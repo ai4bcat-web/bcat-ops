@@ -834,3 +834,258 @@
   color: var(--tms-text);
   font-size: 12px;
 }
+
+/* ── Folder tabs above tables (guide §4) ──────────────────────────────────── */
+/* TmsTabStrip (.tms-folder-tabs), the Payables strip (.tms-quick-tabs), folder-variant segmented
+   tabs (.tms-seg-folder) and the open-shipment strip all share this look. */
+
+.tms-shell .tms-ship-tabs-row {
+  background: transparent;
+  border-bottom: 0;
+}
+
+.tms-shell .tms-ship-tabs,
+.tms-shell .tms-quick-tabs,
+.tms-shell .tms-seg.tms-seg-folder {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow-x: auto;
+}
+
+.tms-shell .tms-ship-tab,
+.tms-shell .tms-quick-tab,
+.tms-shell .tms-seg.tms-seg-folder .tms-seg-item {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: center;
+  column-gap: 8px;
+  row-gap: 2px;
+  min-height: 40px;
+  height: auto;
+  max-width: none;
+  padding: 10px 18px;
+  margin: 0 0 -1px;
+  border: 1px solid var(--tms-tab-border);
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  background: var(--tms-tab-bg);
+  color: var(--tms-nav-ink);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  box-shadow: none;
+  position: relative;
+}
+
+.tms-shell .tms-ship-tab-main {
+  height: auto;
+  padding: 0;
+}
+
+.tms-shell .tms-ship-tab-board:hover,
+.tms-shell .tms-quick-tab:hover,
+.tms-shell .tms-seg.tms-seg-folder .tms-seg-item:hover {
+  background: var(--tms-surface);
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-ship-tab-on,
+.tms-shell .tms-ship-tab-board.tms-ship-tab-on:hover,
+.tms-shell .tms-quick-tab.tms-active,
+.tms-shell .tms-seg.tms-seg-folder .tms-seg-item.tms-active {
+  background: var(--tms-card);
+  border-color: var(--tms-tab-active-border);
+  color: var(--tms-text);
+  font-weight: 600;
+  box-shadow: inset 0 3px 0 0 var(--tms-primary);
+  z-index: 1;
+}
+
+.tms-shell .tms-tab-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Line 2: a 12px mono summary such as an amount, blue on the open tab. */
+.tms-shell .tms-tab-sub {
+  flex: 1 0 100%;
+  display: block;
+  font-family: var(--tms-font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--tms-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tms-shell .tms-ship-tab-on .tms-tab-sub,
+.tms-shell .tms-quick-tab.tms-active .tms-tab-sub {
+  color: var(--tms-primary);
+}
+
+/* Count chip on a folder tab: mono, grey-blue; blue with white text on the open tab. */
+.tms-shell .tms-ship-tab-count,
+.tms-shell .tms-quick-tab-count,
+.tms-shell .tms-seg.tms-seg-folder .tms-seg-count {
+  margin-left: 0;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--tms-tab-chip);
+  color: var(--tms-text-2);
+  font-family: var(--tms-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.tms-shell .tms-ship-tab-on .tms-ship-tab-count,
+.tms-shell .tms-quick-tab.tms-active .tms-quick-tab-count,
+.tms-shell .tms-seg.tms-seg-folder .tms-seg-item.tms-active .tms-seg-count {
+  background: var(--tms-primary);
+  color: var(--tms-on-primary);
+}
+
+/* The open-shipment strip in the shell keeps its slimmer tabs. */
+.tms-shell .tms-ship-tabs-row:not(.tms-folder-tabs) .tms-ship-tab {
+  min-height: 34px;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.tms-shell .tms-ship-tabs-row:not(.tms-folder-tabs) .tms-ship-tab:not(.tms-ship-tab-board) {
+  padding: 0 0 0 10px;
+}
+
+/* Tabs sitting directly on a table: the open tab merges into it and the table loses its top-left corner. */
+.tms-shell .tms-dense-page > .tms-folder-tabs:has(+ .tms-dense-bar),
+.tms-shell .tms-dense-page > .tms-folder-tabs:has(+ .tms-dense-body),
+.tms-shell .tms-page > .tms-folder-tabs:has(+ .tms-table-wrap),
+  margin-bottom: calc(-1 * var(--tms-gap));
+  position: relative;
+  z-index: 2;
+}
+
+.tms-shell .tms-folder-tabs + .tms-dense-bar,
+.tms-shell .tms-folder-tabs + .tms-dense-body,
+.tms-shell .tms-folder-tabs + .tms-table-wrap {
+  border-top-left-radius: 0;
+}
+
+/* ── Segmented control for sub-views (guide §2) ───────────────────────────── */
+/* TmsTabs (view tabs, detail-page tabs), TmsSegmentedTabs and the period toggle. */
+
+.tms-shell .tms-tabs,
+.tms-portal:not(.tms-public) .tms-tabs,
+.tms-shell .tms-seg:not(.tms-seg-folder),
+.tms-portal:not(.tms-public) .tms-seg:not(.tms-seg-folder) {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  width: auto;
+  max-width: 100%;
+  padding: 3px;
+  background: var(--tms-seg-track);
+  border: 0;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.tms-shell .tms-tab,
+.tms-portal:not(.tms-public) .tms-tab,
+.tms-shell .tms-seg:not(.tms-seg-folder) .tms-seg-item,
+.tms-portal:not(.tms-public) .tms-seg:not(.tms-seg-folder) .tms-seg-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  margin: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tms-text-2);
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-seg-sm .tms-seg-item {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.tms-shell .tms-tab:hover,
+.tms-portal:not(.tms-public) .tms-tab:hover,
+.tms-shell .tms-seg:not(.tms-seg-folder) .tms-seg-item:hover {
+  color: var(--tms-text);
+  background: transparent;
+}
+
+.tms-shell .tms-tab.tms-active,
+.tms-portal:not(.tms-public) .tms-tab.tms-active,
+.tms-shell .tms-seg:not(.tms-seg-folder) .tms-seg-item.tms-active,
+.tms-portal:not(.tms-public) .tms-seg:not(.tms-seg-folder) .tms-seg-item.tms-active {
+  background: var(--tms-text);
+  color: var(--tms-card);
+  font-weight: 600;
+  border: 0;
+  box-shadow: var(--tms-seg-shadow);
+}
+
+.tms-shell .tms-tab-count,
+.tms-portal:not(.tms-public) .tms-tab-count,
+.tms-shell .tms-seg:not(.tms-seg-folder) .tms-seg-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--tms-tab-chip);
+  color: var(--tms-text-2);
+  font-family: var(--tms-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.tms-shell .tms-tab.tms-active .tms-tab-count,
+.tms-portal:not(.tms-public) .tms-tab.tms-active .tms-tab-count,
+.tms-shell .tms-seg:not(.tms-seg-folder) .tms-seg-item.tms-active .tms-seg-count {
+  background: var(--tms-primary);
+  color: var(--tms-on-primary);
+}
+
+.tms-shell .tms-tabs.tms-tabs-many,
+.tms-portal:not(.tms-public) .tms-tabs.tms-tabs-many {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.tms-shell .tms-period-toggle,
+.tms-portal:not(.tms-public) .tms-period-toggle {
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--tms-seg-track);
+}
+
+.tms-shell .tms-period-chip,
+.tms-portal:not(.tms-public) .tms-period-chip {
+  border-radius: 6px;
+  color: var(--tms-text-2);
+}
+
+.tms-shell .tms-period-chip[aria-pressed='true'],
+.tms-portal:not(.tms-public) .tms-period-chip[aria-pressed='true'] {
+  background: var(--tms-text);
+  color: var(--tms-card);
+  box-shadow: var(--tms-seg-shadow);
+}

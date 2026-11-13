@@ -233,6 +233,15 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
   return (
     <>
       <div className="tms-dense-page tms-caps">
+        <div className="tms-dense-bar" style={{ display: 'grid', gap: 8 }}>
+          <p className="tms-muted" style={{ fontSize: 12, margin: 0 }}>
+            Need a carrier that is not in the directory?{' '}
+            <Link to="/tms/carriers/find?from=carrier-sales" data-testid="launch-find-invite">Find &amp; invite a carrier</Link>
+          </p>
+          <CarrierLookup needsCover={needs} onCovered={() => { void refresh() }} />
+          <QuotePostingsCard />
+        </div>
+        {gridTab && <DenseKpiStrip open items={kpis} />}
         <TmsTabStrip aria-label="Carrier sales tabs" active={tab} onSelect={onTab} tabs={tabs} />
         <div className="tms-dense-bar">
           <span className="tms-dense-title"><Truck size={18} aria-hidden="true" /> Book · Carrier sales</span>
@@ -257,17 +266,8 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
             </>
           )}
         </div>
-        <div className="tms-dense-bar" style={{ display: 'grid', gap: 8 }}>
-          <p className="tms-muted" style={{ fontSize: 12, margin: 0 }}>
-            Need a carrier that is not in the directory?{' '}
-            <Link to="/tms/carriers/find?from=carrier-sales" data-testid="launch-find-invite">Find &amp; invite a carrier</Link>
-          </p>
-          <CarrierLookup needsCover={needs} onCovered={() => { void refresh() }} />
-          <QuotePostingsCard />
-        </div>
         {gridTab ? (
           <>
-            <DenseKpiStrip open items={kpis} />
             {!isCovered && <DemoLoads onOpen={(d) => setOffersTarget(targetFromDemo(d))} />}
             <div className="tms-dense-body">
               <DenseGrid<ShipmentListRow>

@@ -83,6 +83,7 @@ export function ApChrome({ title, viewTabs, quickTabs, actions, summary }: {
               >
                 {tab.label}
                 {tab.count === undefined ? null : <span className="tms-quick-tab-count">{tab.count}</span>}
+                {tab.summary ? <span className="tms-tab-sub">{tab.summary}</span> : null}
               </button>
             ))}
           </div>

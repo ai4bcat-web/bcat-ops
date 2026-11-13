@@ -375,6 +375,9 @@ export function TrackingBoard(props: TrackingBoardProps) {
 
   return (
     <div className="tms-dense-page tms-tracking-board">
+      <DenseKpiStrip open items={kpis} />
+      <CurrentlyViewing rows={rows} onOpen={onOpenShipment} onChanged={onLockReleased} />
+      {error && <p className="tms-tracking-error">{error}</p>}
       {!focus && (
         <TmsTabStrip
           aria-label="Shipment lifecycle"
@@ -459,9 +462,6 @@ export function TrackingBoard(props: TrackingBoardProps) {
           onSelect={(key) => setMapVisible(key === 'map')}
         />
       </div>
-      <DenseKpiStrip open items={kpis} />
-      <CurrentlyViewing rows={rows} onOpen={onOpenShipment} onChanged={onLockReleased} />
-      {error && <p className="tms-tracking-error">{error}</p>}
       <div className="tms-dense-body" data-testid="tracking-list">
         {loading && rows.length === 0 ? (
           <p className="tms-tracking-empty">Loading shipments…</p>

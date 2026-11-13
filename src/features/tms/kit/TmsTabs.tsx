@@ -2,6 +2,8 @@ export interface TmsTab {
   key: string
   label: string
   count?: number
+  /** Optional second line under the label (folder tabs): a short mono figure such as an amount. */
+  summary?: string
   testId?: string
   countTestId?: string
 }
@@ -13,7 +15,7 @@ export interface TmsTabsProps {
   className?: string
 }
 
-/** Plain text tabs with a green underline on the active one (reference §4). */
+/** Sub-view switcher: a segmented control (restyle 2026-11; styled in restyle.css). */
 export function TmsTabs({ tabs, active, onSelect, className }: TmsTabsProps) {
   return (
     <div className={`tms-tabs${tabs.length >= 8 ? ' tms-tabs-many' : ''}${className ? ` ${className}` : ''}`} role="tablist">

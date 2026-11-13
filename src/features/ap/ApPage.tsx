@@ -338,6 +338,14 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     inbox: inboxStatus.status?.openCount ?? 0,
   }
 
+  // Second line on the folder tabs (restyle 2026-11): the same totals each tab's own summary shows.
+  const tabSummary: Partial<Record<ApTabKey, string>> = {
+    expected: formatCents(sumCents(expectedBills, (bill) => bill.grossCents)),
+    aging: formatCents(sumCents(agingBills, (bill) => bill.balanceCents)),
+    selected: formatCents(sumCents(selectedBills, (bill) => bill.balanceCents)),
+    paid: formatCents(sumCents(settled, (bill) => bill.netCents)),
+  }
+
   const reviewNow = () => {
     void inboxStatus.syncNow().then((failure) => {
       if (failure) toast.error(failure)
@@ -383,7 +391,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     title: 'Invoicing',
     viewTabs,
     quickTabs: {
-      tabs: AP_TABS.map((t) => ({ key: t.key, label: t.label, count: counts[t.key] })),
+      tabs: AP_TABS.map((t) => ({ key: t.key, label: t.label, count: counts[t.key], summary: tabSummary[t.key] })),
       active: tab,
       onSelect: (key: string) => setTab(key as ApTabKey),
     },

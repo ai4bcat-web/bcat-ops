@@ -9,14 +9,14 @@ export interface TmsTabStripProps {
   'aria-label'?: string
 }
 
-/** Folder tabs above a list, one per status, each with a count. Arrow keys move between them. */
+/** Folder tabs above a list, one per status, each with a count and an optional second line. Arrow keys move between them. */
 export function TmsTabStrip({ tabs, active, onSelect, 'aria-label': ariaLabel }: TmsTabStripProps) {
   const move = (from: number, step: number) => {
     const next = tabs[(from + step + tabs.length) % tabs.length]
     if (next) onSelect(next.key)
   }
   return (
-    <div className="tms-ship-tabs-row">
+    <div className="tms-ship-tabs-row tms-folder-tabs">
       <div className="tms-ship-tabs" role="tablist" aria-label={ariaLabel}>
         {tabs.map((tab, i) => {
           const on = tab.key === active
@@ -35,8 +35,11 @@ export function TmsTabStrip({ tabs, active, onSelect, 'aria-label': ariaLabel }:
                 else if (e.key === 'ArrowLeft') { move(i, -1); e.preventDefault() }
               }}
             >
-              {tab.label}
-              {tab.count === undefined ? null : <span className="tms-ship-tab-count" data-testid={tab.countTestId}>{tab.count}</span>}
+              <span className="tms-tab-line">
+                {tab.label}
+                {tab.count === undefined ? null : <span className="tms-ship-tab-count" data-testid={tab.countTestId}>{tab.count}</span>}
+              </span>
+              {tab.summary ? <span className="tms-tab-sub">{tab.summary}</span> : null}
             </button>
           )
         })}

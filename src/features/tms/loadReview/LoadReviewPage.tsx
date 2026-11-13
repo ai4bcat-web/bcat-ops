@@ -208,6 +208,13 @@ export function LoadReviewPage() {
     {capMessage && <TmsAlert tone="orange" title="Selection limit">{capMessage}</TmsAlert>}
     {notice && <div role="status" className="aa-review-results" style={{ whiteSpace: 'pre-line' }}>{notice}</div>}
     <div className="tms-dense-page tms-caps">
+      <DenseKpiStrip open items={[
+        { label: 'In review', value: queue.length },
+        { label: 'Looks ready', value: ready.length },
+        { label: 'Needs fixes', value: needs.length, tone: needs.length > 0 ? 'warn' : undefined },
+        { label: 'Oldest', value: `${Math.max(0, ...queue.map(({ row }) => reviewAgeDays({ deliveredAt: deliveredTimeOf(row) }, now) ?? 0))} d` },
+        { label: 'Value in review', value: formatCents(queue.reduce((sum, { row }) => sum + (row.orderRevenueCents ?? row.revenueCents ?? 0), 0)) },
+      ]} />
       <TmsTabStrip
         aria-label="Load review filters"
         active={tab}
@@ -228,13 +235,6 @@ export function LoadReviewPage() {
         <ColumnsButton catalog={denseCols.filter((c) => c.key !== 'select')} columns={prefs.columns} widths={prefs.widths} pinned={prefs.pinned} onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })} />
         <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
       </div>
-      <DenseKpiStrip open items={[
-        { label: 'In review', value: queue.length },
-        { label: 'Looks ready', value: ready.length },
-        { label: 'Needs fixes', value: needs.length, tone: needs.length > 0 ? 'warn' : undefined },
-        { label: 'Oldest', value: `${Math.max(0, ...queue.map(({ row }) => reviewAgeDays({ deliveredAt: deliveredTimeOf(row) }, now) ?? 0))} d` },
-        { label: 'Value in review', value: formatCents(queue.reduce((sum, { row }) => sum + (row.orderRevenueCents ?? row.revenueCents ?? 0), 0)) },
-      ]} />
       <div className="tms-dense-body">
         <DenseGrid<ReviewEntry>
           aria-label="Load review"

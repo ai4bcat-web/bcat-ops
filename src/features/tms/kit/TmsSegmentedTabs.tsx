@@ -7,12 +7,14 @@ export interface TmsSegmentedTabsProps {
   active: string
   onSelect: (key: string) => void
   size?: 'sm' | 'md'
+  /** 'folder' when the tabs are statuses sitting on a table (restyle guide §4); default is the segmented control. */
+  variant?: 'segmented' | 'folder'
   'aria-label'?: string
   className?: string
 }
 
 /** Pill-group tabs (filters, views). Arrow keys move and wrap, Home/End jump. */
-export function TmsSegmentedTabs({ tabs, active, onSelect, size = 'md', 'aria-label': ariaLabel, className }: TmsSegmentedTabsProps) {
+export function TmsSegmentedTabs({ tabs, active, onSelect, size = 'md', variant = 'segmented', 'aria-label': ariaLabel, className }: TmsSegmentedTabsProps) {
   const refs = useRef<Array<HTMLButtonElement | null>>([])
 
   function move(to: number) {
@@ -36,7 +38,7 @@ export function TmsSegmentedTabs({ tabs, active, onSelect, size = 'md', 'aria-la
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className={`tms-seg${size === 'sm' ? ' tms-seg-sm' : ''}${className ? ` ${className}` : ''}`}
+      className={`tms-seg${size === 'sm' ? ' tms-seg-sm' : ''}${variant === 'folder' ? ' tms-seg-folder' : ''}${className ? ` ${className}` : ''}`}
     >
       {tabs.map((tab, index) => {
         const selected = tab.key === active

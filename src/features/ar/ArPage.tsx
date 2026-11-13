@@ -373,9 +373,9 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
   const queueTotal = (status: ArQueueStatus) => formatCents(queue[status].reduce((sum, r) => sum + (status === 'INVOICED' ? r.balanceCents : r.amountCents), 0))
   const tabs = [
-    { key: 'ready', label: `${AR_QUEUE_STATUS_LABEL.READY} · ${queueTotal('READY')}`, count: queue.READY.length, testId: 'ar-tab-ready' },
-    { key: 'invoiced', label: `${AR_QUEUE_STATUS_LABEL.INVOICED} · ${queueTotal('INVOICED')} open`, count: queue.INVOICED.length, testId: 'ar-tab-invoiced' },
-    { key: 'paid', label: `${AR_QUEUE_STATUS_LABEL.PAID} · ${queueTotal('PAID')}`, count: queue.PAID.length, testId: 'ar-tab-paid' },
+    { key: 'ready', label: AR_QUEUE_STATUS_LABEL.READY, summary: queueTotal('READY'), count: queue.READY.length, testId: 'ar-tab-ready' },
+    { key: 'invoiced', label: AR_QUEUE_STATUS_LABEL.INVOICED, summary: `${queueTotal('INVOICED')} open`, count: queue.INVOICED.length, testId: 'ar-tab-invoiced' },
+    { key: 'paid', label: AR_QUEUE_STATUS_LABEL.PAID, summary: queueTotal('PAID'), count: queue.PAID.length, testId: 'ar-tab-paid' },
     { key: 'payments', label: 'Payments & credits', count: customerAr.payments.length, testId: 'ar-tab-payments' },
     { key: 'aging', label: 'Aging', count: open.aging.byCustomer.length, testId: 'ar-tab-aging' },
   ]

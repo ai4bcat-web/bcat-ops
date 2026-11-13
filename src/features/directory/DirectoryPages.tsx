@@ -481,6 +481,18 @@ export function CustomersPage() {
   return (
     <>
       <div className="tms-dense-page">
+        <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
+        <TmsTabStrip
+          aria-label="Customer status"
+          tabs={[
+            { key: 'active', label: 'Active', count: counts.active, testId: 'customers-tab-active' },
+            { key: 'leads', label: 'Prospects', count: counts.leads, testId: 'customers-tab-leads' },
+            { key: 'inactive', label: 'Inactive', count: counts.inactive, testId: 'customers-tab-inactive' },
+            { key: 'all', label: 'All', count: rowsWithStatus.length, testId: 'customers-tab-all' },
+          ]}
+          active={activeTab}
+          onSelect={(key) => { setActiveTab(key as StatusTab); setPageSize(PAGE_SIZE) }}
+        />
         <div className="tms-dense-bar">
           <span className="tms-dense-title"><Users size={18} aria-hidden="true" /> Customers</span>
           <Search size={14} className="tms-muted" aria-hidden="true" />
@@ -525,18 +537,6 @@ export function CustomersPage() {
           <TmsButton size="sm" variant="secondary" onClick={() => navigate('/tms/customers/billing-setup')}>Billing setup</TmsButton>
           <TmsButton size="sm" variant="primary" onClick={() => setEditing('new')}>Customer</TmsButton>
         </div>
-        <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
-        <TmsTabStrip
-          aria-label="Customer status"
-          tabs={[
-            { key: 'active', label: 'Active', count: counts.active, testId: 'customers-tab-active' },
-            { key: 'leads', label: 'Prospects', count: counts.leads, testId: 'customers-tab-leads' },
-            { key: 'inactive', label: 'Inactive', count: counts.inactive, testId: 'customers-tab-inactive' },
-            { key: 'all', label: 'All', count: rowsWithStatus.length, testId: 'customers-tab-all' },
-          ]}
-          active={activeTab}
-          onSelect={(key) => { setActiveTab(key as StatusTab); setPageSize(PAGE_SIZE) }}
-        />
         <div className="tms-dense-body">
           <CustomerBulkEdit
             customers={sortedRows.filter((r) => selectedIds.has(r.record.id)).map((r) => r.record)}
