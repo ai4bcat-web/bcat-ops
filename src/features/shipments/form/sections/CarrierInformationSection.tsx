@@ -167,10 +167,11 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
   // Own fleet opens the driver dialog; every other carrier goes through the Step AM ladder (directory first, then MCP).
   const onCover = () => (extra ? ctx.actions.cover(slotKey) : ctx.actions.cover())
   // The first block drives the primary assignment's own actions; the others name theirs.
-  const open = (kind: 'dispatch' | 'rateCon' | 'info') => {
+  const open = (kind: 'dispatch' | 'rateCon' | 'info' | 'address') => {
     if (extra && active) ctx.actions.openFor(kind, active.id)
     else if (kind === 'dispatch') ctx.actions.openDispatch()
     else if (kind === 'rateCon') ctx.actions.openSendRateCon()
+    else if (kind === 'address') ctx.actions.openSendAddressDetails()
     else ctx.actions.openSendInfo()
   }
 
@@ -505,6 +506,9 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
         </TmsButton>
         <TmsButton size="sm" data-testid={x(LABEL.carrier.sendInfo.testId)} disabled={disabled || !active} title={active ? needSave : 'Cover a carrier first'} onClick={() => open('info')}>
           {LABEL.carrier.sendInfo.text}
+        </TmsButton>
+        <TmsButton size="sm" data-testid={x(LABEL.carrier.sendAddressDetails.testId)} disabled={disabled || !active} title={active ? (needSave ?? 'E-mail the dispatcher the pickup and delivery addresses, appointments and reference numbers') : 'Cover a carrier first'} onClick={() => open('address')}>
+          {LABEL.carrier.sendAddressDetails.text}
         </TmsButton>
       </div>
     </div>

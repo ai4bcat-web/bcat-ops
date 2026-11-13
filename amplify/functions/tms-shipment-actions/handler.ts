@@ -177,6 +177,7 @@ import {
 } from './postInvoice'
 import { salesRepForDivision } from '../../../src/lib/divisionSalesRep'
 import { parseRateConSnapshot, rateConThreadHeaders, revisedRateConSubject } from '../../../src/lib/rateConRevision'
+import { buildAddressDetailsEmail, type AddressDetailsStopInput } from '../../../src/lib/addressDetailsEmail'
 import { LEAD_STAGES, promotionFor } from '../../../src/lib/crm/promote'
 import { batchShipmentTask, BATCH_TASK_ACTIONS } from './batch'
 import { INTAKE_ACTIONS, reconcileOpenIntake, runIntakeAction, type IntakeAction, type IntakeDeps } from './intake'
@@ -683,6 +684,7 @@ type Action =
   | 'SAVE_GENERATED_DOCUMENT'
   // AU-plan. Mail a stored (plain) bill of lading through the shipment thread.
   | 'EMAIL_BOL'
+  | 'SEND_ADDRESS_DETAILS'
   | 'ATTACH_DRIVER_DOC'
   // The invoice the accounting post generated, filed on its shipment as a document (system caller: tms-finance-actions).
   | 'ATTACH_INVOICE_DOC'
@@ -6274,8 +6276,27 @@ async function sendThreadMime(args: {
   /** A reply in an existing thread (a revised rate con): the message answered and the thread's ids. */
   inReplyTo?: string | null
   references?: string | null
+  /** An HTML version of `body`; sent with it as multipart/alternative. */
+  html?: string | null
 }): Promise<{ status: 'SENT' | 'NOT_SENT' | 'FAILED'; error: string | null; raw: string; sesMessageId: string | null }> {
   const boundary = `=_bcatthread_${Date.now().toString(36)}`
+  const textPart =
+    `Content-Type: text/plain; charset=UTF-8\r\n` +
+    `Content-Transfer-Encoding: base64\r\n` +
+    `\r\n` +
+    `${wrap76(Buffer.from(args.body, 'utf8').toString('base64'))}\r\n`
+  const altBoundary = `${boundary}_alt`
+  const bodyPart = args.html
+    ? `Content-Type: multipart/alternative; boundary="${altBoundary}"\r\n` +
+      `\r\n` +
+      `--${altBoundary}\r\n` + textPart + `\r\n` +
+      `--${altBoundary}\r\n` +
+      `Content-Type: text/html; charset=UTF-8\r\n` +
+      `Content-Transfer-Encoding: base64\r\n` +
+      `\r\n` +
+      `${wrap76(Buffer.from(args.html, 'utf8').toString('base64'))}\r\n` +
+      `--${altBoundary}--\r\n`
+    : textPart
   const raw =
     `From: ${FROM_ADDRESS}\r\n` +
     `To: ${args.to.join(', ')}\r\n` +
@@ -6289,10 +6310,7 @@ async function sendThreadMime(args: {
     `Content-Type: multipart/mixed; boundary="${boundary}"\r\n` +
     `\r\n` +
     `--${boundary}\r\n` +
-    `Content-Type: text/plain; charset=UTF-8\r\n` +
-    `Content-Transfer-Encoding: base64\r\n` +
-    `\r\n` +
-    `${wrap76(Buffer.from(args.body, 'utf8').toString('base64'))}\r\n` +
+    bodyPart +
     `\r\n` +
     args.attachments.map((a) =>
       `--${boundary}\r\n` +
@@ -6673,6 +6691,131 @@ async function getRateConRevision(input: Row): Promise<Row> {
  * before anything is read or sent. A failed send still leaves the message row (status
  * NOT_SENT) and answers with a download link, as the rate confirmation does on a dev stack.
  */
+/**
+ * "Send Address Details" (Ryne 2026-11-13): e-mail the carrier's dispatcher the load's stops —
+ * addresses, appointments, hours, carrier-visible refs, contacts, notes. No money, and it does not
+ * dispatch the load. Built from the stored load (never from browser text); replies in the rate
+ * con's thread when there is one.
+ */
+export async function sendAddressDetails(input: Row, caller: Caller): Promise<Row> {
+  const loadCarrierId = assertString(input.loadCarrierId, 'loadCarrierId')
+  const toInput = assertArrayOf(input.to, 'to', (v, i) => assertEmail(v, `to[${i}]`), 20)
+  if (toInput.length === 0) throw new Error('Add the dispatcher e-mail to send the address details to')
+  const inputCc = input.cc == null ? [] : assertArrayOf(input.cc, 'cc', (v, i) => assertEmail(v, `cc[${i}]`), 20)
+
+  const carrier = await getById(LOAD_CARRIER_TABLE_NAME, loadCarrierId)
+  if (!carrier) throw new Error(`Load carrier not found: ${loadCarrierId}`)
+  if (carrier.status !== 'ACTIVE') throw new Error('Only the carrier currently on the load can be sent the address details')
+  const loadId = String(carrier.loadId)
+  const shipmentId = String(carrier.shipmentId)
+  const shipment = await requireLiveShipment(shipmentId)
+  const load = await getById(LOAD_TABLE_NAME, loadId)
+  if (!load) throw new Error(`Load not found: ${loadId}`)
+  const pro = optionalString(load.loadNumber, 60) ?? optionalString(shipment.number, 60) ?? loadId
+
+  const firstName = firstNameFromEmail(caller.email)
+  const content = buildAddressDetailsEmail({
+    pro,
+    carrierName: optionalString(carrier.carrierName, 200),
+    carrierRef: optionalString(carrier.tripNumber, 100),
+    equipment: optionalString(load.equipmentType, 80),
+    commodity: optionalString(load.commodity, 200) ?? optionalString(load.freightDescription, 200),
+    weightLbs: numberOrNull(load.weight),
+    pieces: numberOrNull(load.pieces),
+    piecesUnit: optionalString(load.piecesUnit, 40),
+    stops: readStops(load) as unknown as AddressDetailsStopInput[],
+  }, `${firstName}, BCAT Tracking`)
+
+  const thread = rateConThreadHeaders(await queryIndex(SHIPMENT_MESSAGE_TABLE_NAME, IDX_MESSAGES_BY_SHIPMENT, 'shipmentId', shipmentId), loadCarrierId)
+  // In the rate con's thread, the subject has to stay that thread's or Gmail splits it off.
+  const subject = thread?.originalSubject ? revisedRateConSubject(thread.originalSubject) : `${content.subject} ${subjectRef(shipmentId)}`
+  const composed = composeRateConCc({
+    to: toInput,
+    extraCc: dedupeEmails([ALWAYS_CC_TRACKING, ...inputCc]),
+    tracking: trackingMailbox(),
+    sender: isEmailAddress(caller.email) ? caller.email : null,
+  })
+  const { to, cc } = composed
+  const now = nowIso()
+  const messageId = newMessageId(shipmentId, Date.now())
+  const threadKey = String(shipment.threadKey ?? threadKeyFor(shipmentId))
+
+  const message: Row = {
+    id: `msg:${shipmentId}:${randomUUID()}`,
+    __typename: 'ShipmentMessage',
+    shipmentId,
+    threadKey,
+    loadId,
+    loadCarrierId,
+    direction: 'OUT',
+    channel: 'EMAIL',
+    kind: 'OTHER',
+    party: 'DISPATCHER',
+    to: to.join(', '),
+    cc: cc.join(', '),
+    from: FROM_ADDRESS,
+    subject,
+    body: content.text,
+    status: 'SENT',
+    error: null,
+    authorKind: 'PERSON',
+    authorName: firstName,
+    messageId,
+    inReplyTo: thread?.inReplyTo ?? null,
+    providerRef: null,
+    attachments: null,
+    documentIds: null,
+    trackingLinkId: null,
+    workflowRunId: null,
+    at: now,
+    createdBy: caller.email,
+    createdAt: now,
+    updatedAt: now,
+  }
+  const items: TransactWriteItem[] = [putItem(SHIPMENT_MESSAGE_TABLE_NAME, message)]
+  if (!shipment.threadKey) {
+    items.push(updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+      threadKey, threadOpenedAt: now, updatedAt: now, updatedBy: caller.email,
+    }, String(shipment.updatedAt ?? '')))
+  }
+  await transact(items, 'address details e-mail')
+
+  const outcome = await sendThreadMime({
+    to, cc, subject, body: content.text, html: content.html, attachments: [], messageId,
+    replyTo: threadReplyAddress(shipmentId),
+    inReplyTo: thread?.inReplyTo ?? null,
+    references: thread?.references ?? null,
+  })
+  if (outcome.status === 'SENT') {
+    if (outcome.sesMessageId) {
+      await dynamo.send(new UpdateItemCommand({
+        TableName: SHIPMENT_MESSAGE_TABLE_NAME,
+        Key: marshall({ id: message.id }),
+        UpdateExpression: 'SET providerRef = :ref, messageId = :mid',
+        ExpressionAttributeValues: marshall({ ':ref': outcome.sesMessageId, ':mid': sesWireMessageId(outcome.sesMessageId) }),
+      }))
+    }
+  } else {
+    console.error('[tms-shipment-actions] address details email failed', outcome.error)
+    await dynamo.send(new UpdateItemCommand({
+      TableName: SHIPMENT_MESSAGE_TABLE_NAME,
+      Key: marshall({ id: message.id }),
+      UpdateExpression: 'SET #status = :status, #error = :error, #updatedAt = :updatedAt',
+      ExpressionAttributeNames: { '#status': 'status', '#error': 'error', '#updatedAt': 'updatedAt' },
+      ExpressionAttributeValues: marshall({ ':status': 'NOT_SENT', ':error': outcome.error, ':updatedAt': nowIso() }),
+    }))
+  }
+
+  await writeAudit('SHIPMENT', shipmentId, 'SEND_ADDRESS_DETAILS', caller, {
+    sentTo: to.join(', '), cc: cc.join(', '), loadId, loadCarrierId, threadKey,
+    emailStatus: outcome.status === 'SENT' ? 'SENT' : 'NOT_SENT', sesMessageId: outcome.sesMessageId,
+  })
+  if (outcome.status !== 'SENT') {
+    throw new Error(`The address details could not be sent: ${outcome.error ?? 'unknown e-mail error'}`)
+  }
+  return { sent: true, to, cc, subject }
+}
+
 async function emailBol(input: Row, caller: Caller): Promise<Row> {
   const parsed = parseEmailBolInput(input)
   const { shipmentId } = parsed
@@ -9346,6 +9489,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return saveGeneratedDocument(documentDeps, input, caller)
     case 'EMAIL_BOL':
       return emailBol(input, caller)
+    case 'SEND_ADDRESS_DETAILS':
+      return sendAddressDetails(input, caller)
     case 'ATTACH_DRIVER_DOC':
       return attachDriverDoc(documentDeps, input, caller)
     case 'ATTACH_INVOICE_DOC':

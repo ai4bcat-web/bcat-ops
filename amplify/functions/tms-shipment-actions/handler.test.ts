@@ -3352,6 +3352,72 @@ describe('carrier booking', () => {
     errorSpy.mockRestore()
   })
 
+  describe('SEND_ADDRESS_DETAILS', () => {
+    const rawOf = (n: number): string =>
+      new TextDecoder().decode((sesSend.mock.calls[n][0] as { input: { Content: { Raw: { Data: Uint8Array } } } }).input.Content.Raw.Data)
+    const decodedParts = (raw: string): string => raw.split('Content-Transfer-Encoding: base64\r\n\r\n').slice(1)
+      .map((chunk) => Buffer.from(chunk.split('\r\n\r\n')[0].split('\r\n--')[0].replace(/\r\n/g, ''), 'base64').toString('utf8')).join('\n')
+
+    it('e-mails the dispatcher the stops (text + HTML), no money, records the message and the activity', async () => {
+      const { loadId, shipmentId } = await bookableLoad()
+      seedCarrier()
+      seedCarrierDocs()
+      await book(loadId)
+      const loadCarrierId = String(activeCarrier().id)
+      const loadBefore = table(TABLES.load).get(loadId)!
+      const out = await call('SEND_ADDRESS_DETAILS', { loadCarrierId, to: ['dispatch@swift.com'], cc: ['ai4bcat+x@gmail.com'] }) as unknown as { sent: boolean; to: string[] }
+      expect(out).toMatchObject({ sent: true, to: ['dispatch@swift.com'] })
+      expect(sesSend).toHaveBeenCalledTimes(1)
+      const raw = rawOf(0)
+      expect(raw).toMatch(/^Subject: PRO .* — Pickup & delivery details \[ref /m)
+      expect(raw).toContain('multipart/alternative')
+      expect(raw).toContain('text/html')
+      const body = decodedParts(raw)
+      expect(body).toMatch(/PICKUP: /)
+      expect(body).toMatch(/DELIVERY: /)
+      expect(body).not.toMatch(/\$|linehaul|carrier rate|total/i)
+      const sent = (sesSend.mock.calls[0][0] as { input: { Destination: { ToAddresses: string[]; CcAddresses: string[] } } }).input.Destination
+      expect(sent.ToAddresses).toEqual(['dispatch@swift.com'])
+      expect(sent.CcAddresses).toEqual(expect.arrayContaining(['tracking@bcatcorp.com', 'ai4bcat+x@gmail.com']))
+      const msg = [...table(TABLES.message).values()].find((m) => m.party === 'DISPATCHER')!
+      expect(msg).toMatchObject({ direction: 'OUT', kind: 'OTHER', loadCarrierId, status: 'SENT' })
+      const audit = [...table(TABLES.audit).values()].find((r) => r.action === 'SEND_ADDRESS_DETAILS')!
+      expect(audit).toMatchObject({ entityType: 'SHIPMENT', entityId: shipmentId })
+      expect(JSON.parse(String(audit.changes))).toMatchObject({ sentTo: 'dispatch@swift.com', emailStatus: 'SENT' })
+      // It does not dispatch the load.
+      expect(table(TABLES.load).get(loadId)!.status).toBe(loadBefore.status)
+      expect(activeCarrier().dispatchedAt ?? null).toBeNull()
+    })
+
+    it('replies in the rate con thread when there is one', async () => {
+      const { loadId } = await bookableLoad()
+      seedCarrier()
+      seedCarrierDocs()
+      await book(loadId)
+      const loadCarrierId = String(activeCarrier().id)
+      sesSend.mockResolvedValueOnce({ MessageId: 'ses-rc' })
+      await call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'] })
+      await call('SEND_ADDRESS_DETAILS', { loadCarrierId, to: ['dispatch@swift.com'] })
+      const rc = rawOf(0)
+      const addr = rawOf(1)
+      const subjectOf = (text: string) => /^Subject: (.*)$/m.exec(text)?.[1] ?? ''
+      expect(subjectOf(addr)).toBe(`RE: ${subjectOf(rc)}`)
+      expect(addr).toMatch(/^In-Reply-To: <ses-rc@email\.amazonses\.com>$/m)
+    })
+
+    it('refuses missing or header-injecting recipients and sends nothing', async () => {
+      const { loadId } = await bookableLoad()
+      seedCarrier()
+      seedCarrierDocs()
+      await book(loadId)
+      const loadCarrierId = String(activeCarrier().id)
+      await expect(call('SEND_ADDRESS_DETAILS', { loadCarrierId, to: [] })).rejects.toThrow(/dispatcher e-mail/)
+      await expect(call('SEND_ADDRESS_DETAILS', { loadCarrierId, to: ['dispatch@swift.com\r\nBcc: x@y.com'] })).rejects.toThrow(/email/)
+      expect(sesSend).not.toHaveBeenCalled()
+      expect([...table(TABLES.audit).values()].some((r) => r.action === 'SEND_ADDRESS_DETAILS')).toBe(false)
+    })
+  })
+
   it('voids the open link without touching the assignment', async () => {
     const { loadId } = await bookableLoad()
     seedCarrier()

@@ -4974,6 +4974,17 @@ export async function emailBol(input: EmailBolInput): Promise<EmailBolResult> {
   return shipmentAction<EmailBolResult>('EMAIL_BOL', input)
 }
 
+/** E-mails the carrier's dispatcher the load's stops (addresses, appointments, refs); never money, never dispatches. */
+export interface SendAddressDetailsInput {
+  loadCarrierId: string
+  to: string[]
+  cc?: string[]
+}
+export interface SendAddressDetailsResult { sent: boolean; to: string[]; cc: string[]; subject: string }
+export async function sendAddressDetails(input: SendAddressDetailsInput): Promise<SendAddressDetailsResult> {
+  return shipmentAction<SendAddressDetailsResult>('SEND_ADDRESS_DETAILS', input)
+}
+
 /** Points a shipment at a file the driver app already holds; the bytes are never copied. */
 export interface AttachDriverDocInput {
   shipmentId: string
