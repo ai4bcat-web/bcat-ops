@@ -5,6 +5,7 @@
  */
 import { memo, type ReactNode } from 'react'
 import type { CardKey } from './cards/cardRegistry'
+import type { SectionState } from './sectionSaved'
 
 export interface FormSectionProps {
   id: CardKey
@@ -13,12 +14,15 @@ export interface FormSectionProps {
   title: string
   /** Count of blocking issues inside; 0 hides the badge. */
   errorCount: number
+  /** `complete`: required fields filled and saved (the card turns green); `unsaved`: edited since the last save. */
+  state?: SectionState
   children: ReactNode
 }
 
-function FormSectionImpl({ id, number, title, errorCount, children }: FormSectionProps) {
+function FormSectionImpl({ id, number, title, errorCount, state = 'neutral', children }: FormSectionProps) {
   return (
-    <section className={`tms-ship-card tms-ship-card-${id}`} data-testid={`section-${id}`} aria-labelledby={`section-${id}-title`}>
+    <section className={`tms-ship-card tms-ship-card-${id}${state === 'complete' ? ' tms-ship-card--saved' : ''}`}
+      data-testid={`section-${id}`} data-state={state} aria-labelledby={`section-${id}-title`}>
       <h2 className="tms-ship-card-head">
         <span className="tms-ship-card-num" aria-hidden="true">{number}</span>
         <span id={`section-${id}-title`} className="tms-ship-card-title">{title}</span>
@@ -26,6 +30,11 @@ function FormSectionImpl({ id, number, title, errorCount, children }: FormSectio
           <span className="tms-ship-card-badge" data-testid={`section-${id}-errors`} aria-label={`${errorCount} problem${errorCount === 1 ? '' : 's'}`}>
             {errorCount}
           </span>
+        ) : null}
+        {state === 'complete' ? (
+          <span className="tms-ship-card-state tms-ship-card-state--saved" data-testid={`section-${id}-saved`}>✓ Saved</span>
+        ) : state === 'unsaved' ? (
+          <span className="tms-ship-card-state tms-ship-card-state--unsaved" data-testid={`section-${id}-unsaved`}>Unsaved</span>
         ) : null}
       </h2>
       <div id={`section-${id}-body`} className="tms-ship-card-body">

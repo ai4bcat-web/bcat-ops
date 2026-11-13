@@ -1,0 +1,84 @@
+.tms-shell .tms-covered-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius);
+  font-size: 13px;
+}
+
+.tms-shell .tms-ship-card--saved .tms-covered-card {
+  border-color: var(--tms-section-saved-border);
+}
+
+.tms-shell .tms-covered-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.tms-shell .tms-covered-card-who {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tms-shell .tms-covered-card-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-covered-card-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.tms-shell .tms-covered-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px 20px;
+  padding-top: 10px;
+  border-top: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-covered-card-block {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+}
+
+.tms-shell .tms-covered-card-label {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-covered-card-label:first-child {
+  margin-top: 0;
+}
+
+.tms-shell .tms-covered-card-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tms-shell .tms-covered-card-line > .tms-muted {
+  min-width: 110px;
+}
+
+.tms-shell .tms-covered-card-bad {
+  color: var(--tms-badge-red);
+  font-weight: 600;
+}

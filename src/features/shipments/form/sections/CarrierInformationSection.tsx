@@ -207,7 +207,10 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
       )}
 
       {active && carrier && !own ? (
-        <CoveredCarrierCard carrier={carrier} testId={x('carrier-covered-card')} />
+        <CoveredCarrierCard
+          carrier={carrier} testId={x('carrier-covered-card')} assignment={active}
+          trip={{ driver: value.driver1.name.trim(), driverPhone: value.driver1.phone.trim(), truckNo: value.truckNo.trim(), trailerNo: value.trailerNo.trim() }}
+        />
       ) : (
       <div className="tms-card-carrier-grid">
         <div className="space-y-1">
