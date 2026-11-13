@@ -1,7 +1,7 @@
 .tms-shell .tms-covered-card {
   display: grid;
-  gap: 10px;
-  padding: 12px 14px;
+  gap: 6px;
+  padding: 8px 12px;
   background: var(--tms-card);
   border: 1px solid var(--tms-border);
   border-radius: var(--tms-radius);
@@ -12,73 +12,51 @@
   border-color: var(--tms-section-saved-border);
 }
 
-.tms-shell .tms-covered-card-head {
+.tms-shell .tms-covered-card-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px 12px;
-}
-
-.tms-shell .tms-covered-card-who {
-  display: grid;
-  gap: 2px;
+  align-items: center;
+  gap: 4px 10px;
   min-width: 0;
 }
 
 .tms-shell .tms-covered-card-name {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--tms-text);
 }
 
-.tms-shell .tms-covered-card-pills {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
-.tms-shell .tms-covered-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 10px 20px;
-  padding-top: 10px;
-  border-top: 1px solid var(--tms-border);
-}
-
-.tms-shell .tms-covered-card-block {
-  display: grid;
-  align-content: start;
-  gap: 3px;
-  min-width: 0;
-}
-
-.tms-shell .tms-covered-card-label {
-  margin-top: 4px;
-  font-size: 11px;
+.tms-shell .tms-covered-card-open {
+  margin-left: auto;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--tms-muted);
+  color: var(--tms-primary);
+  text-decoration: underline;
 }
 
-.tms-shell .tms-covered-card-label:first-child {
-  margin-top: 0;
-}
-
-.tms-shell .tms-covered-card-line {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 8px;
+.tms-shell .tms-covered-chip {
+  padding: 1px 8px;
+  border: 1px solid var(--tms-border);
+  border-radius: 999px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
+  color: var(--tms-text-2);
+  background: var(--tms-bg);
 }
 
-.tms-shell .tms-covered-card-line > .tms-muted {
-  min-width: 110px;
+.tms-shell .tms-covered-chip--soon {
+  color: var(--tms-badge-orange);
+  border-color: var(--tms-badge-orange);
+  background: var(--tms-badge-orange-tint);
 }
 
-.tms-shell .tms-covered-card-bad {
+.tms-shell .tms-covered-chip--bad {
   color: var(--tms-badge-red);
-  font-weight: 600;
+  border-color: var(--tms-badge-red);
+  background: var(--tms-badge-red-tint);
+}
+
+.tms-shell .tms-covered-card-trip {
+  color: var(--tms-text-2);
+  font-variant-numeric: tabular-nums;
 }

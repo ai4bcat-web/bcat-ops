@@ -265,10 +265,6 @@
   border: 1px solid var(--tms-section-saved-border);
 }
 
-.tms-shell .tms-ship-card-state--unsaved {
-  background: var(--tms-badge-orange-tint);
-  color: var(--tms-badge-orange);
-}
 
 .tms-shell .tms-ship-card-head {
   display: flex;
