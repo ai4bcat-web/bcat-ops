@@ -9,10 +9,9 @@ import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { useFileHub } from '@/hooks/useFileHub'
 import { useDriverPaySettings } from './useDriverPaySettings'
-import { docsSummary } from '../driverProfileModel'
-import { needsHireDate } from '@/lib/ptoAllowance'
+import { docsSummary, missingDriverFields } from '../driverProfileModel'
 
-type StatusTab = 'active' | 'inactive' | 'all' | 'needs-hire'
+type StatusTab = 'active' | 'inactive' | 'all'
 
 /** Profiles ▸ Drivers: every driver in one searchable list. A row opens that driver's profile. */
 export function DriversListPage() {
@@ -23,6 +22,7 @@ export function DriversListPage() {
   const hub = useFileHub()
   const { byDriver } = useDriverPaySettings()
   const [tab, setTab] = useState<StatusTab>('active')
+  const [missingOnly, setMissingOnly] = useState(false)
 
   const rows = useMemo<DriverRow[]>(() => {
     const byId = new Map(equipment.map((e) => [e.id, e]))
@@ -42,11 +42,13 @@ export function DriversListPage() {
     active: rows.filter((r) => r.driver.active).length,
     inactive: rows.filter((r) => !r.driver.active).length,
     all: rows.length,
-    needsHire: rows.filter((r) => needsHireDate(r.driver)).length,
+    missing: rows.filter((r) => missingDriverFields(r.driver).length > 0).length,
   }), [rows])
   const shown = useMemo(
-    () => rows.filter((r) => (tab === 'all' ? true : tab === 'needs-hire' ? needsHireDate(r.driver) : tab === 'active' ? r.driver.active : !r.driver.active)),
-    [rows, tab],
+    () => rows
+      .filter((r) => (tab === 'all' ? true : tab === 'active' ? r.driver.active : !r.driver.active))
+      .filter((r) => !missingOnly || missingDriverFields(r.driver).length > 0),
+    [rows, tab, missingOnly],
   )
   const columns = useMemo(() => driverColumns(), [])
 
@@ -62,17 +64,30 @@ export function DriversListPage() {
         </TmsButton>
       )}
       toolbar={(
-        <TmsSegmentedTabs
-          aria-label="Driver status"
-          active={tab}
-          onSelect={(k) => setTab(k as StatusTab)}
-          tabs={[
-            { key: 'active', label: 'Active', count: counts.active },
-            { key: 'inactive', label: 'Inactive', count: counts.inactive },
-            { key: 'all', label: 'All', count: counts.all },
-            ...(counts.needsHire > 0 ? [{ key: 'needs-hire', label: 'Needs hire date', count: counts.needsHire }] : []),
-          ]}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <TmsSegmentedTabs
+            aria-label="Driver status"
+            active={tab}
+            onSelect={(k) => setTab(k as StatusTab)}
+            tabs={[
+              { key: 'active', label: 'Active', count: counts.active },
+              { key: 'inactive', label: 'Inactive', count: counts.inactive },
+              { key: 'all', label: 'All', count: counts.all },
+            ]}
+          />
+          {counts.missing > 0 || missingOnly ? (
+            <TmsButton
+              size="sm"
+              variant={missingOnly ? 'primary' : 'secondary'}
+              aria-pressed={missingOnly}
+              onClick={() => setMissingOnly((v) => !v)}
+              title="Active drivers missing a hire date, phone or driver type"
+              data-testid="drivers-missing-filter"
+            >
+              Missing info ({counts.missing})
+            </TmsButton>
+          ) : null}
+        </div>
       )}
     >
       <ApDenseList<DriverRow>

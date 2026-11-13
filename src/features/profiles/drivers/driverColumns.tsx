@@ -1,7 +1,7 @@
 import { TmsBadge } from '@/features/tms/kit'
 import { needsHireDate } from '@/lib/ptoAllowance'
 import type { ApColumn } from '@/features/ap/ApDenseList'
-import { fleetLabel, FLEET_OPTIONS, type DocsSummary } from '../driverProfileModel'
+import { fleetLabel, FLEET_OPTIONS, missingDriverFields, type DocsSummary } from '../driverProfileModel'
 import type { Driver } from '@/types'
 import type { Equipment } from '@/types/equipment'
 import type { DriverPaySetting } from '@/lib/apiClient'
@@ -20,7 +20,22 @@ const dash = (s: string | null | undefined) => (s && s.trim() ? s : '')
 /** Columns of the driver list. The grid's own filters, sort, widths and saved layout come with it. */
 export function driverColumns(): ApColumn<DriverRow>[] {
   return [
-    { key: 'name', header: 'Driver', group: 'Driver', text: (r) => r.driver.name, render: (r) => <strong>{r.driver.name}</strong> },
+    {
+      key: 'name', header: 'Driver', group: 'Driver', text: (r) => r.driver.name,
+      render: (r) => {
+        const missing = missingDriverFields(r.driver)
+        return (
+          <span className="inline-flex items-center gap-2">
+            <strong>{r.driver.name}</strong>
+            {missing.length > 0 ? (
+              <span title={`Missing: ${missing.join(', ')}`} data-testid={`driver-missing-${r.driver.id}`}>
+                <TmsBadge tone="orange">Missing info</TmsBadge>
+              </span>
+            ) : null}
+          </span>
+        )
+      },
+    },
     {
       key: 'type', header: 'Type', group: 'Driver', filter: 'multi',
       text: (r) => fleetLabel(r.driver.fleetGroup), render: (r) => fleetLabel(r.driver.fleetGroup),

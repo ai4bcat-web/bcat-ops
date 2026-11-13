@@ -23,7 +23,7 @@ import { ProfileRows, ProfileSection } from '../shared/ProfileSection'
 import '../shared/profiles.css'
 import { useDriverPaySettings, type PaySettingPatch } from './useDriverPaySettings'
 import { PayModeSection } from './PayModeSection'
-import { currentFixedExpenses, docsSummary, fleetLabel, payLines, settlementLink, trailerModeFor } from '../driverProfileModel'
+import { currentFixedExpenses, docsSummary, fleetLabel, missingDriverFields, payLines, settlementLink, trailerModeFor } from '../driverProfileModel'
 
 type TabKey = 'overview' | 'pay' | 'equipment' | 'documents' | 'activity'
 const TAB_KEYS: TabKey[] = ['overview', 'pay', 'equipment', 'documents', 'activity']
@@ -142,7 +142,11 @@ export function DriverProfilePage() {
             <TmsBadge tone={driver.active ? 'green' : 'gray'}>{driver.active ? 'Active' : 'Inactive'}</TmsBadge>
             <TmsBadge tone="blue">{fleetLabel(driver.fleetGroup)}</TmsBadge>
             <TmsBadge tone={docs.tone}>Docs: {docs.label}</TmsBadge>
-            {needsHireDate(driver) ? <TmsBadge tone="orange">Needs hire date</TmsBadge> : null}
+            {missingDriverFields(driver).length > 0 ? (
+              <span title={`Missing: ${missingDriverFields(driver).join(', ')}`} data-testid="driver-missing-fields">
+                <TmsBadge tone="orange">Missing: {missingDriverFields(driver).join(', ')}</TmsBadge>
+              </span>
+            ) : null}
           </>
         )}
         subtitle={(

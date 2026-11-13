@@ -7,6 +7,7 @@
 import type { Driver } from '@/types'
 import type { DriverFleet } from '@/types/equipment'
 import type { DriverPaySetting } from '@/lib/apiClient'
+import { needsHireDate } from '@/lib/ptoAllowance'
 import { classificationForFleet, readyScore, slotState, slotsForDriver, visibleSlots, type ReadyScore, type SlotState } from '@/lib/fileHub'
 
 /** The same formatting the driver editor applies on save, so a number looks identical everywhere. */
@@ -144,6 +145,21 @@ export function basicsErrors(b: BasicsInput): Partial<Record<keyof BasicsInput, 
   // Every driver file carries a hire date; Ivan (LOCAL) employees also earn PTO from it.
   if (!(b.hireDate ?? '').trim()) errors.hireDate = b.fleet === 'LOCAL' ? 'Enter the hire date (first day of work). PTO is counted from it.' : 'Enter the hire date (first day of work).'
   return errors
+}
+
+/**
+ * The fields an active driver's file still lacks, by the same rules the Add driver wizard
+ * enforces (name, a 10-digit phone, a driver type, a hire date). Inactive drivers and
+ * brokers are never flagged. Documents are tracked separately (the Documents column).
+ */
+export function missingDriverFields(d: { name?: string | null; phone?: string | null; fleetGroup?: string | null; active?: boolean | null; type?: string | null; hireDate?: string | null }): string[] {
+  if (d.active === false || d.type === 'broker') return []
+  const missing: string[] = []
+  if (!(d.name ?? '').trim()) missing.push('name')
+  if ((d.phone ?? '').replace(/\D/g, '').length < 10) missing.push('phone')
+  if (!d.fleetGroup) missing.push('driver type')
+  if (needsHireDate(d)) missing.push('hire date')
+  return missing
 }
 
 /** A Local driver's starting hourly rate: blank is allowed (set it later on Employee hours), otherwise above $0. */
