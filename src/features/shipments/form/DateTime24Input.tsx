@@ -1,14 +1,18 @@
 /**
- * Typed date + 24-hour time (Ryne, 2026-11-13): no browser picker, US MM/DD/YYYY and military
- * time. Holds the same `YYYY-MM-DDTHH:mm` local value a datetime-local input did, so callers
+ * Date + 24-hour time (Ryne, 2026-11-13): US MM/DD/YYYY and military time. The date box opens
+ * a calendar (ours, not the browser's, so it always reads month first) and still takes typing;
+ * the time stays typed. Holds the same `YYYY-MM-DDTHH:mm` local value a datetime-local input did, so callers
  * and storage are unchanged. A complete, valid pair commits; anything partial commits '' and
  * the text stays so it can be finished. With `endValue` it is an FCFS window: one date, From–To.
  *
  * The date box also takes a pasted `YYYY-MM-DDTHH:mm`, which fills both halves.
  */
 import { useEffect, useRef, useState, type InputHTMLAttributes } from 'react'
+import * as Popover from '@radix-ui/react-popover'
+import { CalendarDays } from 'lucide-react'
 import { TmsInput } from '@/features/tms/kit'
 import { formatUsDate, parse24Time, parseUsDate, splitLocal } from '@/lib/dateTime24'
+import { CalendarGrid } from './CalendarGrid'
 
 type DateInputProps = Pick<InputHTMLAttributes<HTMLInputElement>, 'aria-label' | 'id' | 'title'> & { 'data-testid'?: string }
 
@@ -32,6 +36,10 @@ export function DateTime24Input({ value, onChange, inputProps, disabled, endValu
   const range = onEndChange !== undefined
   const [draft, setDraft] = useState(() => draftsOf(value, endValue))
   const [touched, setTouched] = useState(false)
+  const [open, setOpen] = useState(false)
+  // Opened from the calendar button: focus goes into the grid. Opened by clicking the box: it stays in the box for typing.
+  const [gridFocus, setGridFocus] = useState(false)
+  const anchor = useRef<HTMLDivElement>(null)
   const committed = useRef({ value, end: endValue ?? '' })
 
   // An outside change (Now, a reload, an intake prefill) resets the text; our own commits don't.
@@ -61,6 +69,18 @@ export function DateTime24Input({ value, onChange, inputProps, disabled, endValu
     commit(pasted ? { ...draft, date: formatUsDate(pasted[1]), time: pasted[2] } : { ...draft, date: text })
   }
 
+  const pick = (ymd: string) => {
+    commit({ ...draft, date: formatUsDate(ymd) })
+    setTouched(true)
+    setOpen(false)
+  }
+
+  const openCalendar = (focusGrid: boolean) => {
+    if (disabled) return
+    setGridFocus(focusGrid)
+    setOpen(true)
+  }
+
   const tidy = () => {
     setTouched(true)
     const d = parseUsDate(draft.date)
@@ -80,11 +100,35 @@ export function DateTime24Input({ value, onChange, inputProps, disabled, endValu
   return (
     <div className="ship-dt24" data-range={range ? 'true' : undefined}>
       <div className="ship-dt24-row">
-        <TmsInput
-          {...inputProps} className="ship-dt24-date" inputMode="numeric" autoComplete="off" placeholder="MM/DD/YYYY"
-          value={draft.date} disabled={disabled} aria-invalid={badDate || undefined}
-          onChange={(e) => onDate(e.target.value)} onBlur={tidy}
-        />
+        <Popover.Root open={open} onOpenChange={setOpen}>
+          <Popover.Anchor asChild>
+            <div className="ship-dt24-datebox" ref={anchor}>
+              <TmsInput
+                {...inputProps} className="ship-dt24-date" inputMode="numeric" autoComplete="off" placeholder="MM/DD/YYYY"
+                value={draft.date} disabled={disabled} aria-invalid={badDate || undefined}
+                aria-haspopup="dialog" aria-expanded={open}
+                onChange={(e) => onDate(e.target.value)} onBlur={tidy}
+                onClick={() => openCalendar(false)}
+                onKeyDown={(e) => { if (e.key === 'ArrowDown' && e.altKey) { e.preventDefault(); openCalendar(true) } }}
+              />
+              <button
+                type="button" className="ship-dt24-calbtn" disabled={disabled}
+                aria-label={`Choose ${label} date`} data-testid={testId ? `${testId}-calendar` : undefined}
+                onClick={() => (open ? setOpen(false) : openCalendar(true))}
+              >
+                <CalendarDays size={14} />
+              </button>
+            </div>
+          </Popover.Anchor>
+          <Popover.Content
+            className="ship-dt24-pop" align="start" sideOffset={4} aria-label={`${label} calendar`}
+            onOpenAutoFocus={(e) => e.preventDefault()}
+            // A click back in the date box keeps the calendar open; the box toggles it itself.
+            onInteractOutside={(e) => { if (anchor.current?.contains(e.target as Node)) e.preventDefault() }}
+          >
+            <CalendarGrid value={parseUsDate(draft.date) ?? ''} onPick={pick} autoFocus={gridFocus} />
+          </Popover.Content>
+        </Popover.Root>
         <TmsInput
           className="ship-dt24-time" inputMode="numeric" autoComplete="off" placeholder="HH:MM" maxLength={5}
           aria-label={`${label} ${range ? 'from' : 'time'} (24-hour)`} data-testid={testId ? `${testId}-time` : undefined}

@@ -54,9 +54,11 @@ export interface RateConPanelProps {
   busy: boolean
   onSend: (input: { loadCarrierId: string; pdfBase64: string; to: string[]; cc?: string[]; expiresHours?: number }) => Promise<void>
   onVoid: (input: { loadCarrierId: string }) => Promise<void>
+  /** Called after a send succeeds, with who it went to (the dialog closes on it). */
+  onSent?: (to: string[]) => void
 }
 
-export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings, busy, onSend, onVoid }: RateConPanelProps) {
+export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings, busy, onSend, onVoid, onSent }: RateConPanelProps) {
   const [profiles, setProfiles] = useState<UserProfileRecord[]>([])
   // The ticked list starts from the carrier profile and only becomes state once the
   // user edits it — mirroring the default into state would fight the carrier bundle
@@ -199,6 +201,7 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
         cc: ccParsed.emails,
         expiresHours: expiryHours ? Number(expiryHours) : undefined,
       })
+      onSent?.(toList)
     } catch (err) {
       if (err instanceof Error && err.message) setError(err.message)
     } finally {
