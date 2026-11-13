@@ -49,6 +49,7 @@ vi.mock('@/lib/apiClient', () => ({
   markInvoiceSent: vi.fn(),
   getInvoicePdfUrl: vi.fn().mockResolvedValue('blob:pdf'),
   previewInvoice: vi.fn(),
+  previewInvoicePacket: vi.fn().mockResolvedValue({ invoiceId: 'x', name: 'Invoice.pdf', url: null, pages: [], separate: [], error: null }),
   readyToInvoice: vi.fn(),
   // The invoice detail now carries a Commission card; it reads settings before it reads
   // anything else, and commissions are off here, so the card renders nothing.
@@ -58,6 +59,9 @@ vi.mock('@/lib/apiClient', () => ({
   previewCommissions: vi.fn(),
   runCommissions: vi.fn(),
 }))
+// Ready to invoice's lane / carrier / carrier pay come from the board rows for its shipments.
+const boardRows = vi.hoisted(() => ({ current: [] as unknown[] }))
+vi.mock('@/hooks/useShipments', () => ({ useShipments: () => ({ shipments: boardRows.current, loading: false, error: null, partial: false }) }))
 // The dialogs are mount-to-open and fetch their own context; their behaviour has its own
 // tests, and here they would only drag the finance Lambda into a test about the board.
 vi.mock('./components/GenerateInvoiceDialog', () => ({ GenerateInvoiceDialog: () => null }))
@@ -342,10 +346,13 @@ describe('the AR dense grid', () => {
     expect(screen.getByRole('group', { name: 'Row density' })).toBeTruthy()
     expect(screen.getByText('3 rows')).toBeTruthy()
 
+    const pros = () => bodyRows().map((r) => within(r).getAllByRole('cell')[1].textContent)
     fireEvent.click(screen.getByTitle('Sort by Amount'))
-    expect(bodyRows().map((r) => within(r).getByRole('link').textContent)).toEqual(['S-2', 'S-1', 'S-3'])
+    expect(pros()).toEqual(['S-2', 'S-1', 'S-3'])
     fireEvent.click(screen.getByTitle('Sort by Amount'))
-    expect(bodyRows().map((r) => within(r).getByRole('link').textContent)).toEqual(['S-3', 'S-1', 'S-2'])
+    expect(pros()).toEqual(['S-3', 'S-1', 'S-2'])
+    // Nothing on the invoices page leads to the shipment (Ryne, 2026-11-12).
+    expect(document.querySelector('a[href*="/tms/shipments/"]')).toBeNull()
   })
 
   it('keeps the row tick box and Generate button working inside the grid', async () => {
@@ -356,28 +363,62 @@ describe('the AR dense grid', () => {
     expect(screen.getByText(/1 selected/)).toBeTruthy()
   })
 
-  it('gives each view its own grid, and the Invoiced grid keeps its invoice actions', async () => {
+  it('gives each view its own grid; PRO and Invoice # open the invoice, never the shipment', async () => {
     // Only a SENT invoice is in Invoiced; an unsent one is a draft in Ready to invoice.
     openSet.splice(0, openSet.length, invoice({ sentAt: '2026-09-20T12:05:00.000Z', sentCount: 1 }))
     await setup({ UNBILLED: [worklistRow()] })
     fireEvent.click(screen.getByRole('tab', { name: /^Invoiced/ }))
     await settle()
     const grid = screen.getByRole('table', { name: 'Invoiced' })
-    expect(within(grid).getByRole('link', { name: 'INV-000123' })).toBeTruthy()
     expect(within(grid).getByText('$2,500.00', { selector: 'span' })).toBeTruthy()
-    // Void lives in the row's '…' menu, for admins only.
-    const more = within(grid).getByRole('combobox', { name: 'More actions for invoice INV-000123' })
-    expect(within(more).queryByRole('option', { name: 'Void' }) != null || authGroups.current.length >= 0).toBe(true)
+    expect(within(grid).queryAllByRole('link')).toHaveLength(0)
+    // Sending, payments and void live in the invoice drawer, not on the row.
+    expect(within(grid).queryByRole('button', { name: /^Send invoice/ })).toBeNull()
+    expect(within(grid).queryByRole('combobox', { name: /More actions/ })).toBeNull()
+    fireEvent.click(within(grid).getByRole('button', { name: 'Open invoice INV-000123' }))
+    expect(await screen.findByRole('region', { name: 'Invoice actions' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Receive payment' })).toBeTruthy()
     expect(screen.getByTestId('ar-grid-ar-queue-invoiced')).toBeTruthy()
     openSet.splice(0, openSet.length, invoice())
   })
 
-  it('keeps an auto-generated invoice that was never sent in Ready to invoice as a draft with Send', async () => {
+  it('keeps an auto-generated invoice that was never sent in Ready to invoice as a draft; ticking it offers Send 1 invoice', async () => {
+    authGroups.current = ['page-invoicing']
     await setup({})
     await settle()
     const grid = screen.getByRole('table', { name: 'Ready to invoice' })
     expect(within(grid).getByText('Draft — not sent')).toBeTruthy()
-    expect(within(grid).getByRole('button', { name: 'Send invoice INV-000123' })).toBeTruthy()
+    expect(within(grid).queryByRole('button', { name: 'Send invoice INV-000123' })).toBeNull()
+    const send = screen.getByRole('button', { name: 'Review and send selected invoices' }) as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+    fireEvent.click(within(grid).getByRole('checkbox', { name: 'Select S-1001' }))
+    expect(send.disabled).toBe(false)
+    expect(send.textContent).toContain('Send 1 invoice')
+    // PRO opens the invoice drawer, with the send action inside it.
+    fireEvent.click(within(grid).getByRole('button', { name: 'Open invoice for PRO S-1001' }))
+    expect(await screen.findByRole('button', { name: 'Send invoice' })).toBeTruthy()
+    authGroups.current = []
+  })
+})
+
+describe('Ready to invoice: lane, carrier and margin (internal)', () => {
+  it('shows Cust Ref #, Origin, Destination, Carrier, both rates and a red Profit when it is a loss', async () => {
+    boardRows.current = [{
+      id: 's1', originCity: 'Dallas, TX', destinationCity: 'Joliet, IL', fromState: 'TX', toState: 'IL', carriers: [],
+      carrierName: 'Ace Freight', costCents: 300_000, revenueCents: 250_000, customerReference: 'FR-113188-3',
+    }]
+    await setup({})
+    await settle()
+    const grid = screen.getByRole('table', { name: 'Ready to invoice' })
+    for (const header of ['Cust Ref #', 'Origin', 'Destination', 'Carrier', 'Customer Rate', 'Carrier Rate', 'Profit']) {
+      expect(within(grid).getByTitle(`Sort by ${header}`)).toBeTruthy()
+    }
+    expect(within(grid).getByText('FR-113188-3')).toBeTruthy()
+    expect(within(grid).getByText('Dallas, TX')).toBeTruthy()
+    expect(within(grid).getByText('Ace Freight')).toBeTruthy()
+    const loss = within(grid).getByText('-$500.00')
+    expect(loss.getAttribute('style')).toContain('--tms-badge-red')
+    boardRows.current = []
   })
 })
 

@@ -7690,6 +7690,21 @@ export async function getInvoiceAttachmentPlans(invoiceIds: string[]): Promise<I
   return out.plans ?? []
 }
 
+/** The invoice exactly as it goes out: the invoice PDF with its POD pages merged in, plus the files that ride separately. */
+export interface InvoicePacketPreview {
+  invoiceId: string
+  name: string
+  url: string | null
+  pages: { name: string; pages: number }[]
+  separate: { name: string; sizeBytes: number }[]
+  /** Why the packet could not be built (a POD that will not merge, no invoice PDF yet). The send would be refused too. */
+  error: string | null
+}
+
+export async function previewInvoicePacket(input: { invoiceId: string; excludeDocumentIds?: string[] }): Promise<InvoicePacketPreview> {
+  return financeAction<InvoicePacketPreview>('PREVIEW_INVOICE_PACKET', input)
+}
+
 export async function sendInvoice(input: {
   invoiceId: string
   message?: string

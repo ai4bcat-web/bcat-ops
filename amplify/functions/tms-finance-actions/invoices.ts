@@ -59,6 +59,7 @@ import {
   customerPacketIds,
   invoiceAttachmentPlan,
   invoiceEmailDocuments,
+  mergesIntoInvoicePdf,
   isCustomerRateCon,
   SQUARE_INVOICED_CODE,
   SQUARE_INVOICED_MESSAGE,
@@ -74,6 +75,7 @@ import {
   type CarrierPayFlag,
 } from '../../../src/lib/carrierPayGuard'
 import { pdfText } from '../_shared/pdfText'
+import { combineInvoicePacket } from './invoicePacket'
 import type {
   BillToParty,
   CustomerRecord,
@@ -756,10 +758,27 @@ export function carrierPayFlags(
   return { hard, content }
 }
 
-async function attachmentsFor(
-  invoice: InvoiceRecord,
-  docs: ShipmentDocumentRecord[],
-): Promise<{ attachments: EmailAttachment[]; files: Parameters<typeof carrierPayFlags>[0] }> {
+/** Where a combined invoice + POD packet is kept when it has to be handed back as a download (or previewed). */
+function packetKey(invoice: InvoiceRecord): string {
+  return `invoices/packets/${invoice.id}/${Date.now()}.pdf`
+}
+
+interface SendFiles {
+  /** What the e-mail carries: the invoice PDF with its POD pages, then every other document. */
+  attachments: EmailAttachment[]
+  /** Every SOURCE file, one by one, for the carrier-pay guard (the PODs are scanned as filed, before merging). */
+  files: Parameters<typeof carrierPayFlags>[0]
+  /** Pages each part put into the invoice PDF; empty when there was no invoice PDF to merge into. */
+  packetPages: { name: string; pages: number }[]
+}
+
+/**
+ * Read every file one send carries and build the e-mail's attachments: the invoice PDF and
+ * every POD merged into ONE PDF (Ryne, 2026-11-12), the BOL / Ivan customer rate con /
+ * anything else picked as their own files. A POD that cannot be merged refuses the send
+ * (PodMergeError) rather than going out without it.
+ */
+async function attachmentsFor(invoice: InvoiceRecord, docs: ShipmentDocumentRecord[]): Promise<SendFiles> {
   const keys: { name: string; contentType: string; key: string; doc: ShipmentDocumentRecord | null }[] = []
   if (invoice.pdfKey) {
     keys.push({
@@ -782,22 +801,67 @@ async function attachmentsFor(
     }
   }
 
-  const attachments: EmailAttachment[] = []
-  const files: Parameters<typeof carrierPayFlags>[0] = []
-  let total = 0
+  const files: SendFiles['files'] = []
   for (const entry of keys) {
     const { bytes, contentType } = await s3Bytes(entry.key)
-    total += bytes.byteLength
-    if (total > MAX_EMAIL_ATTACHMENT_BYTES) {
-      const mb = Math.round((total / (1024 * 1024)) * 10) / 10
-      throw new Error(
-        `Those attachments come to ${mb} MB; one e-mail carries at most ${MAX_EMAIL_ATTACHMENT_BYTES / (1024 * 1024)} MB — send fewer`,
-      )
-    }
-    attachments.push({ filename: entry.name, contentType: entry.contentType || contentType, bytes })
     files.push({ documentId: entry.doc?.id ?? null, name: entry.name, bytes, contentType: entry.contentType || contentType, doc: entry.doc })
   }
-  return { attachments, files }
+
+  const invoiceFile = files.find((file) => !file.doc)
+  const merged = invoiceFile ? files.filter((file) => file.doc && mergesIntoInvoicePdf(file.doc, true)) : []
+  const attachments: EmailAttachment[] = []
+  let packetPages: SendFiles['packetPages'] = []
+  if (invoiceFile) {
+    const packet = await combineInvoicePacket(invoiceFile, merged)
+    packetPages = packet.pages
+    attachments.push({ filename: invoiceFile.name, contentType: 'application/pdf', bytes: packet.bytes })
+  }
+  for (const file of files) {
+    if (file === invoiceFile || merged.includes(file)) continue
+    attachments.push({ filename: file.name, contentType: file.contentType, bytes: file.bytes })
+  }
+  const total = attachments.reduce((sum, a) => sum + a.bytes.byteLength, 0)
+  if (total > MAX_EMAIL_ATTACHMENT_BYTES) {
+    const mb = Math.round((total / (1024 * 1024)) * 10) / 10
+    throw new Error(
+      `Those attachments come to ${mb} MB; one e-mail carries at most ${MAX_EMAIL_ATTACHMENT_BYTES / (1024 * 1024)} MB — send fewer`,
+    )
+  }
+  return { attachments, files, packetPages }
+}
+
+/**
+ * PREVIEW_INVOICE_PACKET — the invoice exactly as the customer will open it: the invoice PDF
+ * with its POD pages, stored under invoices/packets/ and handed back as a signed link, plus
+ * the files that ride separately. Writes nothing to the invoice; a POD that cannot be merged
+ * comes back as `error` so the review can say which one.
+ */
+export async function previewInvoicePacket(input: Row): Promise<Row> {
+  const invoiceId = assertString(input.invoiceId, 'invoiceId')
+  const row = await getById(INVOICE_TABLE_NAME, invoiceId)
+  if (!row) throw new Error(`Invoice not found: ${invoiceId}`)
+  const invoice = row as unknown as InvoiceRecord
+  const context = await readOrderContext(invoice.orderId)
+  const scope = attachmentScopeOf(invoice, context)
+  const exclude = input.excludeDocumentIds == null ? [] : emailList(input.excludeDocumentIds, 'excludeDocumentIds')
+  const docs = sendDocuments(context.documents, scope, exclude)
+  const name = attachmentNameOf(invoice)
+  if (!invoice.pdfKey) return { invoiceId, name, url: null, pages: [], separate: [], error: 'No invoice PDF stored yet — regenerate it first' }
+  try {
+    const { attachments, packetPages } = await attachmentsFor(invoice, docs)
+    const key = packetKey(invoice)
+    await putPdf(key, attachments[0].bytes)
+    return {
+      invoiceId,
+      name,
+      url: await signedDownload(key),
+      pages: packetPages as unknown as Row[],
+      separate: attachments.slice(1).map((a) => ({ name: a.filename, sizeBytes: a.bytes.byteLength })) as unknown as Row[],
+      error: null,
+    }
+  } catch (err) {
+    return { invoiceId, name, url: null, pages: [], separate: [], error: err instanceof Error ? err.message : String(err) }
+  }
 }
 
 function emailList(value: unknown, label: string): string[] {
@@ -898,14 +962,14 @@ export async function emailInvoice(input: Row, caller: Caller): Promise<Row> {
   const downloads = delivered.status === 'SENT'
     ? []
     : await Promise.all(
-        (invoice.pdfKey ? [{ name: attachmentNameOf(invoice), key: invoice.pdfKey }] : [])
-          .concat(
-            sendDocs
-              .filter((doc) => Boolean(doc.s3Key))
-              .map((doc) => ({ name: doc.name, key: String(doc.s3Key) })),
-          )
-          .map(async (entry) => ({ name: entry.name, url: await signedDownload(entry.key) })),
-      )
+        attachments.map(async (a, i) => {
+          // The merged invoice + POD packet exists only in memory; store it so the link opens the same bytes.
+          const key = i === 0 && invoice.pdfKey ? packetKey(invoice) : null
+          if (key) await putPdf(key, a.bytes)
+          const source = key ?? sendDocs.find((doc) => doc.name === a.filename && doc.s3Key)?.s3Key
+          return source ? { name: a.filename, url: await signedDownload(String(source)) } : null
+        }),
+      ).then((rows) => rows.filter((r): r is { name: string; url: string } => r != null))
 
   await writeAudit('Invoice', invoiceId, 'EMAIL_INVOICE', caller, { to, cc, status: delivered.status })
   return {

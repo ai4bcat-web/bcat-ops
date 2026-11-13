@@ -3,24 +3,30 @@
  * go out (or, factored, where it stands with OTR), the lines, and hand credits/debits with
  * reasons. "Save & regenerate" saves INTO this invoice (REVISE_INVOICE) — never a second one —
  * and a sent invoice becomes 'Rev N'. Send / Resend hands it to the review carousel.
+ *
+ * This drawer is where a single invoice is sent from (Ryne, 2026-11-12): its Actions bar holds
+ * Send / Resend, Regenerate, Send to factor, Receive payment and Void (admin). The preview is the
+ * invoice exactly as it goes out — one PDF with the POD pages merged in. Nothing here links to
+ * the shipment.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { TmsBadge, TmsButton, TmsDrawer, TmsInput, TmsSelect } from '@/features/tms/kit'
-import { getInvoicePdfUrl, getTmsSettings, graphqlErrorText, reviseInvoice } from '@/lib/apiClient'
+import { getInvoicePdfUrl, getTmsSettings, graphqlErrorText, renderInvoicePdf, reviseInvoice } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
 import { invoiceAttachmentName, invoiceCompanyName, invoicePoNumber } from '@/lib/invoiceIdentity'
 import { renderInvoiceEmail } from '@/lib/shipmentNotices'
 import type { FactoringItem } from '@/types'
 import type { CustomerRecord, InvoiceAdjustment, InvoiceRecord, ShipmentRecord, TmsSettings } from '@/types/tms'
 import { centsFromInput, inputFromCents } from './money'
+import { InvoicePacketFrame } from './InvoicePacketFrame'
 import { INVOICE_FROM_ADDRESS, isFactoredInvoice, manualRecipients } from '../sendReview'
 
 interface Draft { kind: 'CREDIT' | 'DEBIT'; description: string; amount: string; reason: string }
 
-export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, canEdit, onClose, onSaved, onSend }: {
+export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, canEdit, canVoid = false, onClose, onSaved, onSend, onFactor, onPayment, onVoid }: {
   invoice: InvoiceRecord
   customer: CustomerRecord | undefined
   shipment: ShipmentRecord | undefined
@@ -29,6 +35,11 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
   onClose: () => void
   onSaved: () => void
   onSend: (invoice: InvoiceRecord) => void
+  /** Owner / ADMIN (Ryne or Jenny): Void shows. */
+  canVoid?: boolean
+  onFactor?: (invoice: InvoiceRecord) => void
+  onPayment?: (invoice: InvoiceRecord) => void
+  onVoid?: (invoice: InvoiceRecord) => void
 }) {
   const [current, setCurrent] = useState(invoice)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
@@ -89,6 +100,15 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
       .finally(() => setSaving(false))
   }
 
+  const regenerate = () => {
+    setSaving(true)
+    setError(null)
+    renderInvoicePdf({ invoiceId: current.id })
+      .then(({ invoice: fresh }) => { setCurrent(fresh); toast.success(`Regenerated ${fresh.number}`); onSaved() })
+      .catch((err: unknown) => setError(graphqlErrorText(err)))
+      .finally(() => setSaving(false))
+  }
+
   const set = (i: number, patch: Partial<Draft>) => setDrafts((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
   const rev = (current.revision ?? 1) > 1 ? ` Rev ${current.revision}` : ''
 
@@ -105,17 +125,31 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
               {saving ? 'Saving…' : 'Save & regenerate'}
             </TmsButton>
           )}
-          {canEdit && current.status !== 'VOID' && current.status !== 'PAID' && (
-            <TmsButton aria-label={sent ? 'Resend invoice' : 'Send invoice'} onClick={() => onSend(current)}>
-              {factored ? 'Send to OTR' : sent ? 'Resend' : 'Send'}
-            </TmsButton>
-          )}
           <Link className="tms-btn tms-btn-ghost tms-btn-sm" to={`/tms/invoicing/invoices/${current.id}`}>Full record</Link>
           <TmsButton variant="ghost" onClick={onClose}>Close</TmsButton>
         </>
       }
     >
       <div className="flex flex-col gap-4 text-sm">
+        <section aria-label="Invoice actions" className="flex flex-wrap items-center gap-2 rounded p-2" style={{ border: '1px solid var(--tms-border)', background: 'var(--tms-surface-2, transparent)' }}>
+          {canEdit && current.status !== 'VOID' && current.status !== 'PAID' && (
+            <TmsButton variant="primary" aria-label={sent ? 'Resend invoice' : 'Send invoice'} disabled={saving} onClick={() => onSend(current)}>
+              {factored ? 'Send to OTR' : sent ? 'Review & resend' : 'Review & send'}
+            </TmsButton>
+          )}
+          {canEdit && current.status !== 'VOID' && !locked && (
+            <TmsButton aria-label="Regenerate invoice PDF" disabled={saving} onClick={regenerate}><RefreshCw size={13} /> Regenerate PDF</TmsButton>
+          )}
+          {canEdit && onFactor && !factored && !sent && current.status !== 'VOID' && current.status !== 'PAID' && (
+            <TmsButton aria-label="Send to factor instead" disabled={saving} onClick={() => onFactor(current)}>Send to factor</TmsButton>
+          )}
+          {onPayment && sent && current.status !== 'VOID' && current.status !== 'PAID' && (
+            <TmsButton variant="ghost" aria-label="Receive payment" disabled={saving} onClick={() => onPayment(current)}>Receive payment</TmsButton>
+          )}
+          {canVoid && onVoid && current.status !== 'VOID' && (
+            <TmsButton variant="ghost" aria-label="Void invoice" disabled={saving} onClick={() => onVoid(current)}>Void</TmsButton>
+          )}
+        </section>
         <div className="flex flex-wrap gap-2">
           <TmsBadge tone={factored ? 'purple' : 'blue'}>{factored ? 'OTR' : 'Manual'}</TmsBadge>
           <TmsBadge tone={sent ? 'green' : 'orange'}>{sent ? 'Sent' : 'Draft — not sent'}</TmsBadge>
@@ -137,7 +171,7 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
               <dt className="tms-muted">To</dt><dd>{recipients.to.join(', ') || <span style={{ color: 'var(--tms-badge-red)' }}>No AP e-mail on file</span>}</dd>
               <dt className="tms-muted">CC</dt><dd>{recipients.cc.join(', ') || '—'}</dd>
               <dt className="tms-muted">Subject</dt><dd>{email.subject}</dd>
-              <dt className="tms-muted">Attachment</dt><dd>{invoiceAttachmentName(pro, po)}</dd>
+              <dt className="tms-muted">Attachment</dt><dd>{invoiceAttachmentName(pro, po)} <span className="tms-muted">(invoice + POD pages, one PDF)</span></dd>
               <dt className="tms-muted">Body</dt><dd style={{ whiteSpace: 'pre-wrap' }}>{email.body}</dd>
             </dl>
           </section>
@@ -181,9 +215,11 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
 
         {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
 
-        {pdfUrl
-          ? <iframe title={`Invoice ${current.number} PDF`} src={pdfUrl} style={{ width: '100%', height: 520, border: '1px solid var(--tms-border)' }} />
-          : <p className="tms-muted">{current.pdfKey ? 'Loading the PDF…' : 'No PDF stored yet.'}</p>}
+        {!factored && current.status !== 'VOID'
+          ? <section aria-label="Invoice preview"><h3 className="font-semibold">What the customer receives</h3><InvoicePacketFrame invoiceId={current.id} pdfKey={current.pdfKey} /></section>
+          : pdfUrl
+            ? <iframe title={`Invoice ${current.number} PDF`} src={pdfUrl} style={{ width: '100%', height: 520, border: '1px solid var(--tms-border)' }} />
+            : <p className="tms-muted">{current.pdfKey ? 'Loading the PDF…' : 'No PDF stored yet.'}</p>}
       </div>
     </TmsDrawer>
   )

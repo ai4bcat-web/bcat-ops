@@ -16,9 +16,9 @@ import type { InvoiceEmailResult } from '@/lib/apiClient'
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
 
-const { getInvoice, getInvoicePdfUrl, listCustomers, listDivisions, getTmsSettings, emailInvoice } = vi.hoisted(() => ({
+const { getInvoice, previewInvoicePacket, listCustomers, listDivisions, getTmsSettings, emailInvoice } = vi.hoisted(() => ({
   getInvoice: vi.fn(),
-  getInvoicePdfUrl: vi.fn(),
+  previewInvoicePacket: vi.fn(),
   listCustomers: vi.fn(),
   listDivisions: vi.fn(),
   getTmsSettings: vi.fn(),
@@ -26,7 +26,7 @@ const { getInvoice, getInvoicePdfUrl, listCustomers, listDivisions, getTmsSettin
 }))
 vi.mock('@/lib/apiClient', () => ({
   getInvoice,
-  getInvoicePdfUrl,
+  previewInvoicePacket,
   getShipment: () => Promise.resolve(null),
   listCustomers,
   listDivisions,
@@ -121,16 +121,16 @@ describe('EmailInvoiceDialog', () => {
     expect(button.disabled).toBe(true)
   })
 
-  it('opens the stored PDF — the file that is attached — from Preview invoice', async () => {
+  it('opens the invoice exactly as it goes out — the PDF with its POD pages — from Preview invoice', async () => {
     getInvoice.mockResolvedValue({ ...INVOICE, pdfKey: 'invoices/cust-1/INV-000001-v1.pdf', pdfVersion: 1 })
-    getInvoicePdfUrl.mockResolvedValue('https://example.test/preview.pdf')
+    previewInvoicePacket.mockResolvedValue({ url: 'https://example.test/preview.pdf', error: null, pages: [], separate: [] })
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
     renderDialog()
     const button = await screen.findByLabelText('Preview invoice PDF') as HTMLButtonElement
     await waitFor(() => expect(button.disabled).toBe(false))
     fireEvent.click(button)
     await waitFor(() => expect(open).toHaveBeenCalledWith('https://example.test/preview.pdf', '_blank', 'noopener'))
-    expect(getInvoicePdfUrl).toHaveBeenCalledWith('invoices/cust-1/INV-000001-v1.pdf')
+    expect(previewInvoicePacket).toHaveBeenCalledWith({ invoiceId: INVOICE.id })
     open.mockRestore()
   })
 })

@@ -1,24 +1,28 @@
 /**
  * Review before sending (Ryne, 2026-11-12): one invoice per page, ←/→ (buttons and arrow keys),
- * "3 of 12". Each page shows the invoice PDF and the whole e-mail exactly as it will go out —
- * From, To, CC, Subject, attachment name and body — or, for a factored customer, that the bill
- * goes to OTR instead. Edit opens the invoice and comes back; Skip takes it out of the batch;
- * "Send N invoices" sends what is left and lists each result.
+ * "3 of 12". Each page shows the invoice exactly as the customer opens it — ONE PDF, the invoice
+ * then its POD pages — and the whole e-mail: From, To, CC, Subject, every attachment and the
+ * body — or, for a factored customer, that the bill goes to OTR instead. Skip takes an invoice
+ * out of the batch. An invoice that cannot go (no POD, no AP e-mail, carrier pay found, a POD
+ * that will not merge, over 10 MB) is flagged on its page and left out of the send with its
+ * reason; "Send N invoices" sends the rest and lists every result. Nothing goes before that.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, ExternalLink, Loader2, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { TmsBadge, TmsButton, TmsDialog } from '@/features/tms/kit'
-import { getInvoicePdfUrl, getTmsSettings, graphqlErrorText, sendInvoice, sendToFactor } from '@/lib/apiClient'
+import { getTmsSettings, graphqlErrorText, sendInvoice, sendToFactor } from '@/lib/apiClient'
+import { InvoicePacketFrame } from './InvoicePacketFrame'
 import { formatCents } from '@/lib/invoiceBuild'
 import { invoiceAttachmentName, invoiceCompanyName, invoicePoNumber } from '@/lib/invoiceIdentity'
 import { renderInvoiceEmail } from '@/lib/shipmentNotices'
 import type { CustomerRecord, InvoiceRecord, ShipmentRecord, TmsSettings } from '@/types/tms'
-import { INVOICE_FROM_ADDRESS, isFactoredInvoice, manualRecipients } from '../sendReview'
+import { INVOICE_FROM_ADDRESS, isFactoredInvoice, manualRecipients, sendBlockers } from '../sendReview'
 import { attachmentStateText, useInvoiceAttachmentPlans } from '../useInvoiceAttachmentPlans'
 import { DOCUMENT_TYPE_LABELS } from '@/lib/shipmentDocuments'
 import type { InvoiceAttachmentItem } from '@/lib/invoiceDelivery'
+
 
 interface Result { invoiceId: string; number: string; ok: boolean; text: string }
 
@@ -34,7 +38,8 @@ export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAd
   const [batch, setBatch] = useState<InvoiceRecord[]>(invoices)
   const [index, setIndex] = useState(0)
   const [settings, setSettings] = useState<TmsSettings | null>(null)
-  const [pdfUrls, setPdfUrls] = useState<Record<string, string>>({})
+  /** What building each invoice's combined PDF said (null: built fine). */
+  const [packetErrors, setPacketErrors] = useState<Record<string, string | null>>({})
   const [sending, setSending] = useState(false)
   const [results, setResults] = useState<Result[] | null>(null)
 
@@ -57,16 +62,18 @@ export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAd
     const overridden = isAdmin && (overrides[inv.id] ?? '').trim().length >= 5
     return flags.filter((f) => f.hard || !overridden)
   }, [excluded, overrides, plans, isAdmin])
-  const blocked = batch.filter((inv) => openFlags(inv).length > 0)
-
-  useEffect(() => {
-    let alive = true
-    const key = current?.pdfKey
-    if (current && key && !pdfUrls[current.id]) {
-      getInvoicePdfUrl(key).then((url) => { if (alive) setPdfUrls((prev) => ({ ...prev, [current.id]: url })) }).catch(() => undefined)
-    }
-    return () => { alive = false }
-  }, [current, pdfUrls])
+  const blockersOf = useCallback((inv: InvoiceRecord) => {
+    const customer = customerById.get(inv.customerId)
+    return sendBlockers({
+      factored: isFactoredInvoice(inv, customer),
+      to: manualRecipients(customer, settings).to,
+      plan: plans.get(inv.id),
+      openFlags: openFlags(inv).length,
+      packetError: packetErrors[inv.id],
+    })
+  }, [customerById, settings, plans, openFlags, packetErrors])
+  const blocked = batch.filter((inv) => blockersOf(inv).length > 0)
+  const sendable = batch.filter((inv) => blockersOf(inv).length === 0)
 
   const go = useCallback((delta: number) => setIndex((i) => Math.max(0, Math.min(batch.length - 1, i + delta))), [batch.length])
   useEffect(() => {
@@ -102,8 +109,8 @@ export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAd
 
   const sendAll = async () => {
     setSending(true)
-    const out: Result[] = []
-    for (const inv of batch) {
+    const out: Result[] = blocked.map((inv) => ({ invoiceId: inv.id, number: inv.number, ok: false, text: `Left out: ${blockersOf(inv).join('; ')}` }))
+    for (const inv of sendable) {
       const customer = customerById.get(inv.customerId)
       try {
         if (isFactoredInvoice(inv, customer)) {
@@ -155,10 +162,15 @@ export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAd
       footer={
         <>
           <TmsButton variant="ghost" onClick={onClose} disabled={sending}>Cancel</TmsButton>
-          <TmsButton variant="primary" aria-label="Send invoices" disabled={sending || batch.length === 0 || blocked.length > 0}
-            title={blocked.length > 0 ? `Carrier pay found on ${blocked.map((inv) => inv.number).join(', ')} — remove the flagged files first` : undefined}
+          {blocked.length > 0 && (
+            <span className="text-sm" role="status" style={{ color: 'var(--tms-badge-red)' }}>
+              {blocked.length} can't go: {blocked.map((inv) => inv.number).join(', ')}
+            </span>
+          )}
+          <TmsButton variant="primary" aria-label="Send invoices" disabled={sending || sendable.length === 0}
+            title={blocked.length > 0 ? `${blocked.map((inv) => `${inv.number}: ${blockersOf(inv).join('; ')}`).join('\n')}\nThese are left out of the send.` : undefined}
             onClick={() => void sendAll()}>
-            {sending ? <><Loader2 size={14} className="animate-spin" /> Sending…</> : `Send ${batch.length} invoice${batch.length === 1 ? '' : 's'}`}
+            {sending ? <><Loader2 size={14} className="animate-spin" /> Sending…</> : `Send ${sendable.length} invoice${sendable.length === 1 ? '' : 's'}`}
           </TmsButton>
         </>
       }
@@ -178,6 +190,11 @@ export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAd
               <TmsButton size="sm" variant="ghost" aria-label={`Skip invoice ${current.number}`} onClick={skip}><X size={13} /> Skip</TmsButton>
             </span>
           </div>
+          {blockersOf(current).length > 0 && (
+            <div role="alert" aria-label="Cannot send" className="rounded p-2 text-sm" style={{ border: '1px solid var(--tms-badge-red)', color: 'var(--tms-badge-red)' }}>
+              <strong>Will not be sent:</strong> {blockersOf(current).join('; ')}. Fix it, or Skip it — the rest still go.
+            </div>
+          )}
           {page.factored ? (
             <p className="text-sm" aria-label="Goes to OTR"><TmsBadge tone="purple">Goes to OTR</TmsBadge> Factored customer: this invoice is queued for OTR, not e-mailed.</p>
           ) : (
@@ -201,9 +218,16 @@ export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAd
               <dt className="tms-muted">Body</dt><dd aria-label="Invoice body" style={{ whiteSpace: 'pre-wrap' }}>{page.email.body}</dd>
             </dl>
           )}
-          {pdfUrls[current.id]
-            ? <iframe title={`Invoice ${current.number} PDF`} src={pdfUrls[current.id]} style={{ width: '100%', height: 480, border: '1px solid var(--tms-border)' }} />
-            : <p className="text-sm tms-muted">{current.pdfKey ? 'Loading the PDF…' : 'No PDF stored yet for this invoice.'}</p>}
+          {page.factored
+            ? null
+            : <InvoicePacketFrame
+                key={current.id}
+                invoiceId={current.id}
+                pdfKey={current.pdfKey}
+                excludeDocumentIds={excluded[current.id]}
+                height={480}
+                onLoaded={(p) => setPacketErrors((prev) => ({ ...prev, [p.invoiceId]: p.error }))}
+              />}
         </div>
       )}
     </TmsDialog>
@@ -231,8 +255,8 @@ function AttachmentList({ plan, fallback, excluded }: {
     <div className="flex flex-col gap-1">
       <ul className="flex flex-col gap-0.5" aria-label="Attachment list">
         {(plan.items ?? []).filter((item) => !item.documentId || !excluded.includes(item.documentId)).map((item) => (
-          <li key={item.documentId ?? item.name}>
-            {item.name} <span className="tms-muted">· {typeLabel(item)}{item.sizeBytes != null ? ` · ${sizeText(item.sizeBytes)}` : ''}</span>
+          <li key={item.documentId ?? item.name} style={item.inInvoicePdf ? { paddingLeft: 16 } : undefined}>
+            {item.inInvoicePdf ? '↳ ' : ''}{item.name} <span className="tms-muted">· {typeLabel(item)}{item.inInvoicePdf ? ' · pages inside the invoice PDF' : ''}{item.sizeBytes != null ? ` · ${sizeText(item.sizeBytes)}` : ''}</span>
           </li>
         ))}
       </ul>
@@ -240,7 +264,7 @@ function AttachmentList({ plan, fallback, excluded }: {
         <TmsBadge tone={plan.pod === 'ATTACHED' ? 'green' : 'red'}>POD {attachmentStateText(plan.pod)}</TmsBadge>
         <TmsBadge tone={plan.rateCon === 'ATTACHED' ? 'green' : plan.rateCon === 'MISSING' ? 'orange' : 'gray'}>RC {attachmentStateText(plan.rateCon)}</TmsBadge>
       </span>
-      {plan.pod === 'MISSING' && <span role="alert" style={{ color: 'var(--tms-badge-red)' }}>No POD on file — invoice will go without it.</span>}
+      {plan.pod === 'MISSING' && <span role="alert" style={{ color: 'var(--tms-badge-red)' }}>No POD on file — file one before this invoice can go.</span>}
       {plan.rateCon === 'NOT_INCLUDED' && <span className="tms-muted text-xs">BCAT Logistics invoices never carry a rate confirmation.</span>}
       {plan.rateCon === 'MISSING' && <span className="text-xs" style={{ color: 'var(--tms-badge-orange)' }}>Ivan Cartage invoice: no customer rate confirmation on file.</span>}
       {plan.tooBig && <span role="alert" style={{ color: 'var(--tms-badge-red)' }}>Over 10 MB — this e-mail will be refused. Remove a document first.</span>}
