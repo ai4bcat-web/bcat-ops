@@ -20,7 +20,8 @@
 .tms-portal {
   color-scheme: light;
 
-  --tms-bg: #f4f7fb;
+  /* Cool grey canvas a clear step below the white cards, so cards, tabs and tables read as separate objects. */
+  --tms-bg: #e8edf3;
   --tms-sidebar: #ffffff;
   --tms-topbar: #ffffff;
   --tms-card: #ffffff;
@@ -30,14 +31,14 @@
   --tms-surface-subtle: #f7f9fc;
   --tms-surface-hover: #edf2f8;
   --tms-surface-selected: #e6f4fd;
-  --tms-border: #e2e8f0;
+  --tms-border: #d3dae4;
   --tms-input: #ffffff;
   /* Text boxes sit a shade off the white cards so a field reads as a field. Buttons and chips keep --tms-input. */
   --tms-field: #ebf0f7;
   --tms-input-border: #cbd5e1;
   --tms-text: #111827;
   --tms-text-2: #4b5563;
-  --tms-muted: #6b7280;
+  --tms-muted: #5b6574;
   --tms-disabled: #9ca3af;
   --tms-primary: #0369a1;
   --tms-primary-hover: #075985;
@@ -62,7 +63,11 @@
   --tms-row-h: 44px;
   --tms-control-h: 40px;
 
-  --tms-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --tms-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.08);
+  /* Table header band and disabled solid buttons. */
+  --tms-th-bg: #dfe5ed;
+  --tms-th-ink: #1f2937;
+  --tms-disabled-bg: #e2e6ec;
   --tms-shadow-pop: 0 12px 40px rgba(16, 24, 40, 0.12);
   --tms-shadow-modal: 0 24px 60px rgba(16, 24, 40, 0.18);
   --tms-overlay: rgba(17, 24, 39, 0.45);
@@ -166,6 +171,9 @@
   --tms-on-destructive: #ffffff;
 
   --tms-shadow: none;
+  --tms-th-bg: #2e2e2e;
+  --tms-th-ink: #ececec;
+  --tms-disabled-bg: #2f2f2f;
   --tms-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.45);
   --tms-shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.55);
   --tms-overlay: rgba(0, 0, 0, 0.6);
@@ -386,6 +394,21 @@
 .tms-shell .tms-btn-ghost:hover:not(:disabled),
 .tms-portal .tms-btn-ghost:hover:not(:disabled) {
   color: var(--tms-text);
+}
+
+.tms-shell .tms-btn-primary:disabled,
+.tms-portal .tms-btn-primary:disabled {
+  opacity: 1;
+  background: var(--tms-disabled-bg);
+  border-color: var(--tms-border);
+  color: var(--tms-disabled);
+  font-weight: 500;
+}
+
+.tms-shell .tms-btn-secondary,
+.tms-portal .tms-btn-secondary {
+  color: var(--tms-text);
+  font-weight: 500;
 }
 
 .tms-shell .tms-btn-destructive,
