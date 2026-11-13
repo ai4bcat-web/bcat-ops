@@ -59,6 +59,9 @@ vi.mock('@/lib/apiClient', () => ({
   previewCommissions: vi.fn(),
   runCommissions: vi.fn(),
 }))
+// Ready to invoice's lane / carrier / carrier pay come from the board rows for its shipments.
+const boardRows = vi.hoisted(() => ({ current: [] as unknown[] }))
+vi.mock('@/hooks/useShipments', () => ({ useShipments: () => ({ shipments: boardRows.current, loading: false, error: null, partial: false }) }))
 // The dialogs are mount-to-open and fetch their own context; their behaviour has its own
 // tests, and here they would only drag the finance Lambda into a test about the board.
 vi.mock('./components/GenerateInvoiceDialog', () => ({ GenerateInvoiceDialog: () => null }))
@@ -395,6 +398,27 @@ describe('the AR dense grid', () => {
     fireEvent.click(within(grid).getByRole('button', { name: 'Open invoice for PRO S-1001' }))
     expect(await screen.findByRole('button', { name: 'Send invoice' })).toBeTruthy()
     authGroups.current = []
+  })
+})
+
+describe('Ready to invoice: lane, carrier and margin (internal)', () => {
+  it('shows Cust Ref #, Origin, Destination, Carrier, both rates and a red Profit when it is a loss', async () => {
+    boardRows.current = [{
+      id: 's1', originCity: 'Dallas, TX', destinationCity: 'Joliet, IL', fromState: 'TX', toState: 'IL', carriers: [],
+      carrierName: 'Ace Freight', costCents: 300_000, revenueCents: 250_000, customerReference: 'FR-113188-3',
+    }]
+    await setup({})
+    await settle()
+    const grid = screen.getByRole('table', { name: 'Ready to invoice' })
+    for (const header of ['Cust Ref #', 'Origin', 'Destination', 'Carrier', 'Customer Rate', 'Carrier Rate', 'Profit']) {
+      expect(within(grid).getByTitle(`Sort by ${header}`)).toBeTruthy()
+    }
+    expect(within(grid).getByText('FR-113188-3')).toBeTruthy()
+    expect(within(grid).getByText('Dallas, TX')).toBeTruthy()
+    expect(within(grid).getByText('Ace Freight')).toBeTruthy()
+    const loss = within(grid).getByText('-$500.00')
+    expect(loss.getAttribute('style')).toContain('--tms-badge-red')
+    boardRows.current = []
   })
 })
 

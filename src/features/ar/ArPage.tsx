@@ -31,6 +31,8 @@ import {
 import type { DenseColumn } from '@/features/tms/grid/denseGridModel'
 import { ArDenseTable, type ArGrid } from './components/ArDenseTable'
 import { useArWorklist } from '@/hooks/useArWorklist'
+import { useShipments, type ShipmentListRow } from '@/hooks/useShipments'
+import { readyFactsOf } from './readyFacts'
 import { useCustomerAr } from '@/hooks/useCustomerAr'
 import { useOpenInvoices } from '@/hooks/useOpenInvoices'
 import { exportOutstandingReceivables } from '@/lib/opsExports'
@@ -270,6 +272,14 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     }
   }, [unbilled.rows, open.invoices, paidInvoices, lookups, releasedByOrder, billedBy, factorByItemId, divisionFilter])
 
+  // Ready to invoice reads each shipment's board row for its reference, lane, carrier and carrier pay (internal only).
+  const readyShipmentIds = useMemo(
+    () => (tab === 'ready' ? [...new Set(queue.READY.map((row) => row.shipmentId))] : []),
+    [tab, queue],
+  )
+  const readyBoard = useShipments({ kind: 'ids', ids: readyShipmentIds })
+  const boardById = useMemo(() => new Map(readyBoard.shipments.map((row) => [row.id, row])), [readyBoard.shipments])
+
   // What each Ready / Invoiced invoice's e-mail carries (invoice PDF, POD, rate con), for the columns.
   const planIds = useMemo(
     () => (tab === 'ready' || tab === 'invoiced' ? queue[tab === 'ready' ? 'READY' : 'INVOICED'] : [])
@@ -439,6 +449,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       factorByItemId,
       customerById,
       attachmentPlans,
+      boardById,
+      shipmentsById: lookups.shipmentsById,
       months,
       month,
       paidLoading,
@@ -683,7 +695,7 @@ function dateCol<T>(key: string, header: string, of: (row: T) => string | null, 
 
 function queueView({
   status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, factorByItemId, customerById,
-  attachmentPlans, months, month, paidLoading, onMonth, onSelect, onGenerate, onBatchGenerate, onReview, onEdit,
+  attachmentPlans, boardById, shipmentsById, months, month, paidLoading, onMonth, onSelect, onGenerate, onBatchGenerate, onReview, onEdit,
 }: {
   status: ArQueueStatus
   rows: ArQueueRow[]
@@ -697,6 +709,8 @@ function queueView({
   factorByItemId: Map<string, FactoringItem>
   customerById: Map<string, CustomerRecord>
   attachmentPlans: Map<string, InvoiceAttachmentPlanRow>
+  boardById: Map<string, ShipmentListRow>
+  shipmentsById: Map<string, ShipmentRecord>
   months: string[]
   month: string
   paidLoading: boolean
@@ -732,6 +746,28 @@ function queueView({
     return factor ?? (inv.factored ? 'Factored customer' : '—')
   }
 
+  // Internal only: carrier rate and profit never leave this screen (see readyFacts.ts).
+  const facts = (row: ArQueueRow) => readyFactsOf(boardById.get(row.shipmentId), shipmentsById.get(row.shipmentId), row.amountCents)
+  const optCents = (cents: number | null) => (cents == null ? '—' : formatCents(cents))
+  const readyColumns: Array<Col<ArQueueRow>> = !ready ? [] : [
+    { key: 'custRef', header: 'Cust Ref #', group: 'Shipment', text: (row) => facts(row).customerRef ?? '—' },
+    { key: 'origin', header: 'Origin', group: 'Shipment', text: (row) => facts(row).origin ?? '—', filter: 'multi', optionsOf: (row) => opt(facts(row).origin) },
+    { key: 'destination', header: 'Destination', group: 'Shipment', text: (row) => facts(row).destination ?? '—', filter: 'multi', optionsOf: (row) => opt(facts(row).destination) },
+    { key: 'carrier', header: 'Carrier', group: 'Shipment', text: (row) => facts(row).carrier ?? '—', filter: 'multi', optionsOf: (row) => opt(facts(row).carrier) },
+    {
+      key: 'customerRate', header: 'Customer Rate', group: 'Amounts', align: 'right', text: (row) => optCents(facts(row).customerRateCents),
+      sortValue: (row) => facts(row).customerRateCents ?? -Infinity, filter: 'number', numberOf: (row) => (facts(row).customerRateCents ?? 0) / 100, numberUnit: '$',
+    },
+    {
+      key: 'carrierRate', header: 'Carrier Rate', group: 'Amounts', align: 'right', text: (row) => optCents(facts(row).carrierRateCents),
+      sortValue: (row) => facts(row).carrierRateCents ?? -Infinity, filter: 'number', numberOf: (row) => (facts(row).carrierRateCents ?? 0) / 100, numberUnit: '$',
+    },
+    {
+      key: 'profit', header: 'Profit', group: 'Amounts', align: 'right', text: (row) => optCents(facts(row).profitCents),
+      sortValue: (row) => facts(row).profitCents ?? -Infinity, filter: 'number', numberOf: (row) => (facts(row).profitCents ?? 0) / 100, numberUnit: '$',
+    },
+  ]
+
   const columns: Array<Col<ArQueueRow>> = [
     ...(ready ? [{ key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 40 } as Col<ArQueueRow>] : []),
     { key: 'shipment', header: 'PRO', group: 'Shipment', text: (row) => row.shipmentNumber ?? row.shipmentId, extraPx: 16 },
@@ -745,6 +781,7 @@ function queueView({
       text: (row) => invoiceEmailsOf(row).to.join(', ') || (row.factored ? '' : 'No AP email'),
     },
     { key: 'customer', header: 'Customer', group: 'Shipment', text: (row) => row.customerName, filter: 'multi', optionsOf: (row) => opt(row.customerName) },
+    ...readyColumns,
     { key: 'division', header: 'Rev division', group: 'Shipment', text: (row) => row.revDivisionName, filter: 'multi', optionsOf: (row) => opt(row.revDivisionName) },
     { key: 'rep', header: 'Sales rep', group: 'Shipment', text: (row) => row.salesRepName, filter: 'multi', optionsOf: (row) => opt(row.salesRepName) },
     dateCol<ArQueueRow>('delivered', 'Delivered', (row) => row.deliveredAt),
@@ -811,6 +848,11 @@ function queueView({
           : <TmsBadge tone="blue" title="Invoiced by hand: e-mailed to the customer">Manual</TmsBadge>
       case 'balance':
         return <span className="font-medium">{formatCents(row.balanceCents)}</span>
+      case 'profit': {
+        const profit = facts(row).profitCents
+        if (profit == null) return <span className="tms-muted" title="Carrier pay not on file yet">—</span>
+        return <span className="font-medium" title="Internal: customer rate − carrier pay. Never shown to the customer." style={profit < 0 ? { color: 'var(--tms-badge-red)' } : undefined}>{formatCents(profit)}</span>
+      }
       case 'status':
         if (row.shortPaid) return <TmsBadge tone="orange">Short paid {formatCents(row.balanceCents)} open</TmsBadge>
         if (row.status === 'READY' && row.reasons.length > 0) {
