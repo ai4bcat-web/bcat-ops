@@ -2,7 +2,7 @@ import { defineBackend } from '@aws-amplify/backend'
 import { AccountRootPrincipal, AnyPrincipal, ArnPrincipal, Effect, PolicyDocument, PolicyStatement, Role } from 'aws-cdk-lib/aws-iam'
 import { Alias, Key, KeySpec, KeyUsage } from 'aws-cdk-lib/aws-kms'
 import { AttributeType, BillingMode, ProjectionType, Table, TableEncryption } from 'aws-cdk-lib/aws-dynamodb'
-import { CfnFunction, Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType, HttpMethod, EventSourceMapping, StartingPosition } from 'aws-cdk-lib/aws-lambda'
+import { CfnFunction, Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType, HttpMethod, EventSourceMapping, FilterCriteria, FilterRule, StartingPosition } from 'aws-cdk-lib/aws-lambda'
 import { CfnRule, Rule, Schedule, RuleTargetInput } from 'aws-cdk-lib/aws-events'
 import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets'
 import { ArnFormat, Aspects, CfnOutput, Duration, Fn, RemovalPolicy, Stack } from 'aws-cdk-lib'
@@ -1217,6 +1217,58 @@ backend.slackStatusNotifier.resources.lambda.addToRolePolicy(
 )
 
 notifierFn.addEnvironment('TABLE_NAME', intakeTable.tableName)
+
+// Intake Slack threads (Ryne 2026-11-12): the same Lambda posts process updates (PRO created, duplicate, dismissed, carrier booked,
+// picked up, delivered, POD, released, invoice sent) under the Slack message an intake e-mail arrived as. Fed by four streams; it
+// claims each line on the IntakeLoad row (slackPosted) and stores the thread there and on the shipment. Never money (intakeThread.ts).
+// Mappings are created disabled on dev and isolated previews (the handler is also a dry run on dev).
+{
+  const threadSources = {
+    IntakeLoad: tableOrNull('IntakeLoad'),
+    Shipment: tableOrNull('Shipment'),
+    ShipmentDocument: tableOrNull('ShipmentDocument'),
+    Invoice: tableOrNull('Invoice'),
+  }
+  const threadLoad = tableOrNull('Load')
+  const threadAudit = tableOrNull('AuditLog')
+  if (threadSources.IntakeLoad && threadSources.Shipment && threadSources.ShipmentDocument && threadSources.Invoice && threadLoad && threadAudit) {
+    const { IntakeLoad, Shipment, ShipmentDocument, Invoice } = threadSources
+    notifierFn.addToRolePolicy(new PolicyStatement({
+      actions:   ['dynamodb:DescribeStream', 'dynamodb:GetRecords', 'dynamodb:GetShardIterator', 'dynamodb:ListStreams'],
+      resources: [IntakeLoad.tableStreamArn!, Shipment.tableStreamArn!, ShipmentDocument.tableStreamArn!, Invoice.tableStreamArn!],
+    }))
+    // GetItem + UpdateItem on IntakeLoad (thread + slackPosted claims) and Shipment (thread copy); read-only Load (carrier name).
+    notifierFn.addToRolePolicy(new PolicyStatement({
+      actions:   ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
+      resources: [IntakeLoad.tableArn, Shipment.tableArn],
+    }))
+    notifierFn.addToRolePolicy(new PolicyStatement({ actions: ['dynamodb:GetItem'], resources: [threadLoad.tableArn] }))
+    notifierFn.addToRolePolicy(new PolicyStatement({ actions: ['dynamodb:PutItem'], resources: [threadAudit.tableArn] }))
+    notifierFn.addEnvironment('INTAKE_LOAD_TABLE_NAME', IntakeLoad.tableName)
+    notifierFn.addEnvironment('SHIPMENT_TABLE_NAME',    Shipment.tableName)
+    notifierFn.addEnvironment('LOAD_TABLE_NAME',        threadLoad.tableName)
+    notifierFn.addEnvironment('AUDIT_LOG_TABLE_NAME',   threadAudit.tableName)
+    notifierFn.addEnvironment('PORTAL_ORIGIN',          PORTAL_ORIGIN)
+    const threadMappingOn = process.env.BCAT_ISOLATED_PREVIEW !== 'true' && process.env.BCAT_DEV_STACK !== 'true'
+    const threadFilters: Record<string, ReturnType<typeof FilterCriteria.filter>[] | undefined> = {
+      // Only shipments built from (or linked to) an intake row; only POD documents.
+      Shipment: [FilterCriteria.filter({ dynamodb: { NewImage: { intakeLoadId: { S: FilterRule.exists() } } } })],
+      ShipmentDocument: [FilterCriteria.filter({ dynamodb: { NewImage: { type: { S: FilterRule.isEqual('POD') } } } })],
+    }
+    for (const [name, table] of Object.entries({ IntakeLoad, Shipment, ShipmentDocument, Invoice })) {
+      // Own-stack scoping, as BrokerLoadStreamMapping (deploy #227 cycle).
+      new EventSourceMapping(Stack.of(notifierFn), `IntakeThread${name}StreamMapping`, {
+        target:           notifierFn,
+        eventSourceArn:   table.tableStreamArn,
+        startingPosition: StartingPosition.LATEST,
+        batchSize:        10,
+        retryAttempts:    1,
+        filters:          threadFilters[name],
+        enabled:          threadMappingOn,
+      })
+    }
+  }
+}
 
 // ── payCreditApproval Lambda (managePayCredit mutation) ────────────────────
 // Box-truck pay credits added by anyone but the owner/ADMIN wait for Ryne's approval:
