@@ -142,7 +142,7 @@ async function main() {
   if (gate) suffix = gate.suffix; else { suffix = values.suffix ?? DEV_SUFFIX; if (isProductionSuffix(suffix)) throw new Error('Refusing production without --target prod and every production gate'); }
   const apply = values.apply === true && gate !== null ? gate.apply : values.apply === true;
   const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }), { marshallOptions: { removeUndefinedValues: true } });
-  const bills = (await scanAll(doc, `CarrierBill-${suffix}`)).filter((b) => b.status === 'IN_REVIEW' && b.datesPending === true);
+  const bills = (await scanAll(doc, `CarrierBill-${suffix}`, ['id', 'shipmentId', 'shipmentNumber', 'loadId', 'status', 'datesPending', 'paidCents', 'creditedCents', 'billDate', 'dueAt', 'termsDays', 'version', 'carrierName'])).filter((b) => b.status === 'IN_REVIEW' && b.datesPending === true);
   const shipmentIds = new Set(bills.map((b) => b.shipmentId));
   const shipments = (await scanAll(doc, `Shipment-${suffix}`, ['id', 'number', 'status', 'revDivision', 'deliveredAt', 'statusChangedAt'])).filter((s) => shipmentIds.has(s.id));
   const loadIds = new Set(bills.map((b) => b.loadId));
