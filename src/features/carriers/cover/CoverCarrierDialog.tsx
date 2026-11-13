@@ -72,6 +72,11 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
   // Warnings the server asks to be acknowledged (missing certificates, W-9, agreement...): shown with a checkbox, sent back by key.
   const [serverWarn, setServerWarn] = useState<{ keys: string[]; text: string } | null>(null)
   const [serverWarnOk, setServerWarnOk] = useState(false)
+  /** The server refused on insurance / packet / risk findings an admin may override (the `[override:…]` marker). */
+  const [overrideOffer, setOverrideOffer] = useState(false)
+  const [overrideWhy, setOverrideWhy] = useState('')
+  /** Set once an admin overrode: later retries (e.g. after ticking a warning) carry the same reason. */
+  const [overrideUsed, setOverrideUsed] = useState<string | null>(null)
   // Set once the setup packet has gone out and only the cover is left (a warning to acknowledge): the footer then retries the cover alone.
   const [coverTarget, setCoverTarget] = useState<{ id: string; name: string } | null>(null)
   const [inviteOpen, setInviteOpen] = useState(false)
@@ -112,6 +117,9 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
     setAcked(false)
     setServerWarn(null)
     setServerWarnOk(false)
+    setOverrideOffer(false)
+    setOverrideWhy('')
+    setOverrideUsed(null)
     setCoverTarget(null)
     setError(null)
     setPreviewing(true)
@@ -143,7 +151,9 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
         if (row) setSelected((cur) => (cur == null || cur.id === row!.id ? row! : cur))
         // Invited but not Active yet: ask MyCarrierPackets right now (full profile + the status rule), so a carrier that just finished
         // its packet is Active, filled in and assignable the moment someone looks it up, not at the next scheduled sync.
-        if (row && row.status !== 'ACTIVE' && row.mcpInvitedAt) {
+        // Never pulled at all (no MCP status: an Aljex carrier MCP does not monitor for us, so the scheduled sync never reaches it):
+        // pull it too, or its insurance is missing and the booking gate refuses a carrier MCP has certificates for.
+        if (row && ((row.status !== 'ACTIVE' && row.mcpInvitedAt) || !row.mcpStatus) && (row.mcNumber || row.dotNumber)) {
           await pullMcpCarrier(row.id)
           const fresh = await read()
           if (fresh) { row = fresh; setSelected((cur) => (cur == null || cur.id === fresh.id ? fresh : cur)) }
@@ -160,7 +170,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
   }, [queued, carriersLoading])
 
   /** Re-read the load right before the write: its updatedAt is the CAS token, and an invitation may have taken a while. */
-  const cover = async (carrierId: string) => {
+  const cover = async (carrierId: string, overrideReason: string | null = overrideUsed) => {
     const fresh = await getShipmentBundle(shipmentId)
     const load = fresh.loads[0]
     if (!load) throw new Error('This shipment has no load to cover.')
@@ -172,6 +182,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
       ...((gate.warning && acked) || (serverWarn && serverWarnOk)
         ? { acknowledgeWarnings: [...(gate.warning && acked ? [gate.ackKey ?? MODERATE_ACK_KEY] : []), ...(serverWarn && serverWarnOk ? serverWarn.keys : [])] }
         : {}),
+      ...(overrideReason ? { overrideReason } : {}),
     }
     // A load that already has a live carrier gets another one (default: every stop), never a replacement.
     const covered = liveCarriersOf(fresh.loadCarriers, load.id).length > 0
@@ -183,7 +194,10 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
 
   /** A server request to acknowledge warnings becomes a checkbox (and the keys it needs); anything else is the error. */
   const reportCoverError = (e: unknown) => {
-    const text = messageOf(e)
+    const raw = messageOf(e)
+    const offer = /\s*\[override:[^\]]*\]\s*$/.exec(raw)
+    const text = offer ? raw.slice(0, offer.index) : raw
+    setOverrideOffer(!!offer && (callerIsAdmin || callerIsOwner))
     const ask = /Acknowledge these before booking:\s*([\s\S]*?)\s*\[ack:([^\]]+)\]/.exec(text)
     if (ask) {
       setServerWarn({ keys: ask[2].split(',').map((k) => k.trim()).filter(Boolean), text: ask[1] })
@@ -192,12 +206,12 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
     } else setError(text)
   }
 
-  const assignTarget = async () => {
+  const assignTarget = async (overrideReason: string | null = overrideUsed) => {
     if (!coverTarget) return
     setWorking(true)
     setError(null)
     try {
-      const bundle = await cover(coverTarget.id)
+      const bundle = await cover(coverTarget.id, overrideReason)
       toast.success(`${coverTarget.name} assigned`)
       setCovered({ bundle, name: coverTarget.name })
     } catch (e) {
@@ -207,12 +221,12 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
     }
   }
 
-  const assign = async () => {
+  const assign = async (overrideReason: string | null = overrideUsed) => {
     if (!selected) return
     setWorking(true)
     setError(null)
     try {
-      const bundle = await cover(selected.id)
+      const bundle = await cover(selected.id, overrideReason)
       toast.success(route === 'ASSIGN_NOW' ? `${selected.name} assigned` : `${selected.name} assigned, waiting for carrier setup`)
       setCovered({ bundle, name: selected.name })
     } catch (e) {
@@ -376,6 +390,39 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
             </TmsAlert>
           )}
           {error && <TmsAlert tone="red" title="Could not cover" role="alert"><span data-testid="cover-error">{error}</span></TmsAlert>}
+          {error && overrideOffer && (
+            <TmsAlert tone="orange" title="Admin override" role="status">
+              <div className="flex flex-col gap-2" data-testid="cover-override">
+                <span>As an admin you can assign this carrier anyway. Say why; the reason is kept on the shipment&apos;s activity.</span>
+                <textarea
+                  id="cover-override-reason"
+                  data-testid="cover-override-reason"
+                  aria-label="Override reason"
+                  rows={2}
+                  maxLength={500}
+                  value={overrideWhy}
+                  onChange={(e) => setOverrideWhy(e.target.value)}
+                  placeholder="e.g. Insurance verified on the carrier's COI; MCP has not synced it yet"
+                  style={{ width: '100%', fontFamily: 'inherit', fontSize: 13, padding: 6, borderRadius: 6, border: '1px solid var(--tms-border)' }}
+                />
+                <div>
+                  <TmsButton
+                    variant="primary"
+                    data-testid="cover-override-submit"
+                    disabled={working || overrideWhy.trim().length < 3}
+                    onClick={() => {
+                      const why = overrideWhy.trim()
+                      setOverrideUsed(why)
+                      setOverrideOffer(false)
+                      void (coverTarget ? assignTarget(why) : assign(why))
+                    }}
+                  >
+                    {working ? 'Assigning…' : 'Override and cover'}
+                  </TmsButton>
+                </div>
+              </div>
+            </TmsAlert>
+          )}
 
           {nameMatches && (
             <div data-testid="cover-name-results">

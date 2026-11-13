@@ -8680,6 +8680,63 @@ describe('Step AM — cover flow and assignment ladder', () => {
       await expect(cover(loadId)).rejects.toThrow(/insurance/i)
     })
 
+    describe('admin compliance override', () => {
+      const coverAs = (loadId: string, identity: unknown, input: Row = {}): Promise<Row> => call('COVER_CARRIER', {
+        loadId, expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt, carrierId: 'car-1', carrierRateCents: 180_000, ...input,
+      }, identity)
+      /** An ACTIVE carrier with no insurance on file at all, like an Aljex carrier MyCarrierPackets never synced. */
+      const uninsured = (): void => carrierRow({ insurancePolicies: [] })
+
+      it('offers the override to an admin only, through the [override:] marker', async () => {
+        const { loadId } = await sourcingLoad()
+        uninsured()
+        await expect(coverAs(loadId, ADMIN)).rejects.toThrow(/\[override:INSURANCE_EXPIRED:AUTO_LIABILITY,INSURANCE_EXPIRED:CARGO\]$/)
+        const plain = await coverAs(loadId, DISPATCHER).catch((e: Error) => e.message)
+        expect(plain).toMatch(/cannot be assigned: No auto liability insurance/)
+        expect(plain).not.toMatch(/\[override:/)
+      })
+
+      it('refuses an override from a non-admin, server side', async () => {
+        const { loadId } = await sourcingLoad()
+        uninsured()
+        await expect(coverAs(loadId, DISPATCHER, { overrideReason: 'COI checked by phone' })).rejects.toThrow(/only an admin can override/)
+        expect([...table(TABLES.carrier).values()]).toHaveLength(0)
+      })
+
+      it('refuses an admin override without a reason', async () => {
+        const { loadId } = await sourcingLoad()
+        uninsured()
+        await expect(coverAs(loadId, ADMIN, { overrideReason: '  ' })).rejects.toThrow(/needs a reason/)
+        expect([...table(TABLES.carrier).values()]).toHaveLength(0)
+      })
+
+      it('lets an admin cover past the insurance blocks with a reason, and records who, why and what', async () => {
+        const { shipmentId, loadId } = await sourcingLoad()
+        uninsured()
+        const why = 'COI on file in MCP, sync pending'
+        // The admin-only "no cargo insurance" warning still has to be ticked, override or not.
+        await expect(coverAs(loadId, ADMIN, { overrideReason: why })).rejects.toThrow(/Acknowledge these before booking: .*\[ack:INSURANCE_UNVERIFIED\]/)
+        await coverAs(loadId, ADMIN, { overrideReason: why, acknowledgeWarnings: ['INSURANCE_UNVERIFIED'] })
+        const row = active()
+        expect(row.bookingWarnings).toEqual(['INSURANCE_UNVERIFIED', 'OVERRIDE:INSURANCE_EXPIRED:AUTO_LIABILITY', 'OVERRIDE:INSURANCE_EXPIRED:CARGO'])
+        const audits = [...table(TABLES.audit).values()]
+        const onShipment = audits.find((a) => a.action === 'OVERRIDE_CARRIER_COMPLIANCE')!
+        expect(onShipment).toMatchObject({ entityType: 'SHIPMENT', entityId: shipmentId, user: 'admin@bcatcorp.com' })
+        expect(JSON.parse(String(onShipment.changes))).toMatchObject({ why, overridden: expect.stringMatching(/auto liability.*cargo/) })
+        const cover = audits.find((a) => a.action === 'COVER_CARRIER')!
+        expect(JSON.parse(String(cover.changes))).toMatchObject({ overridden: ['INSURANCE_EXPIRED:AUTO_LIABILITY', 'INSURANCE_EXPIRED:CARGO'], overrideWhy: why })
+      })
+
+      it('never overrides a do-not-use carrier', async () => {
+        const { loadId } = await sourcingLoad()
+        carrierRow({ status: 'DO_NOT_USE', insurancePolicies: [] })
+        const message = await coverAs(loadId, ADMIN, { overrideReason: 'just this once' }).catch((e: Error) => e.message)
+        expect(message).toMatch(/do not use/)
+        expect(message).not.toMatch(/\[override:/)
+        expect([...table(TABLES.carrier).values()]).toHaveLength(0)
+      })
+    })
+
     it('BOOK_CARRIER (the offer path) puts its ACTIVE assignment on the ladder too', async () => {
       const { loadId } = await sourcingLoad()
       carrierRow()
