@@ -176,6 +176,7 @@ import {
   postInvoiceCleared, readChangeReason, REASON_REQUIRED_MESSAGE, snapshotOf, type PostInvoiceGuardedAction,
 } from './postInvoice'
 import { salesRepForDivision } from '../../../src/lib/divisionSalesRep'
+import { parseRateConSnapshot, rateConThreadHeaders, revisedRateConSubject } from '../../../src/lib/rateConRevision'
 import { LEAD_STAGES, promotionFor } from '../../../src/lib/crm/promote'
 import { batchShipmentTask, BATCH_TASK_ACTIONS } from './batch'
 import { INTAKE_ACTIONS, reconcileOpenIntake, runIntakeAction, type IntakeAction, type IntakeDeps } from './intake'
@@ -434,6 +435,7 @@ const IDX_CARRIERS_BY_CARRIER_ID = 'loadCarriersByCarrierId'
 const IDX_CARRIER_DOCS_BY_CARRIER = 'carrierDocumentsByCarrierIdAndType'
 const IDX_CHECK_CALLS_BY_LOAD = 'loadCheckCallsByLoadIdAndAt'
 const IDX_SHIPMENTS_BY_NUMBER = 'shipmentsByNumber'
+const IDX_MESSAGES_BY_SHIPMENT = 'shipmentMessagesByShipmentIdAndAt'
 
 /** DUPLICATE_SHIPMENT ceiling — one transaction per copy, and 20 is the plan's cap. */
 const MAX_DUPLICATE_COPIES = 20
@@ -659,6 +661,8 @@ type Action =
   | 'MARK_RATE_CON_SIGNED'
   | 'SET_QUICK_PAY'
   | 'SEND_RATE_CON'
+  // What the last rate con printed, so the browser can mark the next one REVISED and list the changes.
+  | 'GET_RATE_CON_REVISION'
   | 'GET_TRACKING_MAILBOX'
   | 'VOID_RATE_CON'
   | 'DISPATCH_LOAD'
@@ -6245,6 +6249,9 @@ async function sendThreadMime(args: {
   attachments: { filename: string; contentType: string; base64: string }[]
   messageId: string
   replyTo: string
+  /** A reply in an existing thread (a revised rate con): the message answered and the thread's ids. */
+  inReplyTo?: string | null
+  references?: string | null
 }): Promise<{ status: 'SENT' | 'NOT_SENT' | 'FAILED'; error: string | null; raw: string; sesMessageId: string | null }> {
   const boundary = `=_bcatthread_${Date.now().toString(36)}`
   const raw =
@@ -6253,6 +6260,8 @@ async function sendThreadMime(args: {
     (args.cc.length > 0 ? `Cc: ${args.cc.join(', ')}\r\n` : '') +
     `Reply-To: ${args.replyTo}\r\n` +
     `Message-ID: ${args.messageId}\r\n` +
+    (args.inReplyTo ? `In-Reply-To: ${args.inReplyTo}\r\n` : '') +
+    (args.references ? `References: ${args.references}\r\n` : '') +
     `Subject: ${args.subject}\r\n` +
     `MIME-Version: 1.0\r\n` +
     `Content-Type: multipart/mixed; boundary="${boundary}"\r\n` +
@@ -6344,6 +6353,8 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   if (toInput.length === 0) throw new Error('A rate confirmation needs at least one recipient')
   const inputCc = input.cc == null ? [] : assertArrayOf(input.cc, 'cc', (v, i) => assertEmail(v, `cc[${i}]`), 20)
   const expiresHours = optionalInteger(input.expiresHours, { min: 1, max: 720, label: 'expiresHours' })
+  // What this PDF printed (and, from version 2, what changed): kept so the next send can say what moved.
+  const snapshot = input.snapshot == null ? null : parseRateConSnapshot(input.snapshot)
 
   const carrier = await getById(LOAD_CARRIER_TABLE_NAME, loadCarrierId)
   if (!carrier) throw new Error(`Load carrier not found: ${loadCarrierId}`)
@@ -6422,9 +6433,15 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   const filename = multi
     ? `rate-con-${loadNumber}-${carrierSlug(carrierLabel, loadCarrierId)}-v${version}.pdf`
     : `rate-con-${loadNumber}-v${version}.pdf`
-  const subject = multi && carrierLabel
+  // A re-send replies in the first rate con's thread (Ryne 2026-11-13): same subject as a reply,
+  // In-Reply-To the last one sent, References back to the first.
+  const thread = version > 1
+    ? rateConThreadHeaders(await queryIndex(SHIPMENT_MESSAGE_TABLE_NAME, IDX_MESSAGES_BY_SHIPMENT, 'shipmentId', shipmentId), loadCarrierId)
+    : null
+  const freshSubject = multi && carrierLabel
     ? `Rate confirmation — load ${loadNumber} — ${carrierLabel} ${subjectRef(shipmentId)}`
     : `Rate confirmation — load ${loadNumber} ${subjectRef(shipmentId)}`
+  const subject = thread?.originalSubject ? revisedRateConSubject(thread.originalSubject) : version > 1 ? revisedRateConSubject(freshSubject) : freshSubject
   const messageId = newMessageId(shipmentId, version)
   const composed = composeRateConCc({
     to: toInput,
@@ -6443,8 +6460,14 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   const signUrl = PORTAL_ORIGIN
     ? `${PORTAL_ORIGIN.replace(/\/+$/, '')}/sign/rate-con/${token}`
     : ''
+  const changes = snapshot?.changes ?? []
+  const revisionLead = version > 1
+    ? `REVISED rate confirmation (revision ${version}) for load ${loadNumber}. It replaces revision ${version - 1}, whose signing link no longer works.\r\n\r\n` +
+      (changes.length ? `What changed:\r\n${changes.map((c) => `- ${c}`).join('\r\n')}\r\n\r\n` : '')
+    : ''
   const bodyBase =
-    `Attached is the rate confirmation for load ${loadNumber}.\r\n\r\n` +
+    revisionLead +
+    `Attached is the ${version > 1 ? 'revised ' : ''}rate confirmation for load ${loadNumber}.\r\n\r\n` +
     (signUrl ? `Review and sign it here: ${signUrl}\r\n\r\n` : '') +
     `This link expires ${expiresAt}.\r\n\r\n` +
     `This e-mail is the tracking thread for load ${loadNumber}. Please reply all (keep tracking@bcatcorp.com on every reply) for all tracking updates; they must stay in this thread.`
@@ -6471,7 +6494,7 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
     authorKind: 'PERSON',
     authorName: firstName,
     messageId,
-    inReplyTo: null,
+    inReplyTo: thread?.inReplyTo ?? null,
     providerRef: null,
     attachments: null,
     documentIds: [documentId],
@@ -6511,6 +6534,8 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
       rateConExpiresAt: expiresAt,
       rateConDocumentId: documentId,
       rateConVersion: version,
+      // Not a schema field: read back only through GET_RATE_CON_REVISION. Null when the browser sent none.
+      rateConSnapshot: snapshot ? JSON.stringify(snapshot) : null,
       // The signing API's per-token rate limit counts from zero for each new link.
       rateConRequestCount: 0,
       ...(sentRung?.cols ?? {}),
@@ -6555,6 +6580,8 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
     attachments: [{ filename, contentType: 'application/pdf', base64: pdfBase64 }],
     messageId,
     replyTo: threadReplyAddress(shipmentId),
+    inReplyTo: thread?.inReplyTo ?? null,
+    references: thread?.references ?? null,
   })
 
   if (emailOutcome.status !== 'SENT') {
@@ -6603,6 +6630,17 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
     ...(multi ? { liveCarriers: liveRows.length, rateConGrossCents } : {}),
   })
   return readBundle(shipmentId) as unknown as Row
+}
+
+/** The version last sent on this assignment and the snapshot stored with it (null before snapshots existed). */
+async function getRateConRevision(input: Row): Promise<Row> {
+  const loadCarrierId = assertString(input.loadCarrierId, 'loadCarrierId')
+  const carrier = await getById(LOAD_CARRIER_TABLE_NAME, loadCarrierId)
+  if (!carrier) throw new Error(`Load carrier not found: ${loadCarrierId}`)
+  return {
+    version: numberOrNull(carrier.rateConVersion) ?? 0,
+    snapshot: carrier.rateConSnapshot == null ? null : parseRateConSnapshot(carrier.rateConSnapshot),
+  }
 }
 
 /**
@@ -9254,6 +9292,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
     case 'SEND_RATE_CON':
       return sendRateCon(input, caller)
     // The addresses a person needs to start the tracking thread by hand: the tracking mailbox and this shipment's thread address.
+    case 'GET_RATE_CON_REVISION':
+      return getRateConRevision(input)
     case 'GET_TRACKING_MAILBOX':
       return { tracking: trackingMailbox(), thread: threadReplyAddress(assertString(input.shipmentId, 'shipmentId')) } as unknown as Row
     case 'VOID_RATE_CON':

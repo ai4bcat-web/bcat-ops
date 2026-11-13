@@ -253,3 +253,32 @@ describe('rateConFilename', () => {
     expect(rateConFilename('BC-1001', 3)).toBe('rate-con-BC-1001-v3.pdf')
   })
 })
+
+describe('revisions', () => {
+  const base = (): RateConInput => ({
+    carrier: { name: 'Landstar Ranger', mcNumber: '166960', dotNumber: '241572', phone: null },
+    loadCarrier,
+    loadNumber: '20057',
+    stops: [pickup(), delivery()],
+    charges: [{ label: 'Linehaul', amountCents: 120000 }, { label: 'Detention', amountCents: 7500 }],
+    totalCents: 127500,
+  })
+
+  it('a first send carries no revision banner', async () => {
+    const text = await allText(await buildRateConPdf(base()))
+    expect(text).not.toContain('REVISED')
+    expect(text).not.toContain('CHANGES SINCE')
+  })
+
+  it('revision 2 says REVISED - REV 2 and lists what changed', async () => {
+    const text = await allText(await buildRateConPdf({
+      ...base(),
+      revision: { number: 2, at: new Date('2026-11-13T21:00:00Z'), changes: ['Added DETENTION $75.00', 'Total rate $1,200.00 -> $1,275.00'] },
+    }))
+    expect(text).toContain('REVISED - REV 2')
+    expect(text).toContain('CHANGES SINCE REV 1')
+    expect(text).toContain('- Added DETENTION $75.00')
+    expect(text).toContain('- Total rate $1,200.00 -> $1,275.00')
+  })
+})
+

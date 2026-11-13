@@ -14,7 +14,7 @@ import { Ban, Copy, FileText, Send } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { TmsBadge, TmsButton, TmsField, TmsInput } from '@/features/tms/kit'
 import { toast } from 'sonner'
-import { getRateConfirmUrl, getTrackingMailbox, listUserProfiles } from '@/lib/apiClient'
+import { getRateConRevision, getRateConfirmUrl, getTrackingMailbox, listUserProfiles } from '@/lib/apiClient'
 import { buildRateConPdf, joinRateConNotes, rateConFilename, rateConPdfBase64, rateConRepOf } from '@/lib/carrierRateCon'
 import { useAuthUser } from '@/hooks/useAuth'
 import { dedupeEmails } from '@/lib/emailAddress'
@@ -25,6 +25,7 @@ import { formatCents } from '@/lib/tmsDirectory'
 import { rateConChargesFor } from '@/lib/carrierBill'
 import { liveCarriersOf, primaryCarrierOf } from '@/lib/carrierTotals'
 import type { RateConInput, RateConStop } from '@/lib/carrierRateCon'
+import { rateConRevisionFor, rateConSnapshotOf, type RateConSnapshot } from '@/lib/rateConRevision'
 import { readExtras } from '@/features/shipments/form/model'
 import type {
   CarrierContactRecord, CarrierRecord, LoadCarrierRecord, RateConStatus,
@@ -52,7 +53,7 @@ export interface RateConPanelProps {
   contacts: CarrierContactRecord[]
   settings: TmsSettings | null
   busy: boolean
-  onSend: (input: { loadCarrierId: string; pdfBase64: string; to: string[]; cc?: string[]; expiresHours?: number }) => Promise<void>
+  onSend: (input: { loadCarrierId: string; pdfBase64: string; to: string[]; cc?: string[]; expiresHours?: number; snapshot?: RateConSnapshot }) => Promise<void>
   onVoid: (input: { loadCarrierId: string }) => Promise<void>
   /** Called after a send succeeds, with who it went to (the dialog closes on it). */
   onSent?: (to: string[]) => void
@@ -162,11 +163,21 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
     ),
   })
 
+  // From the second send on, the PDF says REVISED and lists what changed since the last one sent.
+  const buildNextInput = async (): Promise<{ input: RateConInput; snapshot: RateConSnapshot }> => {
+    const base = buildInput()
+    const snapshot = rateConSnapshotOf(base)
+    if (version === 0) return { input: base, snapshot: { ...snapshot, changes: [] } }
+    const last = await getRateConRevision(loadCarrier.id).catch(() => null)
+    const revision = rateConRevisionFor((last?.version ?? version) + 1, last?.snapshot ?? null, snapshot)
+    return { input: { ...base, revision }, snapshot: { ...snapshot, changes: revision?.changes ?? [] } }
+  }
+
   const preview = async () => {
     setWorking(true)
     setError(null)
     try {
-      const doc = await buildRateConPdf(buildInput())
+      const doc = await buildRateConPdf((await buildNextInput()).input)
       setPreviewUrl(`data:application/pdf;base64,${rateConPdfBase64(doc)}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not build the rate confirmation.')
@@ -192,10 +203,12 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
     setWorking(true)
     setError(null)
     try {
-      const doc = await buildRateConPdf(buildInput())
+      const next = await buildNextInput()
+      const doc = await buildRateConPdf(next.input)
       await onSend({
         loadCarrierId: loadCarrier.id,
         pdfBase64: rateConPdfBase64(doc),
+        snapshot: next.snapshot,
         to: toList,
         cc: ccParsed.emails,
         expiresHours: expiryHours ? Number(expiryHours) : undefined,

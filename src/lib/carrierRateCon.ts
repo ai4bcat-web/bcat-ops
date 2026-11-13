@@ -19,6 +19,7 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFP
 import type { CarrierRecord, LoadCarrierRecord } from '../types/tms'
 import { RATE_CON_LOGO_HEIGHT, RATE_CON_LOGO_PNG_BASE64, RATE_CON_LOGO_WIDTH } from './carrierRateConLogo'
 import { RATE_CON_TERMS } from './carrierRateConTerms'
+import type { RateConRevision } from './rateConRevision'
 
 const PAGE_W = 612
 const PAGE_H = 792
@@ -43,6 +44,7 @@ const ink = rgb(0, 0, 0)
 const soft = rgb(0.33, 0.33, 0.33)
 const hatch = rgb(0.82, 0.82, 0.82)
 const white = rgb(1, 1, 1)
+const revised = rgb(0.75, 0.05, 0.05)
 
 /** Punctuation the standard fonts cannot encode, mapped to what a printer reads the same. */
 const FOLD: Record<string, string> = {
@@ -125,6 +127,8 @@ export interface RateConInput {
   totalCents: number
   /** Order special instructions + rate-con notes, printed in DISPATCH NOTES. */
   notes?: string
+  /** Version 2 and up: "REVISED - REV n" in the header and a CHANGES block above the stops. */
+  revision?: RateConRevision | null
 }
 
 /** BCAT's main line: the FROM box prints it when the rep has no number of their own. */
@@ -352,6 +356,9 @@ function drawHeader(ctx: Ctx): void {
   put(page, 'Rate Confirmation', 450, 12, helvBold, 15 * (139 / helvBold.widthOfTextAtSize('Rate Confirmation', 15)))
   put(page, ctx.stamp, 450, 29, mono, 10)
   put(page, '(EST)', 564, 29, mono, 10)
+  if (input.revision) {
+    put(page, `REVISED - REV ${input.revision.number}`, 306, 31, helvBold, 10, { color: revised })
+  }
 
   page.drawImage(ctx.logo, { x: 25, y: PAGE_H - 33 - 72, width: 191, height: 72 })
   put(page, 'BCAT LOGISTICS', 30, 137, mono, 10)
@@ -470,6 +477,38 @@ function drawDetails(ctx: Ctx): void {
   }
 }
 
+/** Revisions only: when this version was issued and what changed since the one before it. */
+function drawRevision(ctx: Ctx): void {
+  const revision = ctx.input.revision
+  if (!revision) return
+  const { fonts } = ctx
+  const size = 8.5
+  const issued = `Revision ${revision.number} issued ${stampOf(revision.at)} (EST). This replaces revision ${revision.number - 1}; only this version can be signed.`
+  const lines = [
+    ...wrapMono(issued, 100),
+    ...(revision.changes.length
+      ? revision.changes.flatMap((c) => wrapMono(`- ${c}`, 100))
+      : ['- Changes from the previous revision were not recorded.']),
+  ]
+  let rest = lines
+  let first = true
+  while (rest.length) {
+    const needed = 8.8 + 2 * MONO_ROW + 10.7
+    if (ctx.y + needed > CONTENT_BOTTOM) newPage(ctx)
+    const top = ctx.y
+    box(ctx.page, 20.4, top, 595.3, top + 8.8, hatch)
+    put(ctx.page, first ? `CHANGES SINCE REV ${revision.number - 1}` : `CHANGES SINCE REV ${revision.number - 1} (CONT.)`, 306, top + 0.5, fonts.helvBold, 8, { align: 'center', color: revised })
+    const room = Math.max(1, Math.floor((CONTENT_BOTTOM - top - 8.8 - 10.7) / MONO_ROW))
+    const chunk = rest.slice(0, room)
+    rest = rest.slice(room)
+    const bottom = top + 8.8 + chunk.length * MONO_ROW + 10.7
+    box(ctx.page, 20.4, top + 8.8, 595.3, bottom)
+    chunk.forEach((l, i) => put(ctx.page, l, 28, top + 8.8 + 8.7 + i * MONO_ROW, fonts.mono, size))
+    ctx.y = bottom + SECTION_GAP
+    first = false
+  }
+}
+
 /** `STOP_REF` (a stored reference code) prints as the reference's own "Ref #"; other codes lose their underscores. */
 function refLabelOf(label: string): string {
   const text = foldAscii(label).replace(/_/g, ' ').trim()
@@ -571,6 +610,7 @@ export async function buildRateConPdf(input: RateConInput): Promise<Uint8Array> 
   drawHeader(ctx)
   drawFooter(ctx)
   drawDetails(ctx)
+  drawRevision(ctx)
 
   let picks = 0
   let drops = 0

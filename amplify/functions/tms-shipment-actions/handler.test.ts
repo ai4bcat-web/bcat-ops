@@ -3089,6 +3089,40 @@ describe('carrier booking', () => {
     expect(JSON.parse(String(superseded[0].changes))).toMatchObject({ previousVersion: 1, version: 2, previousStatus: 'SENT' })
   })
 
+  it('a re-send replies in the first rate con\'s thread, says REVISED, lists the changes and keeps the snapshot', async () => {
+    const { loadId } = await bookableLoad()
+    seedCarrier()
+    seedCarrierDocs()
+    await book(loadId)
+    const loadCarrierId = String(activeCarrier().id)
+    const snap = { charges: [{ label: 'Linehaul', amountCents: 120000 }], totalCents: 120000, stops: [], equipmentType: null, commodity: null, weightLbs: null, pieces: null, miles: null, notes: '', truckNumber: null, trailerNumber: null, driverName: null, changes: [] }
+    sesSend.mockResolvedValueOnce({ MessageId: 'ses-first' })
+    await call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'], snapshot: snap })
+    expect(JSON.parse(String(table(TABLES.carrier).get(loadCarrierId)!.rateConSnapshot))).toMatchObject({ totalCents: 120000, changes: [] })
+    const rev = await call('GET_RATE_CON_REVISION', { loadCarrierId }) as unknown as { version: number; snapshot: { totalCents: number } }
+    expect(rev).toMatchObject({ version: 1, snapshot: { totalCents: 120000 } })
+
+    sesSend.mockResolvedValueOnce({ MessageId: 'ses-second' })
+    await call('SEND_RATE_CON', {
+      loadCarrierId, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'],
+      snapshot: { ...snap, charges: [...snap.charges, { label: 'Detention', amountCents: 7500 }], totalCents: 127500, changes: ['Added DETENTION $75.00', 'Total rate $1,200.00 -> $1,275.00'] },
+    })
+    const raw = (n: number) => new TextDecoder().decode((sesSend.mock.calls[n][0] as { input: { Content: { Raw: { Data: Uint8Array } } } }).input.Content.Raw.Data)
+    const subjectOf = (text: string) => /^Subject: (.*)$/m.exec(text)?.[1] ?? ''
+    const first = raw(0)
+    const second = raw(1)
+    expect(first).not.toMatch(/^In-Reply-To:/m)
+    expect(subjectOf(second)).toBe(`RE: ${subjectOf(first)}`)
+    expect(second).toMatch(/^In-Reply-To: <ses-first@email\.amazonses\.com>$/m)
+    expect(second).toMatch(/^References: <ses-first@email\.amazonses\.com>$/m)
+    const body = Buffer.from(second.split('Content-Transfer-Encoding: base64\r\n\r\n')[1].split('\r\n\r\n')[0].replace(/\r\n/g, ''), 'base64').toString('utf8')
+    expect(body).toContain('REVISED rate confirmation (revision 2)')
+    expect(body).toContain('- Added DETENTION $75.00')
+    const messages = [...table(TABLES.message).values()].filter((m) => m.kind === 'RATE_CON').sort((a, b) => String(a.at).localeCompare(String(b.at)))
+    expect(messages[1].inReplyTo).toBe('<ses-first@email.amazonses.com>')
+    expect(JSON.parse(String(table(TABLES.carrier).get(loadCarrierId)!.rateConSnapshot)).changes).toEqual(['Added DETENTION $75.00', 'Total rate $1,200.00 -> $1,275.00'])
+  })
+
   it('refuses a recipient that is not an email address', async () => {
     const { loadId } = await bookableLoad()
     seedCarrier()
