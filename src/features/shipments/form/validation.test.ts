@@ -105,7 +105,7 @@ describe('Aljex wording', () => {
     expect(texts).toEqual([
       'Equipment', 'Division', 'Customer Miles', 'Billable wt', 'Calculate Totals from Picks', 'Customs Bonded',
       'Straps/Chains', 'Mass Release', 'Tracking', 'FSC/Mile', 'Max Rate', 'Origin City', 'Carrier Ref #',
-      'Send Rate Conf', 'Next Chk Call Date And Time', 'EDI Reason',
+      'Send Rate Confirmation', 'Next Chk Call Date And Time', 'EDI Reason',
     ])
     expect(labelFor(LABEL.shipping.weightLbs)).toBe('Weight (required)')
     expect(labelFor(LABEL.shipping.pieces)).toBe('Pieces')
