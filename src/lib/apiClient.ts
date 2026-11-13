@@ -3273,13 +3273,13 @@ export async function releaseFromLoadReview(shipmentIds: string[]): Promise<Batc
 export type StopOp =
   | 'ADD' | 'REMOVE' | 'SWAP' | 'SET_APPT' | 'SET_REQUESTED'
   | 'SET_TIMES' | 'SET_TYPE' | 'SET_REFS' | 'SET_LOCATION'
-export interface UpdateStopInput {
-  loadId: string
-  expectedUpdatedAt?: string
+export interface UpdateStopChange {
   op: StopOp
   stopId?: string
   patch?: Partial<Stop> & { withStopId?: string }
 }
+/** One stop change, or `ops`: several applied together, with the stop order checked once on the result. */
+export type UpdateStopInput = { loadId: string; expectedUpdatedAt?: string } & (UpdateStopChange | { ops: UpdateStopChange[] })
 export async function updateStop(input: UpdateStopInput): Promise<ShipmentBundle> {
   return shipmentAction<ShipmentBundle>('UPDATE_STOP', input)
 }
