@@ -2985,6 +2985,8 @@ export interface ShipmentNoticeAttachment {
  * the deterministic id `ms:<shipmentId>:<milestone>` and the first POD request
  * `pod:<loadCarrierId>`, so a second leg or a stream retry never sends twice.
  */
+export type ShipmentNoticeDeliveryStatus = 'DELIVERED' | 'DELAYED' | 'BOUNCED' | 'COMPLAINT' | 'REJECTED'
+
 export interface ShipmentNoticeRecord {
   id: string
   shipmentId: string
@@ -3004,6 +3006,11 @@ export interface ShipmentNoticeRecord {
   messageId?: string | null
   sentAt?: string | null
   trackingLinkId?: string | null
+  /** What SES reported after accepting the send (ses-delivery-events); null until it reports. */
+  deliveryStatus?: ShipmentNoticeDeliveryStatus | null
+  deliveredAt?: string | null
+  deliveryError?: string | null
+  deliveryLog?: { type: ShipmentNoticeDeliveryStatus; at: string; recipients: string[]; reason: string | null }[] | string | null
   /** When the send was attempted; the sort key of the shipment index. */
   at: string
   createdBy: string

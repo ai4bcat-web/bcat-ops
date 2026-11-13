@@ -186,6 +186,35 @@ export function noticeStatusDetail(notice: ShipmentNoticeRecord): string | null 
 }
 
 /**
+ * Where a sent e-mail actually ended up, as SES reported it after accepting it. "Sent" alone
+ * only means SES took it (20027 was "sent" and nobody received it); a send stays orange until
+ * SES reports a delivery, and turns red when a recipient bounced or complained.
+ */
+export function noticeDelivery(notice: ShipmentNoticeRecord): {
+  label: string
+  tone: 'green' | 'orange' | 'red' | 'gray'
+  detail: string | null
+} {
+  if (notice.status !== 'SENT') {
+    return { label: NOTICE_STATUS_LABEL[notice.status], tone: notice.status === 'COPY' ? 'gray' : 'red', detail: noticeStatusDetail(notice) }
+  }
+  switch (notice.deliveryStatus) {
+    case 'DELIVERED':
+      return { label: 'Delivered', tone: 'green', detail: null }
+    case 'DELAYED':
+      return { label: 'Delayed', tone: 'orange', detail: 'The receiving mail server has not accepted it yet; SES keeps retrying.' }
+    case 'BOUNCED':
+      return { label: 'Bounced', tone: 'red', detail: `Bounced: ${notice.deliveryError ?? 'a recipient refused it'}` }
+    case 'COMPLAINT':
+      return { label: 'Spam complaint', tone: 'red', detail: notice.deliveryError ?? 'A recipient marked it as spam.' }
+    case 'REJECTED':
+      return { label: 'Rejected', tone: 'red', detail: `SES did not send it: ${notice.deliveryError ?? 'rejected'}` }
+    default:
+      return { label: 'Sent', tone: 'orange', detail: 'Accepted for sending; no delivery confirmation yet.' }
+  }
+}
+
+/**
  * One invoice's e-mail history out of a shipment's notices, newest first.
  *
  * Notices belong to the shipment, not the invoice, so a re-issued invoice on the same

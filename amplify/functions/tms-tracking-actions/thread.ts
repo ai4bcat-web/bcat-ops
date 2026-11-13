@@ -285,7 +285,7 @@ export async function sendShipmentMessage(deps: ThreadDeps, input: Row, caller: 
     kind,
     party: replyParty,
     to,
-    from: 'ai4bcat@gmail.com',
+    from: process.env.FROM_ADDRESS || 'notifications@bcatcorp.com',
     cc,
     subject,
     body: signedBody,

@@ -82,6 +82,8 @@ export async function applyOne({ doc, suffix, row, now = new Date() }) {
   const oldId = String(row.invoice.id);
   const target = row.target;
   const audit = (entityType, entityId, changes) => doc.send(new PutCommand({ TableName: `AuditLog-${suffix}`, Item: { id: randomUUID(), __typename: 'AuditLog', entityType, entityId, action: AUDIT_ACTION, user: AUDIT_USER, changes: JSON.stringify(changes), createdAt: at, updatedAt: at } }));
+  // pdfKey is carried over on purpose: it still names the OLD number, so tms-finance-actions sees the
+  // PDF as stale (invoicePdfIsStale) and re-renders it with the new number before any preview or send.
   try {
     await doc.send(new PutCommand({
       TableName: `Invoice-${suffix}`,

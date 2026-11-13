@@ -283,7 +283,7 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
     case 'AGING_STATEMENT':
       return agingStatement(input, caller)
     case 'PREVIEW_INVOICE_PACKET':
-      return previewInvoicePacket(input)
+      return previewInvoicePacket(input, caller)
     case 'INVOICE_ATTACHMENTS':
       return invoiceAttachmentPlans(input)
     case 'SYNC_FACTORING_CHANGE':

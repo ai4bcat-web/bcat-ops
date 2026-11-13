@@ -545,6 +545,37 @@ export async function generateInvoice(input: Row, caller: Caller): Promise<Row> 
   return { invoice: issued as unknown as Row, gate, documentFiled: documentFiled !== false }
 }
 
+/**
+ * What the stored PDF was rendered from: the number printed on it and the money on it. A send
+ * re-renders when this no longer matches the invoice, so a renumbered invoice (20027 still
+ * carried the INV-000001 PDF) or one whose lines changed never goes out with the old document.
+ */
+export function invoicePdfFingerprint(invoice: Pick<InvoiceRecord, 'number' | 'totalCents' | 'lines'> & { revision?: number | null }): string {
+  const lines = (invoice.lines ?? []).map((l) => `${l.code}:${l.amountCents}`).join(',')
+  return `${invoice.number}|${invoice.totalCents ?? 0}|${invoice.revision ?? 1}|${lines}`
+}
+
+/**
+ * True when the stored PDF is not the document this invoice should send: none stored, the key
+ * names another number (renumbered), or it was rendered from different numbers/lines. Invoices
+ * rendered before fingerprints existed are judged by the key alone.
+ */
+export function invoicePdfIsStale(invoice: InvoiceRecord & { pdfFingerprint?: string | null; revision?: number | null }): boolean {
+  if (!invoice.pdfKey || !invoice.pdfVersion) return true
+  if (invoice.pdfKey !== invoicePdfKey(invoice.customerId, invoice.number, invoice.pdfVersion)) return true
+  if (invoice.pdfFingerprint && invoice.pdfFingerprint !== invoicePdfFingerprint(invoice)) return true
+  return false
+}
+
+/** Re-render before a send or preview when the stored PDF is stale; otherwise hand the invoice back untouched. */
+async function freshPdfInvoice(invoice: InvoiceRecord, context: OrderContext, caller: Caller): Promise<InvoiceRecord> {
+  if (!invoicePdfIsStale(invoice)) return invoice
+  const { documentFiled: _filed, ...stored } = await storePdf(invoice, context, caller)
+  if (!stored.pdfKey) throw new Error('The invoice PDF is out of date and could not be re-rendered; try again')
+  console.log('[tms-finance-actions] re-rendered stale invoice PDF', invoice.id, invoice.pdfKey, '->', stored.pdfKey)
+  return stored as InvoiceRecord
+}
+
 /** Render the snapshot and put the bytes. A failure here leaves `pdfKey` null and says so. */
 async function storePdf(invoice: InvoiceRecord, context: OrderContext, caller: Caller): Promise<InvoiceRecord & { documentFiled?: boolean }> {
   const version = (invoice.pdfVersion ?? 0) + 1
@@ -564,6 +595,7 @@ async function storePdf(invoice: InvoiceRecord, context: OrderContext, caller: C
         pdfKey: key,
         pdfSizeBytes: bytes.byteLength,
         pdfVersion: version,
+        pdfFingerprint: invoicePdfFingerprint(invoice),
         updatedAt: now,
         updatedBy: caller.email,
       })],
@@ -571,7 +603,7 @@ async function storePdf(invoice: InvoiceRecord, context: OrderContext, caller: C
     )
     // The invoice shows on its shipment as a document the moment its PDF exists (and again, as the next version, when it is re-rendered).
     const documentFiled = await fileInvoiceDocument({ shipmentId: invoice.shipmentId, invoiceId: invoice.id, orderId: invoice.orderId, number: invoice.number, s3Key: key, sizeBytes: bytes.byteLength })
-    return { ...invoice, pdfKey: key, pdfSizeBytes: bytes.byteLength, pdfVersion: version, documentFiled }
+    return { ...invoice, pdfKey: key, pdfSizeBytes: bytes.byteLength, pdfVersion: version, pdfFingerprint: invoicePdfFingerprint(invoice), documentFiled } as InvoiceRecord & { documentFiled?: boolean }
   } catch (err) {
     console.error('[tms-finance-actions] invoice PDF failed', invoice.id, String(err))
     return { ...invoice, pdfKey: null, pdfSizeBytes: null, pdfVersion: null }
@@ -836,12 +868,13 @@ async function attachmentsFor(invoice: InvoiceRecord, docs: ShipmentDocumentReco
  * the files that ride separately. Writes nothing to the invoice; a POD that cannot be merged
  * comes back as `error` so the review can say which one.
  */
-export async function previewInvoicePacket(input: Row): Promise<Row> {
+export async function previewInvoicePacket(input: Row, caller: Caller): Promise<Row> {
   const invoiceId = assertString(input.invoiceId, 'invoiceId')
   const row = await getById(INVOICE_TABLE_NAME, invoiceId)
   if (!row) throw new Error(`Invoice not found: ${invoiceId}`)
-  const invoice = row as unknown as InvoiceRecord
-  const context = await readOrderContext(invoice.orderId)
+  const context = await readOrderContext(invoice0(row).orderId)
+  // Preview what a send would carry: a stale PDF (renumbered, changed lines) is re-rendered first.
+  const invoice = row.status === 'VOID' || isCarriedOver(row) ? invoice0(row) : await freshPdfInvoice(invoice0(row), context, caller)
   const scope = attachmentScopeOf(invoice, context)
   const exclude = input.excludeDocumentIds == null ? [] : emailList(input.excludeDocumentIds, 'excludeDocumentIds')
   const docs = sendDocuments(context.documents, scope, exclude)
@@ -864,6 +897,10 @@ export async function previewInvoicePacket(input: Row): Promise<Row> {
   }
 }
 
+function invoice0(row: Row): InvoiceRecord {
+  return row as unknown as InvoiceRecord
+}
+
 function emailList(value: unknown, label: string): string[] {
   if (value == null) return []
   return assertArrayOf<string>(value, label, (item, index) => assertString(item, `${label}[${index}]`), 20)
@@ -876,12 +913,13 @@ export async function emailInvoice(input: Row, caller: Caller): Promise<Row> {
 
   const row = await getById(INVOICE_TABLE_NAME, invoiceId)
   if (!row) throw new Error(`Invoice not found: ${invoiceId}`)
-  const invoice = row as unknown as InvoiceRecord
-  if (invoice.status === 'VOID') throw new Error('That invoice is void; it cannot be sent')
+  if (row.status === 'VOID') throw new Error('That invoice is void; it cannot be sent')
   if (isCarriedOver(row)) throw new Error(CARRIED_OVER_MESSAGE)
 
-  const context = await readOrderContext(invoice.orderId)
+  const context = await readOrderContext(invoice0(row).orderId)
   assertNotSquareInvoiced(context.shipment, 'e-mailing its invoice')
+  // Never send a stale document: a renumbered invoice or changed lines re-render the PDF first.
+  const invoice = await freshPdfInvoice(invoice0(row), context, caller)
   const to = emailList(input.to, 'to').length > 0
     ? emailList(input.to, 'to')
     : billingRecipients(context.customer, invoice.billToId)

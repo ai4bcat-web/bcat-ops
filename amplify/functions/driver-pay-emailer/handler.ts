@@ -9,7 +9,7 @@ import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2'
 import { splitAddresses } from '../../../src/lib/payEmail'
 
 const ses = new SESv2Client({})
-const FROM_ADDRESS = process.env.FROM_ADDRESS ?? 'ai4bcat@gmail.com'
+const FROM_ADDRESS = process.env.FROM_ADDRESS ?? 'notifications@bcatcorp.com'
 
 interface Args {
   to: string

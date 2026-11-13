@@ -45,7 +45,7 @@ import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { randomBytes, randomUUID } from 'crypto'
-import { threadKeyFor } from '../../../src/lib/shipmentThread'
+import { threadKeyFor, threadReplyAddress } from '../../../src/lib/shipmentThread'
 
 import {
   IDX_CARRIERS_BY_SHIPMENT,
@@ -111,7 +111,7 @@ import {
   uploadLinkExpiry,
   type NoticeStop,
 } from '../../../src/lib/shipmentNotices'
-import { deliverNotice, type EmailAttachment } from '../_shared/shipmentNotices'
+import { deliverNotice, sesConfigurationSet, type EmailAttachment } from '../_shared/shipmentNotices'
 import type {
   CheckCallNotifyChannel,
   CustomerNotification,
@@ -157,7 +157,7 @@ const BUCKET_NAME = process.env.BUCKET_NAME ?? ''
 const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
 const PORTAL_ORIGIN = process.env.PORTAL_ORIGIN ?? ''
 const WEBHOOK_URL = process.env.WEBHOOK_URL ?? ''
-const FROM_ADDRESS = process.env.FROM_ADDRESS ?? 'ai4bcat@gmail.com'
+const FROM_ADDRESS = process.env.FROM_ADDRESS ?? 'notifications@bcatcorp.com'
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const ADMIN_GROUP = 'ADMIN'
@@ -1103,11 +1103,12 @@ function wrap76(b64: string): string {
  * The Customer Link e-mail. Raw MIME, the same way the pay statements and rate
  * confirmations go out; base64 so a note with an em dash in it survives the wire.
  */
-async function sendCustomerEmail(args: { to: string[]; cc: string[]; subject: string; body: string }): Promise<void> {
+async function sendCustomerEmail(args: { to: string[]; cc: string[]; subject: string; body: string; replyTo: string }): Promise<void> {
   const raw =
     `From: ${FROM_ADDRESS}\r\n` +
     `To: ${args.to.join(', ')}\r\n` +
     (args.cc.length > 0 ? `Cc: ${args.cc.join(', ')}\r\n` : '') +
+    `Reply-To: ${args.replyTo}\r\n` +
     `Subject: ${args.subject.replace(/[\r\n]+/g, ' ').trim()}\r\n` +
     `MIME-Version: 1.0\r\n` +
     `Content-Type: text/plain; charset=UTF-8\r\n` +
@@ -1117,6 +1118,7 @@ async function sendCustomerEmail(args: { to: string[]; cc: string[]; subject: st
 
   await ses.send(new SendEmailCommand({
     FromEmailAddress: FROM_ADDRESS,
+    ConfigurationSetName: sesConfigurationSet(),
     Destination: { ToAddresses: args.to, CcAddresses: args.cc.length > 0 ? args.cc : undefined },
     Content: { Raw: { Data: new TextEncoder().encode(raw) } },
   }))
@@ -1230,7 +1232,7 @@ async function sendCustomerLink(input: Row, caller: Caller): Promise<Row> {
       `Track shipment ${number} here:\n${url}\n\n` +
       `This link works until ${expiresAt}.\n\n— ${contact.name?.trim() || BROKER_FALLBACK}`
     try {
-      await sendCustomerEmail({ to, cc, subject: `Tracking for shipment ${number}`, body })
+      await sendCustomerEmail({ to, cc, subject: `Tracking for shipment ${number}`, body, replyTo: threadReplyAddress(shipmentId) })
       emailStatus = 'SENT'
     } catch (err) {
       // SES is denied on dev. The link is real and the URL is in the response, so this
@@ -1784,6 +1786,7 @@ async function sendUploadLink(input: Row, caller: Caller): Promise<Row> {
     ses,
     tableName: SHIPMENT_NOTICE_TABLE_NAME,
     from: FROM_ADDRESS,
+    replyTo: threadReplyAddress(shipmentId),
     draft: {
       id: first ? noticeId('POD_REQUEST', loadCarrierId) : `ntc-${randomUUID()}`,
       shipmentId,
@@ -1913,6 +1916,7 @@ async function sendMilestoneNotice(input: Row, caller: Caller): Promise<Row> {
     ses,
     tableName: SHIPMENT_NOTICE_TABLE_NAME,
     from: FROM_ADDRESS,
+    replyTo: threadReplyAddress(shipmentId),
     draft: {
       id: `ntc-${randomUUID()}`,
       shipmentId,
@@ -2036,6 +2040,7 @@ async function emailDocuments(input: Row, caller: Caller): Promise<Row> {
     ses,
     tableName: SHIPMENT_NOTICE_TABLE_NAME,
     from: FROM_ADDRESS,
+    replyTo: threadReplyAddress(shipmentId),
     attachments,
     draft: {
       id: `ntc-${randomUUID()}`,
@@ -2318,6 +2323,7 @@ async function sendThreadEmail(input: {
   try {
     const sent = await ses.send(new SendEmailCommand({
       FromEmailAddress: FROM_ADDRESS,
+      ConfigurationSetName: sesConfigurationSet(),
       Destination: { ToAddresses: [input.to], CcAddresses: input.cc ? [input.cc] : undefined },
       Content: { Raw: { Data: new TextEncoder().encode(raw) } },
     }))
