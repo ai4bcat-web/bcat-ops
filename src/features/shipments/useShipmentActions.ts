@@ -34,7 +34,7 @@ export interface ShipmentActions {
   /** AT-plan: another outside carrier next to the live ones; `legStopIds` empty/absent = all stops. */
   addCarrier: (input: BookCarrierFields & { legStopIds?: string[] }) => Promise<void>
   setQuickPay: (input: { loadCarrierId: string; quickPayDays: number | null }) => Promise<void>
-  sendRateCon: (input: { loadCarrierId: string; pdfBase64: string; to: string[]; cc?: string[]; expiresHours?: number }) => Promise<void>
+  sendRateCon: (input: Parameters<typeof sendRateCon>[0]) => Promise<void>
   voidRateCon: (input: { loadCarrierId: string }) => Promise<void>
   /** Step AM — the ladder's two hand steps; both answer with the bundle. */
   enterDriverInfo: (input: Parameters<typeof enterDriverInfo>[0]) => Promise<void>

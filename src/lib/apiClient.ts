@@ -8,6 +8,7 @@ import type { Load, Stop, ApptType, Driver, AuditLogEntry, EntityType, AuditActi
 import type { RateConExtract, RateConFreight } from '@/lib/otrInvoice'
 import type { InvoiceAttachmentPlanRow } from '@/lib/invoiceDelivery'
 import type { McpPullState } from '@/lib/integrations/mcpPull'
+import type { RateConSnapshot } from '@/lib/rateConRevision'
 import type { McpReviewCard } from '@/lib/integrations/mcpReview'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 import { fuelDedupKey } from '@/lib/driverFuel'
@@ -4300,8 +4301,14 @@ export async function sendRateCon(input: {
   to: string[]
   cc?: string[]
   expiresHours?: number
+  /** What this PDF printed (and its change list), stored so the next send can say what moved. */
+  snapshot?: RateConSnapshot
 }): Promise<ShipmentBundle> {
   return shipmentAction<ShipmentBundle>('SEND_RATE_CON', input)
+}
+/** The version last sent on an assignment and what it printed (null before snapshots existed). */
+export async function getRateConRevision(loadCarrierId: string): Promise<{ version: number; snapshot: RateConSnapshot | null }> {
+  return shipmentAction<{ version: number; snapshot: RateConSnapshot | null }>('GET_RATE_CON_REVISION', { loadCarrierId })
 }
 export async function voidRateCon(input: { loadCarrierId: string }): Promise<ShipmentBundle> {
   return shipmentAction<ShipmentBundle>('VOID_RATE_CON', input)
