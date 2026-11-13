@@ -28,6 +28,18 @@ export type RatesSectionProps = SliceProps & { carriers?: CarrierSlot[] }
 
 const usd = (cents: number) => `$${formatCents(cents)}`
 
+/** What the LH rate box expects for a rate type: the unit goes in the placeholder so the entry box reads as "type here". */
+const lhPlaceholder = (kind: string): string =>
+  kind === 'PER_MILE' ? '$ per mile' : kind === 'PER_HOUR' ? '$ per hour' : kind === 'PER_CWT' ? '$ per CWT' : '$0.00'
+
+/**
+ * A calculated amount: plain text, not an input box, so nobody mistakes it for where the
+ * rate goes. Keeps the field's aria-label / test id for screen readers and tests.
+ */
+function Calculated({ cents, attrs }: { cents: number; attrs: { 'aria-label': string; 'data-testid': string } }) {
+  return <output className="tms-rate-calculated" {...attrs}>{cents ? usd(cents) : '—'}</output>
+}
+
 function emptyAccessorialLine(): AccessorialLine {
   return { id: '', carrierLineId: '', release: '', paidTo: '', code: '', label: '', carrierAmount: '', customerAmount: '', note: '' }
 }
@@ -93,9 +105,9 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form, carriers }: RatesS
       />) },
     ...(cust.rateType === 'PER_HOUR' ? [{ key: 'ch', label: LABEL.rates.customerHours.text, node: (
       <TmsInput {...fieldAttrs(LABEL.rates.customerHours)} type="number" min={0} step="any" value={cust.hours} disabled={disabled || ratesLocked} onChange={(e) => setCustomer({ hours: e.target.value })} />) }] : []),
-    { key: 'lh', label: LABEL.rates.customerLhRate.text, node: (
-      <TmsInput {...fieldAttrs(LABEL.rates.customerLhRate)} inputMode="decimal" value={cust.lhRate} disabled={disabled || ratesLocked} onChange={(e) => setCustomer({ lhRate: e.target.value })} />) },
-    { key: 'tl', label: LABEL.rates.customerTotalLh.text, node: <TmsInput {...fieldAttrs(LABEL.rates.customerTotalLh)} readOnly value={usd(preview.customerTotalLhCents)} /> },
+    { key: 'lh', label: `${LABEL.rates.customerLhRate.text} — enter here`, node: (
+      <TmsInput {...fieldAttrs(LABEL.rates.customerLhRate)} className="tms-rate-entry" inputMode="decimal" placeholder={lhPlaceholder(cust.rateType)} value={cust.lhRate} disabled={disabled || ratesLocked} onChange={(e) => setCustomer({ lhRate: e.target.value })} />) },
+    { key: 'tl', label: `${LABEL.rates.customerTotalLh.text} — calculated`, node: <Calculated attrs={fieldAttrs(LABEL.rates.customerTotalLh)} cents={preview.customerTotalLhCents} /> },
     { key: 'fp', label: LABEL.rates.fscPercent.text, node: (
       <TmsInput {...fieldAttrs(LABEL.rates.fscPercent)} inputMode="decimal" value={value.fscPercent} disabled={disabled || ratesLocked} onChange={(e) => onChange({ fscPercent: e.target.value })} />) },
     { key: 'fm', label: LABEL.rates.fscPerMile.text, node: (
@@ -125,9 +137,9 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form, carriers }: RatesS
         />) },
       ...(car.rateType === 'PER_HOUR' ? [{ key: 'kh', label: LABEL.rates.carrierHours.text, node: (
         <TmsInput {...attrs(LABEL.rates.carrierHours, 'hours')} type="number" min={0} step="any" value={car.hours} disabled={disabled || locked} onChange={(e) => set({ hours: e.target.value })} />) }] : []),
-      { key: 'klh', label: LABEL.rates.carrierLhRate.text, node: (
-        <TmsInput {...attrs(LABEL.rates.carrierLhRate, 'lhRate')} inputMode="decimal" value={car.lhRate} disabled={disabled || locked || car.rateType === 'PCT_OF_CUSTOMER'} onChange={(e) => set({ lhRate: e.target.value })} />) },
-      { key: 'ktl', label: LABEL.rates.carrierTotalLh.text, node: <TmsInput {...attrs(LABEL.rates.carrierTotalLh, 'totalLh')} readOnly value={usd(linehaulCents)} /> },
+      { key: 'klh', label: car.rateType === 'PCT_OF_CUSTOMER' ? LABEL.rates.carrierLhRate.text : `${LABEL.rates.carrierLhRate.text} — enter here`, node: (
+        <TmsInput {...attrs(LABEL.rates.carrierLhRate, 'lhRate')} className="tms-rate-entry" inputMode="decimal" placeholder={lhPlaceholder(car.rateType)} value={car.lhRate} disabled={disabled || locked || car.rateType === 'PCT_OF_CUSTOMER'} onChange={(e) => set({ lhRate: e.target.value })} />) },
+      { key: 'ktl', label: `${LABEL.rates.carrierTotalLh.text} — calculated`, node: <Calculated attrs={attrs(LABEL.rates.carrierTotalLh, 'totalLh')} cents={linehaulCents} /> },
       ...(car.rateType === 'PCT_OF_CUSTOMER' ? [{ key: 'kp', label: LABEL.rates.payPct.text, node: (
         <TmsInput {...attrs(LABEL.rates.payPct, 'payPct')} inputMode="decimal" value={car.payPct} disabled={disabled || locked} onChange={(e) => set({ payPct: e.target.value })} />) }] : []),
       { key: 'kmax', label: LABEL.rates.maxRate.text, info: index === 0 && topSpend != null ? `Top spend ${usd(topSpend)}` : undefined, node: (

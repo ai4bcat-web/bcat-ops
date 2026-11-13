@@ -20,9 +20,24 @@ describe('RatesSection', () => {
       customer: { ...v.rates.customer, lhRate: '1000' },
       carrier: { ...v.rates.carrier, lhRate: '800' },
     })
-    expect((screen.getByLabelText('Customer Total LH') as HTMLInputElement).value).toBe('$1000.00')
-    expect((screen.getByLabelText('Carrier Total LH') as HTMLInputElement).value).toBe('$800.00')
+    // Calculated totals are plain text, not input boxes.
+    expect(screen.getByLabelText('Customer Total LH').tagName).toBe('OUTPUT')
+    expect(screen.getByLabelText('Customer Total LH').textContent).toBe('$1000.00')
+    expect(screen.getByLabelText('Carrier Total LH').tagName).toBe('OUTPUT')
+    expect(screen.getByLabelText('Carrier Total LH').textContent).toBe('$800.00')
     expect(screen.queryByTestId('f-rates-netProfit')).toBeNull()
+  })
+
+  it('marks where the rate goes: LH boxes say "enter here" with a unit placeholder; blank totals read "—"', () => {
+    const v = emptyValues()
+    const onChange = setup({ carrier: { ...v.rates.carrier, rateType: 'PER_MILE' } })
+    expect(screen.getByText('Carrier LH Rate — enter here')).toBeTruthy()
+    expect(screen.getByText('Carrier Total LH — calculated')).toBeTruthy()
+    expect((screen.getByLabelText('Carrier LH Rate') as HTMLInputElement).placeholder).toBe('$ per mile')
+    expect((screen.getByLabelText('Customer LH Rate') as HTMLInputElement).placeholder).toBe('$0.00')
+    expect(screen.getByLabelText('Carrier Total LH').textContent).toBe('—')
+    fireEvent.change(screen.getByLabelText('Carrier LH Rate'), { target: { value: '2.50' } })
+    expect(onChange).toHaveBeenCalled()
   })
 
   it('shows Hours only for Per Hour and Pay % only for % of Customer', () => {
