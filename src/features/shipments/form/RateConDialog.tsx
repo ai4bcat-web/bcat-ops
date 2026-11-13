@@ -1,5 +1,9 @@
-/** Send rate confirmation: the existing `RateConPanel` in a dialog for ONE assignment of the load (its own contacts and its own rate con lines). */
+/**
+ * Send rate confirmation: the existing `RateConPanel` in a dialog for ONE assignment of the load (its own contacts and its own rate con lines).
+ * A successful send closes the dialog with a toast (Ryne, 2026-11-13); a failed one stays open with the error.
+ */
 import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { RateConPanel } from '@/features/carriers/components/RateConPanel'
 import { TmsDialog } from '@/features/tms/kit'
 import type { ShipmentActions } from '@/features/shipments/useShipmentActions'
@@ -31,6 +35,7 @@ export function RateConDialog({ bundle, loadCarrierId, settings, busy, onClose, 
         <RateConPanel
           bundle={bundle} loadCarrier={lc} carrier={cb?.carrier ?? null} contacts={cb?.contacts ?? []}
           settings={settings} busy={busy} onSend={sa.sendRateCon} onVoid={sa.voidRateCon}
+          onSent={(to) => { toast.success(`Rate confirmation sent to ${to.join(', ')}`); onClose() }}
         />
       ) : null}
     </TmsDialog>

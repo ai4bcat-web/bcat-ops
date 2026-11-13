@@ -66,3 +66,46 @@ describe('DateTime24Input', () => {
     expect(screen.getByTestId('end').textContent).toMatch(/^\d{4}-11-16T16:00$/)
   })
 })
+
+describe('DateTime24Input calendar', () => {
+  it('the calendar button opens a month grid; picking a day shows MM/DD/YYYY and keeps the typed time', () => {
+    render(<Harness initial="2026-11-16T07:00" />)
+    fireEvent.click(screen.getByTestId('dt-calendar'))
+    expect(screen.getByText('November 2026')).toBeTruthy()
+    fireEvent.click(screen.getByRole('gridcell', { name: 'Thursday, November 19, 2026' }))
+    expect((screen.getByTestId('dt') as HTMLInputElement).value).toBe('11/19/2026')
+    expect((screen.getByTestId('dt-time') as HTMLInputElement).value).toBe('07:00')
+    expect(screen.getByTestId('value').textContent).toBe('2026-11-19T07:00')
+    expect(screen.queryByRole('grid')).toBeNull()
+  })
+
+  it('clicking the date box opens the calendar but typing still works', () => {
+    render(<Harness />)
+    const date = screen.getByTestId('dt')
+    fireEvent.click(date)
+    expect(screen.getByRole('grid')).toBeTruthy()
+    fireEvent.change(date, { target: { value: '12/01/2026' } })
+    fireEvent.change(screen.getByTestId('dt-time'), { target: { value: '1430' } })
+    expect(screen.getByTestId('value').textContent).toBe('2026-12-01T14:30')
+  })
+
+  it('pages months and shows the chosen day selected', () => {
+    render(<Harness initial="2026-11-16T07:00" />)
+    fireEvent.click(screen.getByTestId('dt-calendar'))
+    expect(screen.getByRole('gridcell', { name: 'Monday, November 16, 2026' }).getAttribute('aria-selected')).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: 'Next month' }))
+    expect(screen.getByText('December 2026')).toBeTruthy()
+    fireEvent.click(screen.getByRole('gridcell', { name: 'Wednesday, December 2, 2026' }))
+    expect(screen.getByTestId('value').textContent).toBe('2026-12-02T07:00')
+  })
+
+  it('arrow keys move the focused day and Escape closes', () => {
+    render(<Harness initial="2026-11-16T07:00" />)
+    fireEvent.click(screen.getByTestId('dt-calendar'))
+    const grid = screen.getByRole('grid')
+    fireEvent.keyDown(grid, { key: 'ArrowRight' })
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Tuesday, November 17, 2026')
+    fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' })
+    expect(screen.queryByRole('grid')).toBeNull()
+  })
+})
