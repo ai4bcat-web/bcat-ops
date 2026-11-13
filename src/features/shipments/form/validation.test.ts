@@ -33,12 +33,12 @@ describe('required fields by action', () => {
     expect(blockingIssues(validateForm(ltl, { ...base, level: 'create', customer: CUSTOMER }))).toEqual([])
   })
 
-  it('carrier origin city/state are required only once a carrier is set', () => {
+  it('carrier origin city/state are optional, even with a carrier set', () => {
     const v = filledValues(); v.carrier.originCity = ''; v.carrier.originState = ''
     expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: CUSTOMER }))).toEqual([])
     v.carrier.carrierId = 'car-1'
     expect(blockingIssues(validateForm(v, { ...base, level: 'draft', customer: CUSTOMER }))).toEqual([])
-    expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: CUSTOMER })).map((i) => i.label)).toEqual(['Origin City', 'Origin State'])
+    expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: CUSTOMER }))).toEqual([])
   })
 
   it('the customer’s required references block Create but not Save draft', () => {

@@ -148,13 +148,6 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
     }
   })
 
-  // Carrier origin: required once a carrier is set.
-  const carrierSet = Boolean(values.carrier.carrierId || (values.carrier.useTyped && values.carrier.typedName.trim()) || values.carrier.loadCarrierId)
-  if (carrierSet) {
-    if (empty(values.carrier.originCity)) red('carrier', 'originCity', LABEL.carrier.originCity, 'A carrier needs an origin city.')
-    if (empty(values.carrier.originState)) red('carrier', 'originState', LABEL.carrier.originState, 'A carrier needs an origin state.')
-  }
-
   // Rates / extras.
   if (values.rates.customer.rateType === 'PER_HOUR' && !(Number(values.rates.customer.hours) > 0) && values.rates.customer.lhRate.trim()) {
     push('rates', 'customerHours', LABEL.rates.customerHours.testId, LABEL.rates.customerHours.text, 'Hours must be greater than zero for a per-hour rate.')
