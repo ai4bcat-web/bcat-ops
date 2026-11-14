@@ -8,7 +8,8 @@ vi.mock('@/lib/apiClient', () => ({
     { id: 'a', number: 'A', shipmentNumber: '20001', customerId: 'c1', customerName: 'Acme Foods', status: 'ISSUED', invoiceDate: '2026-10-01', dueAt: '2026-10-31', termsDays: 30, totalCents: 100_00, paidCents: 0, balanceCents: 100_00 },
   ]),
   listInvoicesByMonth: vi.fn(async () => []),
-  listArPaymentsByCustomer: vi.fn(async () => []),
+  listArPayments: vi.fn(async () => []),
+  listApPayments: vi.fn(async () => []),
   listOpenBills: vi.fn(async () => []),
   listBillsByMonth: vi.fn(async () => []),
   listFinanceReviewShipments: vi.fn(async () => []),
@@ -32,11 +33,17 @@ describe('AccountingReportsDialog', () => {
     expect(downloadCsv).toHaveBeenCalledWith('ar-aging-by-customer-2026-11-14.csv', expect.stringContaining('Acme Foods'))
   })
 
+  it('opens on the report a card linked to', () => {
+    render(<AccountingReportsDialog side="AP" asOf="2026-11-14" initialKind="carrierPaidNotBilled" onClose={() => {}} />)
+    expect((screen.getByRole('combobox', { name: 'Report' }) as HTMLSelectElement).value).toBe('carrierPaidNotBilled')
+  })
+
   it('shows the AP reports on Payable', () => {
     render(<AccountingReportsDialog side="AP" asOf="2026-11-14" onClose={() => {}} />)
     const select = screen.getByRole('combobox', { name: 'Report' }) as HTMLSelectElement
     expect([...select.options].map((o) => o.textContent)).toEqual([
-      'AP aging by carrier', 'Open bills', 'Bills paid', 'Expected carrier cost (not yet billed)', 'Margin by load (internal)', 'Needs review list',
+      'AP aging by carrier', 'Open bills', 'Bills paid', 'Expected carrier cost (not yet billed)', 'Margin by load (internal)',
+      'Customer paid, carrier unpaid', 'Carrier paid, not billed', 'Needs review list',
     ])
   })
 })

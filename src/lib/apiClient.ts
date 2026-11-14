@@ -7570,6 +7570,22 @@ export async function listInvoicesByMonth(month: string): Promise<InvoiceRecord[
   }
 }
 
+/**
+ * Every customer cash row (receipts, credits, write-offs, reversals), all customers — the
+ * Payments received report. A paginated list: the table is small (≈1.6k rows) and has no
+ * index by date, so one read covers any range without a per-customer fan-out.
+ */
+export async function listArPayments(): Promise<ArPaymentRecord[]> {
+  if (!arModelsAvailable) return []
+  try {
+    const rows = await listAll<ArPaymentRecord>('listArPayments', AR_PAYMENT_FIELDS, 1000)
+    return rows.map((p) => parseArJson(p, AR_PAYMENT_JSON_FIELDS))
+  } catch (err) {
+    forgetArModels(err)
+    return []
+  }
+}
+
 /** One customer's cash rows — receipts, credits, write-offs, reversals — newest first. */
 export async function listArPaymentsByCustomer(customerId: string): Promise<ArPaymentRecord[]> {
   if (!arModelsAvailable) return []
@@ -8030,6 +8046,18 @@ export async function listBillsByMonth(month: string): Promise<CarrierBillRecord
       sortDirection: 'DESC',
     })
     return rows.map((bill) => parseArJson(bill, CARRIER_BILL_JSON_FIELDS))
+  } catch (err) {
+    forgetApModels(err)
+    return []
+  }
+}
+
+/** Every carrier money row, all carriers: the method and check/ref # behind each paid bill. */
+export async function listApPayments(): Promise<ApPaymentRecord[]> {
+  if (!apModelsAvailable) return []
+  try {
+    const rows = await listAll<ApPaymentRecord>('listApPayments', AP_PAYMENT_FIELDS, 1000)
+    return rows.map((p) => parseArJson(p, AP_PAYMENT_JSON_FIELDS))
   } catch (err) {
     forgetApModels(err)
     return []

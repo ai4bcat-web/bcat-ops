@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ArPaymentRecord, CarrierBillRecord, InvoiceRecord, LaneRateSampleRecord } from '@/types/tms'
+import type { ApPaymentRecord, ArPaymentRecord, CarrierBillRecord, InvoiceRecord, LaneRateSampleRecord } from '@/types/tms'
 import { ACCOUNTING_REPORTS, buildAccountingReport, reportCsv, reportFileName, reportsFor, type ReportFilters } from './accountingReports'
 
 const f = (over: Partial<ReportFilters> = {}): ReportFilters => ({ from: '', to: '', party: '', status: 'all', asOf: '2026-11-14', ...over })
@@ -18,8 +18,9 @@ const bill = (over: Partial<CarrierBillRecord>): CarrierBillRecord => ({
 
 describe('the report list', () => {
   it('splits AR and AP, with the shared reports on both', () => {
-    expect(reportsFor('AR').map((r) => r.kind)).toEqual(['arAgingSummary', 'arAgingDetail', 'arOpen', 'arPayments', 'arDaysToPay', 'marginByLoad', 'needsReview'])
-    expect(reportsFor('AP').map((r) => r.kind)).toEqual(['apAging', 'apOpen', 'apPaid', 'apExpected', 'marginByLoad', 'needsReview'])
+    const shared = ['marginByLoad', 'custPaidCarrierUnpaid', 'carrierPaidNotBilled', 'needsReview']
+    expect(reportsFor('AR').map((r) => r.kind)).toEqual(['arAgingSummary', 'arAgingDetail', 'arOpen', 'arPayments', 'arDaysToPay', ...shared])
+    expect(reportsFor('AP').map((r) => r.kind)).toEqual(['apAging', 'apOpen', 'apPaid', 'apExpected', ...shared])
     expect(ACCOUNTING_REPORTS.every((r) => r.statuses[0].key === 'all')).toBe(true)
   })
 })
@@ -90,9 +91,19 @@ describe('AP reports', () => {
     const t = buildAccountingReport('apExpected', { openBills: bills, review: [{ id: 's9', financeReviewReason: 'No carrier pay-to' }] as never }, f({ status: 'flagged' }))
     expect(t.rows).toEqual([['Haul LLC', '14313', '2026-11-01', 30, 'No carrier pay-to']])
   })
-  it('lists bills paid in the range', () => {
-    const paid = [bill({ status: 'PAID', paidAt: '2026-11-03T12:00:00Z', paidCents: 80_00, balanceCents: 0 }), bill({ id: 'old', status: 'PAID', paidAt: '2026-09-03T12:00:00Z' })]
-    expect(buildAccountingReport('apPaid', { bills: paid }, f({ from: '2026-11-01', to: '2026-11-30' })).rows).toHaveLength(1)
+  it('lists bills paid in the range with the method and check number', () => {
+    const paid = [
+      bill({ status: 'PAID', paidAt: '2026-11-03T12:00:00Z', paidCents: 80_00, balanceCents: 0 }),
+      bill({ id: 'b9', status: 'PAID', paidAt: '2026-11-04T12:00:00Z', paidCents: 20_00, balanceCents: 0 }),
+      bill({ id: 'old', status: 'PAID', paidAt: '2026-09-03T12:00:00Z' }),
+    ]
+    const apPayments = [
+      { id: 'p1', carrierId: 'k1', kind: 'PAYMENT', paidAt: '2026-11-03T12:00:00Z', method: 'CHECK', reference: '1044', amountCents: 80_00, appliedCents: 80_00, unappliedCents: 0, applications: [{ billId: 'b1', amountCents: 80_00 }] },
+    ] as unknown as ApPaymentRecord[]
+    const t = buildAccountingReport('apPaid', { bills: paid, apPayments }, f({ from: '2026-11-01', to: '2026-11-30' }))
+    expect(t.rows.map((r) => [r[2], r[7], r[8]])).toEqual([['20001', 'Paper check', '1044'], ['20001', '', '']])
+    expect(buildAccountingReport('apPaid', { bills: paid, apPayments }, f({ status: 'CHECK' })).rows).toHaveLength(1)
+    expect(buildAccountingReport('apPaid', { bills: paid, apPayments }, f({ status: 'otherMethod' })).rows).toHaveLength(2)
   })
 })
 
@@ -112,6 +123,17 @@ describe('shared reports', () => {
       { id: '2', number: '13726', customerName: 'Acme', financeReviewReason: 'Missing delivered date — enter it' },
     ] as never
     expect(buildAccountingReport('needsReview', { review }, f({ status: 'delivered' })).rows.map((r) => r[0])).toEqual(['13726'])
+  })
+})
+
+describe('mismatch reports', () => {
+  it('lists each side from the computed mismatches', () => {
+    const mismatches = {
+      customerPaidCarrierUnpaid: [{ shipmentId: 's', shipmentNumber: '20001', customerName: 'Acme Foods', carrierName: 'Haul LLC', invoiceNumber: '1001', invoiceCents: 100_00, paidOn: '2026-11-05', billCents: 80_00, billStatus: 'TO_BE_PAID', billDueOrPaid: '2026-11-20' }],
+      carrierPaidNotBilled: [],
+    }
+    expect(buildAccountingReport('custPaidCarrierUnpaid', { mismatches }, f()).rows).toEqual([['20001', 'Acme Foods', '1001', 100, '2026-11-05', 'Haul LLC', 'TO_BE_PAID', 80, '2026-11-20']])
+    expect(buildAccountingReport('carrierPaidNotBilled', { mismatches }, f()).rows).toEqual([])
   })
 })
 

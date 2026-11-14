@@ -25,9 +25,15 @@ const TABLE_CSS = `.acct-report-table { border-collapse: collapse; }
 
 const monthStart = (asOf: string) => `${asOf.slice(0, 7)}-01`
 
-export function AccountingReportsDialog({ side, asOf, onClose }: { side: ReportSide; asOf: string; onClose: () => void }) {
+export function AccountingReportsDialog({ side, asOf, initialKind, onClose }: {
+  side: ReportSide
+  asOf: string
+  /** Open on this report (a card link) instead of the first. */
+  initialKind?: AccountingReportKind | null
+  onClose: () => void
+}) {
   const reports = useMemo(() => reportsFor(side), [side])
-  const [kind, setKind] = useState<AccountingReportKind>(reports[0].kind)
+  const [kind, setKind] = useState<AccountingReportKind>(() => (initialKind && reports.some((r) => r.kind === initialKind) ? initialKind : reports[0].kind))
   const def = reportDef(kind)
   const [from, setFrom] = useState(() => monthStart(asOf))
   const [to, setTo] = useState(asOf)

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ArQueueRow } from '@/features/ar/arQueue'
 import type { CarrierBillRecord, InvoiceRecord, LaneRateSampleRecord } from '@/types/tms'
 import {
-  apExpectedStats, apPaidStats, arInvoicedStats, arPaidStats, arReadyStats, profitCheck, reviewReasonCounts, reviewReasonKeys, topParties,
+  apExpectedStats, apPaidStats, arInvoicedStats, arPaidStats, arReadyStats, billPaymentLines, billingMismatches, profitCheck, reviewReasonCounts, reviewReasonKeys, topParties,
 } from './accountingStats'
 
 const row = (over: Partial<ArQueueRow>): ArQueueRow => ({
@@ -121,5 +121,34 @@ describe('profitCheck', () => {
   })
   it('has no margin without revenue', () => {
     expect(profitCheck([]).marginBps).toBeNull()
+  })
+})
+
+describe('billing mismatches', () => {
+  const inv = (over: Partial<InvoiceRecord>) => ({ id: 'i', number: '1001', shipmentId: 's1', shipmentNumber: '20001', customerName: 'Acme', status: 'PAID', totalCents: 100, paidAt: '2026-11-05T12:00:00Z', ...over } as InvoiceRecord)
+  it('finds customer-paid loads with an open carrier bill, and paid bills with no invoice', () => {
+    const m = billingMismatches({
+      openInvoices: [inv({ id: 'open', shipmentId: 's3', status: 'ISSUED' })],
+      invoices: [inv({}), inv({ id: 'v', shipmentId: 's4', status: 'VOID' })],
+      openBills: [bill({ id: 'b1', shipmentId: 's1', balanceCents: 80, status: 'TO_BE_PAID' }), bill({ id: 'b3', shipmentId: 's3', balanceCents: 50, status: 'TO_BE_PAID' })],
+      paidBills: [bill({ id: 'p4', shipmentId: 's4', shipmentNumber: '4', status: 'PAID', paidCents: 70, paidAt: '2026-11-02T12:00:00Z' }), bill({ id: 'p1', shipmentId: 's1', status: 'PAID' })],
+    })
+    expect(m.customerPaidCarrierUnpaid.map((r) => [r.shipmentNumber, r.billCents, r.paidOn])).toEqual([['20001', 80, '2026-11-05']])
+    // s4's only invoice is void, so the carrier was paid on a load nobody billed.
+    expect(m.carrierPaidNotBilled.map((r) => [r.shipmentNumber, r.billCents])).toEqual([['4', 70]])
+  })
+})
+
+describe('AP payment method', () => {
+  it('takes the latest live payment per bill and splits the Paid card', () => {
+    const lines = billPaymentLines([
+      { id: 'a', kind: 'PAYMENT', paidAt: '2026-11-01T12:00:00Z', method: 'ACH', reference: null, applications: [{ billId: 'x', amountCents: 10 }] },
+      { id: 'b', kind: 'PAYMENT', paidAt: '2026-11-03T12:00:00Z', method: 'CHECK', reference: '77', applications: [{ billId: 'x', amountCents: 5 }] },
+      { id: 'c', kind: 'PAYMENT', paidAt: '2026-11-04T12:00:00Z', method: 'ACH', reversedByPaymentId: 'r', applications: [{ billId: 'y', amountCents: 5 }] },
+    ] as never)
+    expect(lines.get('x')).toMatchObject({ method: 'CHECK', reference: '77' })
+    expect(lines.has('y')).toBe(false)
+    const s = apPaidStats([bill({ id: 'x', paidCents: 15 }), bill({ id: 'z', paidCents: 4 })], new Map() as never, lines)
+    expect([s.ach, s.check, s.other]).toEqual([{ count: 0, cents: 0 }, { count: 1, cents: 15 }, { count: 1, cents: 4 }])
   })
 })
