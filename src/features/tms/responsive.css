@@ -176,3 +176,36 @@
   .tms-shell .tms-dense-bar > div { min-width: 0; max-width: 100%; }
   .tms-shell .tms-ship-actionbar-right { flex-wrap: wrap; justify-content: flex-end; gap: 6px; min-width: 0; max-width: 100%; }
 }
+
+/* ── Billing on phones ───────────────────────────────────────────────────────────────────────────────
+   Batch actions (Batch generate / Factor / Send on Ready to invoice, Mark paid on Invoiced) live in the page head; on a phone that is a
+   long scroll back up after ticking rows. While something is ticked they ride a bar fixed to the bottom of the screen. The wrapper is
+   layout-neutral everywhere else. */
+.tms-shell .tms-batch-actions { display: contents; }
+@media (max-width: 640px) {
+  .tms-shell .tms-batch-actions[data-active='true'] {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    padding: 8px max(12px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+    background: var(--tms-card); border-top: 1px solid var(--tms-border);
+    box-shadow: 0 -6px 16px -8px color-mix(in srgb, var(--tms-text) 30%, transparent);
+  }
+  .tms-shell .tms-batch-actions[data-active='true'] > span { flex: 1 1 100%; }
+  .tms-shell .tms-batch-actions[data-active='true'] > .tms-btn { flex: 1 1 auto; min-height: 44px; }
+  .tms-shell .tms-page:has(.tms-batch-actions[data-active='true']) { padding-bottom: 120px; }
+}
+
+/* Editable tables in dialogs (Mark paid): each row becomes a card of label / field pairs on a phone. Cells carry data-label. */
+@media (max-width: 640px) {
+  .tms-portal .tms-table-stack thead { display: none; }
+  .tms-portal .tms-table-stack, .tms-portal .tms-table-stack tbody { display: block; width: 100%; }
+  .tms-portal .tms-table-stack tr {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px 10px;
+    padding: 10px 0; border-bottom: 1px solid var(--tms-border);
+  }
+  .tms-portal .tms-table-stack td { display: block; min-width: 0 !important; padding: 0; border: 0; text-align: left !important; }
+  .tms-portal .tms-table-stack td[data-label]::before {
+    content: attr(data-label); display: block; font-size: 11px; color: var(--tms-muted); margin-bottom: 2px;
+  }
+  .tms-portal .tms-table-stack td input, .tms-portal .tms-table-stack td select { width: 100%; text-align: left !important; }
+}
