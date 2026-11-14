@@ -107,3 +107,49 @@
 @media (max-width: 900px) {
   .tms-shell div[style*='position: sticky'] { position: static !important; }
 }
+
+/* ── Top bar on phones (Ryne 2026-11-14: billing and other pages hard to use on a phone) ──────────────
+   The section / lifecycle tabs wrap to several rows on a desktop so every tab shows (2026-11-10). On a phone that made the sticky top
+   bar four rows tall (~200px of an 844px screen on Accounting). Here the tabs get their own full-width line under the menu button and
+   scroll sideways in one row; the shell scrolls the lit tab into view. */
+@media (max-width: 900px) {
+  .tms-shell .tms-topbar:has(.tms-lifecycle) { flex-wrap: wrap; row-gap: 6px; padding-block: 6px; }
+  .tms-shell .tms-topbar .tms-lifecycle { order: 10; flex: 1 1 100%; min-width: 0; }
+  .tms-shell .tms-topbar .tms-lifecycle-list {
+    flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .tms-shell .tms-topbar .tms-lifecycle-list::-webkit-scrollbar { display: none; }
+  .tms-shell .tms-topbar .tms-lifecycle-tab { padding: 6px 12px; }
+}
+
+/* ── Dense list toolbars on phones ──────────────────────────────────────────────────────────────────
+   Search takes its own line; the buttons under it stay compact so two or three share a row instead of one each. Row density is a
+   desktop preference: a phone keeps whatever was chosen and hides the toggle. */
+@media (max-width: 640px) {
+  .tms-shell .tms-dense-bar .tms-dg-density { display: none; }
+  .tms-shell .tms-dense-bar > .tms-btn { padding-left: 10px; padding-right: 10px; }
+}
+
+/* ── Dialogs on phones: title and actions stay on screen while the body scrolls; 44px tap targets ──── */
+@media (max-width: 640px) {
+  .tms-portal.tms-dialog-content .tms-dialog-head { position: sticky; top: 0; z-index: 2; background: var(--tms-card); }
+  .tms-portal.tms-dialog-content .tms-dialog-foot {
+    position: sticky; bottom: 0; z-index: 2; background: var(--tms-card);
+    padding-top: 10px; border-top: 1px solid var(--tms-border);
+    padding-bottom: max(var(--tms-pad), env(safe-area-inset-bottom, 0px));
+  }
+  .tms-portal .tms-btn,
+  .tms-portal input:not([type='checkbox']):not([type='radio']),
+  .tms-portal select,
+  .tms-shell .tms-ship-form-scroll input:not([type='checkbox']):not([type='radio']),
+  .tms-shell .tms-ship-form-scroll select { min-height: 44px; }
+  .tms-portal input[type='checkbox'], .tms-portal input[type='radio'] { width: 20px; height: 20px; }
+}
+
+/* Phones: a pinned first data column (often Status with its pills) took half the screen and hid the PRO. Only the checkbox stays pinned. */
+@media (max-width: 640px) {
+  .tms-shell .tms-dg-table td.tms-dg-sticky:not(.tms-dg-check),
+  .tms-shell .tms-dg-table th.tms-dg-sticky:not(.tms-dg-check) { left: auto !important; }
+  .tms-shell .tms-dg-table .tms-dg-sticky-last:not(.tms-dg-check) { box-shadow: none; }
+}
