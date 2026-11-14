@@ -28,7 +28,7 @@ import { useAuthUser } from '@/hooks/useAuth'
 import { isOwnerOrAdmin } from '@/lib/accountingAccess'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Download, Landmark, Mail } from 'lucide-react'
+import { Download, FileBarChart, Landmark, Mail } from 'lucide-react'
 import { toast } from 'sonner'
 import { BillingGapsPanel } from './components/BillingGapsPanel'
 import { Eye, RefreshCw } from 'lucide-react'
@@ -85,6 +85,7 @@ import { useBillingGrant, BILLING_GRANT_MESSAGE } from './useBillingGrant'
 import { attachmentStateText, useInvoiceAttachmentPlans } from './useInvoiceAttachmentPlans'
 import type { InvoiceAttachmentPlanRow } from '@/lib/invoiceDelivery'
 import type { FactoringItem } from '@/types'
+import { AccountingReportsDialog } from '@/features/finance/AccountingReportsDialog'
 import { ArInvoicedCard, ArPaidCard, ArReadyCard, ProfitCheckCard, ReviewReasonCard } from '@/features/finance/AccountingCards'
 import { arInvoicedStats, arPaidStats, arReadyStats, reviewReasonCounts } from '@/features/finance/accountingStats'
 import type { ArPaymentRecord, CustomerRecord, InvoiceRecord, ShipmentRecord, UserProfileRecord } from '@/types/tms'
@@ -164,6 +165,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const [tab, setTab] = useState<ArPageTab>('ready')
   const needsReview = useNeedsReview()
   const [dialog, setDialog] = useState<ArDialog | null>(null)
+  const [reportsOpen, setReportsOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const canRelease = useBillingGrant()
   const authUser = useAuthUser()
@@ -591,6 +593,9 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
               onClick={() => { exportOutstandingReceivables().then((n) => toast.success(`Exported ${n} outstanding receivables`)).catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not export')) }}>
               <Download size={14} aria-hidden="true" /> Export outstanding
             </button>
+            <button type="button" className="tms-btn tms-btn-secondary tms-btn-sm" data-testid="ar-reports" onClick={() => setReportsOpen(true)}>
+              <FileBarChart size={14} aria-hidden="true" /> Reports
+            </button>
             {tab !== 'review' && current.actions}
           </div>
         </div>
@@ -640,6 +645,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         )}
       </div>
 
+      {reportsOpen && <AccountingReportsDialog side="AR" asOf={asOf} onClose={() => setReportsOpen(false)} />}
       {dialog?.kind === 'generate' && (
         <GenerateInvoiceDialog
           orderId={dialog.orderId}
