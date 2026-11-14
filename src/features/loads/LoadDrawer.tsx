@@ -132,7 +132,7 @@ function EditLoadDialog({
                 so the server owns all three. Moving a PRO is its own action — it claims
                 the new number and keeps the old one claimed forever.
               */}
-              <div className="grid grid-cols-3 gap-3" style={{ marginBottom: 12 }}>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" style={{ marginBottom: 12 }}>
                 <Field label="Pro #" hint="Changing a Pro # claims the new number and never releases the old one.">
                   <div style={{ display: 'flex', gap: 6 }}>
                     <Input value={load?.aljexId ?? ''} readOnly disabled className="h-9" />

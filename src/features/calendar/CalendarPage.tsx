@@ -13,15 +13,19 @@ import { CalendarErrorBoundary } from './CalendarErrorBoundary'
 import { CalendarPaperworkProvider } from './CalendarPaperwork'
 import { DriverAvailabilityModal } from './DriverAvailabilityModal'
 import { OwnFleetSwitchDialog } from './OwnFleetSwitchDialog'
+import { MobileLoadAgenda } from './MobileLoadAgenda'
+import { initialCalendarView, rememberPhoneView, effectiveCalendarView, type CalendarView } from './calendarView'
+import { usePhoneWidth, PHONE_MAX_WIDTH } from '@/features/tms/grid/denseCardLayout'
 import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
 import { buildLoadHaystack, loadMatchesQuery } from '@/lib/loadSearch'
 import {
   defaultVisibleDriverIds, loadVisibleForDrivers,
   readStoredDriverIds, writeStoredDriverIds, DRIVER_FILTER_KEYS,
 } from '@/lib/driverFilter'
-import type { ViewMode, Load } from '@/types'
+import type { Load } from '@/types'
 
-const VIEW_CONFIG: Record<ViewMode, { navDays: number }> = {
+const VIEW_CONFIG: Record<CalendarView, { navDays: number }> = {
+  'list':  { navDays: 1  }, // phone card list of the current day
   'day':   { navDays: 1  }, // single current day
   'week':  { navDays: 7  }, // Monday-started week, weekends included
   'month': { navDays: -1 }, // month nav handled separately
@@ -59,7 +63,10 @@ export function CalendarPage() {
    */
   const [chosenDriverIds, setChosenDriverIds] = useState<string[] | null>(() => readStoredDriverIds(DRIVER_FILTER_KEYS.calendar))
 
-  const [currentView, setCurrentView] = useState<ViewMode>('day')
+  const phone = usePhoneWidth()
+  const [chosenView, setChosenView] = useState<CalendarView>(() =>
+    initialCalendarView(typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(`(max-width: ${PHONE_MAX_WIDTH}px)`).matches))
+  const currentView = effectiveCalendarView(chosenView, phone)
   const [startDate, setStartDate]     = useState<Date>(() => new Date())
 
   const setVisibleDrivers = useCallback((ids: string[]) => {
@@ -85,7 +92,7 @@ export function CalendarPage() {
   // Day/Week board columns (PlannerView): Day = the single current day; Week = Monday
   // through Sunday, weekends included. Month is rendered by GridCalendarView instead.
   const cols = useMemo<Date[]>(() => {
-    if (currentView === 'day')  return [startDate]
+    if (currentView === 'day' || currentView === 'list') return [startDate]
     // Week = Monday through the following Monday inclusive (8 days, weekends included).
     if (currentView === 'week') return Array.from({ length: 8 }, (_, i) => addDays(startDate, i))
     return []
@@ -123,17 +130,18 @@ export function CalendarPage() {
   const onToday = useCallback(() => {
     const today = new Date()
     if (currentView === 'month') setStartDate(new Date(today.getFullYear(), today.getMonth(), 1))
-    else if (currentView === 'day') setStartDate(today)
+    else if (currentView === 'day' || currentView === 'list') setStartDate(today)
     else setStartDate(getMondayOf(today))
   }, [currentView])
 
-  const onViewChange = useCallback((view: ViewMode) => {
-    setCurrentView(view)
+  const onViewChange = useCallback((view: CalendarView) => {
+    setChosenView(view)
+    if (phone) rememberPhoneView(view)
     const today = new Date()
     if (view === 'month') setStartDate(new Date(today.getFullYear(), today.getMonth(), 1))
-    else if (view === 'day') setStartDate(today)
+    else if (view === 'day' || view === 'list') setStartDate(today)
     else setStartDate(getMondayOf(today))
-  }, [])
+  }, [phone])
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
 
@@ -209,8 +217,8 @@ export function CalendarPage() {
       {/* ── Page header ────────────────────────────────────────────────────── */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '14px 24px', borderBottom: '1px solid var(--tms-border)',
-        background: 'var(--tms-card)', flexShrink: 0, gap: 16, flexWrap: 'wrap',
+        padding: phone ? '10px 12px' : '14px 24px', borderBottom: '1px solid var(--tms-border)',
+        background: 'var(--tms-card)', flexShrink: 0, gap: phone ? 8 : 16, flexWrap: 'wrap',
       }}>
         <div>
           <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--tms-text)', margin: 0 }}>
@@ -222,7 +230,7 @@ export function CalendarPage() {
         </div>
 
         {/* Status legend + availability button */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: phone ? 10 : 16, ...(phone ? { flexWrap: 'wrap' as const, rowGap: 6 } : {}) }}>
           {STATUS_LEGEND.map(({ label, color }) => (
             <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--tms-muted)' }}>
               <span style={{ width: 8, height: 8, background: color, borderRadius: 2, display: 'inline-block', flexShrink: 0 }} />
@@ -231,7 +239,7 @@ export function CalendarPage() {
           ))}
           <button
             onClick={() => setShowAvailModal(true)}
-            style={{ height: 30, padding: '0 12px', borderRadius: 6, border: '1px solid var(--tms-border)', background: 'var(--tms-bg)', color: 'var(--tms-text-2)', fontSize: 12, fontWeight: 500, cursor: 'pointer', flexShrink: 0 }}
+            style={{ height: phone ? 40 : 30, padding: '0 12px', borderRadius: 6, border: '1px solid var(--tms-border)', background: 'var(--tms-bg)', color: 'var(--tms-text-2)', fontSize: 12, fontWeight: 500, cursor: 'pointer', flexShrink: 0 }}
           >
             Driver Availability
           </button>
@@ -249,22 +257,25 @@ export function CalendarPage() {
         drivers={drivers}
         visibleDriverIds={visibleDriverIdSet}
         onVisibleDriversChange={setVisibleDrivers}
+        phone={phone}
       />
 
       {/* ── Planner ─────────────────────────────────────────────────────────── */}
       <div style={{
         flex: 1, overflow: 'hidden',
-        margin: '12px 16px 16px',
-        borderRadius: 12,
+        margin: phone ? '8px' : '12px 16px 16px',
+        borderRadius: phone ? 10 : 12,
         border: '1px solid var(--tms-border)',
         boxShadow: 'var(--tms-shadow)',
         background: 'var(--tms-card)',
       }}>
         <CalendarErrorBoundary>
-          {/* Mobile uses the SAME day/week/month views as desktop (they scroll
-              horizontally on narrow screens) so it looks and populates identically. */}
+          {/* Day / Week / Month are the same boards as on a desktop (they scroll sideways on a phone). A phone also has List, the
+              day's loads as cards that fit the screen, and opens on it until another view is picked there. */}
           <CalendarPaperworkProvider loads={visibleLoads}>
-          {currentView === 'day' ? (
+          {currentView === 'list' ? (
+            <MobileLoadAgenda loads={visibleLoads} drivers={drivers} day={startDate} />
+          ) : currentView === 'day' ? (
             <PlannerView
               loads={visibleLoads}
               drivers={drivers}
