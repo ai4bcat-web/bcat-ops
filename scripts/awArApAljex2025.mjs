@@ -93,7 +93,10 @@ async function check(o) {
     const expect = lastWritten.get(`${o.table}|${o.id}`) ?? o.expectUpdatedAt
     const done = Object.entries(o.set).every(([k, v]) => same(cur[k], v)) && o.remove.every((k) => cur[k] === undefined)
     if (done) return ['skip', 'already as planned']
-    if (cur.updatedAt !== expect) return ['refuse', `changed since the plan (updatedAt ${cur.updatedAt}, plan saw ${expect})`]
+    if (o.absent) {
+      const present = o.absent.filter((k) => cur[k] != null)
+      if (present.length) return ['refuse', `${present.join(', ')} now set`]
+    } else if (cur.updatedAt !== expect) return ['refuse', `changed since the plan (updatedAt ${cur.updatedAt}, plan saw ${expect})`]
     return ['write', Object.keys(o.set).concat(o.remove.map((k) => `-${k}`)).join(',')]
   }
   if (o.kind === 'invoke') {
@@ -182,8 +185,14 @@ async function run(o) {
     const names = { '#u': 'updatedAt' }; const vals = { ':exp': expect, ':now': now }; const sets = ['#u = :now']
     Object.entries(o.set).forEach(([k, v], i) => { if (k === 'updatedAt') return; names[`#s${i}`] = k; vals[`:s${i}`] = v; sets.push(`#s${i} = :s${i}`) })
     const rem = o.remove.map((k, i) => { names[`#r${i}`] = k; return `#r${i}` })
+    let cond = 'attribute_exists(id) AND #u = :exp'
+    if (o.absent) {
+      delete vals[':exp']
+      cond = ['attribute_exists(id)', ...o.absent.map((k, i) => { names[`#a${i}`] = k; return `(attribute_not_exists(#a${i}) OR attribute_type(#a${i}, :nullT))` })].join(' AND ')
+      vals[':nullT'] = 'NULL'
+    }
     await doc.send(new UpdateCommand({ TableName: T(o.table), Key: { id: o.id }, UpdateExpression: `SET ${sets.join(', ')}${rem.length ? ' REMOVE ' + rem.join(', ') : ''}`,
-      ConditionExpression: 'attribute_exists(id) AND #u = :exp', ExpressionAttributeNames: names, ExpressionAttributeValues: vals }))
+      ConditionExpression: cond, ExpressionAttributeNames: names, ExpressionAttributeValues: vals }))
     lastWritten.set(`${o.table}|${o.id}`, now)
     await audit(o, o.audit?.action ?? 'ALJEX_ARAP_2025', { why: o.audit?.why, before: o.before, after: o.set, removed: o.remove, pro: o.pro })
   } else if (o.kind === 'invoke') {

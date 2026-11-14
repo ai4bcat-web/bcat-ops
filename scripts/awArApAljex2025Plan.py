@@ -287,6 +287,7 @@ else:
     if fi11836:
         update('K', '11836', 'FactoringItem', fi11836, {'orderId': ord11836['id'], 'shipmentId': sh11836['id'], 'customerId': ord11836.get('customerId')},
                why='one queue row for PRO 11836: the e-mail row is tied to its order, so Ready to invoice shows the order once; Send to Factor links the new invoice to it')
+        plan[-1]['absent'] = ['invoiceId', 'otrInvoiceId']   # its readiness refresher rewrites updatedAt; what must hold is "still unlinked, not at OTR"
     listing.append({'section': 'K', 'pro': '11836', 'what': 'After this: Ready to invoice shows 11836 at $305 for STEAM LOGISTICS (factored, MC 894343). Ryne batch-Factors it; '
                     'the app issues the replacement invoice (number 11836-2, OTR remit-to) and links FactoringItem 11836. Nothing goes to OTR until Ryne submits.'})
 
@@ -493,7 +494,7 @@ for p in build:
         'customerRateCents': amt, 'revenueCents': amt, 'references': refs, 'arStatus': 'PAID' if paidFull else 'UNPAID', 'arStatusChangedAt': noon(paid_d if paidFull and paid_d else inv_d),
         'arBalanceCents': max(amt - paid, 0), 'invoiceId': p, 'invoiceNumber': p, 'invoicedAt': noon(inv_d), **({'paidAt': noon(paid_d)} if paidFull and paid_d else {}),
         'pickupAppt': noon(ship_d), 'version': 1}, aud)
-    put('A', p, 'Load', {**base, 'id': ids['lod'], 'shipmentId': ids['shp'], 'orderId': ids['ord'], 'loadNumber': p, 'tmsId': r['Customer Ref #'].strip() or p, 'leg': 1, 'status': 'DELIVERED',
+    put('A', p, 'Load', {**base, 'id': ids['lod'], 'shipmentId': ids['shp'], 'orderId': ids['ord'], 'loadNumber': p, 'aljexId': p, 'pickupNumber': r['Customer Ref #'].strip() or p, 'tmsId': r['Customer Ref #'].strip() or p, 'leg': 1, 'status': 'DELIVERED',
         'statusSource': 'BACKFILL', 'statusChangedAt': noon(del_d), 'statusChangedBy': ACTOR, 'deliveredAt': noon(del_d), 'pickupAppt': noon(ship_d), 'deliveryAppt': noon(del_d),
         'pickupMonth': ship_d[:7], 'customer': cus['name'], 'customerId': cid, 'divisionKey': 'BCAT_LOGISTICS', 'revDivision': 'BROKERAGE', 'revRuleId': 'aljex-import',
         'revTagSource': 'RULE', 'legacyImported': True, 'legacySource': 'ALJEX', **({'equipmentType': eq} if eq else {}), 'originCity': origin, 'destinationCity': dest,
