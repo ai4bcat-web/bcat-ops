@@ -208,6 +208,9 @@ export const SHIPMENT_INTRODUCED_COLUMNS: IntroducedColumn[] = [
   { key: 'invoiceStatus', after: 'status', since: '2026-11-14T07:00:00.000Z' },
   // Factoring Info beside Invoice Status (Ryne 2026-11-14): what a factored load is missing before it can be factored.
   { key: 'factorInfo', after: 'invoiceStatus', since: '2026-11-14T09:00:00.000Z' },
+  // RC and POD read the shipment's Rate confirmation and POD boxes (Ryne 2026-11-14): a layout saved before then gets them beside Status.
+  { key: 'rateConPresent', after: 'status', since: '2026-11-14T16:00:00.000Z' },
+  { key: 'podPresent', after: 'rateConPresent', since: '2026-11-14T16:00:00.000Z' },
 ]
 
 /** The Actions column the page appends after the chosen columns. */

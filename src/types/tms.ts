@@ -2033,6 +2033,8 @@ export interface OrderRecord {
   docsRequired?: string[] | null
   /** `[]` means complete. The board's Docs column reads this. */
   docsMissing?: string[] | null
+  /** Every document type on file for the order, as the gate last saw it. */
+  docsPresent?: string[] | null
   docsCheckedAt?: string | null
   docsOverrideAt?: string | null
   docsOverrideBy?: string | null
