@@ -420,6 +420,7 @@ export function InvoicesPage() {
 
   return (
     <TmsScrollPage
+      className="tms-tablet-cards"
       title="Invoices"
       subtitle="Repairs from repairs@bcatcorp.com land in the Review Queue · post to add them to the list"
       actions={<>
@@ -449,7 +450,7 @@ export function InvoicesPage() {
         <TmsStatRow items={KPIS} columns={5} aria-label="Invoice totals" />
 
         {/* Tab bar */}
-        <div style={{ display: 'flex', gap: 0, overflowX: 'auto' }}>
+        <div style={{ display: 'flex', gap: 0, overflowX: 'auto', overflowY: 'hidden' }}>
           {[
             { key: 'invoices' as const, label: 'Invoices', Icon: Receipt, badge: 0 },
             { key: 'queue' as const, label: 'Review Queue', Icon: Inbox, badge: queueCount },

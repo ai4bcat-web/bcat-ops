@@ -245,6 +245,7 @@ export function FuelPage() {
 
   return (
     <TmsScrollPage
+      className="tms-tablet-cards"
       title="Fuel"
       subtitle="Fuel spend, diesel pricing & per-mile — by truck and driver"
       actions={

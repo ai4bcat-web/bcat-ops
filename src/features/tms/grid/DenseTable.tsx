@@ -12,6 +12,7 @@ import {
   type DenseColumn, type DenseColumnFilter, type DenseFilters, type DenseSort,
 } from './denseGridModel'
 import { useDenseGridPrefs } from './useDenseGridPrefs'
+import type { DenseCardLayout } from './denseCardLayout'
 
 /** A dense column that also draws its cell. */
 export interface DenseTableColumn<T> extends DenseColumn<T> {
@@ -33,10 +34,14 @@ export interface DenseTableProps<T> {
   toolbar?: ReactNode
   maxHeight?: string
   testId?: string
+  /** Widest screen that draws the rows as cards (DenseGrid's `cardsBelow`). */
+  cardsBelow?: number
+  /** Which columns go on top of a card (DenseGrid's `cardLayout`). */
+  cardLayout?: DenseCardLayout
 }
 
 export function DenseTable<T>({
-  gridId, columns, rows, rowKey, defaultSort = null, onRowClick, toneOf, empty, toolbar, maxHeight, testId,
+  gridId, columns, rows, rowKey, defaultSort = null, onRowClick, toneOf, empty, toolbar, maxHeight, testId, cardsBelow, cardLayout,
   'aria-label': ariaLabel,
 }: DenseTableProps<T>) {
   const [filters, setFilters] = useState<DenseFilters>({})
@@ -109,6 +114,8 @@ export function DenseTable<T>({
           onRowClick={onRowClick}
           toneOf={toneOf}
           empty={empty}
+          cardsBelow={cardsBelow}
+          cardLayout={cardLayout}
         />
       </div>
     </div>
