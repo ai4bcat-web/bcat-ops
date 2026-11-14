@@ -509,17 +509,17 @@ describe('POD column', () => {
     expect(podStatusOf(r({ docsMissing: null }))).toBe('')
     expect(podStatusOf(r({ docsRequired: ['BOL'], docsMissing: [] }))).toBe('')
   })
-  it('car shipping (auto shippers) is blank in the fixed POD and RC columns', () => {
+  it('car shipping (auto shippers) reads N/A in the fixed POD and RC columns (nothing to chase)', () => {
     const car = r({ revDivision: 'CAR_SHIPPING', docsMissing: [], rateConSignedAt: '2026-11-10T10:00:00Z' })
-    expect(visibleColumns(['podPresent'])[0]!.value(car)).toBe('')
-    expect(visibleColumns(['rateConPresent'])[0]!.value(car)).toBe('')
+    expect(visibleColumns(['podPresent'])[0]!.value(car)).toBe('N/A')
+    expect(visibleColumns(['rateConPresent'])[0]!.value(car)).toBe('N/A')
   })
-  it('the POD column is a Y when the POD is in and blank when it is not or not known', () => {
+  it('the POD column is a Y when the POD is in, Missing when the gate lists it, and blank when not known', () => {
     const pod = (over: Parameters<typeof r>[0]) => visibleColumns(['podPresent'])[0]!.value(r(over))
     expect(visibleColumns(['podPresent'])[0]!.label).toBe('POD')
     expect(pod({ docsMissing: [] })).toBe('Y')
     expect(pod({ docsMissing: ['BOL'] })).toBe('Y')
-    expect(pod({ docsMissing: ['POD'] })).toBe('')
+    expect(pod({ docsMissing: ['POD'] })).toBe('Missing')
     expect(visibleColumns(['rateConPresent'])[0]!.label).toBe('RC')
     expect(visibleColumns(['rateConPresent'])[0]!.value(r({ rateConSignedAt: '2026-11-10T10:00:00Z' }))).toBe('Y')
     expect(visibleColumns(['rateConPresent'])[0]!.value(r({ rateConOnFile: false }))).toBe('')

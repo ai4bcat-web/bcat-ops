@@ -2498,7 +2498,7 @@ const ORDER_FIELDS = `
 const ORDER_JSON_FIELDS: (keyof OrderRecord)[] = ['references', 'specialRequirements', 'freight']
 // Step E's cached verdict of the required-document gate. Same self-heal, same reason.
 const ORDER_DOC_FIELDS = [
-  'docsRequired', 'docsMissing', 'docsCheckedAt', 'docsOverrideAt', 'docsOverrideBy', 'docsOverrideNote',
+  'docsRequired', 'docsMissing', 'docsPresent', 'docsCheckedAt', 'docsOverrideAt', 'docsOverrideBy', 'docsOverrideNote',
 ]
 let ordersHaveDocs = true
 // Step F's cached invoice facts, so a board row can show the number and what is still

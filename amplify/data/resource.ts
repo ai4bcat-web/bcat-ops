@@ -2196,6 +2196,9 @@ const schema = a.schema(stageTypes({
       // the list never has to open five tables to colour one cell.
       docsRequired:    a.string().array(),
       docsMissing:     a.string().array(),
+      // Every document type on file for the order (the gate's `present`), so the board's POD / RC cells
+      // can say "on file" even when the customer's list does not require that document.
+      docsPresent:     a.string().array(),
       docsCheckedAt:   a.datetime(),
       // An admin may invoice over a missing document, with a note, on the record.
       docsOverrideAt:  a.datetime(),

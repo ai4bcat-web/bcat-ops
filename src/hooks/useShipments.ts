@@ -125,6 +125,8 @@ export interface ShipmentListRow extends ShipmentRecord {
   arBalanceCents: number | null
   factoringItemId: string | null
   docsRequired: string[] | null
+  /** Every document type on file for the shipment's orders (the gate's `present`); null until a gate re-cache writes it. */
+  docsPresent: string[] | null
   docsCheckedAt: string | null
   docsOverrideAt: string | null
   docsOverrideBy: string | null
@@ -410,6 +412,12 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
       if (o.docsMissing == null) continue
       const missing = docsByShipment[o.shipmentId] ??= []
       for (const type of o.docsMissing) if (!missing.includes(type)) missing.push(type)
+    }
+    const docsPresentByShipment: Record<string, string[]> = {}
+    for (const o of orders) {
+      if (o.docsPresent == null) continue
+      const present = docsPresentByShipment[o.shipmentId] ??= []
+      for (const type of o.docsPresent) if (!present.includes(type)) present.push(type)
     }
 
     // The quote a shipment was sold off. Carrier offers (BUY) are a different story and
@@ -740,6 +748,7 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         arBalanceCents: order?.arBalanceCents ?? null,
         factoringItemId: order?.factoringItemId ?? null,
         docsRequired: order?.docsRequired ?? null,
+        docsPresent: docsPresentByShipment[s.id] ?? null,
         docsCheckedAt: order?.docsCheckedAt ?? null,
         docsOverrideAt: order?.docsOverrideAt ?? null,
         docsOverrideBy: order?.docsOverrideBy ?? null,

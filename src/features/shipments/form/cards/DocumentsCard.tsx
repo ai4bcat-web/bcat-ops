@@ -3,21 +3,27 @@
  * type / name / uploaded by-when / preview, and an informational "Required for release"
  * checklist. Works before the shipment exists: files are queued in `values.docs.queued` (held in
  * memory for the session; the browser draft stores no file bytes, so a reload drops them) and
- * written as ShipmentDocument by `runUploadQueued` right after Create. Delete is available for
- * queued files (the drafted ones); saved documents are preview-only here.
+ * written as ShipmentDocument by `runUploadQueued` right after Create.
+ *
+ * Ryne 2026-11-14: the POD and the rate confirmation each get their own box (upload + every file of
+ * that type), and everything else sits under "Other documents" with a type picker. A saved file's
+ * type can be changed after upload (UPDATE_DOCUMENT, which re-reads the release gate) and a file can
+ * be deleted (VOID_DOCUMENT: the row goes VOID, the bytes stay). A file dropped in the generic area
+ * takes the type its name points at ("POD 14657.pdf", "RateConf_…"), and the picker can still change it.
  */
 import { Field } from '../fieldGrid'
 import { memo, useEffect, useRef, useState, type DragEvent } from 'react'
-import { Check, Circle, Eye, Upload } from 'lucide-react'
+import { Check, Circle, Eye, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsButton, TmsIconButton, TmsSelect, TmsTabs } from '@/features/tms/kit'
 import { DocumentPreview } from '@/features/documents/DocumentPreview'
-import { attachIntakeFiles, getIntakeLoad, getShipmentDocumentUrl } from '@/lib/apiClient'
+import { attachIntakeFiles, getIntakeLoad, getShipmentDocumentUrl, updateDocument, voidDocument } from '@/lib/apiClient'
 import { formatBoardDateTime } from '@/lib/date'
 import {
-  ACCEPTED_CONTENT_TYPES, DOCUMENT_TYPE_LABELS, MAX_DOCUMENT_BYTES, SHIPMENT_DOCUMENT_TYPES,
+  ACCEPTED_CONTENT_TYPES, DOCUMENT_TYPE_LABELS, MAX_DOCUMENT_BYTES, SHIPMENT_DOCUMENT_TYPES, SLOT_DOCUMENT_TYPES,
+  isPointerDocument, suggestDocumentType,
 } from '@/lib/shipmentDocuments'
-import type { ShipmentDocumentAudience, ShipmentDocumentType } from '@/types/tms'
+import type { ShipmentDocumentAudience, ShipmentDocumentRecord, ShipmentDocumentType } from '@/types/tms'
 import { LABEL } from '../labels'
 import { isLocked } from '../model'
 import { fieldAttrs } from '../sections/fieldAttrs'
@@ -42,7 +48,75 @@ function fileProblem(file: File): string | null {
 /** What the preview dialog is showing: a saved document (its signed link is fetched) or a queued file (a local link). */
 interface Viewing { title: string; subtitle?: string; name: string; contentType: string; url: string | null; local: boolean }
 
-function DocumentsCardImpl({ values, ctx }: CardProps) {
+/** Interface for the two calls a saved row makes; injected so the card can be tested without the API. */
+export interface DocumentEditApi {
+  retype: (documentId: string, type: ShipmentDocumentType) => Promise<unknown>
+  remove: (documentId: string) => Promise<unknown>
+}
+const liveDocumentApi: DocumentEditApi = {
+  retype: (documentId, type) => updateDocument({ documentId, type }),
+  remove: (documentId) => voidDocument({ documentId, reason: 'Deleted from shipment documents' }),
+}
+
+/** A saved file's type picker and delete (with an inline confirm: the viewer blocks confirm()). */
+function DocActions({ doc, disabled, api, onChanged, show = 'both' }: {
+  doc: ShipmentDocumentRecord
+  disabled: boolean
+  api: DocumentEditApi
+  onChanged: () => Promise<void> | void
+  /** The table puts the picker in its Type column and delete beside preview. */
+  show?: 'both' | 'type' | 'delete'
+}) {
+  const [busy, setBusy] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  // Driver-app / legacy pointers are retyped where they live; a generated file's type describes what was rendered.
+  const fixedType = isPointerDocument(doc) || doc.source === 'GENERATED'
+  const off = disabled || busy || doc.status !== 'ACTIVE'
+  const run = async (work: () => Promise<unknown>, done: string) => {
+    setBusy(true)
+    try {
+      await work()
+      toast.success(done)
+      await onChanged()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not save that change')
+    } finally {
+      setBusy(false)
+      setConfirming(false)
+    }
+  }
+  return (
+    <span className="tms-card-docs-actions" data-testid={`card-documents-actions-${doc.id}`}>
+      {fixedType || show === 'delete' ? null : (
+        <TmsSelect
+          aria-label={`Type of ${doc.name}`}
+          data-testid={`card-documents-type-${doc.id}`}
+          value={doc.type}
+          disabled={off}
+          onChange={(e) => {
+            const next = e.target.value as ShipmentDocumentType
+            if (next !== doc.type) void run(() => api.retype(doc.id, next), `Saved as ${DOCUMENT_TYPE_LABELS[next] ?? next}`)
+          }}
+          options={SHIPMENT_DOCUMENT_TYPES.map((t) => ({ value: t, label: DOCUMENT_TYPE_LABELS[t] ?? t }))}
+        />
+      )}
+      {show === 'type' ? null : confirming ? (
+        <>
+          <TmsButton size="sm" variant="destructive" disabled={off} data-testid={`card-documents-delete-confirm-${doc.id}`}
+            onClick={() => void run(() => api.remove(doc.id), `Deleted ${doc.name}`)}>Delete</TmsButton>
+          <TmsButton size="sm" variant="ghost" disabled={busy} onClick={() => setConfirming(false)}>Keep</TmsButton>
+        </>
+      ) : (
+        <TmsIconButton shape="plain" aria-label={`Delete ${doc.name}`} title="Delete" disabled={off}
+          data-testid={`card-documents-delete-${doc.id}`} onClick={() => setConfirming(true)}>
+          <Trash2 size={14} />
+        </TmsIconButton>
+      )}
+    </span>
+  )
+}
+
+function DocumentsCardImpl({ values, ctx, documentApi = liveDocumentApi }: CardProps & { documentApi?: DocumentEditApi }) {
   const [tab, setTab] = useState<Tab>('public')
   const [type, setType] = useState<ShipmentDocumentType>('OTHER')
   const [problem, setProblem] = useState<string | null>(null)
@@ -71,14 +145,17 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
   const all = ctx.bundle?.documents ?? []
   const hasOld = all.some((d) => d.status === 'SUPERSEDED')
   const active = all.filter((d) => d.status === 'ACTIVE' || (showOld && d.status === 'SUPERSEDED'))
-  const shown = active.filter((d) => (tab === 'public' ? PUBLIC_AUDIENCES.includes(d.audience) : d.audience === 'INTERNAL'))
+  const shown = active.filter((d) => !SLOT_DOCUMENT_TYPES.includes(d.type) && (tab === 'public' ? PUBLIC_AUDIENCES.includes(d.audience) : d.audience === 'INTERNAL'))
   const queued = queuedAll
     .map((q, index) => ({ q, index }))
-    .filter(({ q }) => (tab === 'public' ? q.audience === 'ALL' : q.audience === 'INTERNAL'))
+    .filter(({ q }) => !SLOT_DOCUMENT_TYPES.includes(q.type) && (tab === 'public' ? q.audience === 'ALL' : q.audience === 'INTERNAL'))
 
   // The two documents everybody looks for get their own slot: on file (with where it came from) or an upload button.
-  const slotDoc = (docType: ShipmentDocumentType) => all.find((d) => d.type === docType && d.status === 'ACTIVE' && PUBLIC_AUDIENCES.includes(d.audience))
-  const slotQueued = (docType: ShipmentDocumentType) => queuedAll.find((q) => q.type === docType)
+  // Every file of that type is listed in its box (any audience: a private rate con is still the rate con).
+  const slotDocs = (docType: ShipmentDocumentType) => active.filter((d) => d.type === docType)
+  const slotQueued = (docType: ShipmentDocumentType) => queuedAll.map((q, index) => ({ q, index })).filter(({ q }) => q.type === docType)
+  const editDisabled = disabled || !saved
+  const changed = () => ctx.refreshBundle()
   const slotOrigin = (d: { uploadedBy?: string | null; source?: string | null }): string => {
     const by = d.uploadedBy ?? ''
     if (by.startsWith('link:')) return 'e-signed by the carrier'
@@ -87,6 +164,14 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
     return 'uploaded'
   }
   const slotInputs = useRef<Record<string, HTMLInputElement | null>>({})
+  // The board's Missing chip opens /edit#docs-POD (or #docs-RATE_CON): scroll that box into view and focus its upload.
+  useEffect(() => {
+    const m = /^#docs-(POD|RATE_CON)$/.exec(typeof window === 'undefined' ? '' : window.location.hash)
+    if (!m) return
+    const box = document.getElementById(`docs-${m[1]}`)
+    box?.scrollIntoView?.({ block: 'center' })
+    box?.querySelector<HTMLButtonElement>(`[data-testid="card-documents-slot-${m[1]}-upload"]`)?.focus()
+  }, [])
 
   const emailPdfMissing = !!tiedIntakeId && intakePdfs > 0 && !all.some((d) => d.id.startsWith(`intake-${tiedIntakeId}-`))
   const fileEmailPdf = async () => {
@@ -132,7 +217,7 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
     setViewing(null)
   }
 
-  const take = async (files: FileList | File[] | null, asType: ShipmentDocumentType = type, asAudience: 'ALL' | 'INTERNAL' = audience) => {
+  const take = async (files: FileList | File[] | null, asType?: ShipmentDocumentType, asAudience: 'ALL' | 'INTERNAL' = audience) => {
     const list = Array.from(files ?? [])
     if (list.length === 0) return
     setProblem(null)
@@ -141,8 +226,10 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
       for (const file of list) {
         const bad = fileProblem(file)
         if (bad) { setProblem(bad); continue }
-        if (!saved) ctx.actions.queueDocument(file, asAudience, asType)
-        else await ctx.actions.uploadDocument(file, asAudience, asType)
+        // A slot upload carries its type; the generic area uses the picked type unless the name says POD or rate con.
+        const fileType = asType ?? (type === 'OTHER' ? suggestDocumentType(file.name) ?? type : type)
+        if (!saved) ctx.actions.queueDocument(file, asAudience, fileType)
+        else await ctx.actions.uploadDocument(file, asAudience, fileType)
       }
     } catch (err) {
       setProblem(err instanceof Error ? err.message : 'The upload failed')
@@ -163,30 +250,44 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
       <GenerateRow ctx={ctx} />
       <div className="tms-card-docslots" data-testid="card-documents-slots">
         {([['POD', 'Proof of delivery (POD)', 'Fills in by itself when a driver uploads it in the app or the tracking agent files it.'], ['RATE_CON', 'Rate confirmation', 'Fills in by itself when the carrier e-signs it or it arrives from an intake e-mail.']] as const).map(([docType, label, hint]) => {
-          const doc = slotDoc(docType)
-          const queuedDoc = slotQueued(docType)
+          const docs = slotDocs(docType)
+          const queuedDocs = slotQueued(docType)
+          const onFile = docs.some((d) => d.status === 'ACTIVE')
           return (
-            <div key={docType} className="tms-card-docslot" data-testid={`card-documents-slot-${docType}`} data-on-file={doc ? 'true' : 'false'}>
+            <div key={docType} id={`docs-${docType}`} className="tms-card-docslot" data-testid={`card-documents-slot-${docType}`} data-on-file={onFile ? 'true' : 'false'}>
               <div className="tms-card-docslot-head">
-                {doc ? <Check size={14} aria-hidden /> : <Circle size={14} aria-hidden />}
+                {onFile ? <Check size={14} aria-hidden /> : <Circle size={14} aria-hidden />}
                 <strong>{label}</strong>
-                <span className="tms-muted text-xs">{doc ? 'On file' : queuedDoc ? 'Queued' : 'Missing'}</span>
+                <span className="tms-muted text-xs">{onFile ? 'On file' : queuedDocs.length > 0 ? 'Queued' : 'Missing'}</span>
               </div>
-              {doc ? (
-                <div className="text-xs">
-                  <button type="button" className="tms-link" onClick={() => void preview(doc)}>{doc.name}</button>
-                  <span className="tms-muted">{` · ${slotOrigin(doc)} · ${formatBoardDateTime(doc.uploadedAt)}`}</span>
+              {docs.length === 0 && queuedDocs.length === 0 ? <p className="tms-muted text-xs">{hint}</p> : null}
+              {docs.length > 0 ? (
+                <ul className="tms-card-docslot-list" data-testid={`card-documents-slot-${docType}-list`}>
+                  {docs.map((doc) => (
+                    <li key={doc.id} className="text-xs" data-testid="card-documents-slot-row">
+                      <span>
+                        <button type="button" className="tms-link" onClick={() => void preview(doc)}>{doc.name}</button>
+                        <span className="tms-muted">{` · ${slotOrigin(doc)} · ${formatBoardDateTime(doc.uploadedAt)}`}</span>
+                        {doc.status === 'SUPERSEDED' && <span className="tms-muted"> superseded</span>}
+                      </span>
+                      <DocActions doc={doc} disabled={editDisabled} api={documentApi} onChanged={changed} />
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {queuedDocs.map(({ q, index }) => (
+                <div key={`q-${index}`} className="text-xs tms-card-docslot-queued" data-testid="card-documents-slot-queued">
+                  <span className="tms-muted">{`${q.file.name} will upload on create.`}</span>
+                  <TmsButton size="sm" variant="ghost" aria-label={`Remove ${q.file.name}`} onClick={() => ctx.actions.unqueueDocument(index)}>✕</TmsButton>
                 </div>
-              ) : (
-                <p className="tms-muted text-xs">{queuedDoc ? `${queuedDoc.file.name} will upload on create.` : hint}</p>
-              )}
+              ))}
               <TmsButton
                 size="sm"
                 disabled={disabled}
                 data-testid={`card-documents-slot-${docType}-upload`}
                 onClick={() => slotInputs.current[docType]?.click()}
               >
-                <Upload size={13} aria-hidden />{doc ? 'Replace' : 'Upload'}
+                <Upload size={13} aria-hidden />{onFile ? 'Upload another' : 'Upload'}
               </TmsButton>
               <input
                 ref={(el) => { slotInputs.current[docType] = el }}
@@ -202,6 +303,7 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
         })}
       </div>
 
+      <div className="tms-card-req-title" data-testid="card-documents-other-title">Other documents</div>
       <TmsTabs
         tabs={[{ key: 'public', label: LABEL.documents.public.text }, { key: 'private', label: LABEL.documents.private.text }]}
         active={tab}
@@ -269,15 +371,18 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
             <tr key={d.id} data-testid="card-documents-row">
               <td><button type="button" className="tms-link" onClick={() => void preview(d)}>{d.name}</button></td>
               <td>
-                {DOCUMENT_TYPE_LABELS[d.type] ?? d.type}
+                {isPointerDocument(d) || d.source === 'GENERATED' || d.status !== 'ACTIVE' || !saved
+                  ? (DOCUMENT_TYPE_LABELS[d.type] ?? d.type)
+                  : <DocActions doc={d} disabled={editDisabled} api={documentApi} onChanged={changed} show="type" />}
                 {d.source === 'GENERATED' && <span className="tms-muted">{` v${d.version}`}</span>}
                 {d.status === 'SUPERSEDED' && <span className="tms-muted" data-testid="card-documents-superseded-chip"> superseded</span>}
               </td>
               <td className="tms-muted">{[d.uploadedBy, formatBoardDateTime(d.uploadedAt)].filter(Boolean).join(' · ')}</td>
-              <td>
+              <td className="tms-card-docs-actions">
                 <TmsIconButton shape="plain" aria-label={`Preview ${d.name}`} title="Preview" onClick={() => void preview(d)}>
                   <Eye size={14} />
                 </TmsIconButton>
+                <DocActions doc={d} disabled={editDisabled} api={documentApi} onChanged={changed} show="delete" />
               </td>
             </tr>
           ))}

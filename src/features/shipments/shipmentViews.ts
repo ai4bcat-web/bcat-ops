@@ -173,6 +173,8 @@ export type ShipmentRow = ShipmentRecord & {
   arBalanceCents?: number | null
   factoringItemId?: string | null
   docsRequired?: string[] | null
+  /** Every document type on file (the order gate's `present`); null until the gate re-caches. */
+  docsPresent?: string[] | null
   docsCheckedAt?: string | null
   docsOverrideAt?: string | null
   docsOverrideBy?: string | null
@@ -776,21 +778,60 @@ export function podStatusOf(row: Pick<ShipmentRow, 'revDivision' | 'docsMissing'
   return row.docsMissing.includes('POD') ? 'NO_POD' : 'POD_IN'
 }
 
-/** The rate confirmation is on file or signed (the RC column's rule). */
-export function rateConIn(row: Pick<ShipmentRow, 'rateConSignedAt' | 'rateConStatus' | 'rateConOnFile'>): boolean {
-  return Boolean(row.rateConSignedAt) || row.rateConStatus === 'SIGNED' || row.rateConOnFile === true
+/**
+ * The rate confirmation is on file or signed (the RC column's rule). "On file" includes the order's document
+ * gate: the gate reads the shipment's Documents (the Rate confirmation box), so a file uploaded there, or
+ * retyped into a rate confirmation, counts the moment the gate re-reads (Ryne 2026-11-14).
+ */
+export function rateConIn(row: Pick<ShipmentRow, 'rateConSignedAt' | 'rateConStatus' | 'rateConOnFile'> & { docsMissing?: string[] | null; docsRequired?: string[] | null; docsPresent?: string[] | null }): boolean {
+  if (Boolean(row.rateConSignedAt) || row.rateConStatus === 'SIGNED' || row.rateConOnFile === true) return true
+  if (Array.isArray(row.docsPresent) && row.docsPresent.includes('RATE_CON')) return true
+  return Array.isArray(row.docsMissing) && Array.isArray(row.docsRequired)
+    && row.docsRequired.includes('RATE_CON') && !row.docsMissing.includes('RATE_CON')
 }
+
+export type DocCellState = 'PRESENT' | 'MISSING' | 'NA' | ''
+
+/**
+ * The POD and RC board cells (Ryne 2026-11-14: "mapped to the column in the active shipment table so we know
+ * which is missing"), read from the same facts as the shipment's POD and Rate confirmation boxes: the order's
+ * document gate, re-cached on every upload, retype and delete. NA where the document is not chased: car shipping
+ * has neither, and Ivan Cartage's own fleet (ASSETS) has no carrier rate confirmation. '' = not known yet.
+ */
+export function docCellOf(
+  row: Pick<ShipmentRow, 'status' | 'voidedAt' | 'deletedAt' | 'assignmentType' | 'revDivision' | 'docsMissing' | 'rateConSignedAt' | 'rateConStatus' | 'rateConOnFile'> & { docsRequired?: string[] | null; docsPresent?: string[] | null },
+  docType: 'POD' | 'RATE_CON',
+): DocCellState {
+  if (row.revDivision === 'CAR_SHIPPING') return 'NA'
+  const delivered = boardStatusOf(row) === 'DELIVERED'
+  if (docType === 'POD') {
+    // What is on file wins, whether or not the customer's list requires a POD.
+    if (Array.isArray(row.docsPresent) && row.docsPresent.includes('POD')) return 'PRESENT'
+    const pod = podStatusOf(row)
+    if (pod === 'POD_IN') return 'PRESENT'
+    if (pod === 'NO_POD') return 'MISSING'
+    return delivered ? 'MISSING' : ''
+  }
+  if (row.revDivision === 'ASSETS') return 'NA'
+  if (rateConIn(row)) return 'PRESENT'
+  if (Array.isArray(row.docsMissing) && row.docsMissing.includes('RATE_CON')) return 'MISSING'
+  return delivered ? 'MISSING' : ''
+}
+
+export const DOC_CELL_TEXT: Record<DocCellState, string> = { PRESENT: 'Y', MISSING: 'Missing', NA: 'N/A', '': '' }
 
 /**
  * The documents a shipment is missing (Ryne 2026-11-11): whatever the order's document gate lists, plus, once it is DELIVERED, a POD and a rate
  * confirmation (RC) that are not on it. Car shipping (auto shippers) has neither to chase; Ivan Cartage's own fleet has no carrier RC; a shipment
  * whose documents were signed off by hand (`docsOverrideAt`) is not flagged again. A delivered shipment whose gate never ran counts as missing a POD.
  */
-export function docsMissingOf(row: Pick<ShipmentRow, 'status' | 'voidedAt' | 'deletedAt' | 'assignmentType' | 'revDivision' | 'docsMissing' | 'docsOverrideAt' | 'rateConSignedAt' | 'rateConStatus' | 'rateConOnFile'>): string[] {
+export function docsMissingOf(row: Pick<ShipmentRow, 'status' | 'voidedAt' | 'deletedAt' | 'assignmentType' | 'revDivision' | 'docsMissing' | 'docsOverrideAt' | 'rateConSignedAt' | 'rateConStatus' | 'rateConOnFile'> & { docsRequired?: string[] | null; docsPresent?: string[] | null }): string[] {
   const out = [...(row.docsMissing ?? [])]
   if (row.revDivision === 'CAR_SHIPPING' || row.docsOverrideAt || boardStatusOf(row) !== 'DELIVERED') return out
-  if ((row.docsMissing == null || row.docsMissing.includes('POD')) && !out.includes('POD')) out.push('POD')
-  if (row.revDivision !== 'ASSETS' && !rateConIn(row) && !out.includes('RC')) out.push('RC')
+  const podOnFile = Array.isArray(row.docsPresent) && row.docsPresent.includes('POD')
+  if (!podOnFile && (row.docsMissing == null || row.docsMissing.includes('POD')) && !out.includes('POD')) out.push('POD')
+  // The gate's RATE_CON and the board's RC are the same document: count it once.
+  if (row.revDivision !== 'ASSETS' && !rateConIn(row) && !out.includes('RC') && !out.includes('RATE_CON')) out.push('RC')
   return out
 }
 
@@ -1174,7 +1215,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
     label: 'POD',
     group: 'Computed',
     // Car shipping (auto shippers) has no POD or RC to chase: both columns stay blank for it (Ryne 2026-11-11).
-    value: (r) => (podStatusOf(r) === 'POD_IN' ? 'Y' : ''),
+    value: (r) => DOC_CELL_TEXT[docCellOf(r, 'POD')],
     width: 56,
   },
   {
@@ -1182,7 +1223,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
     // Ryne 2026-11-11: "RC", a Y when the rate confirmation is on file or signed and blank otherwise, fixed beside POD.
     label: 'RC',
     group: 'Computed',
-    value: (r) => (r.revDivision !== 'CAR_SHIPPING' && rateConIn(r) ? 'Y' : ''),
+    value: (r) => DOC_CELL_TEXT[docCellOf(r, 'RATE_CON')],
     width: 56,
   },
   { key: 'postedBoards', label: 'Posted Boards', group: 'Computed', value: (r) => (r.datPostedAt ? 'DAT' : ''), width: 120 },

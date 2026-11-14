@@ -304,7 +304,7 @@ export async function recacheDocGates(
       updateItemTx(
         deps.store.tables.order,
         String(order.id),
-        { docsRequired: gate.required, docsMissing: gate.missing, docsCheckedAt: now },
+        { docsRequired: gate.required, docsMissing: gate.missing, docsPresent: gate.present, docsCheckedAt: now },
         null,
       ),
     )
@@ -885,6 +885,10 @@ export async function updateDocument(deps: DocumentDeps, input: Row, caller: Cal
   const shipmentId = String(doc.shipmentId)
   const bundle = await liveBundle(deps, shipmentId)
   assertPlacement(bundle, { orderId, loadCarrierId })
+  if (type && type !== doc.type) {
+    const refusal = billedPaperworkRefusal(bundle, doc)
+    if (refusal) throw new Error(refusal)
+  }
 
   const now = nowIso()
   const patch: Row = { updatedBy: caller.email, updatedAt: now }
@@ -903,12 +907,31 @@ export async function updateDocument(deps: DocumentDeps, input: Row, caller: Cal
   }
   await transact(deps.store.db, writes, 'document')
   await deps.writeAudit('SHIPMENT_DOCUMENT', documentId, 'UPDATE_DOCUMENT', caller, {
-    shipmentId, name: patch.name, type: patch.type, audience: patch.audience, orderId, loadCarrierId,
+    shipmentId, name: patch.name, type: patch.type, fromType: type && type !== doc.type ? doc.type : undefined,
+    audience: patch.audience, orderId, loadCarrierId,
   })
+  // A file retyped into a POD is the POD from now on: the lane timing sample counts it like an upload.
+  if (type === 'POD' && doc.type !== 'POD') await stampPodReceived(deps, next)
   return documentResult(deps, shipmentId, next)
 }
 
 // ── VOID_DOCUMENT ────────────────────────────────────────────────────────────
+
+/** The paperwork an invoice is billed and factored on. */
+const BILLED_ON_TYPES = new Set(['POD', 'RATE_CON'])
+
+/**
+ * Once an order is invoiced, its POD and rate confirmation have gone out with the invoice
+ * (to the customer, or to OTR with the factoring submission). Taking one off the shipment, or
+ * retyping it into something else, would leave BCAT showing a load billed on paperwork it no
+ * longer has. A replacement upload is still allowed; it supersedes nothing that went out.
+ */
+export function billedPaperworkRefusal(bundle: Pick<Bundle, 'orders'>, doc: Row): string | null {
+  if (!BILLED_ON_TYPES.has(String(doc.type))) return null
+  const invoiced = bundle.orders.some((o) => o.invoiceId || o.arStatus === 'UNPAID' || o.arStatus === 'PAID')
+  if (!invoiced) return null
+  return 'This load is already invoiced, and this document went out with the invoice. Upload a corrected copy instead of removing or retyping it.'
+}
 
 /**
  * Take a document off the shipment. The row survives as VOID and the S3 object is
@@ -931,6 +954,8 @@ export async function voidDocument(deps: DocumentDeps, input: Row, caller: Calle
 
   const shipmentId = String(doc.shipmentId)
   const bundle = await liveBundle(deps, shipmentId)
+  const refusal = billedPaperworkRefusal(bundle, doc)
+  if (refusal) throw new Error(refusal)
   const now = nowIso()
   const patch: Row = {
     status: 'VOID',
@@ -1044,6 +1069,7 @@ export async function readyToInvoice(
     readyToInvoiceAt: now,
     docsRequired: gate.required,
     docsMissing: gate.missing,
+    docsPresent: gate.present,
     docsCheckedAt: now,
     updatedBy: caller.email,
     updatedAt: now,

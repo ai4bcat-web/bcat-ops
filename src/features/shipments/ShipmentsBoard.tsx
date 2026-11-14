@@ -19,6 +19,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
   CalendarX,
+  Check,
   Clock,
   Columns3,
   Download,
@@ -108,6 +109,7 @@ import {
   needsDriver,
   toCsv,
   podStatusOf,
+  docCellOf,
   docsMissingOf,
   type ShipmentRow,
   profitByDivision,
@@ -989,6 +991,28 @@ function BoardPane({
         return pod === 'NO_POD'
           ? <TmsBadge tone="orange" title="No proof of delivery on file yet">No POD</TmsBadge>
           : <span className="text-[color:var(--tms-badge-green)]">POD in</span>
+      }
+      if (columnKey === 'podPresent' || columnKey === 'rateConPresent') {
+        const docType = columnKey === 'podPresent' ? 'POD' : 'RATE_CON'
+        const label = docType === 'POD' ? 'POD' : 'Rate confirmation'
+        const cell = docCellOf(row, docType)
+        if (cell === 'PRESENT') return <span className="text-[color:var(--tms-badge-green)]" title={`${label} on file`} data-testid={`doc-cell-${docType}`} data-state="present"><Check size={14} aria-label={`${label} on file`} /></span>
+        if (cell === 'NA') return <span className="tms-muted" title={`No ${label} to chase on this load`} data-testid={`doc-cell-${docType}`} data-state="na">N/A</span>
+        if (cell === 'MISSING') {
+          return (
+            <Link
+              to={`/tms/shipments/${row.id}/edit#docs-${docType}`}
+              className="tms-board-link"
+              title={`${label} missing: open this shipment's Documents`}
+              data-testid={`doc-cell-${docType}`}
+              data-state="missing"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <TmsBadge tone="red">Missing</TmsBadge>
+            </Link>
+          )
+        }
+        return null
       }
       if (columnKey === 'docsMissing') {
         if (row.docsMissing == null) return null

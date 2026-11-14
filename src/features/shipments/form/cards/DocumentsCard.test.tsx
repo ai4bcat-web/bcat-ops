@@ -37,10 +37,12 @@ describe('DocumentsCard', () => {
     ],
   })
 
-  it('Public lists CUSTOMER, CARRIER and ALL; Private lists INTERNAL; voided rows never show', () => {
+  it('Other documents: Public lists CUSTOMER, CARRIER and ALL; Private lists INTERNAL; voided rows and the POD / rate con never show there', () => {
     setup({ mode: 'edit', bundle })
     const names = () => screen.getAllByTestId('card-documents-row').map((r) => r.children[0].textContent)
-    expect(names()).toEqual(['customer-bol.pdf', 'carrier-rc.pdf', 'all.pdf'])
+    expect(names()).toEqual(['customer-bol.pdf', 'all.pdf'])
+    // The carrier rate con lives in its own box.
+    expect(within(screen.getByTestId('card-documents-slot-RATE_CON')).getByText('carrier-rc.pdf')).toBeTruthy()
     expect(within(screen.getAllByTestId('card-documents-row')[0]).getByText(/ann@example.invalid/)).toBeTruthy()
     fireEvent.click(screen.getByRole('tab', { name: 'Private' }))
     expect(names()).toEqual(['internal.pdf'])
@@ -104,8 +106,10 @@ describe('DocumentsCard', () => {
 
   it('on create, picked files are queued on the active tab audience and never uploaded', () => {
     const ctx = setup()
-    pick(pdf('tender.pdf'), pdf('rc.pdf'))
+    pick(pdf('rc.pdf'), pdf('tender.pdf'))
     expect(ctx.actions.queueDocument).toHaveBeenCalledTimes(2)
+    // A name that says rate con files as one; anything else keeps the picked type.
+    expect(ctx.actions.queueDocument).toHaveBeenNthCalledWith(1, expect.any(File), 'ALL', 'RATE_CON')
     expect(ctx.actions.queueDocument).toHaveBeenLastCalledWith(expect.any(File), 'ALL', 'OTHER')
     fireEvent.click(screen.getByRole('tab', { name: 'Private' }))
     pick(pdf('internal.pdf'))
@@ -189,5 +193,59 @@ describe('releaseDocItems (Load Review rules)', () => {
     expect(items.find((i) => i.type === 'RATE_CON')).toMatchObject({ present: false, queued: true })
     // The carrier's invoice is never on the release list.
     expect(items.some((i) => i.type === 'CARRIER_INVOICE')).toBe(false)
+  })
+
+  describe('saved files: change type, delete', () => {
+    const mistyped = savedBundle({ documents: [doc('p', 'POD 14657.pdf', 'ALL'), doc('r', 'RateConf_4010854523.pdf', 'ALL')] })
+    const api2 = () => ({ retype: vi.fn(async () => undefined), remove: vi.fn(async () => undefined) })
+    const renderWith = (documentApi: ReturnType<typeof api2>, b = mistyped) => {
+      const ctx = makeCtx({ mode: 'edit', bundle: b, refreshBundle: vi.fn(async () => undefined) })
+      const values = { ...emptyValues(), docs: { queued: [] } }
+      render(<DocumentsCard values={values} update={vi.fn()} form={makeForm(values)} ctx={ctx} issues={[]} mode={ctx.mode} locked={NO_LOCKS} documentApi={documentApi} />)
+      return ctx
+    }
+
+    it('a file filed as Other can be retyped to POD after upload, and the shipment re-reads', async () => {
+      const documentApi = api2()
+      const ctx = renderWith(documentApi)
+      fireEvent.change(screen.getByLabelText('Type of POD 14657.pdf'), { target: { value: 'POD' } })
+      await waitFor(() => expect(documentApi.retype).toHaveBeenCalledWith('p', 'POD'))
+      await waitFor(() => expect(ctx.refreshBundle).toHaveBeenCalled())
+    })
+
+    it('a POD on file shows in the POD box with its own type picker and delete', () => {
+      renderWith(api2(), savedBundle({ documents: [doc('p', 'POD 14657.pdf', 'ALL', 'POD')] }))
+      const box = screen.getByTestId('card-documents-slot-POD')
+      expect(box.getAttribute('data-on-file')).toBe('true')
+      expect(within(box).getByLabelText('Type of POD 14657.pdf')).toBeTruthy()
+      expect(within(box).getByLabelText('Delete POD 14657.pdf')).toBeTruthy()
+      expect(screen.queryAllByTestId('card-documents-row')).toHaveLength(0)
+    })
+
+    it('delete asks inline first, then voids the file; Keep backs out', async () => {
+      const documentApi = api2()
+      renderWith(documentApi)
+      fireEvent.click(screen.getByLabelText('Delete POD 14657.pdf'))
+      fireEvent.click(screen.getByText('Keep'))
+      expect(documentApi.remove).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByLabelText('Delete POD 14657.pdf'))
+      fireEvent.click(screen.getByTestId('card-documents-delete-confirm-p'))
+      await waitFor(() => expect(documentApi.remove).toHaveBeenCalledWith('p'))
+    })
+
+    it('driver-app and generated files keep their type (no picker)', () => {
+      const pointer = { ...doc('d', 'driver-pod.jpg', 'ALL', 'POD'), source: 'DRIVER_APP' }
+      const gen = { ...doc('g', 'BOL v1.pdf', 'ALL', 'BOL'), source: 'GENERATED', version: 1 }
+      renderWith(api2(), savedBundle({ documents: [pointer, gen] }))
+      expect(screen.queryByLabelText('Type of driver-pod.jpg')).toBeNull()
+      expect(screen.queryByLabelText('Type of BOL v1.pdf')).toBeNull()
+    })
+  })
+
+  it('the board\'s Missing chip lands on the matching box (#docs-RATE_CON) with its upload focused', () => {
+    window.location.hash = '#docs-RATE_CON'
+    setup({ mode: 'edit', bundle: savedBundle({ documents: [] }) })
+    expect(document.activeElement?.getAttribute('data-testid')).toBe('card-documents-slot-RATE_CON-upload')
+    window.location.hash = ''
   })
 })

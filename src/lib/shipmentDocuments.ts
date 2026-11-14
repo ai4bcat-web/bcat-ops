@@ -539,3 +539,22 @@ export function driverDocumentId(submissionDocId: string): string {
 export function legacyRateConDocumentId(loadId: string): string {
   return `rck:${loadId}`
 }
+
+/**
+ * The type a file's name points at, for the generic drop area: "POD 14657.pdf" is a POD,
+ * "RateConf_4010854523.pdf" a rate confirmation. Null when the name says nothing, and the
+ * picked type stands. Only the two documents billing turns on are guessed; a wrong guess on
+ * anything else costs more than it saves.
+ */
+export function suggestDocumentType(fileName: string): ShipmentDocumentType | null {
+  const base = fileName.replace(/\.[a-z0-9]+$/i, '')
+  const words = base.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+  const squashed = words.replace(/ /g, '')
+  if (/\b(pod|pods)\b/.test(words) || squashed.includes('proofofdelivery') || /^pod\d/.test(squashed)) return 'POD'
+  if (squashed.includes('rateconf') || squashed.includes('ratecon') || /\brc\b/.test(words) || squashed.includes('loadconfirmation')
+    || squashed.includes('carrierconfirmation')) return 'RATE_CON'
+  return null
+}
+
+/** Documents the POD and rate confirmation boxes hold; everything else is "Other documents". */
+export const SLOT_DOCUMENT_TYPES: readonly ShipmentDocumentType[] = ['POD', 'RATE_CON']
