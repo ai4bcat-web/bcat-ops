@@ -56,7 +56,7 @@ describe('DocumentsCard', () => {
     expect(rcSlot.textContent).toContain('e-signed by the carrier')
     const podSlot = screen.getByTestId('card-documents-slot-POD')
     expect(podSlot.getAttribute('data-on-file')).toBe('false')
-    expect(podSlot.textContent).toContain('Missing')
+    expect(podSlot.textContent).toContain('NEED')
   })
 
   it('a shipment built from an e-mail whose PDF never reached Documents offers to add it, once, and refreshes', async () => {

@@ -514,12 +514,12 @@ describe('POD column', () => {
     expect(visibleColumns(['podPresent'])[0]!.value(car)).toBe('N/A')
     expect(visibleColumns(['rateConPresent'])[0]!.value(car)).toBe('N/A')
   })
-  it('the POD column is a Y when the POD is in, Missing when the gate lists it, and blank when not known', () => {
+  it('the POD column is a Y when the POD is in, NEED when the gate lists it, and blank when not known', () => {
     const pod = (over: Parameters<typeof r>[0]) => visibleColumns(['podPresent'])[0]!.value(r(over))
     expect(visibleColumns(['podPresent'])[0]!.label).toBe('POD')
     expect(pod({ docsMissing: [] })).toBe('Y')
     expect(pod({ docsMissing: ['BOL'] })).toBe('Y')
-    expect(pod({ docsMissing: ['POD'] })).toBe('Missing')
+    expect(pod({ docsMissing: ['POD'] })).toBe('NEED')
     expect(visibleColumns(['rateConPresent'])[0]!.label).toBe('RC')
     expect(visibleColumns(['rateConPresent'])[0]!.value(r({ rateConSignedAt: '2026-11-10T10:00:00Z' }))).toBe('Y')
     expect(visibleColumns(['rateConPresent'])[0]!.value(r({ rateConOnFile: false }))).toBe('')

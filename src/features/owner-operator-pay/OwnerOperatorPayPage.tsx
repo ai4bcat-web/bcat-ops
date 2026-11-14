@@ -248,7 +248,7 @@ function csvField(trip: OwnerOpTrip, field: OtrRequiredField) {
 }
 
 function csvDoc(trip: OwnerOpTrip, kind: 'POD' | 'Rate confirmation') {
-  return trip.readiness?.missingDocuments.includes(kind) ? 'Missing' : 'Yes'
+  return trip.readiness?.missingDocuments.includes(kind) ? 'NEED' : 'Yes'
 }
 
 function statementCsv(row: OwnerOperatorPayRow, periodStart: string): string {

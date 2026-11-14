@@ -818,7 +818,7 @@ export function docCellOf(
   return delivered ? 'MISSING' : ''
 }
 
-export const DOC_CELL_TEXT: Record<DocCellState, string> = { PRESENT: 'Y', MISSING: 'Missing', NA: 'N/A', '': '' }
+export const DOC_CELL_TEXT: Record<DocCellState, string> = { PRESENT: 'Y', MISSING: 'NEED', NA: 'N/A', '': '' }
 
 /**
  * The documents a shipment is missing (Ryne 2026-11-11): whatever the order's document gate lists, plus, once it is DELIVERED, a POD and a rate
