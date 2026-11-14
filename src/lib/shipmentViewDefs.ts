@@ -356,7 +356,7 @@ export const BOARD_COLUMN_KEYS = [
   'billTo', 'costCenter', 'rateType', 'refPo', 'refPu', 'refDelivery', 'refBol',
   'equipmentLength', 'specialRequirements', 'freightCommodity', 'freightWeight',
   'freightPieces', 'freightPallets', 'customerNotes', 'internalNotes', 'customerRate',
-  'orderRevenue', 'arStatusChangedAt', 'invoiceNumber', 'invoicedAt', 'paidAt', 'arBalance',
+  'orderRevenue', 'arStatusChangedAt', 'invoiceNumber', 'invoicedAt', 'paidAt', 'arBalance', 'invoiceStatus',
   'factoringItem', 'docsRequired', 'docsCheckedAt', 'docsOverride', 'quoteNumber', 'quoteAmount',
   // Load.
   'loadAljexId', 'loadTmsId', 'pickupNumber', 'originName', 'destinationName',

@@ -1057,6 +1057,18 @@ export async function listFactoringItems(): Promise<FactoringItem[]> {
   })
 }
 
+/** One OTR queue row by id (the PRO), or null when it is gone. */
+export async function getFactoringItem(id: string): Promise<FactoringItem | null> {
+  return readFactoring(async (fields) => {
+    const result = await client.graphql({
+      query: `query GetFactoringItem($id: ID!) { getFactoringItem(id: $id) { ${fields} } }`,
+      variables: { id },
+    }) as { data: { getFactoringItem: FactoringItem | null } }
+    const item = result.data.getFactoringItem
+    return item ? parseFactoringJson(item) : null
+  })
+}
+
 /** Staff may update status; email intake owns creation. */
 export async function updateFactoringItem(
   id: string,

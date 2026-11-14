@@ -233,9 +233,15 @@ describe('Status column for released shipments', () => {
     expect(status.value(row('i', { status: 'DELIVERED', invoiceId: 'inv-1' }))).toBe('RELEASED')
   })
 
-  it('leaves unreleased, non-delivered and voided rows as they were', () => {
+  it('reads RELEASED for any load past Load Review, whatever its stop status (Ryne 2026-11-14)', () => {
+    expect(status.value(row('o', { status: 'OPEN', arStatus: 'UNBILLED' }))).toBe('RELEASED')
+    expect(status.value(row('e', { status: 'IN_TRANSIT', readyToInvoiceAt: '2026-02-01T00:00:00.000Z' }))).toBe('RELEASED')
+    expect(status.value(row('c', { status: 'CANCELED', arStatus: 'UNBILLED' }))).not.toBe('RELEASED')
+  })
+
+  it('leaves unreleased and voided rows as they were', () => {
     expect(status.value(row('u', { status: 'DELIVERED', arStatus: 'DOCS_NEEDED', stops }))).toBe('DELIVERED 2/2')
-    expect(status.value(row('o', { status: 'OPEN', arStatus: 'UNBILLED' }))).toBe('OPEN')
+    expect(status.value(row('o', { status: 'OPEN', arStatus: 'DOCS_NEEDED' }))).toBe('OPEN')
     expect(status.value(row('v', { status: 'DELIVERED', arStatus: 'UNBILLED', voidedAt: '2026-02-01T00:00:00.000Z' }))).toBe('VOIDED')
   })
 })

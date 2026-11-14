@@ -13,16 +13,16 @@ describe('Shipments default columns', () => {
     const total =
       SHIPMENT_DEFAULT_COLUMNS.reduce((sum, key) => sum + defaultColumnWidth(byKey.get(key)!), 0) +
       defaultColumnWidth(ACTIONS_COLUMN)
-    // Status, RC, POD, PRO # and Customer Ref # are the fixed columns, in that order (Ryne 2026-11-11).
-    expect(SHIPMENT_DEFAULT_COLUMNS.slice(0, 5)).toEqual(['status', 'rateConPresent', 'podPresent', 'proNumber', 'customerReference'])
+    // Status, Invoice Status (2026-11-14), RC, POD, PRO # and Customer Ref # are the fixed columns, in that order (Ryne 2026-11-11).
+    expect(SHIPMENT_DEFAULT_COLUMNS.slice(0, 6)).toEqual(['status', 'invoiceStatus', 'rateConPresent', 'podPresent', 'proNumber', 'customerReference'])
     expect(total).toBeLessThanOrEqual(SCROLLER_1440_PX)
   })
 
   it('are real columns that keep the Aljex board order', () => {
     for (const key of SHIPMENT_DEFAULT_COLUMNS) expect(SHIPMENT_COLUMN_KEYS).toContain(key)
-    // The five fixed columns lead; everything after them keeps the Aljex order.
+    // The six fixed columns lead; everything after them keeps the Aljex order.
     const aljexOrder = ['proNumber', ...ALJEX_COLUMN_KEYS.filter((k) => k !== 'proNumber')]
-    const positions = SHIPMENT_DEFAULT_COLUMNS.slice(5).map((k) => aljexOrder.indexOf(k))
+    const positions = SHIPMENT_DEFAULT_COLUMNS.slice(6).map((k) => aljexOrder.indexOf(k))
     expect(positions.every((p) => p >= 0)).toBe(true)
     expect(positions).toEqual([...positions].sort((a, b) => a - b))
   })

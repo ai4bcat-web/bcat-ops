@@ -7,7 +7,9 @@ import { optionsOfRow, type DenseColumn, type DenseOption } from '@/features/tms
 import { customerDisplayName } from '@/lib/customerResolution'
 import { LADDER_FILTER_OPTIONS, assignmentChipText } from './carrierLadder'
 import { boardStatusOf } from '@/lib/shipmentViewDefs'
-import { BOARD_COLUMNS, displayStatusOf, carrierSortKey, rowShipmentType, type ShipmentRow } from './shipmentViews'
+import { BOARD_COLUMNS, displayStatusOf, carrierSortKey, invoiceStatusOfRow, rowShipmentType, type ShipmentRow } from './shipmentViews'
+import type { IntroducedColumn } from './teamColumnLayout'
+import { LOAD_INVOICE_STATUS_LABEL, LOAD_INVOICE_STATUS_ORDER } from '@/lib/loadInvoiceStatus'
 import { SHIPMENT_TYPES, shipmentTypeLabel } from '@/lib/shipmentTypes'
 
 export function sentence(value: string): string {
@@ -64,6 +66,8 @@ const BOARD_STATUS_ORDER = ['OPEN', 'COVERED', 'DISPATCHED', 'ARRIVED', 'DEPARTE
 
 export const STATUS_OPTIONS: DenseOption[] = BOARD_STATUS_ORDER.map((s) => ({ value: s, label: sentence(s) }))
 
+export const INVOICE_STATUS_OPTIONS: DenseOption[] = LOAD_INVOICE_STATUS_ORDER.map((k) => ({ value: k, label: LOAD_INVOICE_STATUS_LABEL[k] }))
+
 export const SHIPMENT_TYPE_OPTIONS: DenseOption[] = SHIPMENT_TYPES.map((t) => ({ value: t.key, label: t.label }))
 
 function readField(row: ShipmentRow, field: string): string | null {
@@ -95,6 +99,20 @@ export const SHIPMENT_GRID_COLUMNS: DenseColumn<ShipmentRow>[] = BOARD_COLUMNS.m
       },
       sortValue: statusSortKey,
       extraPx: 110, // the tracking pill beside the status text
+    }
+  }
+  if (col.key === 'invoiceStatus') {
+    // The facet is the status word; the cell adds the paid date. 136 px keeps the default set inside the 1440 scroller.
+    return {
+      ...base,
+      width: 136,
+      filter: 'multi',
+      fixedOptions: INVOICE_STATUS_OPTIONS,
+      optionsOf: (row) => {
+        const s = invoiceStatusOfRow(row)
+        return [{ value: s.key, label: s.label }]
+      },
+      sortValue: (row) => LOAD_INVOICE_STATUS_ORDER.indexOf(invoiceStatusOfRow(row).key),
     }
   }
   if (col.key === 'carrierAssignment') {
@@ -156,14 +174,22 @@ export const SHIPMENT_COLUMN_KEYS = SHIPMENT_GRID_COLUMNS.map((c) => c.key)
  * Revert to the full Aljex set: `['proNumber', ...ALJEX_COLUMN_KEYS.filter((k) => k !== 'proNumber')]`.
  */
 export const SHIPMENT_DEFAULT_COLUMNS = [
-  'status', 'rateConPresent', 'podPresent', 'proNumber', 'customerReference', 'customerName', 'carrier', 'destinationCity', 'deliveryAppt',
+  'status', 'invoiceStatus', 'rateConPresent', 'podPresent', 'proNumber', 'customerReference', 'customerName', 'carrier', 'destinationCity', 'deliveryAppt',
 ]
 
 /**
  * The columns frozen on the left until the team default says otherwise, in this order (Ryne 2026-11-11). Edit layout > Columns changes which
  * columns are frozen and their order; the choice is saved with the team default.
  */
-export const SHIPMENT_DEFAULT_FROZEN = ['status', 'rateConPresent', 'podPresent', 'proNumber', 'customerReference']
+export const SHIPMENT_DEFAULT_FROZEN = ['status', 'invoiceStatus', 'rateConPresent', 'podPresent', 'proNumber', 'customerReference']
+
+/**
+ * Invoice status shipped beside Status on 2026-11-14 (Ryne): a team layout saved before then gets it right
+ * after Status; one saved since keeps whatever the admin chose.
+ */
+export const SHIPMENT_INTRODUCED_COLUMNS: IntroducedColumn[] = [
+  { key: 'invoiceStatus', after: 'status', since: '2026-11-14T07:00:00.000Z' },
+]
 
 /** The Actions column the page appends after the chosen columns. */
 export const ACTIONS_COLUMN: DenseColumn<ShipmentRow> = {

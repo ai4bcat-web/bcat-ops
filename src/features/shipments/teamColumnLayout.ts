@@ -21,11 +21,25 @@ export interface TeamColumnLayout {
  * column must not blank the grid); duplicates collapse; widths and pins that point at a column
  * that is not shown are dropped. No usable saved row means the built-in default columns.
  */
+/**
+ * A column added to the built-in default after team layouts were already saved. A layout saved before
+ * `since` never had the chance to show or hide it, so it gets the column right after `after` (when it shows `after`) (pinned with it
+ * when `after` is pinned, so the two stay side by side). A layout saved on or after `since` is the admin's
+ * choice and is left alone: removing the column there keeps it hidden.
+ */
+export interface IntroducedColumn {
+  key: string
+  after: string
+  /** ISO time the column shipped. */
+  since: string
+}
+
 export function resolveTeamLayout(
-  templates: readonly Pick<ShipmentColumnTemplateRecord, 'id' | 'columns' | 'widths' | 'pinned'>[],
+  templates: readonly (Pick<ShipmentColumnTemplateRecord, 'id' | 'columns' | 'widths' | 'pinned'> & { updatedAt?: string | null })[],
   validKeys: readonly string[],
   defaultColumns: readonly string[],
   defaultPinned: readonly string[] = [],
+  introduced: readonly IntroducedColumn[] = [],
 ): TeamColumnLayout {
   const fallback: TeamColumnLayout = { columns: [...defaultColumns], widths: {}, pinned: defaultColumns.filter((k) => defaultPinned.includes(k)) }
   const saved = templates.find((t) => t.id === TEAM_DEFAULT_COLUMN_TEMPLATE_ID)
@@ -48,6 +62,15 @@ export function resolveTeamLayout(
   // from the built-in frozen set (only the ones it shows) until somebody pins differently and saves.
   const savedPins = Array.isArray(saved.pinned) ? saved.pinned.filter((k) => columns.includes(k)) : []
   const pinned = savedPins.length > 0 ? savedPins : columns.filter((k) => defaultPinned.includes(k))
+  for (const col of introduced) {
+    if (!valid.has(col.key) || columns.includes(col.key)) continue
+    if (saved.updatedAt && saved.updatedAt >= col.since) continue
+    const at = columns.indexOf(col.after)
+    if (at < 0) continue
+    columns.splice(at + 1, 0, col.key)
+    const pinAt = pinned.indexOf(col.after)
+    if (pinAt >= 0) pinned.splice(pinAt + 1, 0, col.key)
+  }
   return { columns, widths, pinned }
 }
 
