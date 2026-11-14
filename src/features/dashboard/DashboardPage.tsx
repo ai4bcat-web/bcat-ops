@@ -399,6 +399,7 @@ export function DashboardPage() {
 
   return (
     <TmsScrollPage
+      className="tms-phone-keep"
       title="Operations Dashboard"
       subtitle={`Live snapshot · ${dateLabel}`}
       actions={(

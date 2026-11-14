@@ -25,6 +25,8 @@ import { personName } from '@/lib/roles'
 import { SWITCHES_ON_HINT, pathIsDormant } from '@/lib/dormantPages'
 import { useTmsCompany } from './tmsCompany'
 import { useTmsTheme } from './tmsTheme'
+import { usePhoneWidth } from './grid/denseCardLayout'
+import { watchPhoneTables } from './phoneTables'
 import './theme.css'
 import './shell.css'
 
@@ -525,6 +527,13 @@ export function TmsShell({
     const tr = tab.getBoundingClientRect()
     list.scrollLeft += tr.left - lr.left - (list.clientWidth - tr.width) / 2
   }, [activePath, activeSearch])
+
+  // Phones: plain tables anywhere on the page (and in dialogs) become label / value cards (phoneTables.ts + responsive.css).
+  const phone = usePhoneWidth()
+  useEffect(() => {
+    if (!phone || typeof MutationObserver === 'undefined') return undefined
+    return watchPhoneTables(document.body)
+  }, [phone])
 
   const handleQuery = useCallback(
     (value: string) => {
