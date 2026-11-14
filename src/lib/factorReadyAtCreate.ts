@@ -104,6 +104,19 @@ export function orderPoNumber(references: ReadonlyArray<{ code?: string | null; 
   return null
 }
 
+/**
+ * The PO a load factors under: the order's customer-visible PO reference, else the shipment's Customer Ref
+ * (the header field, which the form mirrors onto the load as `tmsId` and reads back from there when the
+ * order has no PO reference — shipment 20000's shape). PO reference first, Customer Ref second.
+ */
+export function factoringPoNumber(
+  references: Parameters<typeof orderPoNumber>[0],
+  customerRef: string | null | undefined,
+): string | null {
+  const fallback = text(customerRef)
+  return orderPoNumber(references) ?? (fallback && fallback.toUpperCase() !== 'N/A' ? fallback : null)
+}
+
 /** First pick up and last delivery, read the way the factoring queue row reads them. */
 export function routeEnds(stops: Stop[] | null | undefined): { pickup: FactorPlace | null; delivery: FactorPlace | null } {
   const picks = ordered(stops, 'pickup')

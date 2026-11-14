@@ -76,7 +76,7 @@ import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { planPendingCarrierBills, readPendingBillContext, writePendingBill } from '../_shared/pendingCarrierBill'
 import { hasGap, isReleasedOrder, reconcileReleasedOrder, type ReconcileFinding } from '../../../src/lib/billingReconcile'
 import { evaluateReleaseGate, releaseGateError, type ReleaseGateResult } from '../../../src/lib/releaseGate'
-import { factorGapsForLoad, orderPoNumber, routeEnds, type FactorReadyInput } from '../../../src/lib/factorReadyAtCreate'
+import { factorGapsForLoad, factoringPoNumber, routeEnds, type FactorReadyInput } from '../../../src/lib/factorReadyAtCreate'
 import { evaluateLoadReview, loadReviewExtras, loadReviewRefusal, type LoadReviewReason } from '../../../src/lib/loadReview'
 import { profitFromFacts, resolveReviewRequirements, type ReviewFacts, type ReviewRequirement } from '../../../src/lib/reviewRequirements'
 import {
@@ -1348,7 +1348,10 @@ function factorReviewReasons(bundle: Bundle, order: Row, customer: Row | null): 
   }
   const gaps = factorGapsForLoad({
     customer: customer as unknown as FactorReadyInput['customer'],
-    poNumber: orderPoNumber(order.references as Parameters<typeof orderPoNumber>[0]),
+    poNumber: factoringPoNumber(
+      order.references as Parameters<typeof factoringPoNumber>[0],
+      bundle.loads.find((l) => !l.voidedAt && !l.deletedAt && (l.orderId == null || !orderId || String(l.orderId) === orderId))?.tmsId as string | null | undefined,
+    ),
     customerRateCents: numberOrNull(order.revenueCents),
     ...routeEnds(stops),
   })

@@ -33,7 +33,6 @@ vi.mock('@/lib/apiClient', () => ({
 }))
 
 // The drawer is a separate surface with its own data hooks; this page only mounts it.
-vi.mock('@/features/loads/LoadDrawer', () => ({ LoadDrawer: () => null }))
 
 // No document lookups: presigning real attachments needs Amplify.
 vi.mock('@/hooks/useLoadDriverDocs', () => ({
@@ -624,12 +623,11 @@ describe('OwnerOperatorPayPage', () => {
       expect(link).toHaveAttribute('href', '/tms/shipments/shp-1')
     })
 
-    it('still opens an old load with no shipment in the load drawer', () => {
+    it('never opens a side rail: an old load with no shipment is plain text', () => {
       renderWith([{ id: 'l2', shipmentId: null }], trip('l2'))
       expect(screen.queryByTestId('settlement-pro-link')).not.toBeInTheDocument()
-      const btn = screen.getByRole('button', { name: /Open the load for PRO/ })
-      fireEvent.click(btn)
-      expect(useAppStore.getState().selectedLoadId).toBe('l2')
+      expect(screen.queryByRole('button', { name: /Open the load for PRO/ })).not.toBeInTheDocument()
+      expect(useAppStore.getState().selectedLoadId).toBeNull()
     })
 
     it('shows plain text when the row never resolved to a load', () => {

@@ -21,7 +21,7 @@ import {
 } from '../../../src/lib/releaseGate'
 import { assertNotSquareInvoiced } from '../../../src/lib/invoiceDelivery'
 import { isFactorBilled } from '../../../src/lib/factorBilling'
-import { factorGapsAtCreate, orderPoNumber, routeEnds } from '../../../src/lib/factorReadyAtCreate'
+import { factorGapsAtCreate, factoringPoNumber, routeEnds } from '../../../src/lib/factorReadyAtCreate'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { isCustomerUnresolved, unresolvedCustomerMessage } from '../../../src/lib/customerResolution'
 import type { FactoringItem, Stop } from '../../../src/types'
@@ -349,7 +349,7 @@ async function factorReadyFor(orderId: string, factorRemitToName: string | null)
   for (const reason of release.missing) missing.push(reason.message)
   for (const gap of factorGapsAtCreate({
     customer,
-    poNumber: orderPoNumber(order.references),
+    poNumber: factoringPoNumber(order.references, load?.tmsId as string | null | undefined),
     customerRateCents: numberOrNull(order.revenueCents),
     ...routeEnds(stops),
   })) missing.push(gap.message)
