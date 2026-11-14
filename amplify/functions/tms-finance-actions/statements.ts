@@ -13,6 +13,7 @@ import {
   agingStatementEmail,
   agingStatementFilename,
   buildAgingStatement,
+  isFactoredInvoice,
   type StatementShipmentLike,
 } from '../../../src/lib/agingStatement'
 import { buildAgingStatementPdf } from '../../../src/lib/agingStatementPdf'
@@ -54,7 +55,7 @@ export async function agingStatement(input: Row, caller: Caller): Promise<Row> {
 
   const invoices = (await queryIndex(INVOICE_TABLE_NAME, 'invoicesByCustomerIdAndIssuedAt', 'customerId', customerId)) as unknown as InvoiceRecord[]
   const shipmentsById = new Map<string, StatementShipmentLike>()
-  for (const id of [...new Set(invoices.filter((inv) => inv.balanceCents > 0).map((inv) => inv.shipmentId))]) {
+  for (const id of [...new Set(invoices.filter((inv) => inv.balanceCents > 0 && !isFactoredInvoice(inv)).map((inv) => inv.shipmentId))]) {
     const shipment = await getById(SHIPMENT_TABLE_NAME, id)
     if (shipment) shipmentsById.set(id, shipment as StatementShipmentLike)
   }
@@ -71,17 +72,17 @@ export async function agingStatement(input: Row, caller: Caller): Promise<Row> {
   const key = `invoices/statements/${customerId}/${asOf}-${Date.now()}.pdf`
   await putPdf(key, bytes)
   const url = await signedDownload(key)
-  const summary = { rows: statement.rows.length, totalCents: statement.totalCents, byBucket: statement.byBucket, companyName: statement.companyName }
+  const summary = { rows: statement.rows.length, totalCents: statement.totalCents, byBucket: statement.byBucket, companyName: statement.companyName, factoredExcluded: statement.factoredExcluded }
 
   if (!send) return { preview: true, to, cc, subject, body, filename, url, statement: summary }
 
-  if (to.length === 0) throw new Error(`${customerName} has no AP e-mail on file; add one on the customer before sending a statement`)
+  if (to.length === 0) throw new Error(`Missing invoice e-mail: ${customerName} has none on file; add one on the customer before sending a statement`)
   if (statement.rows.length === 0) throw new Error(`${customerName} has no open invoices to report`)
 
   const now = nowIso()
   // The notice log is keyed by shipment: a statement is filed against its oldest open invoice's shipment.
-  const firstShipmentId = invoices.find((inv) => inv.invoiceDate === statement.rows[0].invoiceDate && inv.balanceCents > 0)?.shipmentId
-    ?? invoices.find((inv) => inv.balanceCents > 0)!.shipmentId
+  const reported = invoices.filter((inv) => inv.balanceCents > 0 && !isFactoredInvoice(inv))
+  const firstShipmentId = reported.find((inv) => inv.invoiceDate === statement.rows[0].invoiceDate)?.shipmentId ?? reported[0].shipmentId
   const delivered = await deliverNotice({
     db: dynamo,
     ses,

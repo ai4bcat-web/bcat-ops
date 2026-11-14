@@ -22,6 +22,7 @@ import {
 } from './owedFilters'
 import { SendReviewCarousel } from './components/SendReviewCarousel'
 import { AgingStatementDialog } from './components/AgingStatementDialog'
+import { BulkAgingStatementDialog, type BulkStatementCustomer } from './components/BulkAgingStatementDialog'
 import { allApEmails } from '@/lib/billingMethod'
 import { useAuthUser } from '@/hooks/useAuth'
 import { isOwnerOrAdmin } from '@/lib/accountingAccess'
@@ -47,7 +48,7 @@ import { useDirectory } from '@/hooks/useDirectory'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import {
-  agingStatement, batchGenerateInvoices, getTmsSettings, graphqlErrorText, listInvoicesByMonth, listUserProfiles, reversePayment, voidInvoice,
+  batchGenerateInvoices, getTmsSettings, graphqlErrorText, listInvoicesByMonth, listUserProfiles, reversePayment, voidInvoice,
 } from '@/lib/apiClient'
 import { loadWorklistShipments } from '@/lib/worklistShipments'
 import { NeedsReviewList } from '@/features/finance/NeedsReview'
@@ -91,6 +92,7 @@ type ArDialog =
   | { kind: 'edit'; invoice: InvoiceRecord }
   | { kind: 'review'; invoices: InvoiceRecord[] }
   | { kind: 'statement'; customerId: string; customerName: string }
+  | { kind: 'bulkStatement'; customers: BulkStatementCustomer[] }
   | { kind: 'generate'; orderId: string; shipmentNumber: string | null }
   | { kind: 'payment'; customerId: string; customerName: string; invoiceId?: string }
   | { kind: 'credit'; customerId: string; customerName: string }
@@ -478,25 +480,10 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
   const customer = customers.find((c) => c.id === arCustomerId) ?? null
   const customerById = new Map(customers.map((c) => [c.id, c]))
-  const runBulkStatements = async () => {
-    setBusy(true)
-    let sent = 0
-    const failed: string[] = []
-    for (const id of statementSelected) {
-      const name = customerById.get(id)?.name ?? id
-      try {
-        const row = await agingStatement({ customerId: id, send: true })
-        if (row.emailStatus === 'SENT') sent++
-        else failed.push(`${name}: ${row.emailError || row.emailStatus}`)
-      } catch (err) {
-        failed.push(`${name}: ${graphqlErrorText(err)}`)
-      }
-    }
-    setBusy(false)
-    setStatementSelected([])
-    if (sent) toast.success(`Sent ${sent} aging report${sent === 1 ? '' : 's'}`)
-    if (failed.length) toast.error(`Not sent — ${failed.join('; ')}`)
-    void refreshAll()
+  // Bulk statements always preview and confirm first; nothing is mailed straight from the tick boxes.
+  const runBulkStatements = () => {
+    const names = new Map(aging.byCustomer.map((row) => [row.customerId, row.customerName]))
+    setDialog({ kind: 'bulkStatement', customers: statementSelected.map((id) => ({ id, name: customerById.get(id)?.name ?? names.get(id) ?? id })) })
   }
 
   const groupControl = (
@@ -554,6 +541,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onReview: (invs) => setDialog({ kind: 'review', invoices: invs }),
       onEdit: (inv) => setDialog({ kind: 'edit', invoice: inv }),
       onMarkPaid: (invs) => setDialog({ kind: 'markPaid', invoices: invs }),
+      onStatement: (customerId, customerName) => setDialog({ kind: 'statement', customerId, customerName }),
       paymentFacts,
     })
     : tab === 'payments' ? paymentsView({
@@ -577,7 +565,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       statementSelected,
       onStatementSelect: setStatementSelected,
       onStatement: (customerId, customerName) => setDialog({ kind: 'statement', customerId, customerName }),
-      onBulkStatements: () => void runBulkStatements(),
+      onBulkStatements: runBulkStatements,
       busy,
     })
 
@@ -697,6 +685,13 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           customerName={dialog.customerName}
           onClose={() => setDialog(null)}
           onSent={() => { setDialog(null); void refreshAll() }}
+        />
+      )}
+      {dialog?.kind === 'bulkStatement' && (
+        <BulkAgingStatementDialog
+          customers={dialog.customers}
+          onClose={() => { setDialog(null); void refreshAll() }}
+          onDone={() => { setDialog(null); setStatementSelected([]); void refreshAll() }}
         />
       )}
       {dialog?.kind === 'credit' && (
@@ -843,7 +838,7 @@ function dateCol<T>(key: string, header: string, of: (row: T) => string | null, 
 function queueView({
   status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, factorByItemId, customerById,
   attachmentPlans, boardById, shipmentsById, months, month, paidLoading, onMonth, onSelect, onGenerate, onBatchGenerate, onReview, onEdit,
-  onMarkPaid, paymentFacts,
+  onMarkPaid, onStatement, paymentFacts,
   factorReadiness, onBatchFactor,
 }: {
   status: ArQueueStatus
@@ -873,6 +868,8 @@ function queueView({
   onReview: (invoices: InvoiceRecord[]) => void
   onEdit: (invoice: InvoiceRecord) => void
   onMarkPaid: (invoices: InvoiceRecord[]) => void
+  /** Invoiced, grouped by customer: e-mail that customer's aging report from the group header. */
+  onStatement?: (customerId: string, customerName: string) => void
   paymentFacts: CustomerPaymentFacts
 }): ListView {
   const ready = status === 'READY'
@@ -1262,6 +1259,12 @@ function queueView({
                     onSelect(allPicked ? selected.filter((id) => !ids.includes(id)) : [...new Set([...selected, ...ids])])
                   }}>
                   {allPicked ? 'Clear' : `Select all ${groupPayable.length}`}
+                </button>
+              )}
+              {invoiced && customerId && onStatement && t.balanceCents > 0 && (
+                <button type="button" className="tms-link text-sm" data-testid="ar-group-statement"
+                  onClick={(e) => { e.stopPropagation(); onStatement(customerId, key) }}>
+                  Email aging report
                 </button>
               )}
             </span>

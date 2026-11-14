@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { PDFDocument } from 'pdf-lib'
-import { AGING_STATEMENT_EMAIL_BODY, agingStatementEmail, agingStatementFilename, buildAgingStatement } from './agingStatement'
+import { AGING_STATEMENT_EMAIL_BODY, agingStatementEmail, agingStatementFilename, buildAgingStatement, isFactoredInvoice } from './agingStatement'
 import { buildAgingStatementPdf } from './agingStatementPdf'
 import type { InvoiceRecord } from '@/types/tms'
 
@@ -49,5 +49,17 @@ describe('aging statement', () => {
     expect((await PDFDocument.load(bytes)).getPageCount()).toBe(1)
     const { subject, body } = agingStatementEmail(statement)
     expect(`${subject} ${body}`).not.toMatch(/carrier pay|cost|margin/i)
+  })
+
+  it('leaves factored invoices off (OTR collects them) and counts what it left', () => {
+    const st = buildAgingStatement({
+      customerName: 'X', asOf: '2026-12-15',
+      invoices: [inv({ id: 'm' }), inv({ id: 'f1', number: '1', factored: true }), inv({ id: 'f2', number: '2', factoringItemId: 'fi-1' })],
+      shipmentsById: new Map(),
+    })
+    expect(st.rows).toHaveLength(1)
+    expect(st.totalCents).toBe(100_000)
+    expect(st.factoredExcluded).toBe(2)
+    expect(isFactoredInvoice({ factored: null, factoringItemId: null })).toBe(false)
   })
 })
