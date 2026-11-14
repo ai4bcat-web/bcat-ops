@@ -14,7 +14,7 @@ import { CalendarPaperworkProvider } from './CalendarPaperwork'
 import { DriverAvailabilityModal } from './DriverAvailabilityModal'
 import { OwnFleetSwitchDialog } from './OwnFleetSwitchDialog'
 import { MobileLoadAgenda } from './MobileLoadAgenda'
-import { initialCalendarView, rememberPhoneView, effectiveCalendarView, type CalendarView } from './calendarView'
+import { initialCalendarView, rememberPhoneView, type CalendarView } from './calendarView'
 import { usePhoneWidth, PHONE_MAX_WIDTH } from '@/features/tms/grid/denseCardLayout'
 import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
 import { buildLoadHaystack, loadMatchesQuery } from '@/lib/loadSearch'
@@ -25,7 +25,6 @@ import {
 import type { Load } from '@/types'
 
 const VIEW_CONFIG: Record<CalendarView, { navDays: number }> = {
-  'list':  { navDays: 1  }, // phone card list of the current day
   'day':   { navDays: 1  }, // single current day
   'week':  { navDays: 7  }, // Monday-started week, weekends included
   'month': { navDays: -1 }, // month nav handled separately
@@ -64,9 +63,8 @@ export function CalendarPage() {
   const [chosenDriverIds, setChosenDriverIds] = useState<string[] | null>(() => readStoredDriverIds(DRIVER_FILTER_KEYS.calendar))
 
   const phone = usePhoneWidth()
-  const [chosenView, setChosenView] = useState<CalendarView>(() =>
+  const [currentView, setCurrentView] = useState<CalendarView>(() =>
     initialCalendarView(typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(`(max-width: ${PHONE_MAX_WIDTH}px)`).matches))
-  const currentView = effectiveCalendarView(chosenView, phone)
   const [startDate, setStartDate]     = useState<Date>(() => new Date())
 
   const setVisibleDrivers = useCallback((ids: string[]) => {
@@ -92,11 +90,18 @@ export function CalendarPage() {
   // Day/Week board columns (PlannerView): Day = the single current day; Week = Monday
   // through Sunday, weekends included. Month is rendered by GridCalendarView instead.
   const cols = useMemo<Date[]>(() => {
-    if (currentView === 'day' || currentView === 'list') return [startDate]
+    if (currentView === 'day') return [startDate]
     // Week = Monday through the following Monday inclusive (8 days, weekends included).
     if (currentView === 'week') return Array.from({ length: 8 }, (_, i) => addDays(startDate, i))
     return []
   }, [currentView, startDate])
+
+  // A phone's card list: Day = the day, Week = the week's days, Month = every day of the month.
+  const phoneDays = useMemo<Date[]>(() => {
+    if (currentView !== 'month') return cols
+    const last = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0).getDate()
+    return Array.from({ length: last }, (_, i) => new Date(startDate.getFullYear(), startDate.getMonth(), i + 1))
+  }, [currentView, cols, startDate])
 
   // The days the board shows; the store windows these (±1 month) in and the poll refreshes only them.
   const visibleFrom = ymd(currentView === 'month' ? startDate : cols[0])
@@ -130,16 +135,16 @@ export function CalendarPage() {
   const onToday = useCallback(() => {
     const today = new Date()
     if (currentView === 'month') setStartDate(new Date(today.getFullYear(), today.getMonth(), 1))
-    else if (currentView === 'day' || currentView === 'list') setStartDate(today)
+    else if (currentView === 'day') setStartDate(today)
     else setStartDate(getMondayOf(today))
   }, [currentView])
 
   const onViewChange = useCallback((view: CalendarView) => {
-    setChosenView(view)
+    setCurrentView(view)
     if (phone) rememberPhoneView(view)
     const today = new Date()
     if (view === 'month') setStartDate(new Date(today.getFullYear(), today.getMonth(), 1))
-    else if (view === 'day' || view === 'list') setStartDate(today)
+    else if (view === 'day') setStartDate(today)
     else setStartDate(getMondayOf(today))
   }, [phone])
 
@@ -270,11 +275,11 @@ export function CalendarPage() {
         background: 'var(--tms-card)',
       }}>
         <CalendarErrorBoundary>
-          {/* Day / Week / Month are the same boards as on a desktop (they scroll sideways on a phone). A phone also has List, the
-              day's loads as cards that fit the screen, and opens on it until another view is picked there. */}
+          {/* A phone shows Day / Week / Month as cards per day (Ryne 2026-11-14, which also removed the separate List view); a
+              desktop shows the boards. */}
           <CalendarPaperworkProvider loads={visibleLoads}>
-          {currentView === 'list' ? (
-            <MobileLoadAgenda loads={visibleLoads} drivers={drivers} day={startDate} />
+          {phone ? (
+            <MobileLoadAgenda loads={visibleLoads} drivers={drivers} days={phoneDays} skipEmptyDays={currentView === 'month'} />
           ) : currentView === 'day' ? (
             <PlannerView
               loads={visibleLoads}
