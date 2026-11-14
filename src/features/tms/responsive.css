@@ -229,3 +229,23 @@
   }
   .tms-shell .tms-dense-filters[data-open='true'] .tms-dense-spacer { display: none; }
 }
+
+/* ── Numbers never clip on a phone (Ryne 2026-11-14: "Numbers are still cut off on mobile") ──────────
+   Cards lay out label / amount rows inline with space-between. On a narrow card the amount was pushed past the edge and clipped.
+   Rows wrap instead, so the amount drops under its label; the amount and a big value's delta stay whole. */
+@media (max-width: 640px) {
+  .tms-shell .tms-card [style*='justify-content: space-between'],
+  .tms-shell .tms-kpi-card [style*='justify-content: space-between'],
+  .tms-shell .tms-head-band-cards [style*='justify-content: space-between'] { flex-wrap: wrap; row-gap: 2px; }
+  .tms-shell .tms-card [style*='justify-content: space-between'] > *,
+  .tms-shell .tms-head-band-cards [style*='justify-content: space-between'] > * { min-width: 0; }
+  .tms-shell .tms-card [style*='tabular-nums'],
+  .tms-shell .tms-head-band-cards [style*='tabular-nums'] { white-space: nowrap; flex-shrink: 0; }
+  .tms-shell .tms-card [style*='align-items: baseline'] { flex-wrap: wrap; }
+}
+/* Summary card rows (Receivables, Payables, profit check): on a phone the label wraps rather than cutting off its count
+   ("Pending with shippers 244 invoices"); the amount column keeps its full width. */
+@media (max-width: 640px) {
+  .tms-shell .tms-list-row-label, .tms-portal .tms-list-row-label { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+  .tms-shell .tms-list-row-value, .tms-portal .tms-list-row-value { flex-shrink: 0; }
+}
