@@ -196,6 +196,8 @@ export interface CustomerRecord {
   notes?: string | null
   mcNumber?: string | null
   dotNumber?: string | null
+  /** Broker or shipper (Ryne 2026-11-14). Only a factored broker must carry an MC; null = not set yet. */
+  customerType?: 'BROKER' | 'SHIPPER' | null
   /**
    * Whether this customer's loads get factored. Factoring is what makes an MC and
    * origin/destination ZIPs mandatory at booking; a direct-billed customer needs neither.

@@ -221,7 +221,10 @@ export function whyNotFactorable(input: FactorRefusalInput): string | null {
     return `Invoice ${invoice.number} is not this order's current invoice (${order.invoiceId}).`
   }
   if (!text(customer.mcNumber)) {
-    return `${customer.name} has no MC number on file, and OTR resolves the broker from its MC.`
+    // A factored shipper needs no MC to be booked (Ryne 2026-11-14), but OTR's API files an invoice only under a BrokerMC.
+    return customer.customerType === 'SHIPPER'
+      ? `${customer.name} is a shipper with no MC; OTR's API files invoices under a broker MC, so submit this one in the OTR portal.`
+      : `${customer.name} has no MC number on file, and OTR resolves the broker from its MC.`
   }
   if (shipment.status !== 'DELIVERED') {
     return `Shipment ${shipment.number} is ${shipment.status}, not DELIVERED; a factor buys a delivered load.`

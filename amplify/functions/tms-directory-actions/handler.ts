@@ -31,6 +31,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { validateCommissionPlans, validatePaySchedule } from '../../../src/lib/commission'
 import { validateAutomationPatch } from '../../../src/lib/trackingAutomation'
 import { CUSTOMER_TRACKING_MODES, DRIVER_SMS_TARGETS, TRACKING_METHODS } from '../../../src/lib/trackingPrefs'
+import { CUSTOMER_TYPES } from '../../../src/lib/factorBilling'
 import { teamMembership, validateTeams } from '../../../src/lib/teams'
 import { REVIEW_REQUIREMENTS, normalizeReviewRequirements } from '../../../src/lib/reviewRequirements'
 import { SEED_DIVISIONS, SEED_RULES, validateDivisions, validateRules } from '../../../src/lib/ownership'
@@ -1319,6 +1320,10 @@ async function upsertCustomer(
     notes: optionalString(input.notes, 4000),
     mcNumber: optionalString(input.mcNumber, 50),
     dotNumber: optionalString(input.dotNumber, 50),
+    // Ryne 2026-11-14: only a broker we factor needs an MC. Unset stays unset (shown as "needs a type").
+    customerType: 'customerType' in input
+      ? optionalEnum(input.customerType, CUSTOMER_TYPES, 'customerType')
+      : (existing?.customerType as string | undefined) ?? null,
     billingEmail: optionalString(input.billingEmail, 254),
     billingContactName: optionalString(input.billingContactName, 255),
     billingPhone: optionalString(input.billingPhone, 50),

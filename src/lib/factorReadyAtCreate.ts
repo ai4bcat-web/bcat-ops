@@ -4,7 +4,7 @@
  *
  * OTR takes eleven fields (`OTR_REQUIRED_FIELDS`). Three come from the invoice itself
  * (number, date, amount) and exist once it is generated; the rest are known when the
- * shipment is booked: the customer's PO, the broker's MC, and the city, state and ZIP at
+ * shipment is booked: the customer's PO, the MC when the customer is a broker, and the city, state and ZIP at
  * each end of the run. A rate of zero would be an invoice of zero. Those, and the
  * customer's billing method (unset, release to billing is refused), are what this checks.
  *
@@ -15,7 +15,7 @@
  * on a strict save (as a refusal), so the two cannot disagree about what is missing.
  * Relative imports only: the shipment Lambda bundles this file by path.
  */
-import { isFactorBilled, type FactorBillingCustomer } from './factorBilling'
+import { mcRequiredForFactoring, type CustomerType, type FactorBillingCustomer } from './factorBilling'
 import { ordered, placeOf } from './factorHandoff'
 import type { Stop } from '../types'
 
@@ -45,7 +45,7 @@ export interface FactorPlace {
 
 export interface FactorReadyInput {
   /** Null when the shipment only has a typed customer name; the customer checks wait for a link. */
-  customer: (FactorBillingCustomer & { name?: string | null; mcNumber?: string | null }) | null
+  customer: (FactorBillingCustomer & { name?: string | null; mcNumber?: string | null; customerType?: CustomerType | null }) | null
   poNumber: string | null | undefined
   /** The customer's total in cents (what the invoice will bill). */
   customerRateCents: number | null | undefined
@@ -76,7 +76,8 @@ export function factorGapsAtCreate(input: FactorReadyInput): FactorGap[] {
     if (customer.billingMethod !== 'FACTOR' && customer.billingMethod !== 'MANUAL' && customer.factored !== true) {
       gaps.push({ code: 'BILLING_METHOD', message: `${name} has no billing method. Set Factor or Manual on the customer record.` })
     }
-    if (isFactorBilled(customer) && !text(customer.mcNumber)) {
+    // Brokers only (Ryne 2026-11-14): a factored shipper has no MC to give.
+    if (mcRequiredForFactoring(customer) && !text(customer.mcNumber)) {
       gaps.push({ code: 'CUSTOMER_MC', message: `${name} has no MC number. Add it on the customer record — OTR looks the broker up by MC.` })
     }
   }

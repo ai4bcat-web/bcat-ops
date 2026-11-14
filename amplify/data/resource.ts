@@ -923,6 +923,8 @@ const schema = a.schema(stageTypes({
       notes:        a.string(),
       // Phase 1: full customer record + credit / billing / workflow controls
       mcNumber:     a.string(),
+      // Ryne 2026-11-14: only a broker we factor needs an MC. Null = nobody has said yet.
+      customerType: a.enum(['BROKER', 'SHIPPER']),
       /*
        * True only when this record's NAME was looked up from its MC somewhere that knows
        * the answer. A name and an MC sitting on the same row is not that: the name comes
