@@ -2068,6 +2068,42 @@ async function mirrorTeamKeys(teams: Team[], caller: Caller): Promise<void> {
   }
 }
 
+const COST_CATEGORIES = ['hosting', 'backend', 'email', 'auth', 'phone', 'ai', 'thirdparty', 'dev', 'other']
+const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/
+
+/** Settings > Cost to run: fixed monthly costs an admin types in for services with no billing API. */
+export function validateCostManualEntries(v: unknown): Array<Record<string, unknown>> | null {
+  if (v == null) return null
+  const list = typeof v === 'string' ? JSON.parse(v) : v
+  if (!Array.isArray(list)) throw new Error('costManualEntries must be a list')
+  if (list.length > 60) throw new Error('costManualEntries: at most 60 entries')
+  const ids = new Set<string>()
+  return list.map((raw, i) => {
+    if (!raw || typeof raw !== 'object') throw new Error(`costManualEntries[${i}] must be an object`)
+    const e = raw as Record<string, unknown>
+    const id = typeof e.id === 'string' && e.id.trim() ? e.id.trim().slice(0, 60) : `m${i}`
+    if (ids.has(id)) throw new Error(`costManualEntries: duplicate id ${id}`)
+    ids.add(id)
+    const label = typeof e.label === 'string' ? e.label.trim().slice(0, 120) : ''
+    if (!label) throw new Error(`costManualEntries[${i}]: a name is required`)
+    const category = typeof e.category === 'string' && COST_CATEGORIES.includes(e.category) ? e.category : 'other'
+    const monthlyCents = e.monthlyCents
+    if (typeof monthlyCents !== 'number' || !Number.isInteger(monthlyCents) || monthlyCents < 0 || monthlyCents > 100_000_000) {
+      throw new Error(`costManualEntries[${i}]: monthly cost must be a whole number of cents, 0 or more`)
+    }
+    const month = (m: unknown, field: string): string | null => {
+      if (m == null || m === '') return null
+      if (typeof m !== 'string' || !MONTH_RE.test(m)) throw new Error(`costManualEntries[${i}].${field} must be YYYY-MM`)
+      return m
+    }
+    const startMonth = month(e.startMonth, 'startMonth')
+    const endMonth = month(e.endMonth, 'endMonth')
+    if (startMonth && endMonth && endMonth < startMonth) throw new Error(`costManualEntries[${i}]: end month is before start month`)
+    const note = typeof e.note === 'string' && e.note.trim() ? e.note.trim().slice(0, 300) : null
+    return { id, label, category, monthlyCents, startMonth, endMonth, note }
+  })
+}
+
 async function saveSettings(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
   const id = 'default'
   const existing = await getSettings()
@@ -2170,6 +2206,7 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
       return map
     }, 'divisionSalesReps'),
     progressSteps: keep(input.progressSteps, validateProgressSteps, 'progressSteps'),
+    costManualEntries: keep(input.costManualEntries, validateCostManualEntries, 'costManualEntries'),
     paymentTerms: keep(input.paymentTerms, (v) => validatePaymentTerms(v, { defaultPaymentTermsDays: defaultPaymentTermsDays as number | undefined }), 'paymentTerms'),
 
     updatedBy: caller.email,

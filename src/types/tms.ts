@@ -497,6 +497,8 @@ export interface TmsSettings {
   checkCallSkipWhenDriverActive?: boolean | null
   /** Which progress steps each revenue division shows, per variant (src/lib/progressSteps.ts). Null = the built-in defaults. */
   progressSteps?: Record<string, Record<string, Array<{ key: string; label: string; enabled: boolean }>>> | null
+  /** Settings > Cost to run: fixed monthly costs for services with no billing API (src/lib/costToRun.ts). */
+  costManualEntries?: import('@/lib/costToRun').CostManualEntry[] | null
   /** Who the customer page says to call. */
   trackingContact?: TrackingContact | null
   /** Body of the carrier ping text. Must contain `{url}`. */

@@ -198,7 +198,7 @@ vi.mock('@anthropic-ai/sdk', () => {
   return { default: Anthropic }
 })
 
-import { handler, parseInput, resolveViewColumns } from './handler'
+import { handler, parseInput, resolveViewColumns, validateCostManualEntries } from './handler'
 // The real signer: the token the geocode Lambda mints must verify here, byte for byte.
 import { signGeocodePayload } from '../tms-geocode/handler'
 import { SEED_DIVISIONS, SEED_RULES } from '../../../src/lib/ownership'
@@ -3865,5 +3865,24 @@ describe('customer delete / merge / restore — permissions', () => {
     const queries = (send.mock.calls as [{ __type: string; input: Record<string, unknown> }][]).filter(([c]) => c.__type === 'Query')
     expect(queries.some(([c]) => c.input.IndexName === 'shipmentsByCustomerIdAndPickupAppt')).toBe(true)
     vi.unstubAllEnvs()
+  })
+})
+
+// ── Settings > Cost to run: fixed monthly costs ───────────────────────────────
+describe('validateCostManualEntries', () => {
+  it('keeps a valid entry and normalises the optional fields', () => {
+    expect(validateCostManualEntries([{ id: 'gw', label: ' Google Workspace ', category: 'email', monthlyCents: 3000, startMonth: '2026-01' }]))
+      .toEqual([{ id: 'gw', label: 'Google Workspace', category: 'email', monthlyCents: 3000, startMonth: '2026-01', endMonth: null, note: null }])
+  })
+  it('clears with null and falls back to Other for an unknown category', () => {
+    expect(validateCostManualEntries(null)).toBeNull()
+    expect(validateCostManualEntries([{ id: 'x', label: 'X', category: 'nope', monthlyCents: 1 }])?.[0].category).toBe('other')
+  })
+  it('refuses a missing name, fractional cents, bad months and duplicate ids', () => {
+    expect(() => validateCostManualEntries([{ id: 'a', label: '', monthlyCents: 1 }])).toThrow(/name is required/)
+    expect(() => validateCostManualEntries([{ id: 'a', label: 'A', monthlyCents: 1.5 }])).toThrow(/whole number of cents/)
+    expect(() => validateCostManualEntries([{ id: 'a', label: 'A', monthlyCents: 1, startMonth: '2026-13' }])).toThrow(/YYYY-MM/)
+    expect(() => validateCostManualEntries([{ id: 'a', label: 'A', monthlyCents: 1, startMonth: '2026-05', endMonth: '2026-04' }])).toThrow(/before start/)
+    expect(() => validateCostManualEntries([{ id: 'a', label: 'A', monthlyCents: 1 }, { id: 'a', label: 'B', monthlyCents: 1 }])).toThrow(/duplicate/)
   })
 })
