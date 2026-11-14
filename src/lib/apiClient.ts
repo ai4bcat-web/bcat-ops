@@ -7723,7 +7723,7 @@ export interface AgingStatementResult {
   emailStatus?: string
   emailError?: string | null
   sentAt?: string | null
-  statement: { rows: number; totalCents: number; companyName: string; byBucket: Record<string, number> }
+  statement: { rows: number; totalCents: number; companyName: string; byBucket: Record<string, number>; factoredExcluded?: number }
 }
 
 /** Save edits into the existing invoice: re-read charges, replace hand adjustments, recompute, re-render (Rev N once sent). */

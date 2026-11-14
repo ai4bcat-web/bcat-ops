@@ -35,6 +35,8 @@ export interface AgingStatement {
   rows: StatementRow[]
   byBucket: Record<StatementBucket, number>
   totalCents: number
+  /** Open factored invoices left off: OTR owns and collects those, so the customer is never asked. */
+  factoredExcluded: number
 }
 
 /** The revenue division and subdivision behind an invoice, as the shipment carries them. */
@@ -45,13 +47,19 @@ export interface StatementShipmentLike {
 
 const OPEN: Record<string, true> = { ISSUED: true, PARTIAL: true }
 
+/** Billed through OTR: the customer pays the factor, so BCAT never asks them about it. */
+export function isFactoredInvoice(inv: Pick<InvoiceRecord, 'factored' | 'factoringItemId'>): boolean {
+  return Boolean(inv.factored || inv.factoringItemId)
+}
+
 export function buildAgingStatement(input: {
   customerName: string
   asOf: string
   invoices: InvoiceRecord[]
   shipmentsById: Map<string, StatementShipmentLike>
 }): AgingStatement {
-  const open = input.invoices.filter((inv) => OPEN[inv.status] && inv.balanceCents > 0)
+  const openAll = input.invoices.filter((inv) => OPEN[inv.status] && inv.balanceCents > 0)
+  const open = openAll.filter((inv) => !isFactoredInvoice(inv))
   const rows: StatementRow[] = open
     .map((inv) => ({
       invoiceNumber: inv.number,
@@ -78,7 +86,7 @@ export function buildAgingStatement(input: {
     return invoiceCompanyName(shipment?.revDivision, shipment?.revSubdivision)
   }))
   const companyName = names.size === 1 ? [...names][0] : 'BCAT Logistics Corporation'
-  return { customerName: input.customerName, asOf: input.asOf, companyName, rows, byBucket, totalCents }
+  return { customerName: input.customerName, asOf: input.asOf, companyName, rows, byBucket, totalCents, factoredExcluded: openAll.length - open.length }
 }
 
 /** Ryne's wording, exactly. */

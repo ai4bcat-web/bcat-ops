@@ -14,7 +14,7 @@ export function AgingStatementDialog({ customerId, customerName, onClose, onSent
   customerId: string
   customerName: string
   onClose: () => void
-  onSent: () => void
+  onSent: (result: AgingStatementResult) => void
 }) {
   const [preview, setPreview] = useState<AgingStatementResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -35,7 +35,7 @@ export function AgingStatementDialog({ customerId, customerName, onClose, onSent
       .then((row) => {
         if (row.emailStatus === 'SENT') {
           toast.success(`Aging report sent to ${row.to.join(', ')}`)
-          onSent()
+          onSent(row)
         } else {
           setError(row.emailError || `Not sent (${row.emailStatus ?? 'unknown'})`)
         }
@@ -65,7 +65,7 @@ export function AgingStatementDialog({ customerId, customerName, onClose, onSent
       {preview && (
         <dl className="grid gap-2 text-sm" style={{ gridTemplateColumns: 'max-content 1fr' }}>
           <dt className="tms-muted">To</dt>
-          <dd aria-label="Statement to">{preview.to.join(', ') || <span style={{ color: 'var(--tms-badge-red)' }}>No AP e-mail on file</span>}</dd>
+          <dd aria-label="Statement to">{preview.to.join(', ') || <span style={{ color: 'var(--tms-badge-red)' }}>Missing invoice e-mail — add one on the customer to send</span>}</dd>
           <dt className="tms-muted">CC</dt>
           <dd aria-label="Statement cc">{preview.cc.join(', ')}</dd>
           <dt className="tms-muted">Subject</dt>
@@ -80,6 +80,11 @@ export function AgingStatementDialog({ customerId, customerName, onClose, onSent
           <dt className="tms-muted">Body</dt>
           <dd aria-label="Statement body" style={{ whiteSpace: 'pre-wrap' }}>{preview.body}</dd>
         </dl>
+      )}
+      {preview && (preview.statement.factoredExcluded ?? 0) > 0 && (
+        <p className="text-xs tms-muted" data-testid="statement-factored-note">
+          {preview.statement.factoredExcluded} factored invoice{preview.statement.factoredExcluded === 1 ? ' is' : 's are'} left off: OTR collects those.
+        </p>
       )}
       {nothingOpen && <p className="text-xs tms-muted">Nothing is open for this customer.</p>}
       {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}

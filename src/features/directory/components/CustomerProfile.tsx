@@ -50,6 +50,7 @@ import { CreditLimitCard } from './CreditLimitCard'
 import { ReviewRequirementsField } from './ReviewRequirementsField'
 import { CustomerArTab } from './CustomerArTab'
 import { CustomerHistoryTab } from './CustomerHistoryTab'
+import { AgingStatementDialog } from '@/features/ar/components/AgingStatementDialog'
 import { changeNeedsReason, diffCustomer } from '@/lib/customerAudit'
 import { StatusActionDialog } from './StatusActionDialog'
 import { FlowDefaultsCard } from './FlowDefaultsCard'
@@ -167,6 +168,11 @@ export function CustomerProfile({
   ), [customer, settings, orders, shipments, loads, ar.invoices])
 
   const daysToPay = useMemo(() => customerDaysToPay(ar.invoices, ar.payments), [ar.invoices, ar.payments])
+  const [statementOpen, setStatementOpen] = useState(false)
+  // A send this session shows at once; the customer row catches up on the next load.
+  const [sentNow, setSentNow] = useState<{ at: string; to: string } | null>(null)
+  const lastStatementAt = sentNow?.at ?? customer.agingStatementSentAt ?? null
+  const lastStatementTo = sentNow?.to ?? customer.agingStatementSentTo ?? null
 
   const effectiveStatus = useMemo(
     () => effectiveCustomerStatus(customer, lastLoadAt, new Date().toISOString()),
@@ -345,6 +351,24 @@ export function CustomerProfile({
                   : <><strong>{daysToPay.averageDays} days</strong> on average, invoice date to paid date, across {daysToPay.count} paid invoice{daysToPay.count === 1 ? '' : 's'}.</>}
               </p>
             </TmsCard>
+            <TmsCard title="Aging statement">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm" data-testid="customer-last-statement">
+                  {lastStatementAt
+                    ? <>Last sent <strong>{new Date(lastStatementAt).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}</strong>{lastStatementTo ? <> to {lastStatementTo}</> : null}.</>
+                    : 'No aging statement sent yet.'}
+                </p>
+                <TmsButton size="sm" data-testid="customer-send-statement" onClick={() => setStatementOpen(true)}>Email aging report</TmsButton>
+              </div>
+            </TmsCard>
+            {statementOpen && (
+              <AgingStatementDialog
+                customerId={customer.id}
+                customerName={customer.name ?? customer.id}
+                onClose={() => setStatementOpen(false)}
+                onSent={(res) => { setStatementOpen(false); if (res.sentAt) setSentNow({ at: res.sentAt, to: res.to.join(', ') }) }}
+              />
+            )}
             <CreditLimitCard
               policy={creditSummary.policy}
               summary={creditSummary}
