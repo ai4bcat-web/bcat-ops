@@ -11,6 +11,7 @@
  * happen — a false "sent" here is a customer who never got their bill.
  */
 import { InvoiceEditDrawer } from './components/InvoiceEditDrawer'
+import { billsThroughOtr, ordersNeedingInvoice, unsentLabel } from './autoInvoice'
 import { ArSummaryStrip } from './ArSummaryStrip'
 import { computeArSummary, divisionKeyOf } from './arSummary'
 import { ageInvoices } from '@/lib/arAging'
@@ -26,7 +27,7 @@ import { BulkAgingStatementDialog, type BulkStatementCustomer } from './componen
 import { allApEmails } from '@/lib/billingMethod'
 import { useAuthUser } from '@/hooks/useAuth'
 import { isOwnerOrAdmin } from '@/lib/accountingAccess'
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Download, FileBarChart, Landmark, Mail } from 'lucide-react'
 import { toast } from 'sonner'
@@ -71,7 +72,6 @@ import {
   orderByGroup, type ArBilledBy, type ArGroupBy, type ArQueueLookups, type ArQueueRow, type ArQueueStatus,
 } from './arQueue'
 import { CreditMemoDialog } from './components/CreditMemoDialog'
-import { GenerateInvoiceDialog } from './components/GenerateInvoiceDialog'
 import { ReasonDialog } from './components/ReasonDialog'
 import { ReceivePaymentDialog } from './components/ReceivePaymentDialog'
 import { MarkPaidDialog } from './components/MarkPaidDialog'
@@ -98,7 +98,6 @@ type ArDialog =
   | { kind: 'review'; invoices: InvoiceRecord[] }
   | { kind: 'statement'; customerId: string; customerName: string }
   | { kind: 'bulkStatement'; customers: BulkStatementCustomer[] }
-  | { kind: 'generate'; orderId: string; shipmentNumber: string | null }
   | { kind: 'payment'; customerId: string; customerName: string; invoiceId?: string }
   | { kind: 'credit'; customerId: string; customerName: string }
   | { kind: 'factor'; invoiceId: string }
@@ -322,6 +321,15 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     }
   }, [unbilled.rows, open.invoices, paidInvoices, lookups, releasedByOrder, billedBy, factorByItemId, factoringItems, owed, asOf])
 
+  // Needs review's PRO opens the shipment's live (not void) invoice, newest first, when it has one.
+  const liveInvoiceByShipment = useMemo(() => {
+    const out = new Map<string, InvoiceRecord>()
+    const live = [...open.invoices, ...paidInvoices].filter((inv) => inv.status !== 'VOID')
+      .sort((a, b) => String(b.issuedAt ?? '').localeCompare(String(a.issuedAt ?? '')))
+    for (const inv of live) if (!out.has(inv.shipmentId)) out.set(inv.shipmentId, inv)
+    return out
+  }, [open.invoices, paidInvoices])
+
   // Paid date / ACH-check / ref # and days to pay, read for the customers on the Invoiced and Paid tabs.
   const [paymentsVersion, setPaymentsVersion] = useState(0)
   const factCustomerIds = useMemo(() => {
@@ -444,6 +452,45 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       .finally(() => setBusy(false))
   }
 
+  // Ready to invoice has no Generate button (Ryne 2026-11-14): a released load's missing invoice is made here,
+  // once per order per visit, and never sent. A refusal stays on its row with Retry.
+  const autoAttempted = useRef<Set<string>>(new Set())
+  const [autoErrors, setAutoErrors] = useState<ReadonlyMap<string, string>>(() => new Map())
+  const [autoRunning, setAutoRunning] = useState<ReadonlySet<string>>(() => new Set())
+  const refreshRef = useRef(refreshAll)
+  useEffect(() => { refreshRef.current = refreshAll })
+  const generateMissing = useCallback((orderIds: string[]) => {
+    if (orderIds.length === 0) return
+    for (const id of orderIds) autoAttempted.current.add(id)
+    const chunks: string[][] = []
+    for (let i = 0; i < orderIds.length; i += BATCH_GENERATE_LIMIT) chunks.push(orderIds.slice(i, i + BATCH_GENERATE_LIMIT))
+    void chunks.reduce<Promise<void>>((done, chunk) => done.then(() => batchGenerateInvoices({ orderIds: chunk }))
+      .then((answer) => {
+        setAutoErrors((prev) => {
+          const next = new Map(prev)
+          for (const r of answer?.results ?? []) {
+            if (r.invoiceId) next.delete(r.orderId)
+            else next.set(r.orderId, r.releaseGate && !r.releaseGate.ok ? r.releaseGate.missing.map((m) => m.message).join(' ') : r.error ?? 'Refused')
+          }
+          return next
+        })
+      })
+      .catch((e: unknown) => {
+        const message = graphqlErrorText(e) || 'The invoice could not be made'
+        setAutoErrors((prev) => new Map([...prev, ...chunk.map((id) => [id, message] as const)]))
+      }), Promise.resolve().then(() => setAutoRunning((prev) => new Set([...prev, ...orderIds]))))
+      .then(() => refreshRef.current())
+      .catch(() => undefined)
+      .finally(() => setAutoRunning((prev) => new Set([...prev].filter((id) => !orderIds.includes(id)))))
+  }, [])
+  useEffect(() => {
+    if (tab === 'ready' && canRelease) generateMissing(ordersNeedingInvoice(queue.READY, autoAttempted.current))
+  }, [tab, canRelease, queue.READY, generateMissing])
+  const retryInvoice = (orderId: string) => {
+    setAutoErrors((prev) => { const next = new Map(prev); next.delete(orderId); return next })
+    generateMissing([orderId])
+  }
+
 
 
   const runVoid = (invoice: InvoiceRecord, reason: string) => {
@@ -543,7 +590,9 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       paidLoading,
       onMonth: (ym: string) => { setPaidLoading(true); setMonth(ym) },
       onSelect: setSelected,
-      onGenerate: (row) => setDialog({ kind: 'generate', orderId: row.orderId, shipmentNumber: row.shipmentNumber }),
+      invoiceErrors: autoErrors,
+      invoicesRunning: autoRunning,
+      onRetryInvoice: retryInvoice,
       onBatchGenerate: runBatchGenerate,
       factorReadiness,
       onBatchFactor: (rows) => setDialog({ kind: 'batchFactor', rows }),
@@ -643,7 +692,11 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           bottom={<TmsTabStrip aria-label="Invoicing status" tabs={tabs} active={tab} onSelect={(key) => { setSelected([]); setTab(key as ArPageTab) }} />}
         />
         {tab === 'review' ? (
-          <NeedsReviewList side="AR" rows={needsReview.rows} error={needsReview.error} onCleared={needsReview.refresh} />
+          <NeedsReviewList
+            side="AR" rows={needsReview.rows} error={needsReview.error} onCleared={needsReview.refresh}
+            invoiceFor={(shipmentId) => liveInvoiceByShipment.get(shipmentId)}
+            onOpenInvoice={(inv) => setDialog({ kind: 'edit', invoice: inv })}
+          />
         ) : (
           <>
             {current.banner}
@@ -653,14 +706,6 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       </div>
 
       {reportsOpen && <AccountingReportsDialog side="AR" asOf={asOf} initialKind={reportsOpen === 'menu' ? null : reportsOpen} onClose={() => setReportsOpen(null)} />}
-      {dialog?.kind === 'generate' && (
-        <GenerateInvoiceDialog
-          orderId={dialog.orderId}
-          busy={busy}
-          onClose={() => setDialog(null)}
-          onDone={() => closeAndRefresh()}
-        />
-      )}
       {dialog?.kind === 'payment' && (
         <ReceivePaymentDialog
           customerId={dialog.customerId}
@@ -863,7 +908,7 @@ function dateCol<T>(key: string, header: string, of: (row: T) => string | null, 
 
 function queueView({
   status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, factorByItemId, customerById,
-  attachmentPlans, boardById, shipmentsById, months, month, paidLoading, onMonth, onSelect, onGenerate, onBatchGenerate, onReview, onEdit,
+  attachmentPlans, boardById, shipmentsById, months, month, paidLoading, onMonth, onSelect, invoiceErrors, invoicesRunning, onRetryInvoice, onBatchGenerate, onReview, onEdit,
   onMarkPaid, onStatement, paymentFacts,
   factorReadiness, onBatchFactor,
 }: {
@@ -886,7 +931,11 @@ function queueView({
   paidLoading: boolean
   onMonth: (ym: string) => void
   onSelect: (ids: string[]) => void
-  onGenerate: (row: ArQueueRow) => void
+  /** Ready to invoice: why an order's invoice could not be made (shown with Retry), by order id. */
+  invoiceErrors?: ReadonlyMap<string, string>
+  /** Ready to invoice: orders whose invoice is being made right now. */
+  invoicesRunning?: ReadonlySet<string>
+  onRetryInvoice?: (orderId: string) => void
   onBatchGenerate: () => void
   /** Ready to factor per row key (Ready to invoice only). */
   factorReadiness?: Map<string, FactorReadiness>
@@ -910,8 +959,10 @@ function queueView({
     const lines = row.invoiceId ? paymentFacts.linesByInvoice.get(row.invoiceId) ?? [] : []
     return lines.map((l) => `${formatDay(l.receivedOn)} · ${l.method ? PAYMENT_METHOD_LABEL[l.method] ?? l.method : 'Write-off'}${l.reference ? ` #${l.reference}` : ''} · ${formatCents(l.amountCents)}`).join('\n')
   }
+  // A factored row is never e-mailed (Ryne 2026-11-14): it goes through the OTR queue instead.
+  const throughOtr = (row: ArQueueRow) => billsThroughOtr(row, row.customerId ? customerById.get(row.customerId) : undefined)
   const sentText = (row: ArQueueRow) =>
-    row.sentAt ? `${formatDay(row.sentAt)}${row.sentTo ? ` → ${row.sentTo}` : ''}` : row.invoiceId ? 'Not sent' : '—'
+    row.sentAt ? `${formatDay(row.sentAt)}${row.sentTo ? ` → ${row.sentTo}` : ''}` : unsentLabel(row, throughOtr(row))
   const pastDueText = (row: ArQueueRow) =>
     row.dueAt && invoiced ? agingChipFor(row.dueAt, asOf).label : '—'
   // Who the invoice is (or will be) e-mailed to: the customer's AP addresses, and the copy list.
@@ -1093,12 +1144,17 @@ function queueView({
         if (row.status === 'READY' && row.reasons.length > 0) {
           return <span className="flex items-center gap-1"><TmsBadge tone="red">Blocked</TmsBadge><span style={{ color: 'var(--tms-badge-red)' }}>{row.reasons.join('; ')}</span></span>
         }
-        if (row.status === 'READY' && row.invoiceId) return <TmsBadge tone="orange">Draft — not sent</TmsBadge>
+        if (row.status === 'READY' && row.invoiceId) {
+          return throughOtr(row)
+            ? <TmsBadge tone="blue" title="Factored: batch Factor sends it to OTR; no e-mail">Factor next</TmsBadge>
+            : <TmsBadge tone="orange">Draft — not sent</TmsBadge>
+        }
         return <TmsBadge tone={row.status === 'PAID' ? 'green' : row.status === 'INVOICED' ? 'blue' : 'gray'}>{AR_QUEUE_STATUS_LABEL[row.status]}</TmsBadge>
       case 'sent':
         if (!row.invoiceId) return <span className="tms-muted">—</span>
-        return row.sentAt
-          ? <span title={row.sentTo ?? undefined}>✓ {formatDay(row.sentAt)}{row.sentCount > 1 ? ` (${row.sentCount}×)` : ''}</span>
+        if (row.sentAt) return <span title={row.sentTo ?? undefined}>✓ {formatDay(row.sentAt)}{row.sentCount > 1 ? ` (${row.sentCount}×)` : ''}</span>
+        return throughOtr(row)
+          ? <TmsBadge tone="gray" title="Factored invoices are not e-mailed; OTR gets them through the queue">{unsentLabel(row, true)}</TmsBadge>
           : <TmsBadge tone="orange">Not sent</TmsBadge>
       case 'pastDue': {
         if (!invoiced || !row.dueAt) return <span className="tms-muted">—</span>
@@ -1135,15 +1191,25 @@ function queueView({
         return <span title={names} style={plan.tooBig ? { color: 'var(--tms-badge-red)' } : undefined}>{plan.count}{plan.tooBig ? ' (over 10 MB)' : ''}</span>
       }
       case 'actions': {
-        // Sending, payments, factoring and void live in the invoice drawer; the row only opens it (or generates a missing invoice).
+        // Sending, payments, factoring and void live in the invoice drawer; the row only opens it. Ready to invoice
+        // makes a missing invoice by itself (Ryne 2026-11-14): no Generate button, only Retry when that failed.
         const inv = row.invoice
         if (ready && !inv) {
-          return (
-            <TmsButton size="sm" aria-label={`Generate invoice for ${row.shipmentNumber ?? row.orderId}`}
-              disabled={busy || row.reasons.length > 0 || !canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => onGenerate(row)}>
-              Generate
-            </TmsButton>
-          )
+          if (row.orderId.startsWith('factor:')) return null
+          const error = invoiceErrors?.get(row.orderId)
+          if (error) {
+            return (
+              <span className="flex items-center justify-end gap-1">
+                <TmsBadge tone="red" title={error}>Invoice not made</TmsBadge>
+                <TmsButton size="sm" aria-label={`Retry the invoice for ${row.shipmentNumber ?? row.orderId}`}
+                  disabled={busy || !canRelease} title={canRelease ? error : BILLING_GRANT_MESSAGE} onClick={() => onRetryInvoice?.(row.orderId)}>
+                  Retry
+                </TmsButton>
+              </span>
+            )
+          }
+          if (row.reasons.length > 0) return <span className="tms-muted text-xs" title={row.reasons.join('\n')}>Not ready</span>
+          return <span className="tms-muted text-xs" title={canRelease ? undefined : BILLING_GRANT_MESSAGE}>{invoicesRunning?.has(row.orderId) || canRelease ? 'Making invoice…' : 'Invoice pending'}</span>
         }
         if (!inv) return null
         return (
@@ -1161,7 +1227,8 @@ function queueView({
   }
 
   // Drafts (auto-generated, not sent) ticked in Ready to invoice: the review carousel's batch.
-  const selectedDrafts = rows.filter((row) => row.invoice && selected.includes(row.orderId)).map((row) => row.invoice as InvoiceRecord)
+  // Factored drafts are never e-mailed: their next step is batch Factor (Ryne 2026-11-14).
+  const selectedDrafts = rows.filter((row) => row.invoice && !throughOtr(row) && selected.includes(row.orderId)).map((row) => row.invoice as InvoiceRecord)
   const actions = (
     <>
       {groupControl}
@@ -1236,7 +1303,7 @@ function queueView({
         { label: 'Open balance', value: formatCents(totals.balanceCents) },
         { label: 'Past due', value: rows.filter((r) => (r.daysPastDue ?? 0) > 0).length, tone: 'bad' as const },
         { label: 'Short paid', value: rows.filter((r) => r.shortPaid).length, tone: 'warn' as const },
-        { label: 'Not sent', value: rows.filter((r) => !r.sentAt).length, tone: 'warn' as const },
+        { label: 'Not sent', value: rows.filter((r) => !r.sentAt && !throughOtr(r)).length, tone: 'warn' as const },
       ]
       : []),
     ...(ready ? [{ label: 'Blocked', value: rows.filter((r) => r.reasons.length > 0).length, tone: 'warn' as const }] : []),
