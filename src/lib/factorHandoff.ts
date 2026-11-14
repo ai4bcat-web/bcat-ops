@@ -30,7 +30,7 @@ import type {
   OrderRecord,
   ShipmentRecord,
 } from '../types/tms'
-import { stopPlace, type StopPlaceStop } from './stopPlace'
+import { stopPlace, stopsList, type StopPlaceStop } from './stopPlace'
 
 /**
  * The slice of a Load this module needs. `aljexId` is the PRO: a shipment-born load
@@ -100,8 +100,8 @@ export function placeOf(stop: Stop | undefined): Place {
 }
 
 /** Stops of one type, in route order. */
-export function ordered(stops: Stop[] | null | undefined, type: Stop['type']): Stop[] {
-  return (stops ?? [])
+export function ordered(stops: Stop[] | string | null | undefined, type: Stop['type']): Stop[] {
+  return stopsList<Stop>(stops)
     .filter((s) => s.type === type)
     .slice()
     .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))

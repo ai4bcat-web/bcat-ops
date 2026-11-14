@@ -98,6 +98,7 @@ import type {
   TmsSettings,
 } from '../../../src/types/tms'
 import type { Stop } from '../../../src/types'
+import { stopsList } from '../../../src/lib/stopPlace'
 
 /**
  * What this module needs from the router: the shipment store it already built,
@@ -1370,7 +1371,7 @@ function factorReviewReasons(bundle: Bundle, order: Row, customer: Row | null): 
   for (const load of bundle.loads) {
     if (load.voidedAt || load.deletedAt) continue
     if (load.orderId != null && orderId && String(load.orderId) !== orderId) continue
-    for (const stop of (Array.isArray(load.stops) ? load.stops : []) as Stop[]) stops.push(stop)
+    for (const stop of stopsList<Stop>(load.stops)) stops.push(stop)
   }
   const gaps = factorGapsForLoad({
     customer: customer as unknown as FactorReadyInput['customer'],
