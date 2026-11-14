@@ -136,7 +136,8 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
   if (fp < 0) push('picks', 'pickup', LABEL.picks.insertPick.testId, 'Pick Up', 'A shipment needs at least one pick up.', strictRed ? 'error' : 'warn')
   if (ld < 0) push('picks', 'delivery', LABEL.picks.insertStop.testId, 'Consignee', 'A shipment needs at least one delivery.', submit ? 'error' : 'warn')
   if (fp >= 0 && empty(values.stops[fp].name)) red('pickup', 'name', LABEL.pickup.name, 'Pick Up needs a name.')
-  if (fp >= 0 && empty(values.stops[fp].ready) && empty(values.stops[fp].appt)) red('pickup', 'ready', LABEL.pickup.ready, 'Pick Up needs a Ready date and time.')
+  // The appointment (or FCFS window) is the date a person types; Ready copies it (readyDefault.ts), and a Ready typed on its own still counts.
+  if (fp >= 0 && empty(values.stops[fp].ready) && empty(values.stops[fp].appt)) red('pickup', 'appt', LABEL.pickup.appt, 'Pick Up needs an appointment date and time.')
   if (submit && ld >= 0 && empty(values.stops[ld].name)) push('consignee', 'name', 'f-consignee-name', LABEL.stop.name.text, 'Consignee needs a name before Submit.')
 
   // Stop format rules (intakeProblems): city + two-letter state, zip 5/9, chronological.

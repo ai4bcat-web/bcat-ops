@@ -70,7 +70,9 @@ export function toStop(s: FormStop, index: number, role: 'first-pickup' | 'last-
   // (an end another screen set rides along untouched).
   out.apptType = apptIso ? (s.fcfs ? 'fcfs' : 'exact') : 'tbd'
   out.apptEnd = (apptIso && toIso(s.apptEnd)) || null
-  if (readyIso) out.requestedStart = readyIso
+  // A pickup saved with no Ready is ready at its appointment (readyDefault.ts).
+  const requestedStart = readyIso ?? (s.type === 'pickup' ? apptIso : undefined)
+  if (requestedStart) out.requestedStart = requestedStart
   if (mustIso) out.requestedEnd = mustIso
   if (hasContact) out.contact = contact
   if (s.note.trim()) out.instructions = s.note.trim()

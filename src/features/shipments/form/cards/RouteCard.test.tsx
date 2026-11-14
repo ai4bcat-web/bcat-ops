@@ -153,10 +153,11 @@ describe('RouteCard', () => {
     expect(host.current!.getValues().stops[0].name).toBe('Nowhere Ltd')
   })
 
-  it('Pick Up Name and Ready are the red fields; the consignee has Must Deliver instead of Ready', () => {
+  it('Pick Up Name and Appt are the red fields (Ready follows Appt); the consignee has Must Deliver instead of Ready', () => {
     setup()
     expect(screen.getByLabelText('Name (required)')).toBeTruthy()
-    expect(screen.getByLabelText('Ready (required)')).toBeTruthy()
+    expect(screen.getByLabelText('Appt (required)')).toBeTruthy()
+    expect(screen.queryByLabelText('Ready (required)')).toBeNull()
     expect(screen.getByTestId('f-consignee-mustDeliver')).toBeTruthy()
     expect(screen.queryByTestId('f-consignee-ready')).toBeNull()
   })
@@ -176,6 +177,20 @@ describe('RouteCard', () => {
     })
     expect((screen.getByTestId('f-route-remove-1') as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByTestId('f-stop-1-name') as HTMLInputElement).disabled).toBe(true)
+  })
+
+  it('Ready follows the appointment until it is typed on its own', () => {
+    const host = setup((v) => ({ ...v, stops: [{ ...v.stops[0], ready: '', appt: '' }, v.stops[1]] }))
+    fireEvent.change(screen.getByTestId('f-pickup-appt'), { target: { value: '11/13/2026' } })
+    fireEvent.change(screen.getByTestId('f-pickup-appt-time'), { target: { value: '0700' } })
+    expect(host.current!.getValues().stops[0]).toMatchObject({ appt: '2026-11-13T07:00', ready: '2026-11-13T07:00' })
+    // Moving the appointment moves a Ready that still matches it.
+    fireEvent.change(screen.getByTestId('f-pickup-appt-time'), { target: { value: '0900' } })
+    expect(host.current!.getValues().stops[0]).toMatchObject({ appt: '2026-11-13T09:00', ready: '2026-11-13T09:00' })
+    // A Ready typed by hand stays put.
+    fireEvent.change(screen.getByTestId('f-pickup-ready-time'), { target: { value: '0600' } })
+    fireEvent.change(screen.getByTestId('f-pickup-appt-time'), { target: { value: '1000' } })
+    expect(host.current!.getValues().stops[0]).toMatchObject({ appt: '2026-11-13T10:00', ready: '2026-11-13T06:00' })
   })
 
   it('typed 24-hour times, no picker; FCFS takes a From–To window prefilled from the hours', () => {

@@ -2543,6 +2543,20 @@ describe('UPDATE_STOP', () => {
     expect(stops.map((x) => x.appt)).toEqual(['2026-11-16T15:00:00.000Z', '2026-11-16T16:00:00.000Z'])
   })
 
+  it('a pickup saved with no Ready is ready at its appointment, and Ready follows a moved appointment until set on its own (Ryne 2026-11-14)', async () => {
+    const { loadId } = await draftWithStops()
+    const at = () => table(TABLES.load).get(loadId)!.updatedAt
+    const stops = () => JSON.parse(String(table(TABLES.load).get(loadId)!.stops)) as Row[]
+    const pu = () => stops().find((x) => x.id === 'stp-pu')!
+    expect(pu().requestedStart).toBe(pu().appt)
+    expect(stops().find((x) => x.id === 'stp-de')!.requestedStart ?? null).toBeNull()
+    await call('UPDATE_STOP', { loadId, expectedUpdatedAt: at(), op: 'SET_APPT', stopId: 'stp-pu', patch: { appt: '2026-03-02T15:00:00.000Z', apptType: 'exact' } })
+    expect(pu()).toMatchObject({ appt: '2026-03-02T15:00:00.000Z', requestedStart: '2026-03-02T15:00:00.000Z' })
+    await call('UPDATE_STOP', { loadId, expectedUpdatedAt: at(), op: 'SET_REQUESTED', stopId: 'stp-pu', patch: { requestedStart: '2026-03-02T11:00:00.000Z' } })
+    await call('UPDATE_STOP', { loadId, expectedUpdatedAt: at(), op: 'SET_APPT', stopId: 'stp-pu', patch: { appt: '2026-03-02T16:00:00.000Z', apptType: 'exact' } })
+    expect(pu()).toMatchObject({ appt: '2026-03-02T16:00:00.000Z', requestedStart: '2026-03-02T11:00:00.000Z' })
+  })
+
   it('ops: an out-of-order result is still refused, and nothing from the batch is written', async () => {
     const { loadId } = await draftWithStops()
     const before = table(TABLES.load).get(loadId)!.stops

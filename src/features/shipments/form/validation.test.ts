@@ -26,7 +26,7 @@ describe('required fields by action', () => {
       expect.arrayContaining(['Name', 'Equipment', 'Division', 'Weight', 'Description']))
     const labels = new Set(issues.map((i) => `${i.section}:${i.label}`))
     expect(labels).toContain('pickup:Name')
-    expect(labels).toContain('pickup:Ready')
+    expect(labels).toContain('pickup:Appt')
     expect(issues).toHaveLength(8)
     expect(issueSummary(all)).toMatch(/^15 required fields missing — /)
   })

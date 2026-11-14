@@ -80,6 +80,13 @@ describe('stops', () => {
     expect(last.requestedEnd).toBeDefined()
     expect(last.instructions).toBe('Dock 9')
   })
+  it('a pickup saved with no Ready is ready at its appointment; a delivery gets no Ready', () => {
+    const v = filledValues()
+    v.stops[0].ready = ''
+    const stops = toStops(v)
+    expect(stops[0].requestedStart).toBe(stops[0].appt)
+    expect(stops[stops.length - 1].requestedStart).toBeUndefined()
+  })
   it('a second pick keeps its ref on the stop, the first pickup on the order', () => {
     const v = filledValues()
     const stops = toStops(v)

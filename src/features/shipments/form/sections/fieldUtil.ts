@@ -53,7 +53,7 @@ export type StopKey = keyof typeof LABEL.stop
 
 /** Label + test id of one stop control. Pick Up Name / Ready use the red `LABEL.pickup` defs. */
 export function stopDef(prefix: string, key: StopKey, required: boolean): LabelDef {
-  if (required && (key === 'name' || key === 'ready')) return { ...LABEL.pickup[key], testId: `f-${prefix}-${key}` }
+  if (required && (key === 'name' || key === 'ready' || key === 'appt')) return { ...LABEL.pickup[key], testId: `f-${prefix}-${key}` }
   return { ...LABEL.stop[key], testId: `f-${prefix}-${key}` }
 }
 
