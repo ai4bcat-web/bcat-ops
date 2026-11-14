@@ -12,6 +12,7 @@ import { financeAction, setDeliveredDate, type FinanceReviewShipment } from '@/l
 import { errorText } from '@/lib/errorText'
 import { formatDateShort } from '@/lib/date'
 import { shipmentEditorPath } from '@/lib/shipmentLinks'
+import type { InvoiceRecord } from '@/types/tms'
 
 interface Props {
   rows: FinanceReviewShipment[]
@@ -19,9 +20,15 @@ interface Props {
   /** AP page: also show the carrier note (carrier pay is internal to AP). */
   side: 'AR' | 'AP'
   onCleared: () => void
+  /**
+   * AR page (Ryne 2026-11-14): the PRO opens that shipment's invoice when it has one, like every other AR tab.
+   * A flagged load with no invoice yet keeps the link to the shipment, where the fix is made.
+   */
+  invoiceFor?: (shipmentId: string) => InvoiceRecord | undefined
+  onOpenInvoice?: (invoice: InvoiceRecord) => void
 }
 
-export function NeedsReviewList({ rows, error, side, onCleared }: Props) {
+export function NeedsReviewList({ rows, error, side, onCleared, invoiceFor, onOpenInvoice }: Props) {
   const [busy, setBusy] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const shown = useMemo(() => {
@@ -71,7 +78,17 @@ export function NeedsReviewList({ rows, error, side, onCleared }: Props) {
     )
   }
   const columns: ColumnDef<FinanceReviewShipment>[] = [
-    { key: 'pro', header: 'PRO', render: (row) => <Link to={shipmentEditorPath(row.id)}>{row.number ?? row.id}</Link>, text: (row) => String(row.number ?? '') },
+    {
+      key: 'pro',
+      header: 'PRO',
+      render: (row) => {
+        const invoice = invoiceFor?.(row.id)
+        return invoice && onOpenInvoice
+          ? <button type="button" className="tms-link" aria-label={`Open invoice for PRO ${row.number ?? row.id}`} onClick={() => onOpenInvoice(invoice)}>{row.number ?? row.id}</button>
+          : <Link to={shipmentEditorPath(row.id)}>{row.number ?? row.id}</Link>
+      },
+      text: (row) => String(row.number ?? ''),
+    },
     { key: 'customer', header: 'Customer', render: (row) => row.customerName ?? '—', text: (row) => row.customerName ?? '' },
     { key: 'reason', header: 'Reason', render: (row) => row.financeReviewReason ?? '—', text: (row) => row.financeReviewReason ?? '' },
     ...(side === 'AP'

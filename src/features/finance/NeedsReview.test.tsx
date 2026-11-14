@@ -65,4 +65,19 @@ describe('NeedsReviewList', () => {
   it('lists the oldest flag first', () => {
     expect(sortReview(rows).map((r) => r.number)).toEqual(['13823', '14433'])
   })
+
+  // Ryne 2026-11-14: on AR, the PRO opens the invoice when there is one; no invoice keeps the shipment link.
+  it('opens the invoice from the PRO when the shipment has one, else links the shipment', () => {
+    const invoice = { id: 'inv-9', shipmentId: 'shp-2', number: '14433' } as never
+    const onOpenInvoice = vi.fn()
+    render(
+      <MemoryRouter>
+        <NeedsReviewList side="AR" rows={rows} error={null} onCleared={() => {}}
+          invoiceFor={(id) => (id === 'shp-2' ? invoice : undefined)} onOpenInvoice={onOpenInvoice} />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Open invoice for PRO 14433' }))
+    expect(onOpenInvoice).toHaveBeenCalledWith(invoice)
+    expect(screen.getByRole('link', { name: '13823' })).toBeTruthy()
+  })
 })

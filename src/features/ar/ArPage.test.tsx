@@ -261,7 +261,7 @@ describe('the AR board', () => {
    * A row that is not billable has to say so where the decision is made. Hiding the
    * refusal behind the dialog means opening every row to find the two that are stuck.
    */
-  it('refuses to generate an order that is not ready, and says why', async () => {
+  it('does not try to invoice an order that is not ready, and says why', async () => {
     await setup({
       UNBILLED: [worklistRow({
         docsReady: false,
@@ -271,25 +271,45 @@ describe('the AR board', () => {
     })
 
     expect(screen.getByText('The POD has not been accepted yet.')).toBeTruthy()
-    const generate = screen.getByRole('button', { name: 'Generate invoice for S-1001' })
-    expect((generate as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByRole('button', { name: /Generate invoice for/ })).toBeNull()
+    expect(apiClient.batchGenerateInvoices).not.toHaveBeenCalled()
     const select = screen.getByRole('checkbox', { name: 'Select S-1001' })
     expect((select as HTMLInputElement).disabled).toBe(true)
   })
 
+  // Ryne 2026-11-14: no Generate button; a released order's invoice is made by itself (never sent).
   // Posting is an action on the Invoicing page: its grant opens it (Ryne 2026-11-12), the broad tms grant does not.
   it.each([
-    ['tms-only', ['page-tms', 'page-loads'], true],
-    ['page-invoicing', ['page-invoicing'], false],
-    ['ADMIN', ['ADMIN'], false],
-    ['page-billingRelease', ['page-billingRelease'], false],
-  ])('Generate and Batch generate are %s-gated: disabled=%s', async (_label, groups, disabled) => {
+    ['tms-only', ['page-tms', 'page-loads'], false],
+    ['page-invoicing', ['page-invoicing'], true],
+    ['ADMIN', ['ADMIN'], true],
+    ['page-billingRelease', ['page-billingRelease'], true],
+  ])('Ready to invoice makes the missing invoice by itself for %s: called=%s', async (_label, groups, called) => {
     authGroups.current = groups
+    ;(apiClient.batchGenerateInvoices as Mock).mockResolvedValue({ results: [{ orderId: 'o1', invoiceId: 'inv-1' }] })
     await setup({ UNBILLED: [worklistRow()] })
-    const generate = screen.getByRole('button', { name: 'Generate invoice for S-1001' }) as HTMLButtonElement
+    await settle()
+    expect(screen.queryByRole('button', { name: /Generate invoice for/ })).toBeNull()
+    if (called) expect(apiClient.batchGenerateInvoices).toHaveBeenCalledWith({ orderIds: ['o1'] })
+    else expect(apiClient.batchGenerateInvoices).not.toHaveBeenCalled()
+    // Generating never sends.
+    expect(apiClient.batchEmailInvoices).not.toHaveBeenCalled()
     const batch = screen.getByRole('button', { name: 'Batch generate invoices' }) as HTMLButtonElement
-    expect(generate.disabled).toBe(disabled)
-    expect(batch.title === '').toBe(!disabled)
+    expect(batch.title === '').toBe(called)
+    authGroups.current = []
+  })
+
+  it('shows a refused invoice on its row with Retry, and Retry asks once more', async () => {
+    authGroups.current = ['ADMIN']
+    ;(apiClient.batchGenerateInvoices as Mock).mockResolvedValue({ results: [{ orderId: 'o1', error: 'The customer has no billing method' }] })
+    await setup({ UNBILLED: [worklistRow()] })
+    await settle()
+    expect(apiClient.batchGenerateInvoices).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('Invoice not made')).toBeTruthy()
+    ;(apiClient.batchGenerateInvoices as Mock).mockResolvedValue({ results: [{ orderId: 'o1', invoiceId: 'inv-1' }] })
+    fireEvent.click(screen.getByRole('button', { name: 'Retry the invoice for S-1001' }))
+    await settle()
+    expect(apiClient.batchGenerateInvoices).toHaveBeenCalledTimes(2)
     authGroups.current = []
   })
 
