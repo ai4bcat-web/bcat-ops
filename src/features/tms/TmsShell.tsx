@@ -514,6 +514,18 @@ export function TmsShell({
     return () => window.removeEventListener('keydown', onKey)
   }, [navOpen, setNavOpen])
 
+  // On a phone the tab strip is one row that scrolls sideways (responsive.css): bring the lit tab into view. A no-op on a desktop,
+  // where the strip wraps and never overflows.
+  const topbarRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const list = topbarRef.current?.querySelector<HTMLElement>('.tms-lifecycle-list')
+    const tab = list?.querySelector<HTMLElement>('.tms-lifecycle-tab.tms-active')
+    if (!list || !tab || list.scrollWidth <= list.clientWidth) return
+    const lr = list.getBoundingClientRect()
+    const tr = tab.getBoundingClientRect()
+    list.scrollLeft += tr.left - lr.left - (list.clientWidth - tr.width) / 2
+  }, [activePath, activeSearch])
+
   const handleQuery = useCallback(
     (value: string) => {
       setQuery(value)
@@ -595,7 +607,7 @@ export function TmsShell({
       </aside>
 
       <div className="tms-content">
-        <header className="tms-topbar">
+        <header className="tms-topbar" ref={topbarRef}>
           <button
             ref={menuBtnRef}
             type="button"
