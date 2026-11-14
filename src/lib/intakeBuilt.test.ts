@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { builtMatchesFor, keyTokens, needsBuiltCheck, normRef, refCandidates, storedBuiltMatches, subjectTokens, type BuiltShipment } from './intakeBuilt'
+import { autoLinkTarget, builtMatchesFor, keyTokens, needsBuiltCheck, normRef, refCandidates, storedBuiltMatches, subjectTokens, type BuiltShipment } from './intakeBuilt'
 import { NOT_DUPLICATE_TOKEN } from './intakeDup'
 import type { IntakeLoadRecord } from '../types/intake'
 
@@ -99,5 +99,15 @@ describe('the answer staging stored on the row', () => {
     expect(storedBuiltMatches(row({ reference: '573570079', alreadyBuilt: [{ number: '1' }] as never, alreadyBuiltCheckedAt: at }))).toBeNull()
     expect(storedBuiltMatches(row({ reference: '573570079', alreadyBuilt: stored, alreadyBuiltCheckedAt: at, confirmed: [NOT_DUPLICATE_TOKEN] }))).toBeNull()
     expect(storedBuiltMatches(row({ reference: '573570079', alreadyBuilt: stored, alreadyBuiltCheckedAt: at, shipmentId: 'sh-9' }))).toBeNull()
+  })
+})
+
+describe('autoLinkTarget', () => {
+  const m = (shipmentId: string, source: 'reference' | 'subject') => ({ shipmentId, number: shipmentId, customerName: null, value: '15810', source })
+  it('is the one shipment matched on a parsed reference, and nothing otherwise', () => {
+    expect(autoLinkTarget([m('a', 'reference')])?.shipmentId).toBe('a')
+    expect(autoLinkTarget([m('a', 'subject')])).toBeNull()
+    expect(autoLinkTarget([m('a', 'reference'), m('b', 'reference')])).toBeNull()
+    expect(autoLinkTarget([])).toBeNull()
   })
 })

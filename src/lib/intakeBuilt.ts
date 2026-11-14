@@ -141,3 +141,13 @@ export function storedBuiltMatches(row: Pick<IntakeLoadRecord, 'status' | 'shipm
   }
   return out
 }
+
+/**
+ * The one shipment an open row can be tied to without asking anyone: every match is that single shipment, and it matched on a parsed
+ * reference (the reference, pickup or delivery number), never only on a word of the subject. `builtMatchesFor` has already left out
+ * rows marked "not a duplicate", deleted or moved rows, voided shipments and shipments of another customer. Anything else stays a flag.
+ */
+export function autoLinkTarget(matches: readonly BuiltMatch[]): BuiltMatch | null {
+  if (matches.length !== 1) return null
+  return matches[0].source === 'reference' ? matches[0] : null
+}

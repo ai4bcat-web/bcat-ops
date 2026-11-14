@@ -37,7 +37,7 @@ import { intakeCounts } from '@/lib/intakeLoad'
 import { isDeletedIntake } from '@/lib/intakeDup'
 import { duplicateGroups } from '@/lib/intakeDuplicates'
 import { DeleteIntakeDialog, IntakeItemDialog, IntakeRowFlags } from './DuplicateParts'
-import { useBuiltMatches } from './useBuiltMatches'
+import { useAutolinkBuilt, useBuiltMatches } from './useBuiltMatches'
 import type { IntakeLoadRecord } from '@/types/intake'
 import {
   ALL_GROUP,
@@ -47,6 +47,7 @@ import {
   parseView,
   resolveGroup,
   rowInGroup,
+  withDivisionColumn,
   type IntakeView,
 } from './intakeGroups'
 import { useIntakeLoads } from './useIntakeLoads'
@@ -71,7 +72,11 @@ function rememberView(key: string, view: IntakeView): void {
   }
 }
 
-const DEFAULT_COLUMNS = ['received', 'from', 'customer', 'reference', 'route', 'completeness', 'source']
+const DEFAULT_COLUMNS = ['received', 'from', 'customer', 'division', 'reference', 'route', 'completeness', 'source']
+
+function divisionColumnAddedKey(email: string | null | undefined): string {
+  return `tms:intake:division-column-added:${email ?? 'anon'}`
+}
 
 function reviewText(row: IntakeLoadRecord): string {
   if (row.reviewedAt && row.reviewedBy) return 'Reviewed'
@@ -161,6 +166,15 @@ export function IntakeBoard() {
   // Rows an admin deleted are out of every tab; duplicates are found among the open queue.
   const dups = useMemo(() => duplicateGroups(open.rows), [open.rows])
   const { matches: built } = useBuiltMatches(open.rows)
+  // A row whose reference already belongs to exactly one built shipment is tied to it and leaves the queue (the server checks again).
+  useAutolinkBuilt(built, open.refresh)
+  const divisionName = useMemo(() => {
+    const names = new Map(flattenDivisions(divisions ?? []).map((r) => [r.division.code, r.division.name]))
+    return (r: IntakeLoadRecord) => {
+      const code = r.fields.divisionCode ?? r.divisionCode
+      return code ? (names.get(code) ?? code) : '—'
+    }
+  }, [divisions])
   const rows = open.rows.filter((r) => !isDeletedIntake(r) && rowInGroup(r, view, selected, activeCodes))
   const missingAddress = activeDivisions.filter((d) => !d.intakeEmail)
 
@@ -190,6 +204,7 @@ export function IntakeBoard() {
         sortValue: (r) => r.fromName || r.fromEmail,
       },
       { key: 'customer', header: 'Customer', group: 'Order', text: (r) => r.fields.customerName ?? '—', filter: 'multi', optionsOf: (r) => (r.fields.customerName ? [{ value: r.fields.customerName, label: r.fields.customerName }] : []) },
+      { key: 'division', header: 'Rev division', group: 'Order', text: divisionName, filter: 'multi', optionsOf: (r) => { const n = divisionName(r); return n === '—' ? [] : [{ value: n, label: n }] } },
       { key: 'reference', header: 'Reference', group: 'Order', text: (r) => r.fields.reference ?? '—' },
       { key: 'route', header: 'Pickup → Delivery', group: 'Order', text: route },
       {
@@ -214,7 +229,7 @@ export function IntakeBoard() {
       },
       { key: 'source', header: 'E-mail', text: () => '', fixed: true, filter: false, sortable: false, width: 190 },
     ],
-    [],
+    [divisionName],
   )
   const prefs = useDenseGridPrefs({
     gridId: 'intake',
@@ -223,6 +238,18 @@ export function IntakeBoard() {
     validKeys: DEFAULT_COLUMNS,
     defaultSort: { key: 'received', dir: 'desc' },
   })
+  const { columns: savedColumns, setColumns } = prefs
+  useEffect(() => {
+    if (savedColumns.includes('division')) return
+    const key = divisionColumnAddedKey(user?.email)
+    try {
+      if (window.localStorage.getItem(key) === '1') return
+      window.localStorage.setItem(key, '1')
+    } catch {
+      return
+    }
+    setColumns(withDivisionColumn(savedColumns))
+  }, [savedColumns, setColumns, user?.email])
   const gridColumns = useMemo(
     () => [
       ...prefs.columns.filter((k) => k !== 'source').map((k) => columns.find((c) => c.key === k)).filter((c) => c != null),

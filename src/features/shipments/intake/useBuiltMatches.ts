@@ -6,8 +6,8 @@
  * A failed read leaves the rows unflagged: the check is advice, never a gate that blocks the queue.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { listShipmentsBySearchKeys, type ShipmentKeyRow } from '@/lib/apiClient'
-import { builtMatchesFor, needsBuiltCheck, refCandidates, storedBuiltMatches, type BuiltMatch } from '@/lib/intakeBuilt'
+import { autolinkIntakeBuilt, listShipmentsBySearchKeys, type ShipmentKeyRow } from '@/lib/apiClient'
+import { autoLinkTarget, builtMatchesFor, needsBuiltCheck, refCandidates, storedBuiltMatches, type BuiltMatch } from '@/lib/intakeBuilt'
 import type { IntakeLoadRecord } from '@/types/intake'
 
 const TTL_MS = 5 * 60 * 1000
@@ -83,4 +83,34 @@ export function useBuiltMatches(rows: readonly IntakeLoadRecord[]): { matches: M
   }, [ready, values, checked, stored])
 
   return { matches, error: done?.sig === sig ? done.error : null }
+}
+
+/** Rows already handed to the server this session: one try each, so a row the server will not link is not sent on every render. */
+const autolinkTried = new Set<string>()
+
+/** Test hook: forget which rows were tried. */
+export function resetAutolinkTried(): void {
+  autolinkTried.clear()
+}
+
+/**
+ * When the check finds rows that belong to exactly one built shipment (`autoLinkTarget`), ask the server to tie them to it
+ * (INTAKE_AUTOLINK_BUILT re-checks every open row itself and links only those), then reload the queue. Quiet on failure: the
+ * row keeps its "Built" flag and the admin buttons still work.
+ */
+export function useAutolinkBuilt(matches: Map<string, BuiltMatch[]>, reload: () => void): void {
+  const ids = useMemo(
+    () => [...matches.entries()].filter(([id, m]) => autoLinkTarget(m) != null && !autolinkTried.has(id)).map(([id]) => id).sort(),
+    [matches],
+  )
+  const sig = ids.join('|')
+  useEffect(() => {
+    if (ids.length === 0) return
+    for (const id of ids) autolinkTried.add(id)
+    autolinkIntakeBuilt()
+      .then((r) => { if (r.linked > 0) reload() })
+      .catch((err: unknown) => { console.warn('[intake] auto-link of built loads failed', err) })
+    // `ids` is derived from `sig`
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig])
 }
