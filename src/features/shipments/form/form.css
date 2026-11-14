@@ -874,14 +874,14 @@
 .tms-shell .ship-dt24-dash, .tms-portal .ship-dt24-dash { color: var(--tms-muted); }
 .tms-shell .ship-dt24 input[aria-invalid='true'], .tms-portal .ship-dt24 input[aria-invalid='true'] { border-color: var(--tms-destructive); }
 .tms-shell .ship-dt24-problem, .tms-portal .ship-dt24-problem { font-size: 11px; color: var(--tms-destructive); }
-.tms-shell .ship-appt-kind { display: inline-flex; border: 1px solid var(--tms-border); border-radius: 6px; overflow: hidden; }
-.tms-shell .ship-appt-kind button {
+.tms-shell .ship-appt-kind, .tms-portal .ship-appt-kind { display: inline-flex; border: 1px solid var(--tms-border); border-radius: 6px; overflow: hidden; }
+.tms-shell .ship-appt-kind button, .tms-portal .ship-appt-kind button {
   border: 0; background: transparent; color: var(--tms-text-2); font: inherit; font-size: 11px; font-weight: 600;
   padding: 1px 8px; cursor: pointer;
 }
-.tms-shell .ship-appt-kind button[aria-pressed='true'] { background: var(--tms-primary); color: var(--tms-on-primary); }
-.tms-shell .ship-appt-kind button:disabled { cursor: default; opacity: 0.6; }
-.tms-shell .ship-appt-kind button:focus-visible { outline: 2px solid var(--tms-primary); outline-offset: -2px; }
+.tms-shell .ship-appt-kind button[aria-pressed='true'], .tms-portal .ship-appt-kind button[aria-pressed='true'] { background: var(--tms-primary); color: var(--tms-on-primary); }
+.tms-shell .ship-appt-kind button:disabled, .tms-portal .ship-appt-kind button:disabled { cursor: default; opacity: 0.6; }
+.tms-shell .ship-appt-kind button:focus-visible, .tms-portal .ship-appt-kind button:focus-visible { outline: 2px solid var(--tms-primary); outline-offset: -2px; }
 .tms-shell .ship-dt24-datebox, .tms-portal .ship-dt24-datebox { position: relative; flex: 1 1 110px; min-width: 0; display: flex; }
 .tms-shell .ship-dt24-datebox .ship-dt24-date, .tms-portal .ship-dt24-datebox .ship-dt24-date { flex: 1 1 auto; padding-right: 30px; }
 .tms-shell .ship-dt24-calbtn, .tms-portal .ship-dt24-calbtn { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--tms-muted); cursor: pointer; }
