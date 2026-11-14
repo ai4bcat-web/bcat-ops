@@ -66,7 +66,8 @@ const FACTORING_STATUS_LABEL: Record<FactoringItemStatus, string> = {
  * then everything, then what is finished. "Need to factor" is the default because an empty
  * queue there is the only state worth celebrating.
  */
-const FILTER_ORDER = ['NEED_TO_FACTOR', 'PENDING_WITH_OTR', 'MANUAL_INVOICE', 'ALL', 'FACTORED', 'INVOICED_MANUALLY', 'ARCHIVED'] as const
+// Need to factor is no longer a tab (Ryne 2026-11-14): those loads are batch factored from Invoicing → Ready to invoice.
+const FILTER_ORDER = ['PENDING_WITH_OTR', 'MANUAL_INVOICE', 'ALL', 'FACTORED', 'INVOICED_MANUALLY', 'ARCHIVED'] as const
 type FilterKey = (typeof FILTER_ORDER)[number]
 
 const RED = { color: 'var(--tms-badge-red)' }
@@ -449,7 +450,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   useResolveLoads(items.map((i) => i.loadId))
   const { user, isAdmin } = useAuth()
   const [search, setSearch] = useState('')
-  const [activeTab, setActiveTab] = useState<FilterKey>('NEED_TO_FACTOR')
+  const [activeTab, setActiveTab] = useState<FilterKey>('PENDING_WITH_OTR')
   /** On the Pending tab: one of OTR's own labels (or OTR_UNREPORTED) to narrow to, or null for all. */
   const [otrFilter, setOtrFilter] = useState<string | null>(null)
   /** Show only the rows OTR turned down (they have to be invoiced by hand), across every tab. */
@@ -866,6 +867,10 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           <ColumnsButton catalog={denseCols} columns={prefs.columns} widths={prefs.widths} pinned={prefs.pinned} onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })} />
           <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
         </div>
+        <p className="text-sm tms-muted" data-testid="factor-moved-note">
+          Loads waiting to be factored are in <a href="/tms/invoicing">Invoicing → Ready to invoice</a>
+          {counts.NEED_TO_FACTOR > 0 ? ` (${counts.NEED_TO_FACTOR} now)` : ''}: tick them and press Factor to send them to OTR together.
+        </p>
         {error && <p style={RED}>{error}</p>}
         {rejected.length > 0 && (
           <div role="status" data-testid="otr-rejected-strip" className="flex flex-wrap items-center gap-2" style={{ padding: '6px 8px', background: 'var(--tms-badge-red-tint, transparent)' }}>

@@ -27,7 +27,7 @@ import { useAuthUser } from '@/hooks/useAuth'
 import { isOwnerOrAdmin } from '@/lib/accountingAccess'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Download, Mail } from 'lucide-react'
+import { Download, Landmark, Mail } from 'lucide-react'
 import { toast } from 'sonner'
 import { BillingGapsPanel } from './components/BillingGapsPanel'
 import { Eye, RefreshCw } from 'lucide-react'
@@ -47,7 +47,7 @@ import { useDirectory } from '@/hooks/useDirectory'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import {
-  agingStatement, batchGenerateInvoices, graphqlErrorText, listInvoicesByMonth, listUserProfiles, reversePayment, voidInvoice,
+  agingStatement, batchGenerateInvoices, getTmsSettings, graphqlErrorText, listInvoicesByMonth, listUserProfiles, reversePayment, voidInvoice,
 } from '@/lib/apiClient'
 import { loadWorklistShipments } from '@/lib/worklistShipments'
 import { NeedsReviewList } from '@/features/finance/NeedsReview'
@@ -66,7 +66,7 @@ import {
   agingChipFor, formatDay, lastThreeMonths, monthLabel,
 } from './arViews'
 import {
-  AR_BILLED_BY_LABEL, AR_GROUP_BY_LABEL, AR_QUEUE_STATUS_LABEL, billedByMatches, isInvoiceSent, splitOpenInvoices, buildPaidRows, buildReadyRows, groupKeyOf, groupTotals,
+  AR_BILLED_BY_LABEL, AR_GROUP_BY_LABEL, AR_QUEUE_STATUS_LABEL, billedByMatches, factorQueueRows, isInvoiceSent, splitOpenInvoices, buildPaidRows, buildReadyRows, groupKeyOf, groupTotals,
   orderByGroup, type ArBilledBy, type ArGroupBy, type ArQueueLookups, type ArQueueRow, type ArQueueStatus,
 } from './arQueue'
 import { CreditMemoDialog } from './components/CreditMemoDialog'
@@ -74,6 +74,9 @@ import { GenerateInvoiceDialog } from './components/GenerateInvoiceDialog'
 import { ReasonDialog } from './components/ReasonDialog'
 import { ReceivePaymentDialog } from './components/ReceivePaymentDialog'
 import { SendToFactorDialog } from './components/SendToFactorDialog'
+import { BatchFactorDialog } from './components/BatchFactorDialog'
+import { BATCH_FACTOR_LIMIT } from './batchFactor'
+import { useFactorReadiness, type FactorReadiness } from './useFactorReadiness'
 import { useBillingGrant, BILLING_GRANT_MESSAGE } from './useBillingGrant'
 import { attachmentStateText, useInvoiceAttachmentPlans } from './useInvoiceAttachmentPlans'
 import type { InvoiceAttachmentPlanRow } from '@/lib/invoiceDelivery'
@@ -89,6 +92,7 @@ type ArDialog =
   | { kind: 'payment'; customerId: string; customerName: string; invoiceId?: string }
   | { kind: 'credit'; customerId: string; customerName: string }
   | { kind: 'factor'; invoiceId: string }
+  | { kind: 'batchFactor'; rows: ArQueueRow[] }
   | { kind: 'void'; invoice: InvoiceRecord }
   | { kind: 'reverse'; payment: ArPaymentRecord }
 
@@ -176,7 +180,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const invoiced = useArWorklist('UNPAID')
   const open = useOpenInvoices()
   const { customers } = useDirectory({ locations: false })
-  const { items: factoringItems } = useFactoringItems()
+  const { items: factoringItems, refresh: refreshFactoring } = useFactoringItems()
   const { divisions } = useOwnershipDivisions()
 
   const [profiles, setProfiles] = useState<UserProfileRecord[]>([])
@@ -203,6 +207,16 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   /** What the last batch generated, so "Batch e-mail" bills exactly those invoices. */
   /** What the last batch refused, with the release gate's own sentences. */
   const [refusals, setRefusals] = useState<BatchRefusal[]>([])
+  // Batch Factor: the factor's name for the confirmation, and a counter that re-asks readiness after a run.
+  const [factorName, setFactorName] = useState<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    getTmsSettings()
+      .then((st) => { if (alive) setFactorName(st?.factorRemitTo?.name?.trim() || null) })
+      .catch(() => { /* the confirmation says none is set up */ })
+    return () => { alive = false }
+  }, [])
+  const [factorVersion, setFactorVersion] = useState(0)
 
   const months = useMemo(() => lastThreeMonths(asOf), [asOf])
   const [month, setMonth] = useState(() => months[0])
@@ -281,16 +295,19 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       && (!due || inDueBucket(row.dueAt, asOf, owed.due)))
     const keep = (rows: ArQueueRow[]) => keepAll(rows, true)
     return {
-      READY: keep((() => {
+      READY: (() => {
         const ready = buildReadyRows(unbilled.rows, lookups)
         const readyOrders = new Set(ready.map((r) => r.orderId))
-        return [...split.drafts.filter((r) => !readyOrders.has(r.orderId)), ...ready]
-      })()),
+        const rows = keep([...split.drafts.filter((r) => !readyOrders.has(r.orderId)), ...ready])
+        // The loads the To factor tab held: queue rows not yet at OTR. Always listed, whatever the billed-by view.
+        const invoicesById = new Map(open.invoices.map((inv) => [inv.id, inv]))
+        return [...rows, ...factorQueueRows(factoringItems, rows, invoicesById, lookups)]
+      })(),
       INVOICED: keep(split.invoiced),
       // Paid rows owe nothing, so the due bucket does not narrow them.
       PAID: keepAll(buildPaidRows(paidInvoices, lookups), false),
     }
-  }, [unbilled.rows, open.invoices, paidInvoices, lookups, releasedByOrder, billedBy, factorByItemId, owed, asOf])
+  }, [unbilled.rows, open.invoices, paidInvoices, lookups, releasedByOrder, billedBy, factorByItemId, factoringItems, owed, asOf])
 
   // Ready to invoice reads each shipment's board row for its reference, lane, carrier and carrier pay (internal only).
   const readyShipmentIds = useMemo(
@@ -362,7 +379,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
 
   const refreshAll = () =>
-    Promise.all([unbilled.refresh(), invoiced.refresh(), open.refresh(), customerAr.refresh(), loadMonth()])
+    Promise.all([unbilled.refresh(), invoiced.refresh(), open.refresh(), customerAr.refresh(), loadMonth(), refreshFactoring()])
       .then(() => undefined)
 
   const closeAndRefresh = () => {
@@ -370,10 +387,13 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     void refreshAll()
   }
 
+  const factorReadiness = useFactorReadiness(queue.READY, tab === 'ready', factorVersion)
+
   const runBatchGenerate = () => {
     setBusy(true)
     const byOrder = new Map(unbilled.rows.map((r) => [r.orderId, r]))
-    batchGenerateInvoices({ orderIds: selected })
+    // Queue rows (the folded-in To factor loads) have no order to generate; Factor sends them.
+    batchGenerateInvoices({ orderIds: selected.filter((id) => !id.startsWith('factor:')) })
       .then(({ results }) => {
         const made = results.flatMap((r) => (r.invoiceId ? [r.invoiceId] : []))
         const failed = results.filter((r) => r.error)
@@ -514,6 +534,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onSelect: setSelected,
       onGenerate: (row) => setDialog({ kind: 'generate', orderId: row.orderId, shipmentNumber: row.shipmentNumber }),
       onBatchGenerate: runBatchGenerate,
+      factorReadiness,
+      onBatchFactor: (rows) => setDialog({ kind: 'batchFactor', rows }),
       onReview: (invs) => setDialog({ kind: 'review', invoices: invs }),
       onEdit: (inv) => setDialog({ kind: 'edit', invoice: inv }),
     })
@@ -669,6 +691,19 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           onDone={closeAndRefresh}
         />
       )}
+      {dialog?.kind === 'batchFactor' && (
+        <BatchFactorDialog
+          rows={dialog.rows}
+          factorName={factorName}
+          onClose={() => setDialog(null)}
+          onDone={() => {
+            setDialog(null)
+            setSelected([])
+            setFactorVersion((v) => v + 1)
+            void refreshAll()
+          }}
+        />
+      )}
       {dialog?.kind === 'void' && (
         <ReasonDialog
           title={`Void invoice ${dialog.invoice.number}`}
@@ -783,6 +818,7 @@ function dateCol<T>(key: string, header: string, of: (row: T) => string | null, 
 function queueView({
   status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, factorByItemId, customerById,
   attachmentPlans, boardById, shipmentsById, months, month, paidLoading, onMonth, onSelect, onGenerate, onBatchGenerate, onReview, onEdit,
+  factorReadiness, onBatchFactor,
 }: {
   status: ArQueueStatus
   rows: ArQueueRow[]
@@ -805,6 +841,9 @@ function queueView({
   onSelect: (ids: string[]) => void
   onGenerate: (row: ArQueueRow) => void
   onBatchGenerate: () => void
+  /** Ready to factor per row key (Ready to invoice only). */
+  factorReadiness?: Map<string, FactorReadiness>
+  onBatchFactor?: (rows: ArQueueRow[]) => void
   onReview: (invoices: InvoiceRecord[]) => void
   onEdit: (invoice: InvoiceRecord) => void
 }): ListView {
@@ -832,6 +871,24 @@ function queueView({
     const factor = otrStatusLabel(item?.otrStatus) ?? (inv.factoringItemId ? 'In the factoring queue' : null)
     return factor ?? (inv.factored ? 'Factored customer' : '—')
   }
+
+  // Ready to factor: only for customers billed through the factor; everyone else keeps the normal invoice flow.
+  const readinessOf = (row: ArQueueRow) => factorReadiness?.get(row.key)
+  const factorReadyText = (row: ArQueueRow) => {
+    const r = readinessOf(row)
+    if (!r) return '…'
+    if (!r.factorBilled) return r.missing.length ? r.missing.join('; ') : '—'
+    return r.ready ? '✓ Ready to factor' : `Missing: ${r.missing.join('; ')}`
+  }
+  /** A factor-billed load is picked only when it is Ready to factor ✓; any other load keeps its own rule. */
+  const selectBlocked = (row: ArQueueRow): string | null => {
+    if (row.reasons.length > 0) return row.reasons.join('; ')
+    const r = readinessOf(row)
+    if (row.factorItem && !r) return 'Checking whether it is ready to factor…'
+    if (r?.factorBilled && !r.ready) return `Not ready to factor: ${r.missing.join('; ')}`
+    return null
+  }
+  const factorReadyRows = rows.filter((row) => selected.includes(row.orderId) && readinessOf(row)?.factorBilled && readinessOf(row)?.ready)
 
   // Internal only: carrier rate and profit never leave this screen (see readyFacts.ts).
   const facts = (row: ArQueueRow) => readyFactsOf(boardById.get(row.shipmentId), shipmentsById.get(row.shipmentId), row.amountCents)
@@ -888,6 +945,10 @@ function queueView({
       key: 'pastDue', header: 'Days past due', group: 'Invoice', align: 'right', text: pastDueText,
       sortValue: (row) => row.daysPastDue ?? -99999, filter: 'number', numberOf: (row) => row.daysPastDue ?? 0, numberUnit: 'days',
     },
+    ...(ready ? [{
+      key: 'factorReady', header: 'Ready to factor', group: 'Invoice', text: factorReadyText,
+      filter: 'multi', optionsOf: (row: ArQueueRow) => opt(factorReadyText(row).startsWith('Missing') ? 'Missing' : factorReadyText(row)),
+    } as Col<ArQueueRow>] : []),
     ...(ready || invoiced ? attachmentColumns(attachmentPlans) : []),
     ...(status === 'PAID' ? [dateCol<ArQueueRow>('paidAt', 'Paid on', (row) => row.paidAt)] : []),
     ...(invoiced ? [{ key: 'factor', header: 'Factor', group: 'Invoice', text: factorText, filter: 'multi', optionsOf: (row: ArQueueRow) => opt(factorText(row)) } as Col<ArQueueRow>] : []),
@@ -902,7 +963,8 @@ function queueView({
             type="checkbox"
             aria-label={`Select ${row.shipmentNumber ?? row.orderId}`}
             checked={selected.includes(row.orderId)}
-            disabled={row.reasons.length > 0}
+            disabled={selectBlocked(row) != null}
+            title={selectBlocked(row) ?? undefined}
             onChange={() => toggle(row.orderId)}
           />
         )
@@ -935,6 +997,18 @@ function queueView({
           : <TmsBadge tone="blue" title="Invoiced by hand: e-mailed to the customer">Manual</TmsBadge>
       case 'balance':
         return <span className="font-medium">{formatCents(row.balanceCents)}</span>
+      case 'factorReady': {
+        const r = readinessOf(row)
+        if (!r) return <span className="tms-muted">…</span>
+        if (!r.factorBilled) return <span className="tms-muted" title={r.missing.join('\n') || 'Not a factored customer: invoice it as usual'}>—</span>
+        if (r.ready) return <TmsBadge tone="green" title="Everything OTR needs is here">✓ Ready to factor</TmsBadge>
+        return (
+          <span className="flex items-center gap-1" title={r.missing.join('\n')}>
+            <TmsBadge tone="red">Missing</TmsBadge>
+            <span style={{ color: 'var(--tms-badge-red)' }}>{r.missing.join('; ')}</span>
+          </span>
+        )
+      }
       case 'profit': {
         const profit = facts(row).profitCents
         if (profit == null) return <span className="tms-muted" title="Carrier pay not on file yet">—</span>
@@ -1027,6 +1101,18 @@ function queueView({
             onClick={onBatchGenerate}
           >
             Batch generate
+          </TmsButton>
+          <TmsButton
+            variant="primary"
+            aria-label="Factor selected loads with OTR"
+            data-testid="batch-factor"
+            disabled={busy || !canRelease || factorReadyRows.length === 0 || factorReadyRows.length > BATCH_FACTOR_LIMIT || !onBatchFactor}
+            title={factorReadyRows.length === 0
+              ? 'Tick factored loads that are Ready to factor ✓; you confirm before anything goes to OTR'
+              : factorReadyRows.length > BATCH_FACTOR_LIMIT ? `${BATCH_FACTOR_LIMIT} at a time` : undefined}
+            onClick={() => onBatchFactor?.(factorReadyRows)}
+          >
+            <Landmark size={14} /> Factor {factorReadyRows.length || ''}
           </TmsButton>
           <TmsButton
             variant="primary"

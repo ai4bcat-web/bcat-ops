@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { ArWorklistRow } from '@/hooks/useArWorklist'
 import type { InvoiceRecord, ShipmentRecord } from '@/types/tms'
-import { buildInvoicedRows, buildPaidRows, buildReadyRows, groupTotals, orderByGroup, type ArQueueLookups } from './arQueue'
+import { buildInvoicedRows, buildPaidRows, buildReadyRows, factorQueueRows, groupTotals, orderByGroup, type ArQueueLookups } from './arQueue'
 
 const lookups: ArQueueLookups = {
   shipmentsById: new Map(),
@@ -65,5 +65,21 @@ describe('the invoicing queue', () => {
     const b = buildReadyRows([row({ orderId: 'y' })], lookups)[0]
     expect(orderByGroup([a, b], 'division').map((r) => r.orderId)).toEqual(['y', 'x'])
     expect(groupTotals([a, b])).toEqual({ count: 2, amountCents: 2000, balanceCents: 2000 })
+  })
+})
+
+describe('factorQueueRows (the folded-in To factor tab)', () => {
+  const l = { shipmentsById: new Map(), divisionName: (c: string | null | undefined) => c ?? 'No division', repName: () => 'No sales rep', asOf: '2026-11-14' }
+  const item = (over: Record<string, unknown>) => ({ id: 'P1', proNumber: 'P1', status: 'NEED_TO_FACTOR', subject: '', fromEmail: '', receivedAt: '2026-11-11T19:19:10.000Z', messageId: '', createdAt: '', updatedAt: '', ...over }) as never
+
+  it('lists queue rows not yet at OTR, once, and skips any a Ready order already carries', () => {
+    const rows = factorQueueRows([
+      item({ id: '11836', proNumber: '11836', otrAmount: 375 }),
+      item({ id: 'P2', proNumber: 'P2', orderId: 'o-covered' }),
+      item({ id: 'P3', proNumber: 'P3', status: 'PENDING_WITH_OTR' }),
+    ], [{ orderId: 'o-covered', shipmentId: 's-x' } as never], new Map(), l)
+    expect(rows.map((r) => r.key)).toEqual(['factor:11836'])
+    expect(rows[0]).toMatchObject({ status: 'READY', shipmentNumber: '11836', amountCents: 37_500, factored: true, orderId: 'factor:11836' })
+    expect(rows[0].factorItem?.id).toBe('11836')
   })
 })

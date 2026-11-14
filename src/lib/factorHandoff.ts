@@ -95,7 +95,7 @@ interface Place {
  * The address snapshot is the detailed source; `Stop.city` is the display string and
  * sometimes carries the state appended ("MESA, AZ"), which `splitCityState` recovers.
  */
-function placeOf(stop: Stop | undefined): Place {
+export function placeOf(stop: Stop | undefined): Place {
   if (!stop) return {}
   const label = splitCityState(stop.city)
   return {
@@ -106,7 +106,7 @@ function placeOf(stop: Stop | undefined): Place {
 }
 
 /** Stops of one type, in route order. */
-function ordered(stops: Stop[] | null | undefined, type: Stop['type']): Stop[] {
+export function ordered(stops: Stop[] | null | undefined, type: Stop['type']): Stop[] {
   return (stops ?? [])
     .filter((s) => s.type === type)
     .slice()

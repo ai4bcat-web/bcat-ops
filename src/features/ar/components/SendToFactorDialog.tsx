@@ -132,7 +132,7 @@ export function SendToFactorDialog({ invoiceId, busy, onClose, onDone }: {
             >
               <CheckCircle2 size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--tms-badge-green)' }} />
               Queue row {queuedPro} is ready. Nothing has been submitted to OTR — that is a
-              separate step a person takes on the factoring queue.
+              separate step: tick it in Ready to invoice and press Factor.
             </p>
           ) : (
             <p
@@ -165,8 +165,8 @@ export function SendToFactorDialog({ invoiceId, busy, onClose, onDone }: {
           </div>
 
           {queuedPro && (
-            <Link to="/tms/invoicing/factored" className="inline-flex items-center gap-1 font-medium">
-              Open the factoring queue to submit it to OTR <ArrowRight size={14} />
+            <Link to="/tms/invoicing" className="inline-flex items-center gap-1 font-medium">
+              Submit it to OTR from Ready to invoice (Factor) <ArrowRight size={14} />
             </Link>
           )}
         </div>

@@ -20,6 +20,8 @@ import {
   type ReleaseGateResult,
 } from '../../../src/lib/releaseGate'
 import { assertNotSquareInvoiced } from '../../../src/lib/invoiceDelivery'
+import { isFactorBilled } from '../../../src/lib/factorBilling'
+import { factorGapsAtCreate, orderPoNumber, routeEnds } from '../../../src/lib/factorReadyAtCreate'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { isCustomerUnresolved, unresolvedCustomerMessage } from '../../../src/lib/customerResolution'
 import type { FactoringItem, Stop } from '../../../src/types'
@@ -285,5 +287,92 @@ export async function previewFactor(input: Row): Promise<Row> {
     fields: queueRow.otrManualFields ?? {},
     existing: existingRow ? { id: existingRow.id, status: existingRow.status } : null,
     note,
+  }
+}
+
+/** The most orders one PREVIEW_FACTOR_READY reads; the page asks in pages of this size. */
+export const FACTOR_READY_LIMIT = 50
+
+/**
+ * Ready to factor, for the rows of Ready to invoice (Ryne 2026-11-14). Writes nothing.
+ *
+ * Per order: whether its customer is billed through the factor, and — when it is —
+ * every reason it could not be factored right now, in one list: the release gate (delivery,
+ * POD, rate confirmation, carrier pay), the factor-ready fields from booking (PO, rate, both
+ * ends' city/state/ZIP, MC), the factor's remit-to, and a PRO already at OTR. A draft invoice
+ * already on the order is judged the way Send to Factor judges it (`whyNotFactorable`).
+ */
+export async function previewFactorReady(input: Row): Promise<Row> {
+  const orderIds = Array.isArray(input.orderIds) ? input.orderIds.map(String).filter(Boolean) : []
+  if (orderIds.length === 0) return { results: [] }
+  if (orderIds.length > FACTOR_READY_LIMIT) throw new Error(`At most ${FACTOR_READY_LIMIT} orders at a time`)
+  const factorRemitToName = await configuredFactorRemitToName()
+  const results = await Promise.all(orderIds.map(async (orderId) => {
+    try {
+      return await factorReadyFor(orderId, factorRemitToName)
+    } catch (err) {
+      return { orderId, factorBilled: false, ready: false, missing: [err instanceof Error ? err.message : String(err)] }
+    }
+  }))
+  return { results }
+}
+
+async function factorReadyFor(orderId: string, factorRemitToName: string | null): Promise<Row> {
+  const orderRow = await getById(ORDER_TABLE_NAME, orderId)
+  if (!orderRow) throw new Error(`Order not found: ${orderId}`)
+  const order = orderRow as unknown as OrderRecord
+  const shipmentId = String(order.shipmentId ?? '')
+  const [shipmentRow, customerRow, loadRows, invoiceRow] = await Promise.all([
+    getById(SHIPMENT_TABLE_NAME, shipmentId),
+    order.customerId ? getById(CUSTOMER_TABLE_NAME, String(order.customerId)) : Promise.resolve(null),
+    queryIndex(LOAD_TABLE_NAME, IDX_LOADS_BY_SHIPMENT, 'shipmentId', shipmentId),
+    order.invoiceId ? getById(INVOICE_TABLE_NAME, String(order.invoiceId)) : Promise.resolve(null),
+  ])
+  if (!shipmentRow) throw new Error(`Shipment not found: ${shipmentId}`)
+  const customer = customerRow as unknown as CustomerRecord | null
+  if (!customer) return { orderId, factorBilled: false, ready: false, missing: ['No customer record is linked to this order.'] }
+  if (!isFactorBilled(customer)) return { orderId, factorBilled: false, ready: false, missing: [] }
+
+  const shipment = shipmentRow as unknown as ShipmentRecord
+  const loads = loadRows as unknown as ShipmentLoad[]
+  const load = loads.find((row) => row.orderId === orderId) ?? loads[0] ?? null
+  const stops: Stop[] = []
+  for (const row of loads) {
+    if (row.orderId != null && row.orderId !== orderId) continue
+    for (const stop of row.stops ?? []) stops.push(stop)
+  }
+
+  const missing: string[] = []
+  const release = evaluateReleaseGate(await loadReleaseGateInput(releaseGateDeps, {
+    shipmentId, orderId, shipment: shipmentRow, order: orderRow, loads: loadRows, customer: customerRow,
+  }))
+  for (const reason of release.missing) missing.push(reason.message)
+  for (const gap of factorGapsAtCreate({
+    customer,
+    poNumber: orderPoNumber(order.references),
+    customerRateCents: numberOrNull(order.revenueCents),
+    ...routeEnds(stops),
+  })) missing.push(gap.message)
+  if (!factorRemitToName) missing.push('No factor remit-to is set up in AR settings.')
+  if (!load || !String(load.aljexId ?? '').trim()) missing.push('The load has no PRO number, which is the id OTR files the invoice under.')
+
+  const existingRow = load?.aljexId
+    ? ((await getById(FACTORING_ITEM_TABLE_NAME, String(load.aljexId).trim())) as unknown as FactoringItem | null)
+    : null
+  if (existingRow && String(existingRow.otrInvoiceId ?? '').trim()) {
+    missing.push(`PRO ${existingRow.proNumber} was already submitted to OTR as invoice ${existingRow.otrInvoiceId}.`)
+  }
+  const invoice = invoiceRow as unknown as InvoiceRecord | null
+  if (invoice) {
+    const refusal = whyNotFactorable({ invoice, order, shipment, customer, load, existingRow, factorRemitToName })
+    if (refusal && !missing.includes(refusal)) missing.push(refusal)
+  }
+  return {
+    orderId,
+    factorBilled: true,
+    ready: missing.length === 0,
+    missing: [...new Set(missing)],
+    invoiceId: invoice?.id ?? null,
+    factoringItemId: existingRow?.id ?? null,
   }
 }

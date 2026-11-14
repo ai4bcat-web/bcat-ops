@@ -36,12 +36,19 @@ vi.mock('@/hooks/useFactoringItems', () => ({
   useFactoringItems: () => ({ items: [], loading: false, error: null, refresh: vi.fn() }),
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
+const factorReady = vi.hoisted(() => ({ current: {} as Record<string, { orderId: string; factorBilled: boolean; ready: boolean; missing: string[] }> }))
+vi.mock('@/lib/otrClient', () => ({ assembleInvoice: vi.fn(), submitToOtr: vi.fn(), uploadOtrDocs: vi.fn() }))
 vi.mock('@/lib/apiClient', () => ({
   graphqlErrorText: (e: unknown) => String(e),
   getInvoiceAttachmentPlans: vi.fn().mockResolvedValue([]),
   listInvoicesByMonth: vi.fn().mockResolvedValue([]),
   listUserProfiles: vi.fn().mockResolvedValue([{ id: 'rep-1', email: 'jenny@bcatcorp.com', name: 'Jenny Rep' }]),
   batchGenerateInvoices: vi.fn(),
+  // Ready to factor: nothing is factor-billed unless a test says so.
+  previewFactorReady: vi.fn(async ({ orderIds }: { orderIds: string[] }) => ({
+    results: orderIds.map((orderId) => factorReady.current[orderId] ?? { orderId, factorBilled: false, ready: false, missing: [] }),
+  })),
+  sendToFactor: vi.fn(),
   batchEmailInvoices: vi.fn(),
   voidInvoice: vi.fn(),
   reversePayment: vi.fn(),
@@ -479,5 +486,47 @@ describe('one invoice', () => {
     expect(screen.getByText(/SES is off on dev/)).toBeTruthy()
     expect(screen.getByText(/identity not verified/)).toBeTruthy()
     expect(screen.getByRole('button', { name: /Copy e-mail body/ })).toBeTruthy()
+  })
+})
+
+describe('Ready to invoice: batch Factor', () => {
+  it('shows Ready to factor, confirms count, total and factor, then sends each load through the OTR path', async () => {
+    authGroups.current = ['page-invoicing']
+    factorReady.current = { o1: { orderId: 'o1', factorBilled: true, ready: true, missing: [] } }
+    ;(apiClient.getTmsSettings as Mock).mockResolvedValue({ id: 'default', commissionsEnabled: false, factorRemitTo: { name: 'OTR Capital, LLC' } })
+    ;(apiClient.batchGenerateInvoices as Mock).mockResolvedValue({ results: [{ orderId: 'o1', invoiceId: 'inv-1' }] })
+    ;(apiClient.sendToFactor as Mock).mockResolvedValue({ factoringItem: { id: 'S-1001' }, invoice: {}, reused: false })
+    const otr = await import('@/lib/otrClient')
+    ;(otr.submitToOtr as Mock).mockResolvedValue({ invoiceId: 555, brokerName: '', isDuplicate: false, uploaded: {}, documentErrors: [] })
+    await setup({ UNBILLED: [worklistRow()] })
+    await settle()
+    expect(screen.getByText('✓ Ready to factor')).toBeTruthy()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select S-1001' }))
+    fireEvent.click(screen.getByTestId('batch-factor'))
+    const confirm = await screen.findByTestId('batch-factor-confirm')
+    expect(within(confirm).getByText('1')).toBeTruthy()
+    expect(within(confirm).getByText('$2,500.00')).toBeTruthy()
+    expect(within(confirm).getByText('OTR Capital, LLC')).toBeTruthy()
+    // Nothing goes to OTR until Submit is pressed.
+    expect(otr.submitToOtr).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('batch-factor-submit'))
+    expect(await screen.findByTestId('batch-factor-results')).toBeTruthy()
+    expect(apiClient.batchGenerateInvoices).toHaveBeenCalledWith({ orderIds: ['o1'] })
+    expect(apiClient.sendToFactor).toHaveBeenCalledWith({ invoiceId: 'inv-1' })
+    expect(otr.submitToOtr).toHaveBeenCalledWith('S-1001')
+    expect(screen.getByText(/Submitted to OTR as invoice 555/)).toBeTruthy()
+    factorReady.current = {}
+    authGroups.current = []
+  })
+
+  it('a factored load that is not ready cannot be ticked, and says what is missing', async () => {
+    factorReady.current = { o1: { orderId: 'o1', factorBilled: true, ready: false, missing: ['Consignee needs a ZIP code — OTR needs it to factor the load.'] } }
+    await setup({ UNBILLED: [worklistRow()] })
+    await settle()
+    const box = screen.getByRole('checkbox', { name: 'Select S-1001' }) as HTMLInputElement
+    expect(box.disabled).toBe(true)
+    expect(screen.getAllByText(/Consignee needs a ZIP code/).length).toBeGreaterThan(0)
+    expect((screen.getByTestId('batch-factor') as HTMLButtonElement).disabled).toBe(true)
+    factorReady.current = {}
   })
 })

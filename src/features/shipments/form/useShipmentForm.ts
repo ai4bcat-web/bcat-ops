@@ -97,6 +97,8 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
   }, [pipelineCtx, customerOf])
 
   const mode: 'create' | 'edit' = bundle ? 'edit' : 'create'
+  // Past draft: the factor-ready fields warn instead of blocking (src/lib/factorReadyAtCreate).
+  const existingLoad = Boolean(bundle && bundle.shipment.status !== 'DRAFT')
   const customer = customerOf(values.customer.id)
 
   // `update` never changes identity (sections are memoised on their handlers); it reads the
@@ -142,8 +144,8 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
 
   // ── issues: nothing is shown until the first Save/Create/Submit attempt, then live ──
   const issues = useMemo<FormIssue[]>(
-    () => (attempt ? validateForm(values, { level: attempt, mode, customer, settings }) : []),
-    [attempt, values, mode, customer, settings],
+    () => (attempt ? validateForm(values, { level: attempt, mode, customer, settings, existingLoad }) : []),
+    [attempt, values, mode, customer, settings, existingLoad],
   )
 
   // ── local draft autosave (create mode, before any server write): at most once per AUTOSAVE_MS while editing,
@@ -236,6 +238,7 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
       const v = valuesRef.current
       const blocking = blockingIssues(validateForm(v, {
         level, mode: bundle ? 'edit' : 'create', customer: customerOf(v.customer.id), settings,
+        existingLoad: Boolean(bundle && bundle.shipment.status !== 'DRAFT'),
       }))
       if (blocking.length > 0) {
         if (kind === 'draft') toast.info('Kept as a local draft on this browser. Pick a customer to save it to the server.')

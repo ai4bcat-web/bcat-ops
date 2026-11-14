@@ -7739,6 +7739,22 @@ export async function previewFactor(input: { invoiceId: string }): Promise<{
  * typed fields; submitting it to OTR stays a separate human act on `/factoring`.
  * `reused` is true when the invoice already had a row — it is never written twice.
  */
+/** Ready to factor, per Ready-to-invoice order (PREVIEW_FACTOR_READY). Reads only. At most 50 orders a call. */
+export interface FactorReadyResult {
+  orderId: string
+  /** The customer is billed through the factor (billing method FACTOR). */
+  factorBilled: boolean
+  ready: boolean
+  /** Every reason it cannot be factored now, in the server's words. */
+  missing: string[]
+  invoiceId?: string | null
+  factoringItemId?: string | null
+}
+
+export async function previewFactorReady(input: { orderIds: string[] }): Promise<{ results: FactorReadyResult[] }> {
+  return financeAction('PREVIEW_FACTOR_READY', input)
+}
+
 export async function sendToFactor(input: { invoiceId: string }): Promise<{
   factoringItem: FactoringItem
   invoice: InvoiceRecord
