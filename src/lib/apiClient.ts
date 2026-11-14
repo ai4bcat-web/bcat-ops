@@ -7272,6 +7272,18 @@ export async function listTimeClockEntries(range?: {
   return items
 }
 
+/** One driver's time-clock rows for a range of Chicago work days (YYYY-MM-DD), via the driverId/workDate index. */
+export async function listTimeClockByDriver(driverId: string, from: string, to: string): Promise<TimeClockEntry[]> {
+  return listTrackingIndex<TimeClockEntry>({
+    name: 'listTimeClockEntryByDriverIdAndWorkDate',
+    decls: '$driverId: ID!, $from: String!, $to: String!',
+    args: 'driverId: $driverId, workDate: { between: [$from, $to] }',
+    variables: { driverId, from, to },
+    fields: TIME_CLOCK_FIELDS,
+    limit: 100,
+  })
+}
+
 /**
  * Correct one row, on the record.
  *

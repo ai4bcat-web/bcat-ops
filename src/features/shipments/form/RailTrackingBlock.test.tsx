@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({
   listTruckLocations: vi.fn(),
   listCheckCallsByLoad: vi.fn(),
   listTrackingLinksByShipment: vi.fn(),
+  listTimeClockByDriver: vi.fn(),
 }))
 vi.mock('@/lib/apiClient', () => api)
 vi.mock('@/features/dashboard/FleetMiniMap', () => ({ FleetMiniMap: () => <div data-testid="mini-map" /> }))
@@ -26,6 +27,7 @@ beforeEach(() => {
   api.listTruckLocations.mockResolvedValue([])
   api.listCheckCallsByLoad.mockResolvedValue([])
   api.listTrackingLinksByShipment.mockResolvedValue([])
+  api.listTimeClockByDriver.mockResolvedValue([])
   useAppStore.setState({
     drivers: [{ id: 'd-1', name: 'Manuel', phone: '', active: true, fleetGroup: 'LOCAL' }] as never,
     equipment: [{ id: 'eq-9', type: 'truck', unitNumber: '309' }] as never,

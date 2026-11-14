@@ -3,7 +3,7 @@
  * way that fits who is hauling it (Ryne, 2026-11-13).
  *
  *   - Ivan driver (own fleet): the truck's Motive ELD fix, plus the driver's recent
- *     check-ins from the Ivan driver app (stop taps and app check calls).
+ *     check-ins from the Ivan driver app (stop taps, app check calls and time-clock punches).
  *   - Owner operator (own fleet): the truck's Motive ELD fix.
  *   - Brokered (an outside carrier): whether the driver accepted the tracking link and,
  *     once they did, the link's last ping.
@@ -12,7 +12,7 @@
  */
 import { isOwnerOperator } from '@/lib/driverOwnership'
 import type { TruckLocation } from '@/lib/apiClient'
-import type { Driver, Stop } from '@/types'
+import type { Driver, Stop, TimeClockEntry } from '@/types'
 import type { LoadCarrierRecord, LoadCheckCallRecord, ShipmentLoad, TrackingLinkRecord } from '@/types/tms'
 
 export type TrackingCase = 'IVAN' | 'OWNER_OP' | 'BROKERED' | 'NONE'
@@ -111,9 +111,16 @@ const CHECK_CALL_LABEL: Partial<Record<LoadCheckCallRecord['type'], string>> = {
   NOTE: 'Note',
 }
 
-/** The driver's own check-ins: stop taps from the driver app and app-sourced check calls. */
-export function checkInsOf(stops: readonly Stop[], checkCalls: readonly LoadCheckCallRecord[], limit = 5): CheckIn[] {
+export type Punch = Pick<TimeClockEntry, 'kind' | 'clockInAt' | 'clockOutAt'>
+
+/** The driver's own check-ins: stop taps from the driver app, app-sourced check calls and time-clock punches. */
+export function checkInsOf(stops: readonly Stop[], checkCalls: readonly LoadCheckCallRecord[], limit = 5, punches: readonly Punch[] = []): CheckIn[] {
   const out: CheckIn[] = []
+  for (const p of punches) {
+    if (p.kind && p.kind !== 'WORK') continue
+    if (p.clockInAt) out.push({ at: p.clockInAt, label: 'Clocked in (time clock)', place: null })
+    if (p.clockOutAt) out.push({ at: p.clockOutAt, label: 'Clocked out (time clock)', place: null })
+  }
   for (const s of stops) {
     const place = [s.name?.trim(), s.city?.trim()].filter(Boolean).join(', ') || null
     if (s.arrivedAt && s.arrivedSource === 'DRIVER_APP') out.push({ at: s.arrivedAt, label: STOP_LABEL(s, 'ARRIVED'), place })
@@ -146,11 +153,13 @@ export interface RailTrackingInput {
   truckLocations: readonly TruckLocation[]
   checkCalls: readonly LoadCheckCallRecord[]
   trackingLinks: readonly TrackingLinkRecord[]
+  /** The Ivan driver's time-clock rows around this load. Owner operators do not clock. */
+  punches?: readonly Punch[]
   now: Date
 }
 
 export function railTracking(input: RailTrackingInput): RailTracking {
-  const { load, loadCarriers, drivers, equipment, truckLocations, checkCalls, trackingLinks, now } = input
+  const { load, loadCarriers, drivers, equipment, truckLocations, checkCalls, trackingLinks, punches = [], now } = input
   const stops = (load?.stops ?? []) as Stop[]
   const delivered = DELIVERED.has(String(load?.status ?? ''))
   const lastDelivery = [...stops].reverse().find((s) => s.type === 'delivery')
@@ -182,7 +191,7 @@ export function railTracking(input: RailTrackingInput): RailTracking {
       emptyReason: fix ? null
         : !unit ? 'No truck is assigned, so there is no ELD to read.'
         : `Truck ${unit} has no ELD position. Check that its unit number matches Motive.`,
-      checkIns: checkInsOf(stops, checkCalls),
+      checkIns: checkInsOf(stops, checkCalls, 5, kind === 'IVAN' ? punches : []),
     }
   }
 
