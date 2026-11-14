@@ -1069,6 +1069,13 @@ export async function getFactoringItem(id: string): Promise<FactoringItem | null
   })
 }
 
+/** MOVE_TO_MANUAL_INVOICE: an OTR-rejected load back to Ready to invoice, and its customer to manual invoice. */
+export async function moveToManualInvoice(input: { factoringItemId: string }): Promise<{
+  proNumber: string; orderId: string; customerId: string; voidedInvoice: string | null; note: string
+}> {
+  return financeAction('MOVE_TO_MANUAL_INVOICE', input)
+}
+
 /** Staff may update status; email intake owns creation. */
 export async function updateFactoringItem(
   id: string,

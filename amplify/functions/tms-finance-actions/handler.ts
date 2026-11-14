@@ -30,6 +30,7 @@ import {
 } from './invoices'
 import { createCredit, recordPayment, reversePayment, writeOffInvoice } from './payments'
 import { previewFactor, previewFactorReady, sendToFactor } from './factor'
+import { moveToManualInvoice } from './otrRejected'
 import { releaseToBilling, sendInvoice, syncFactoringChange } from './release'
 import {
   approveBill,
@@ -98,6 +99,7 @@ type Action =
   | 'REVERSE_PAYMENT'
   | 'PREVIEW_FACTOR'
   | 'PREVIEW_FACTOR_READY'
+  | 'MOVE_TO_MANUAL_INVOICE'
   | 'SEND_TO_FACTOR'
   | 'SAVE_AR_SETTINGS'
   | 'PREVIEW_BILL'
@@ -214,7 +216,7 @@ interface AppSyncEvent {
 function accountingPagesFor(action: Action): readonly string[] {
   if (action === 'RELEASE_TO_BILLING') return ['loadReview', 'invoicing']
   if (action === 'CLEAR_FINANCE_REVIEW' || action === 'SET_DELIVERED_DATE') return ['invoicing', 'carrierPay']
-  if (action === 'SEND_TO_FACTOR' || action === 'SYNC_FACTORING_CHANGE' || action === 'SETTLE_FACTORED_INVOICES') return ['invoicing', 'factoring']
+  if (action === 'SEND_TO_FACTOR' || action === 'SYNC_FACTORING_CHANGE' || action === 'SETTLE_FACTORED_INVOICES' || action === 'MOVE_TO_MANUAL_INVOICE') return ['invoicing', 'factoring']
   if (COMMISSION_ACTIONS[action]) return ['commissions']
   if (AP_ACTIONS[action]) return ['carrierPay']
   return ['invoicing']
@@ -301,6 +303,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return previewFactor(input)
     case 'PREVIEW_FACTOR_READY':
       return previewFactorReady(input)
+    case 'MOVE_TO_MANUAL_INVOICE':
+      return moveToManualInvoice(input, caller)
     case 'SEND_TO_FACTOR':
       return sendToFactor(input, caller)
     case 'SAVE_AR_SETTINGS':

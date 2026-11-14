@@ -43,7 +43,8 @@ import { loadFromFactoringItem } from './loadFromInvoice'
 import { ManualInvoicePanel } from './ManualInvoicePanel'
 import { manualSentInfo } from '@/lib/manualInvoice'
 import { noBuyInfo } from '@/lib/noBuy'
-import { mayInvoiceManually, needsManualInvoice, otrRejection } from '@/lib/otrRejection'
+import { isOtrRejected, mayInvoiceManually, needsManualInvoice, otrRejection } from '@/lib/otrRejection'
+import { MoveToManualDialog } from './MoveToManualDialog'
 import { InvoiceManuallyDialog } from './InvoiceManuallyDialog'
 import { CustomerPaidCell, CustomerPaidDialog } from './CustomerPaidCell'
 import { formatPaidOn } from './formatPaidOn'
@@ -67,7 +68,8 @@ const FACTORING_STATUS_LABEL: Record<FactoringItemStatus, string> = {
  * queue there is the only state worth celebrating.
  */
 // Need to factor is no longer a tab (Ryne 2026-11-14): those loads are batch factored from Invoicing → Ready to invoice.
-const FILTER_ORDER = ['PENDING_WITH_OTR', 'MANUAL_INVOICE', 'ALL', 'FACTORED', 'INVOICED_MANUALLY', 'ARCHIVED'] as const
+// Invoiced manually is not a tab either: those loads are invoiced, and show in Invoicing → Invoiced. OTR rejected takes its place.
+const FILTER_ORDER = ['PENDING_WITH_OTR', 'MANUAL_INVOICE', 'ALL', 'FACTORED', 'OTR_REJECTED', 'ARCHIVED'] as const
 type FilterKey = (typeof FILTER_ORDER)[number]
 
 const RED = { color: 'var(--tms-badge-red)' }
@@ -466,6 +468,8 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   /** The row whose Customer paid dialog / Send to OTR again confirmation is open. */
   const [paidEditId, setPaidEditId] = useState<string | null>(null)
   const [resendId, setResendId] = useState<string | null>(null)
+  /** The OTR-rejected row whose Move to manual invoice confirmation is open. */
+  const [moveManualId, setMoveManualId] = useState<string | null>(null)
   const canEditPaid = hasAccountingPage(user?.groups, user?.email, 'factoring')
 
   // Deleting a row drops the record that a PRO was ever sent for factoring, so it is
@@ -486,7 +490,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     PENDING_WITH_OTR: items.filter((i) => i.status === 'PENDING_WITH_OTR').length,
     MANUAL_INVOICE: items.filter((i) => i.status === 'MANUAL_INVOICE').length,
     FACTORED: items.filter((i) => i.status === 'FACTORED').length,
-    INVOICED_MANUALLY: items.filter((i) => i.status === 'INVOICED_MANUALLY').length,
+    OTR_REJECTED: items.filter((i) => isOtrRejected(i)).length,
     ARCHIVED: items.filter((i) => i.status === 'ARCHIVED').length,
   }), [items])
 
@@ -499,14 +503,14 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
        * nothing is actually lost.
        */
       .filter((item) =>
-        rejectedOnly ? otrRejection(item) != null : activeTab === 'ALL' ? item.status !== 'ARCHIVED' : item.status === activeTab,
+        rejectedOnly ? otrRejection(item) != null
+          : activeTab === 'ALL' ? item.status !== 'ARCHIVED'
+            : activeTab === 'OTR_REJECTED' ? isOtrRejected(item)
+              : item.status === activeTab,
       )
       .filter((item) => activeTab !== 'PENDING_WITH_OTR' || !otrFilter || otrLabelOf(item) === otrFilter)
       .filter((item) => matchesSearch(item, search))
-      // The Invoiced manually tab is a send log, so it reads newest send first.
-      .sort((a, b) => activeTab === 'INVOICED_MANUALLY'
-        ? (manualSentInfo(b)?.at ?? '').localeCompare(manualSentInfo(a)?.at ?? '')
-        : new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
+      .sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
   }, [items, activeTab, search, otrFilter, rejectedOnly])
 
   /*
@@ -538,6 +542,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const manualMoveItem = manualMoveId ? items.find((i) => i.id === manualMoveId) ?? null : null
   const paidEditItem = paidEditId ? items.find((i) => i.id === paidEditId) ?? null : null
   const resendItem = resendId ? items.find((i) => i.id === resendId) ?? null : null
+  const moveManualItem = moveManualId ? items.find((i) => i.id === moveManualId) ?? null : null
   const openItem = openId ? items.find((i) => i.id === openId) ?? null : null
   const manualPanel = openItem?.status === 'MANUAL_INVOICE' || openItem?.status === 'INVOICED_MANUALLY'
 
@@ -709,8 +714,8 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     },
     {
       key: 'received',
-      header: activeTab === 'INVOICED_MANUALLY' ? 'SENT' : 'RECEIVED',
-      render: (item) => activeTab === 'INVOICED_MANUALLY'
+      header: 'RECEIVED',
+      render: (item) => item.status === 'INVOICED_MANUALLY'
         ? <SentByHandCell item={item} />
         : (
           <span className="whitespace-nowrap tms-muted" title={formatReceivedAt(item.receivedAt)}>
@@ -747,6 +752,18 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
               onClick={() => setManualMoveId(item.id)}
             >
               Invoice manually
+            </TmsButton>
+          )}
+          {isOtrRejected(item) && (
+            <TmsButton
+              size="sm"
+              variant="secondary"
+              aria-label={`Move PRO ${item.proNumber} to manual invoice`}
+              data-testid={`move-manual-${item.id}`}
+              disabled={pendingIds.has(item.id)}
+              onClick={() => setMoveManualId(item.id)}
+            >
+              Move to manual invoice
             </TmsButton>
           )}
           {offersResend(item) && !noBuyInfo(item).noBuy && (
@@ -806,10 +823,10 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       filter: 'date', dateOf: (i) => i.customerPaidOn ?? null,
     },
     {
-      key: 'received', header: activeTab === 'INVOICED_MANUALLY' ? 'Sent' : 'Received', group: 'Status', extraPx: activeTab === 'INVOICED_MANUALLY' ? 200 : 0,
-      text: (i) => activeTab === 'INVOICED_MANUALLY' ? (manualSentInfo(i) ? formatReceivedAt(sentAtOf(i)) : '\u2014') : relativeReceived(i.receivedAt),
-      sortValue: (i) => (activeTab === 'INVOICED_MANUALLY' ? sentAtOf(i) : i.receivedAt) || null,
-      filter: 'date', dateOf: (i) => (activeTab === 'INVOICED_MANUALLY' ? sentAtOf(i) : i.receivedAt) || null,
+      key: 'received', header: 'Received', group: 'Status',
+      text: (i) => i.status === 'INVOICED_MANUALLY' ? (manualSentInfo(i) ? `Sent ${formatReceivedAt(sentAtOf(i))}` : '\u2014') : relativeReceived(i.receivedAt),
+      sortValue: (i) => (i.status === 'INVOICED_MANUALLY' ? sentAtOf(i) : i.receivedAt) || null,
+      filter: 'date', dateOf: (i) => (i.status === 'INVOICED_MANUALLY' ? sentAtOf(i) : i.receivedAt) || null,
     },
     {
       key: 'status', header: 'Status', group: 'Status', extraPx: 130,
@@ -859,7 +876,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
             size="sm"
             active={activeTab}
             onSelect={(key) => { setActiveTab(key as FilterKey); resetPaging() }}
-            tabs={FILTER_ORDER.map((key) => ({ key, label: key === 'ALL' ? 'All' : FACTORING_STATUS_LABEL[key], count: counts[key] }))}
+            tabs={FILTER_ORDER.map((key) => ({ key, label: key === 'ALL' ? 'All' : key === 'OTR_REJECTED' ? 'OTR rejected' : FACTORING_STATUS_LABEL[key], count: counts[key] }))}
           />
           <ClearFiltersButton count={filterCount} onClear={() => { setSearch(''); setOtrFilter(null); setDense({}); resetPaging() }} />
           <span className="tms-dense-spacer" />
@@ -969,6 +986,14 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
       {paidEditItem && <CustomerPaidDialog item={paidEditItem} onClose={() => setPaidEditId(null)} onDone={refresh} />}
       {resendItem && <ResendToOtrDialog item={resendItem} onClose={() => setResendId(null)} onDone={refresh} />}
+      {moveManualItem && (
+        <MoveToManualDialog
+          item={moveManualItem}
+          customerName={customerOf(moveManualItem).name}
+          onClose={() => setMoveManualId(null)}
+          onDone={() => { setMoveManualId(null); void refresh() }}
+        />
+      )}
 
       {/* Opened by the PRO column — the leg editor, for the documents on it. */}
       <LoadDrawer />
