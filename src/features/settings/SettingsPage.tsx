@@ -34,6 +34,7 @@ import { ConsolidationCard } from './ConsolidationCard'
 import { TeamsCard } from './TeamsCard'
 import { UsersRolesCard } from './UsersRolesCard'
 import { CommissionSettingsCard } from './CommissionSettingsCard'
+import { CostToRunCard } from './CostToRunCard'
 import { SettingsCard, Stack } from './settingsKit'
 
 export function SettingsPage() {
@@ -72,6 +73,7 @@ export function SettingsPage() {
           <ChargeCodesCard />
           <ProgressStepsCard />
           <UsersRolesCard />
+          <CostToRunCard />
         </>
       )}
 

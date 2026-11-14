@@ -65,6 +65,7 @@ import { withDefaultChargeCodes } from '@/lib/chargeCodeDefaults'
 import { parseTrackingPrefs, type TrackingPrefsOverride } from '@/lib/trackingPrefs'
 import { parseDetentionFlag, type DetentionFlagInput } from '@/lib/detentionFlag'
 import { batchByIndex, batchByIndexPairs, batchGet, setDefaultGraphqlRunner } from '@/lib/aliasBatch'
+import { costMonthIds, parseJsonField, toMeta, toMonthRow, type CostManualEntry, type CostMeta, type CostMonthRow } from '@/lib/costToRun'
 import { LOAD_WORKFLOW_STATUSES } from '@/lib/shipmentStatus'
 
 // Untyped client — our own types from src/types handle type safety
@@ -1910,6 +1911,44 @@ export async function saveTmsSettings(patch: TmsSettingsPatch, expectedUpdatedAt
     if (changed) throw new Error('This settings was changed by someone else — reload and try again.', { cause: err })
     return directoryAction<TmsSettings>('SAVE_SETTINGS', { id: 'default', expectedUpdatedAt: current.updatedAt, ...patch })
   }
+}
+
+// ── Settings > Cost to run ──────────────────────────────────────────────────
+// Daily costs live in DashboardRollup 'COST:*' rows (scripts/costCollector.mjs); the fixed
+// monthly costs an admin types in live on TmsSettings.costManualEntries.
+
+export interface CostToRunData {
+  meta: CostMeta | null
+  months: CostMonthRow[]
+  manual: CostManualEntry[]
+  settingsUpdatedAt: string | null
+}
+
+export async function getCostToRun(lastMonth: string, monthCount = 15): Promise<CostToRunData> {
+  const ids = [...costMonthIds(lastMonth, monthCount), 'COST:META']
+  const rows = modelAvailable('DashboardRollup')
+    ? await batchGet<{ id: string; payload: unknown }>({ query: 'getDashboardRollup', fields: 'id payload' }, ids)
+    : new Map<string, { id: string; payload: unknown }>()
+  let manual: CostManualEntry[] = []
+  let settingsUpdatedAt: string | null = null
+  try {
+    const r = await client.graphql({
+      query: 'query GetCostManual { getTmsSettings(id: "default") { id updatedAt costManualEntries } }',
+    }) as { data: { getTmsSettings: { updatedAt?: string | null; costManualEntries?: unknown } | null } }
+    const parsed = parseJsonField(r.data.getTmsSettings?.costManualEntries)
+    manual = Array.isArray(parsed) ? (parsed as CostManualEntry[]) : []
+    settingsUpdatedAt = r.data.getTmsSettings?.updatedAt ?? null
+  } catch (err) {
+    // A backend without the field yet: no manual entries until it deploys.
+    console.warn('[apiClient] cost-to-run manual entries unavailable', err)
+  }
+  const months = ids.slice(0, -1).map((id) => (rows.get(id) ? toMonthRow(id, rows.get(id)!.payload) : null)).filter((r): r is CostMonthRow => r != null)
+  const metaRow = rows.get('COST:META')
+  return { meta: metaRow ? toMeta(metaRow.payload) : null, months, manual, settingsUpdatedAt }
+}
+
+export async function saveCostManualEntries(entries: CostManualEntry[], expectedUpdatedAt?: string | null): Promise<void> {
+  await saveTmsSettings({ costManualEntries: entries }, expectedUpdatedAt ?? undefined)
 }
 
 // ── My Brokerage (Step L) ───────────────────────────────────────────────────

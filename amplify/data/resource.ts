@@ -1213,6 +1213,9 @@ const schema = a.schema(stageTypes({
       checkCallSkipWhenDriverActive: a.boolean(),   // false — no cadence text while the driver's link/app/ELD updates on time
       // Settings > Progress steps: { <revDivision code>: { CARRIER | LOCAL_DRIVER | OWNER_OPERATOR: [{ key, label, enabled }] } }. Null = built-in defaults. Validated by src/lib/progressSteps.ts.
       progressSteps:                 a.json(),
+      // Settings > Cost to run: services with no billing API, as fixed monthly costs.
+      // [{ id, label, category, monthlyCents, startMonth?, endMonth?, note? }]. Admin write via SAVE_SETTINGS.
+      costManualEntries:             a.json(),
       // { mode: 'CUSTOMER_REP' | 'FIXED', name?, email?, phone? } — whose details
       // the public customer page prints as "who to call".
       trackingContact:               a.json(),

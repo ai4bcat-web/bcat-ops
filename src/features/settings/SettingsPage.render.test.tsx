@@ -19,6 +19,16 @@ const api = vi.hoisted(() => ({
   saveDivision: vi.fn(),
   listUserProfiles: vi.fn(async () => []),
   getTmsSettings: vi.fn(),
+  getCostToRun: vi.fn(async () => ({
+    meta: {
+      services: [{ key: 'aws.amplify.prod', label: 'Amplify hosting & builds (live app)', category: 'hosting', source: 'billed' }],
+      asOf: '2026-11-10', collectedAt: '2026-11-11T12:00:00Z', sources: { aws: { ok: true } }, notes: [],
+    },
+    months: [{ month: '2026-11', days: { '2026-11-02': { 'aws.amplify.prod': 1234 } }, excluded: {} }],
+    manual: [{ id: 'gw', label: 'Google Workspace', category: 'email', monthlyCents: 3000, startMonth: '2026-11', endMonth: null }],
+    settingsUpdatedAt: '2026-11-01T00:00:00Z',
+  })),
+  saveCostManualEntries: vi.fn(async () => undefined),
   saveTmsSettings: vi.fn(async (patch: Partial<TmsSettings>) => ({ id: 'default', ...patch } as TmsSettings)),
   saveShipmentSettings: vi.fn(async () => ({ settings: { id: 'default' } as TmsSettings })),
   saveCommissionSettings: vi.fn(async () => ({ settings: { id: 'default' } as TmsSettings })),
@@ -73,7 +83,7 @@ describe('SettingsPage', () => {
 
   it('renders the step I cards for an admin', async () => {
     await act(async () => { render(<MemoryRouter><SettingsPage /></MemoryRouter>) })
-    for (const heading of ['Shipments', 'Consolidation', 'Customer settings', 'Carrier documents', 'Charge codes', 'Teams', 'Roles & pages', 'Commissions', 'Truck work phones']) {
+    for (const heading of ['Shipments', 'Consolidation', 'Customer settings', 'Carrier documents', 'Charge codes', 'Teams', 'Roles & pages', 'Commissions', 'Truck work phones', 'Cost to run']) {
       expect(screen.getAllByText(heading).length).toBeGreaterThan(0)
     }
   })
@@ -316,5 +326,14 @@ describe('PostalCodeAliasesCard', () => {
     await waitFor(() => expect(screen.getByText('Alias 60601 needs a two-letter state')).toBeTruthy())
 
     expect(api.saveTmsSettings).not.toHaveBeenCalled()
+  })
+})
+
+describe('CostToRunCard', () => {
+  it('shows the collected costs by category and the fixed monthly costs', async () => {
+    await act(async () => { render(<MemoryRouter><SettingsPage /></MemoryRouter>) })
+    await waitFor(() => expect(screen.getAllByText('Hosting').length).toBeGreaterThan(0))
+    expect(screen.getByDisplayValue('Google Workspace')).toBeTruthy()
+    expect(screen.getAllByText('$12.34').length).toBeGreaterThan(0)
   })
 })
