@@ -39,7 +39,7 @@ import { dirname, join } from 'node:path'
 // The AWS SDK comes from the repo's node_modules; launchd runs a copy of this file, so the
 // repo is found through BCAT_OPS_DIR (default ~/bcat-ops) when the script's own parent has none.
 const here = join(dirname(fileURLToPath(import.meta.url)), '..')
-const repo = existsSync(join(here, 'node_modules')) ? here : (process.env.BCAT_OPS_DIR ?? join(homedir(), 'bcat-ops'))
+const repo = existsSync(join(here, 'node_modules', '@aws-sdk', 'client-dynamodb')) ? here : (process.env.BCAT_OPS_DIR ?? join(homedir(), 'bcat-ops'))
 const require = createRequire(join(repo, 'package.json'))
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb')
 const { DynamoDBDocumentClient, GetCommand, PutCommand } = require('@aws-sdk/lib-dynamodb')
