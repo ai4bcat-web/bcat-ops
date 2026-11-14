@@ -55,3 +55,15 @@ export function rowInGroup(row: IntakeLoadRecord, view: IntakeView, group: strin
   if (view === 'division') return group === UNASSIGNED ? row.divisionCode == null || !divisionCodes.has(row.divisionCode) : row.divisionCode === group
   return group === NOT_MATCHED ? !row.fields.customerId : row.fields.customerId === group
 }
+
+/**
+ * Rev division joined the defaults on 2026-11-14. A layout saved before then never had it: add it once, right after Customer, and remember
+ * that it was added so someone who later hides it keeps it hidden.
+ */
+export function withDivisionColumn(columns: readonly string[]): string[] {
+  if (columns.includes('division')) return [...columns]
+  const at = columns.indexOf('customer')
+  const out = [...columns]
+  out.splice(at >= 0 ? at + 1 : Math.min(out.length, 3), 0, 'division')
+  return out
+}

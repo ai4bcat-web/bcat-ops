@@ -142,4 +142,15 @@ describe('otrSettlementReadiness', () => {
     expect(r.ready).toBe(false)
     expect(r.missingDocuments).toEqual(['POD', 'Rate confirmation'])
   })
+
+  it("uses a shipment load's customer ref as the PO, ahead of the pickup number", () => {
+    const { customersById, locationsById } = maps([customer()], [])
+    const podIndex = buildPodIndex({ jobsdoneLoadIds: [], submissions: [] })
+    const shipped = otrSettlementReadiness({ load: load({ shipmentId: 'shp-1', aljexId: '20000', tmsId: 'M371205', pickupNumber: 'N/A' }), customersById, locationsById, podIndex })
+    expect(shipped.payload).toMatchObject({ InvoiceNo: '20000', PoNumber: 'M371205' })
+    // An old load with no shipment keeps the pickup number as its PO.
+    const old = otrSettlementReadiness({ load: load(), customersById, locationsById, podIndex })
+    expect(old.payload.PoNumber).toBe('PO-1')
+  })
 })
+

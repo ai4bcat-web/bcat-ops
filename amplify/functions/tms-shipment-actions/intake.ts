@@ -40,9 +40,10 @@ import {
 } from '../../../src/lib/intakeLoad'
 import { requiresApptProofs } from '../../../src/lib/apptQueue'
 import { INTAKE_DELETED_REASON, NOT_DUPLICATE_TOKEN } from '../../../src/lib/intakeDup'
+import { autoLinkTarget, builtMatchesFor, keyTokens, needsBuiltCheck, normRef, refCandidates, type BuiltShipment } from '../../../src/lib/intakeBuilt'
 import type { IntakeFields, IntakeLoadRecord, IntakeMeta, IntakeNote } from '../../../src/types/intake'
 
-export const INTAKE_ACTIONS = ['INTAKE_SAVE_DRAFT', 'INTAKE_MARK_REVIEWED', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS', 'INTAKE_LINK_SHIPMENT', 'INTAKE_ATTACH_FILES', 'INTAKE_DELETE', 'INTAKE_NOT_DUPLICATE', 'INTAKE_ADD_NOTE'] as const
+export const INTAKE_ACTIONS = ['INTAKE_SAVE_DRAFT', 'INTAKE_MARK_REVIEWED', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS', 'INTAKE_LINK_SHIPMENT', 'INTAKE_ATTACH_FILES', 'INTAKE_DELETE', 'INTAKE_NOT_DUPLICATE', 'INTAKE_ADD_NOTE', 'INTAKE_AUTOLINK_BUILT'] as const
 export type IntakeAction = (typeof INTAKE_ACTIONS)[number]
 
 /** A PROMOTING row with no shipment older than this was abandoned (Lambda timeout is shorter). */
@@ -63,6 +64,8 @@ export interface IntakeDeps {
   writeAudit(entityType: string, entityId: string, action: string, caller: Caller, changes: Row): Promise<void>
   /** Copy the intake e-mail's files onto the shipment as its customer rate confirmation documents. Never throws. */
   attachFiles?(shipmentId: string, intakeId: string, attachments: { key: string; name: string; contentType: string; size: number }[], caller: Caller): Promise<number>
+  /** Shipments whose search key holds any of `values` (lower case): the server side of the Intake already-built check. */
+  findShipmentsBySearchKeys?(values: string[]): Promise<Row[]>
   actions: {
     createShipment(input: Row, caller: Caller): Promise<Row>
     setRevTag(input: Row, caller: Caller): Promise<Row>
@@ -378,7 +381,12 @@ export async function intakeLinkShipment(deps: IntakeDeps, input: Row, caller: C
   // The e-mail the load came in on (rate con / tender) lands in the shipment's Documents, so nobody re-uploads it by hand.
   const files = attachmentFilesOf(row)
   const attached = deps.attachFiles && files.length ? await deps.attachFiles(shipmentId, intakeId, files, caller) : 0
-  const changes: Row = { linkedBy: caller.email, runId: row.runId ?? null, via: 'CREATE_FORM', ...(attached ? { documentsAttached: attached } : {}) }
+  const via = input.via === 'BUILT_MATCH' ? 'BUILT_MATCH' : 'CREATE_FORM'
+  const changes: Row = {
+    linkedBy: caller.email, runId: row.runId ?? null, via,
+    ...(via === 'BUILT_MATCH' ? { reference: optionalString(input.matchedValue, 200) ?? null } : {}),
+    ...(attached ? { documentsAttached: attached } : {}),
+  }
   await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_LINK_SHIPMENT', caller, { ...changes, shipmentId })
   await deps.writeAudit('SHIPMENT', shipmentId, 'INTAKE_LINK_SHIPMENT', caller, { ...changes, intakeId })
   return intakeRecordOf(saved) as unknown as Row
@@ -626,39 +634,88 @@ export function runIntakeAction(deps: IntakeDeps, action: IntakeAction, input: R
       return intakeNotDuplicate(deps, input, caller)
     case 'INTAKE_ADD_NOTE':
       return intakeAddNote(deps, input, caller)
+    case 'INTAKE_AUTOLINK_BUILT':
+      return intakeAutolinkBuilt(deps, caller).then((linked) => ({ linked }) as unknown as Row)
   }
 }
 
 // ── Queue hygiene ────────────────────────────────────────────────────────────
 
-const refKey = (v: unknown): string => String(v ?? '').trim().toLowerCase()
+function builtShipmentOf(r: Row, extraRefs: readonly string[] = []): BuiltShipment {
+  const key = typeof r.searchKey === 'string' ? r.searchKey : ''
+  return {
+    id: String(r.id),
+    number: typeof r.number === 'string' && r.number ? r.number : null,
+    customerId: typeof r.customerId === 'string' ? r.customerId : null,
+    customerName: typeof r.customerName === 'string' ? r.customerName : null,
+    // The order's reference values join the key whole, so "FR-113188 3" matches even though the key splits it on the space.
+    searchKey: [key, ...extraRefs.map(normRef).filter(Boolean)].join(' '),
+    voidedAt: typeof r.voidedAt === 'string' ? r.voidedAt : null,
+    deletedAt: typeof r.deletedAt === 'string' ? r.deletedAt : null,
+  }
+}
+
+/**
+ * Tie each row to the one shipment it was built as (`autoLinkTarget`), through INTAKE_LINK_SHIPMENT, so the queue never keeps a load
+ * that already exists. `only` limits it to one shipment (the reconcile after a save); `known` overrides that shipment's scanned row.
+ * Returns how many rows it linked. A row that fails is logged and skipped.
+ */
+async function autolinkRows(deps: IntakeDeps, rows: IntakeLoadRecord[], caller: Caller, only?: BuiltShipment): Promise<number> {
+  if (rows.length === 0) return 0
+  const values = [...new Set(rows.flatMap((r) => refCandidates(r).map((c) => c.value.toLowerCase())))]
+  const found = new Map<string, BuiltShipment>()
+  if (deps.findShipmentsBySearchKeys) {
+    for (let i = 0; i < values.length; i += 25) {
+      for (const s of await deps.findShipmentsBySearchKeys(values.slice(i, i + 25))) found.set(String(s.id), builtShipmentOf(s))
+    }
+  }
+  if (only) found.set(only.id, only)
+  const shipments = [...found.values()]
+  const tokens = new Map<string, Set<string>>()
+  let linked = 0
+  for (const row of rows) {
+    const target = autoLinkTarget(builtMatchesFor(row, shipments, tokens))
+    if (!target || (only && target.shipmentId !== only.id)) continue
+    try {
+      await intakeLinkShipment(deps, { intakeId: row.id, shipmentId: target.shipmentId, via: 'BUILT_MATCH', matchedValue: target.value }, caller)
+      linked += 1
+    } catch (err) {
+      console.error('[intake] auto-link failed', row.id, err instanceof Error ? err.message : String(err))
+    }
+  }
+  return linked
+}
+
+async function openIntakeRows(deps: IntakeDeps): Promise<IntakeLoadRecord[]> {
+  const open = await deps.queryIndex(deps.tables.intakeLoad, 'intakeLoadsByStatusAndReceivedAt', 'status', 'OPEN')
+  return open.map(intakeRecordOf).filter(needsBuiltCheck)
+}
 
 /**
  * Ryne 2026-11-10: a shipment built from an intake row must always clear that row from the queue, even when the create form's own link
- * call never landed. Any OPEN row whose reference, pickup or delivery number is one of this shipment's order references is linked to it
- * (the same INTAKE_LINK_SHIPMENT path, so the files are filed and both audit rows are written). Returns how many rows it cleared. Never throws.
+ * call never landed. Ryne 2026-11-14: and a load built some other way (by hand, from Slack) clears it too, once its references are on
+ * the shipment. Runs after a create and after every save that can change references: any OPEN row whose parsed reference, pickup or
+ * delivery number belongs to this shipment and to no other one (`autoLinkTarget`) is linked to it. Returns how many rows it cleared.
+ * Never throws.
  */
 export async function reconcileOpenIntake(deps: IntakeDeps, shipmentId: string, caller: Caller): Promise<number> {
   try {
+    const shipment = await deps.getById(deps.tables.shipment, shipmentId)
+    if (!shipment) return 0
     const orders = await deps.queryIndex(deps.tables.order, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId)
-    const refs = new Set(orders.flatMap((o) => (Array.isArray(o.references) ? (o.references as Row[]) : []).map((r) => refKey(r.value))).filter(Boolean))
-    if (refs.size === 0) return 0
-    const open = await deps.queryIndex(deps.tables.intakeLoad, 'intakeLoadsByStatusAndReceivedAt', 'status', 'OPEN')
-    let cleared = 0
-    for (const row of open) {
-      const f = jsonOf<Partial<IntakeFields>>(row.fields, {})
-      const keys = [f.reference, f.pickupNumber, f.deliveryNumber].map(refKey).filter(Boolean)
-      if (!keys.some((k) => refs.has(k))) continue
-      try {
-        await intakeLinkShipment(deps, { intakeId: String(row.id), shipmentId }, caller)
-        cleared += 1
-      } catch (err) {
-        console.error('[intake] reconcile link failed', row.id, err instanceof Error ? err.message : String(err))
-      }
-    }
-    return cleared
+    const refs = orders.flatMap((o) => (Array.isArray(o.references) ? (o.references as Row[]) : []).map((r) => String(r.value ?? '').trim())).filter(Boolean)
+    const self = builtShipmentOf(shipment, refs)
+    if (!self.number || self.voidedAt || self.deletedAt) return 0
+    const mine = keyTokens(self.searchKey, self.number)
+    const rows = (await openIntakeRows(deps)).filter((r) => refCandidates(r).some((c) => c.source === 'reference' && mine.has(c.norm)))
+    return await autolinkRows(deps, rows, caller, self)
   } catch (err) {
     console.error('[intake] reconcile failed', shipmentId, err instanceof Error ? err.message : String(err))
     return 0
   }
+}
+
+/** INTAKE_AUTOLINK_BUILT: the same clean-up over the whole open queue, for rows whose shipment was built before this check existed. */
+export async function intakeAutolinkBuilt(deps: IntakeDeps, caller: Caller): Promise<number> {
+  return autolinkRows(deps, await openIntakeRows(deps), caller)
 }

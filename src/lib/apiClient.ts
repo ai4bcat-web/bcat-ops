@@ -3180,6 +3180,11 @@ export async function linkIntakeShipment(input: { intakeId: string; shipmentId: 
   return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_LINK_SHIPMENT', input))
 }
 
+/** Tie every open intake row whose reference belongs to exactly one built shipment to that shipment (the server decides which). */
+export async function autolinkIntakeBuilt(): Promise<{ linked: number }> {
+  return shipmentAction<{ linked: number }>('INTAKE_AUTOLINK_BUILT', {})
+}
+
 /** Owner/ADMIN: remove a load from the Intake queue (it never touches a shipment built from it). */
 export async function deleteIntake(input: { intakeId: string; expectedVersion: number; reason?: string }): Promise<IntakeLoadRecord> {
   return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_DELETE', input))

@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { unmarshall } from '@aws-sdk/util-dynamodb'
 import type { TransactWriteItem } from '@aws-sdk/client-dynamodb'
 
-import { INTAKE_CONFLICT_MESSAGE, PROMOTING_STALE_MS, runIntakeAction, type IntakeDeps } from './intake'
+import { INTAKE_CONFLICT_MESSAGE, PROMOTING_STALE_MS, reconcileOpenIntake, runIntakeAction, type IntakeDeps } from './intake'
 import { emptyIntakeFields } from '../../../src/lib/intakeLoad'
 import type { Caller } from '../_shared/actionInputs'
 
@@ -477,5 +477,77 @@ describe('INTAKE_MOVE_TO_ACTIVE', () => {
   it('refuses a dismissed row', async () => {
     seedIntake({ status: 'DISMISSED' })
     await expect(run('INTAKE_MOVE_TO_ACTIVE', { intakeId: 'il:r1', expectedVersion: 3 })).rejects.toThrow(/dismissed/)
+  })
+})
+
+describe('already built: auto-link (INTAKE_AUTOLINK_BUILT and the reconcile after a save)', () => {
+  // The status index and the search-key scan, on top of the shared fake.
+  const builtDeps = (): IntakeDeps => {
+    const base = deps()
+    return {
+      ...base,
+      queryIndex: async (t, i, k, v) => (k === 'status' ? [...rows(t).values()].filter((r) => r.status === v) : base.queryIndex(t, i, k, v)),
+      findShipmentsBySearchKeys: async (values) =>
+        [...rows(T.shipment).values()].filter((r) => values.some((v) => String(r.searchKey ?? '').includes(v))),
+    }
+  }
+  const shipment = (id: string, number: string, searchKey: string, over: Row = {}) =>
+    rows(T.shipment).set(id, { id, number, customerId: 'cus-1', customerName: 'Acme', searchKey, ...over })
+  const autolink = () => runIntakeAction(builtDeps(), 'INTAKE_AUTOLINK_BUILT', {}, caller)
+  // Real references are long enough to match on (five or more letters and digits); the shared fixture's are not.
+  const withRef = (over: Row = {}) => seedIntake({ fields: JSON.stringify({ ...JSON.parse(String(intake().fields)), reference: 'PO-77001', pickupNumber: null, deliveryNumber: null }), ...over })
+  beforeEach(() => { withRef() })
+
+  it('links a row whose reference is on exactly one shipment, marks it MOVED and says why in the audit', async () => {
+    shipment('shp-9', '20054', '20054 acme chicago, il dallas, tx po-77001')
+    expect(await autolink()).toEqual({ linked: 1 })
+    expect(intake()).toMatchObject({ status: 'MOVED', shipmentId: 'shp-9', shipmentNumber: '20054' })
+    expect(audits.find((a) => a.type === 'INTAKE_LOAD')?.changes).toMatchObject({ via: 'BUILT_MATCH', reference: 'PO-77001', shipmentId: 'shp-9' })
+  })
+
+  it('is idempotent: a second run links nothing and writes no more audit rows', async () => {
+    shipment('shp-9', '20054', '20054 acme po-77001')
+    await autolink()
+    const before = audits.length
+    expect(await autolink()).toEqual({ linked: 0 })
+    expect(audits).toHaveLength(before)
+  })
+
+  it('leaves a row that matches two shipments, only a subject word, another customer, or was marked not a duplicate', async () => {
+    shipment('shp-9', '20054', '20054 acme po-77001')
+    shipment('shp-8', '20053', '20053 acme po-77001')
+    expect(await autolink()).toEqual({ linked: 0 })
+
+    rows(T.shipment).delete('shp-8')
+    rows(T.shipment).set('shp-9', { ...rows(T.shipment).get('shp-9')!, customerId: 'cus-2' })
+    expect(await autolink()).toEqual({ linked: 0 })
+
+    rows(T.shipment).set('shp-9', { ...rows(T.shipment).get('shp-9')!, customerId: 'cus-1', searchKey: '20054 acme 4455667' })
+    seedIntake({ subject: 'Load 4455667', fields: JSON.stringify({ ...JSON.parse(String(intake().fields)), reference: null, pickupNumber: null, deliveryNumber: null }) })
+    expect(await autolink()).toEqual({ linked: 0 })
+
+    rows(T.shipment).set('shp-9', { ...rows(T.shipment).get('shp-9')!, searchKey: '20054 acme po-77001' })
+    withRef({ confirmed: ['notDuplicate'] })
+    expect(await autolink()).toEqual({ linked: 0 })
+    expect(intake().status).toBe('OPEN')
+  })
+
+  it('the reconcile after a save links the row once the reference is on the order, even when the key splits it', async () => {
+    shipment('shp-9', '20054', '20054 acme chicago, il')
+    rows(T.order).set('ord-9', { id: 'ord-9', shipmentId: 'shp-9', references: [] })
+    expect(await reconcileOpenIntake(builtDeps(), 'shp-9', caller)).toBe(0)
+    expect(intake().status).toBe('OPEN')
+
+    rows(T.order).set('ord-9', { id: 'ord-9', shipmentId: 'shp-9', references: [{ code: 'PO', value: 'PO-77001' }] })
+    expect(await reconcileOpenIntake(builtDeps(), 'shp-9', caller)).toBe(1)
+    expect(intake()).toMatchObject({ status: 'MOVED', shipmentId: 'shp-9' })
+  })
+
+  it('the reconcile never links a row whose reference belongs to another shipment as well', async () => {
+    shipment('shp-9', '20054', '20054 acme po-77001')
+    shipment('shp-8', '20053', '20053 acme po-77001')
+    rows(T.order).set('ord-9', { id: 'ord-9', shipmentId: 'shp-9', references: [{ code: 'PO', value: 'PO-77001' }] })
+    expect(await reconcileOpenIntake(builtDeps(), 'shp-9', caller)).toBe(0)
+    expect(intake().status).toBe('OPEN')
   })
 })

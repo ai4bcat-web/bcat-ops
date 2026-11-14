@@ -8,7 +8,7 @@ import * as auth from '@/hooks/useAuth'
 import type { OwnershipDivisionRecord } from '@/types/tms'
 import { IntakeBoard } from './IntakeBoard'
 import { intakeFields, intakeRow } from './testFixtures'
-import { resetBuiltMatchCache } from './useBuiltMatches'
+import { resetAutolinkTried, resetBuiltMatchCache } from './useBuiltMatches'
 
 const division = (code: string, name: string, over: Partial<OwnershipDivisionRecord> = {}): OwnershipDivisionRecord => ({
   id: code, code, name, brand: null, parentId: null, color: null, sortOrder: 0, active: true, owners: null, flows: null,
@@ -19,7 +19,7 @@ let divisions: OwnershipDivisionRecord[] = []
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({
   useOwnershipDivisions: () => ({ divisions, loading: false, error: null, refresh: () => undefined }),
 }))
-vi.mock('@/lib/apiClient', () => ({ listIntakeLoads: vi.fn(), countOpenIntakeLoads: vi.fn().mockResolvedValue(0), batchShipmentTask: vi.fn(), dismissIntake: vi.fn(), deleteIntake: vi.fn(), markIntakeNotDuplicate: vi.fn(), addIntakeNote: vi.fn(), listShipmentsBySearchKeys: vi.fn() }))
+vi.mock('@/lib/apiClient', () => ({ listIntakeLoads: vi.fn(), countOpenIntakeLoads: vi.fn().mockResolvedValue(0), batchShipmentTask: vi.fn(), dismissIntake: vi.fn(), deleteIntake: vi.fn(), markIntakeNotDuplicate: vi.fn(), addIntakeNote: vi.fn(), listShipmentsBySearchKeys: vi.fn(), autolinkIntakeBuilt: vi.fn().mockResolvedValue({ linked: 0 }) }))
 
 function Where() {
   const loc = useLocation()
@@ -67,6 +67,16 @@ describe('IntakeBoard', () => {
         intakeRow({ id: 'il:c', divisionCode: null, subject: 'Stray tender' }),
       ]
     })
+  })
+
+  it('shows each row\'s rev division by name in its own column, right after Customer', async () => {
+    window.localStorage.clear()
+    renderBoard()
+    await screen.findByText('First tender')
+    const headers = screen.getAllByRole('columnheader').map((h) => h.textContent ?? '')
+    const customer = headers.findIndex((h) => h.includes('Customer'))
+    expect(headers[customer + 1]).toContain('Rev division')
+    expect(screen.getAllByText('Brokerage').length).toBeGreaterThanOrEqual(2)
   })
 
   it('has one sub-tab per active division with its open count, plus Unassigned, and none for archived divisions', async () => {
@@ -334,6 +344,9 @@ describe('IntakeBoard: already built as a PRO', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     resetBuiltMatchCache()
+    resetAutolinkTried()
+    vi.mocked(api.autolinkIntakeBuilt).mockClear()
+    vi.mocked(api.autolinkIntakeBuilt).mockResolvedValue({ linked: 0 })
     divisions = [division('BRK', 'Brokerage')]
     vi.mocked(api.listIntakeLoads).mockImplementation(async () => [
       intakeRow({ id: 'il:a', subject: 'Tender for Mesa', fields: intakeFields({ reference: '573570079' }) }),
@@ -353,6 +366,22 @@ describe('IntakeBoard: already built as a PRO', () => {
     expect(notice).toHaveTextContent('Reference 573570079')
     expect(within(notice).getByTestId('intake-built-link')).toHaveAttribute('href', '/tms/shipments/shp-43')
     expect(api.listShipmentsBySearchKeys).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks the server once to tie a row whose reference is on exactly one shipment, and re-reads the queue when it did', async () => {
+    vi.mocked(api.autolinkIntakeBuilt).mockResolvedValue({ linked: 1 })
+    renderBoard()
+    await waitFor(() => expect(api.autolinkIntakeBuilt).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(vi.mocked(api.listIntakeLoads).mock.calls.length).toBeGreaterThanOrEqual(2))
+  })
+
+  it('never asks to tie a row that only matched on a word of the subject', async () => {
+    vi.mocked(api.listIntakeLoads).mockImplementation(async () => [
+      intakeRow({ id: 'il:a', subject: 'Rate Confirmation for Load: 573570079', fields: intakeFields({ reference: null, pickupNumber: null, deliveryNumber: null }) }),
+    ])
+    renderBoard()
+    await screen.findByTestId('intake-flag-built')
+    expect(api.autolinkIntakeBuilt).not.toHaveBeenCalled()
   })
 
   it('a reference only found in the subject says "May already be built"', async () => {

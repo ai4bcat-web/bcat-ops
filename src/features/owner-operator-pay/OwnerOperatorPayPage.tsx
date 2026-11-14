@@ -1,6 +1,6 @@
 import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ChevronLeft, ChevronRight, Plus, Download, Settings, Banknote, PlusCircle, Pencil, Trash2, AlertTriangle, Copy, Smartphone, FileText, Mail } from 'lucide-react'
 import { OTR_FIELD_LABEL, type OtrRequiredField } from '@/lib/otrInvoice'
@@ -107,9 +107,17 @@ function OtrDoc({
  *
  * Every conversation about a settlement row is "what is going on with 14559" — and the
  * answer is on the load. Copying the number and hunting for it on the Loads page is the
- * step this removes. Falls back to plain text when the row never resolved to a load, so
+ * step this removes. A load that belongs to a shipment links to the shipment page itself
+ * (a real link, so ctrl/cmd-click opens a tab); an old load with no shipment still opens
+ * in the load drawer. Falls back to plain text when the row never resolved to a load, so
  * an unlinked trip reads as unlinked rather than as a dead link.
  */
+const PRO_LINK_STYLE: React.CSSProperties = {
+  border: 'none', background: 'none', padding: 0, cursor: 'pointer',
+  font: 'inherit', color: 'var(--tms-primary)', textDecoration: 'underline',
+  textUnderlineOffset: 2,
+}
+
 function ProLink({
   loadId, proNumber, children,
 }: {
@@ -119,19 +127,23 @@ function ProLink({
 }) {
   const setSelectedLoad = useAppStore((st) => st.setSelectedLoad)
   const loads = useAppStore((st) => st.loads)
-  const known = loadId ? loads.some((l) => l.id === loadId) : false
-  if (!loadId || !known) return <>{children}</>
+  const load = loadId ? loads.find((l) => l.id === loadId) : undefined
+  if (!loadId || !load) return <>{children}</>
+  const label = `Open the shipment for PRO ${proNumber || loadId}`
+  if (load.shipmentId) {
+    return (
+      <Link to={`/tms/shipments/${encodeURIComponent(load.shipmentId)}`} aria-label={label} title="Open this shipment" style={PRO_LINK_STYLE} data-testid="settlement-pro-link">
+        {children}
+      </Link>
+    )
+  }
   return (
     <button
       type="button"
       onClick={() => setSelectedLoad(loadId, 'view')}
       aria-label={`Open the load for PRO ${proNumber || loadId}`}
       title="Open this load"
-      style={{
-        border: 'none', background: 'none', padding: 0, cursor: 'pointer',
-        font: 'inherit', color: 'var(--tms-primary)', textDecoration: 'underline',
-        textUnderlineOffset: 2,
-      }}
+      style={PRO_LINK_STYLE}
     >
       {children}
     </button>
@@ -262,7 +274,7 @@ function statementCsv(row: OwnerOperatorPayRow, periodStart: string): string {
   const L: string[] = []
   L.push(q(`${row.driver.name} — owner operator pay period ${weekLabelLong(periodStart)}`)); L.push('')
   L.push([
-    'PRO #', 'PO #', 'Load ID', 'Customer', 'Broker MC', 'Invoice amount', 'Invoice date',
+    'PRO #', 'PO #', 'Customer', 'Broker MC', 'Invoice amount', 'Invoice date',
     'Origin city', 'Origin state', 'Origin ZIP', 'Dest city', 'Dest state', 'Dest ZIP',
     'POD', 'Rate confirmation', 'Miles', 'Rate/mi', 'Freight', 'Driver Amount', 'On this check',
   ].map(q).join(','))
@@ -270,7 +282,7 @@ function statementCsv(row: OwnerOperatorPayRow, periodStart: string): string {
   for (const t of row.trips) {
     L.push([
       csvField(t, 'InvoiceNo'), csvField(t, 'PoNumber'),
-      t.loadId, t.customer, csvField(t, 'BrokerMC'),
+      t.customer, csvField(t, 'BrokerMC'),
       csvField(t, 'InvoiceAmount'), csvField(t, 'InvoiceDate'),
       csvField(t, 'FromCity'), csvField(t, 'FromState'), csvField(t, 'FromZip'),
       csvField(t, 'ToCity'), csvField(t, 'ToState'), csvField(t, 'ToZip'),
@@ -545,7 +557,7 @@ export function OwnerOperatorPayPage({ week, onWeek, viewSwitch, initialDriverId
         />
       )}
       {settingsFor && <SettingsModal driver={settingsFor} existing={pay.rows.find((r) => r.driver.id === settingsFor.id)?.baseSetting} onSave={async (patch, expectedUpdatedAt) => { await pay.saveSetting(settingsFor.id, patch, expectedUpdatedAt); setSettings(null) }} onClose={() => setSettings(null)} />}
-      {/* Opened by the PRO column. Present on every page that can select a load. */}
+      {/* Opened by the PRO column for an old load that has no shipment. */}
       <LoadDrawer />
     </TmsScrollPage>
   )
@@ -626,10 +638,9 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr style={{ borderBottom: '1px solid var(--tms-border)' }}>
-            {/* PRO and PO lead: they are how the office and OTR both name a load. */}
+            {/* PRO and PO lead: they are how the office and OTR both name a load. The PO is the shipment's customer ref, the PO it factors under. */}
             <th style={{ ...TH, textAlign: 'left' }}>PRO #</th>
             <th style={{ ...TH, textAlign: 'left' }}>PO #</th>
-            <th style={{ ...TH, textAlign: 'left' }}>Load ID</th>
             <th style={{ ...TH, textAlign: 'left' }}>Customer</th>
             <th style={{ ...TH, textAlign: 'left' }}>Route</th>
             <th style={TH}>Broker MC</th>
@@ -656,7 +667,9 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
               const held = heldReasonById.get(t.id)
               return (
               <tr key={t.id} style={{ borderBottom: '1px solid var(--tms-border)', background: dup ? 'var(--tms-badge-red-tint)' : held ? 'var(--tms-badge-orange-tint)' : undefined }}>
-                <td style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', fontWeight: 600 }}>
+                <td style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', fontWeight: 600, color: dup ? 'var(--tms-badge-red)' : undefined }}
+                    title={dup ? 'Duplicate — this load also settled last week' : undefined}>
+                  {dup && <AlertTriangle size={12} style={{ color: 'var(--tms-badge-red)', verticalAlign: '-1px', marginRight: 4 }} />}
                   {/* The PRO is how everyone refers to a load, so it is also the way to it. */}
                   <ProLink loadId={t.id} proNumber={String(t.readiness?.payload.InvoiceNo ?? '')}>
                     <OtrCell trip={t} field="InvoiceNo" />
@@ -664,11 +677,6 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
                 </td>
                 <td style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)' }}>
                   <OtrCell trip={t} field="PoNumber" />
-                </td>
-                <td style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', fontWeight: dup ? 700 : 400, color: dup ? 'var(--tms-badge-red)' : 'var(--tms-text-2)' }}
-                    title={dup ? 'Duplicate — this Load ID also settled last week' : undefined}>
-                  {dup && <AlertTriangle size={12} style={{ color: 'var(--tms-badge-red)', verticalAlign: '-1px', marginRight: 4 }} />}
-                  {t.loadId}
                 </td>
                 <td style={{ ...TD, textAlign: 'left', color: 'var(--tms-text-2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.customer || '—'}</td>
                 <td style={{ ...TD, textAlign: 'left', color: 'var(--tms-text-2)' }}>{t.origin || '—'} → {t.destination || '—'}</td>

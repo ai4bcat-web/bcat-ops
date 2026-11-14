@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { intakeFields, intakeRow } from './testFixtures'
-import { groupByCustomer, groupByDivision, parseView, resolveGroup, rowInGroup } from './intakeGroups'
+import { groupByCustomer, groupByDivision, parseView, resolveGroup, rowInGroup, withDivisionColumn } from './intakeGroups'
 
 const row = (id: string, divisionCode: string | null, customerId: string | null, customerName: string | null = null) =>
   intakeRow({ id, divisionCode, fields: intakeFields({ customerId, customerName }) })
@@ -34,5 +34,13 @@ describe('intakeGroups', () => {
     expect(resolveGroup(groups, null)).toBe('all')
     expect(parseView('bogus')).toBe('all')
     expect(parseView('customer')).toBe('customer')
+  })
+})
+
+describe('withDivisionColumn', () => {
+  it('adds Rev division once, right after Customer, and keeps the rest of a saved layout', () => {
+    expect(withDivisionColumn(['received', 'from', 'customer', 'reference', 'source'])).toEqual(['received', 'from', 'customer', 'division', 'reference', 'source'])
+    expect(withDivisionColumn(['received', 'customer', 'division'])).toEqual(['received', 'customer', 'division'])
+    expect(withDivisionColumn(['received', 'from'])).toEqual(['received', 'from', 'division'])
   })
 })

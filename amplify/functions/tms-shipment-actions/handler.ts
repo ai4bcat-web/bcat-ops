@@ -609,6 +609,7 @@ type Action =
   | 'INTAKE_DELETE'
   | 'INTAKE_NOT_DUPLICATE'
   | 'INTAKE_ADD_NOTE'
+  | 'INTAKE_AUTOLINK_BUILT'
   | 'SAVE_ORDER_FORM'
   | 'CHECK_CREDIT'
   | 'SUBMIT_ORDER'
@@ -920,7 +921,7 @@ function isActionAuthorized(action: Action, caller: Caller): boolean {
     return groups.includes(LOADS_PAGE_GROUP) || groups.includes(QUOTES_PAGE_GROUP) || tms
   }
   // Whoever builds a shipment from an intake load can tie the two together: the link is the end of the build, not a review step.
-  if (action === 'INTAKE_LINK_SHIPMENT' || action === 'INTAKE_ATTACH_FILES') return groups.includes(INTAKE_REVIEW_PAGE_GROUP) || groups.includes(LOADS_PAGE_GROUP) || tms
+  if (action === 'INTAKE_LINK_SHIPMENT' || action === 'INTAKE_ATTACH_FILES' || action === 'INTAKE_AUTOLINK_BUILT') return groups.includes(INTAKE_REVIEW_PAGE_GROUP) || groups.includes(LOADS_PAGE_GROUP) || tms
   if (INTAKE_REVIEW_ACTIONS[action]) return groups.includes(INTAKE_REVIEW_PAGE_GROUP)
   if (LOAD_REVIEW_ACTIONS[action]) return groups.includes(LOAD_REVIEW_PAGE_GROUP) || groups.includes(LOADS_PAGE_GROUP) || tms
   if (action === 'RECONCILE_BILLING') return BILLING_RECONCILE_GROUPS.some((g) => groups.includes(g)) || groups.includes(LOADS_PAGE_GROUP) || tms
@@ -2680,6 +2681,8 @@ async function saveOrderForm(input: Row, caller: Caller, opts: SaveOrderFormOpts
     charges: chargeRows.length,
     revenueCents: totals.revenueCents,
   })
+  // The create runs before the form saves the references, so the queue is checked again once they are on the order.
+  await reconcileOpenIntake(intakeDeps, shipmentId, caller)
 
   return { bundle: await readBundle(shipmentId), totals }
 }
@@ -7734,6 +7737,7 @@ async function updateOrderDetails(input: Row, caller: Caller): Promise<Row> {
     repriced,
   })
   if (repriced && isDeliveredOrLater(load.status)) await writeLaneSample(quoteDeps, loadId)
+  if ('references' in orderIn) await reconcileOpenIntake(intakeDeps, shipmentId, caller)
   return readBundle(shipmentId) as unknown as Row
 }
 
@@ -9166,6 +9170,33 @@ async function attachIntakeFiles(
   return attached
 }
 
+/**
+ * Shipments whose search key holds any of `values` (lower case), for the Intake already-built check (`intake.ts`). The key is not
+ * indexed, so this is one filtered table scan (at most 25 values per call); it only runs when an open intake row could match.
+ */
+async function findShipmentsBySearchKeys(values: string[]): Promise<Row[]> {
+  const unique = [...new Set(values.map((v) => v.trim().toLowerCase()).filter((v) => v.length >= 5))].slice(0, 25)
+  if (!SHIPMENT_TABLE_NAME || unique.length === 0) return []
+  const names: Record<string, string> = { '#k': 'searchKey', '#n': 'number' }
+  const vals: Record<string, AttributeValue> = {}
+  const clauses = unique.map((v, i) => { vals[`:v${i}`] = { S: v }; return `contains(#k, :v${i})` })
+  const out: Row[] = []
+  let lastKey: Record<string, AttributeValue> | undefined
+  do {
+    const page = await dynamo.send(new ScanCommand({
+      TableName: SHIPMENT_TABLE_NAME,
+      FilterExpression: clauses.join(' OR '),
+      ProjectionExpression: 'id, #n, customerId, customerName, #k, voidedAt, deletedAt',
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: vals,
+      ExclusiveStartKey: lastKey,
+    }))
+    for (const item of page.Items ?? []) out.push(unmarshall(item))
+    lastKey = page.LastEvaluatedKey
+  } while (lastKey)
+  return out
+}
+
 const intakeDeps: IntakeDeps = {
   tables: { intakeLoad: INTAKE_LOAD_TABLE_NAME, shipment: SHIPMENT_TABLE_NAME, order: ORDER_TABLE_NAME, load: LOAD_TABLE_NAME },
   getById,
@@ -9176,6 +9207,7 @@ const intakeDeps: IntakeDeps = {
   isDivisionActive: (code) => assertTaggableDivision(code, null).then(() => true, () => false),
   writeAudit,
   attachFiles: attachIntakeFiles,
+  findShipmentsBySearchKeys,
   actions: { createShipment, setRevTag, setSalesRep, assignAsset },
   now: nowIso,
 }
@@ -9407,6 +9439,7 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
     case 'INTAKE_DELETE':
     case 'INTAKE_NOT_DUPLICATE':
     case 'INTAKE_ADD_NOTE':
+    case 'INTAKE_AUTOLINK_BUILT':
       return runIntakeAction(intakeDeps, action as IntakeAction, input, caller)
     case 'CHECK_CREDIT':
       return checkCredit(input)
