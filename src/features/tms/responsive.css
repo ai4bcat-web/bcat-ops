@@ -153,3 +153,26 @@
   .tms-shell .tms-dg-table th.tms-dg-sticky:not(.tms-dg-check) { left: auto !important; }
   .tms-shell .tms-dg-table .tms-dg-sticky-last:not(.tms-dg-check) { box-shadow: none; }
 }
+
+/* ── Page heads and summary cards on phones (billing, directory, workstations) ──────────────────────
+   The action cluster sits under the title, left-aligned, labels on one line ("Group by" was breaking in two). Summary cards in a head
+   band (Receivables, Open AR by division, Payables) become one swipeable row instead of a stack that pushed the tabs and table below
+   the fold. */
+@media (max-width: 640px) {
+  .tms-shell .tms-page-actions { margin-left: 0; flex: 1 1 100%; justify-content: flex-start; gap: 6px; }
+  .tms-shell .tms-page-actions label { white-space: nowrap; }
+  .tms-shell .tms-head-band-cards,
+  .tms-portal .tms-head-band-cards {
+    display: flex; overflow-x: auto; scroll-snap-type: x mandatory; gap: 8px; padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
+  }
+  .tms-shell .tms-head-band-cards > *,
+  .tms-portal .tms-head-band-cards > * { flex: 0 0 min(88%, 340px); scroll-snap-align: start; }
+}
+
+/* Workstation toolbars wrap their segmented filters in plain divs; a long filter row (Tracking's Focus tabs measure 603px) scrolls inside
+   its own row instead of running off the screen. Shipment form actions wrap onto a second row instead of scrolling the page sideways. */
+@media (max-width: 900px) {
+  .tms-shell .tms-dense-bar > div { min-width: 0; max-width: 100%; }
+  .tms-shell .tms-ship-actionbar-right { flex-wrap: wrap; justify-content: flex-end; gap: 6px; min-width: 0; max-width: 100%; }
+}
