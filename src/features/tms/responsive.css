@@ -253,3 +253,107 @@
   .tms-shell .tms-list-row-label, .tms-portal .tms-list-row-label { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
   .tms-shell .tms-list-row-value, .tms-portal .tms-list-row-value { flex-shrink: 0; }
 }
+
+/* ── Plain tables on phones (Ryne 2026-11-14: every page as clean as the dashboard on a phone) ─────────
+   The shell labels each cell of a plain <table> with its column header and marks the table data-phone-stack="on" at phone width only
+   (phoneTables.ts). Each row becomes a card: the first column (PRO, name, date) across the top, every other column as a label over its
+   value, two to a line. Nothing is cut off: cells wrap, amounts stay whole. DenseGrid tables have their own cards and are skipped. */
+@media (max-width: 640px) {
+  .tms-shell table[data-phone-stack='on'],
+  .tms-portal table[data-phone-stack='on'] { display: block; width: 100% !important; min-width: 0 !important; max-width: 100%; border-collapse: separate; }
+  .tms-shell table[data-phone-stack='on'] > thead,
+  .tms-portal table[data-phone-stack='on'] > thead { display: none; }
+  .tms-shell table[data-phone-stack='on'] > tbody,
+  .tms-portal table[data-phone-stack='on'] > tbody { display: block; width: 100%; }
+  .tms-shell table[data-phone-stack='on'] > tfoot,
+  .tms-portal table[data-phone-stack='on'] > tfoot { display: block; width: 100%; }
+  .tms-shell table[data-phone-stack='on'] > tbody > tr,
+  .tms-portal table[data-phone-stack='on'] > tbody > tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 12px; padding: 10px 12px; height: auto !important; border-bottom: 1px solid var(--tms-border); }
+  .tms-shell table[data-phone-stack='on'] > tfoot > tr,
+  .tms-portal table[data-phone-stack='on'] > tfoot > tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 12px; padding: 10px 12px; height: auto !important; font-weight: 600; background: var(--tms-surface-subtle); }
+  .tms-shell table[data-phone-stack='on'] > tbody > tr > td,
+  .tms-portal table[data-phone-stack='on'] > tbody > tr > td { display: block; width: auto !important; min-width: 0 !important; max-width: none !important; height: auto !important; padding: 0 !important; border: 0 !important; text-align: left !important; position: static !important; white-space: normal !important; overflow: visible !important; text-overflow: clip !important; overflow-wrap: anywhere; }
+  .tms-shell table[data-phone-stack='on'] > tbody > tr > th,
+  .tms-portal table[data-phone-stack='on'] > tbody > tr > th { display: block; width: auto !important; min-width: 0 !important; max-width: none !important; height: auto !important; padding: 0 !important; border: 0 !important; text-align: left !important; position: static !important; white-space: normal !important; overflow: visible !important; text-overflow: clip !important; overflow-wrap: anywhere; }
+  .tms-shell table[data-phone-stack='on'] > tfoot > tr > td,
+  .tms-portal table[data-phone-stack='on'] > tfoot > tr > td { display: block; width: auto !important; min-width: 0 !important; max-width: none !important; height: auto !important; padding: 0 !important; border: 0 !important; text-align: left !important; position: static !important; white-space: normal !important; overflow: visible !important; text-overflow: clip !important; overflow-wrap: anywhere; }
+  .tms-shell table[data-phone-stack='on'] > tfoot > tr > th,
+  .tms-portal table[data-phone-stack='on'] > tfoot > tr > th { display: block; width: auto !important; min-width: 0 !important; max-width: none !important; height: auto !important; padding: 0 !important; border: 0 !important; text-align: left !important; position: static !important; white-space: normal !important; overflow: visible !important; text-overflow: clip !important; overflow-wrap: anywhere; }
+  .tms-shell table[data-phone-stack='on'] > tbody > tr > [data-label]::before,
+  .tms-portal table[data-phone-stack='on'] > tbody > tr > [data-label]::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 11px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; color: var(--tms-muted); }
+  .tms-shell table[data-phone-stack='on'] > tfoot > tr > [data-label]::before,
+  .tms-portal table[data-phone-stack='on'] > tfoot > tr > [data-label]::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 11px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; color: var(--tms-muted); }
+  .tms-shell table[data-phone-stack='on'] > tbody > tr > td:first-child,
+  .tms-portal table[data-phone-stack='on'] > tbody > tr > td:first-child { grid-column: 1 / -1; font-weight: 600; }
+  .tms-shell table[data-phone-stack='on'] > tbody > tr > th:first-child,
+  .tms-portal table[data-phone-stack='on'] > tbody > tr > th:first-child { grid-column: 1 / -1; font-weight: 600; }
+  .tms-shell table[data-phone-stack='on'] > tbody > tr > td:not([data-label]),
+  .tms-portal table[data-phone-stack='on'] > tbody > tr > td:not([data-label]) { grid-column: 1 / -1; }
+  .tms-shell table[data-phone-stack='on'] > tbody > tr > td[colspan],
+  .tms-portal table[data-phone-stack='on'] > tbody > tr > td[colspan] { grid-column: 1 / -1; }
+  .tms-shell table[data-phone-stack='on'] > tbody > tr > th:not([data-label]),
+  .tms-portal table[data-phone-stack='on'] > tbody > tr > th:not([data-label]) { grid-column: 1 / -1; }
+  .tms-shell table[data-phone-stack='on'] > tbody > tr > th[colspan],
+  .tms-portal table[data-phone-stack='on'] > tbody > tr > th[colspan] { grid-column: 1 / -1; }
+  .tms-shell table[data-phone-stack='on'] > tfoot > tr > td:not([data-label]),
+  .tms-portal table[data-phone-stack='on'] > tfoot > tr > td:not([data-label]) { grid-column: 1 / -1; }
+  .tms-shell table[data-phone-stack='on'] > tfoot > tr > td[colspan],
+  .tms-portal table[data-phone-stack='on'] > tfoot > tr > td[colspan] { grid-column: 1 / -1; }
+  .tms-shell table[data-phone-stack='on'] > tfoot > tr > th:not([data-label]),
+  .tms-portal table[data-phone-stack='on'] > tfoot > tr > th:not([data-label]) { grid-column: 1 / -1; }
+  .tms-shell table[data-phone-stack='on'] > tfoot > tr > th[colspan],
+  .tms-portal table[data-phone-stack='on'] > tfoot > tr > th[colspan] { grid-column: 1 / -1; }
+  .tms-shell table[data-phone-stack='on'] .tabular-nums,
+  .tms-portal table[data-phone-stack='on'] .tabular-nums { white-space: nowrap; }
+  .tms-shell table[data-phone-stack='on'] [style*='tabular-nums'],
+  .tms-portal table[data-phone-stack='on'] [style*='tabular-nums'] { white-space: nowrap; }
+  .tms-shell .tms-table-wrap:has(> table[data-phone-stack='on']),
+  .tms-portal .tms-table-wrap:has(> table[data-phone-stack='on']) { overflow: visible !important; }
+  .tms-shell .overflow-auto:has(> table[data-phone-stack='on']),
+  .tms-portal .overflow-auto:has(> table[data-phone-stack='on']) { overflow: visible !important; }
+  .tms-shell .overflow-x-auto:has(> table[data-phone-stack='on']),
+  .tms-portal .overflow-x-auto:has(> table[data-phone-stack='on']) { overflow: visible !important; }
+  .tms-shell .tms-card-body:has(> table[data-phone-stack='on']),
+  .tms-portal .tms-card-body:has(> table[data-phone-stack='on']) { overflow: visible !important; }
+}
+
+/* ── Grids and figures on phones ───────────────────────────────────────────────────────────────────────
+   index.css already folds inline repeat(3..7) and 1fr 1fr grids to one column at phone width. What it misses: unprefixed Tailwind
+   grid-cols-N (two columns here), a content-plus-400px side panel (drops under the content), and the Settings row editors laid out in rem
+   tracks (two fields to a line). KPI tile figures scale instead of clipping, and money truncated with an ellipsis shows in full. The
+   Operations Dashboard (.tms-phone-keep) is left exactly as it is. */
+@media (max-width: 640px) {
+  .tms-shell .grid-cols-3:not(.tms-phone-keep *),
+  .tms-shell .grid-cols-4:not(.tms-phone-keep *),
+  .tms-shell .grid-cols-5:not(.tms-phone-keep *),
+  .tms-shell .grid-cols-6:not(.tms-phone-keep *) { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .tms-shell [style*='1fr) 400px'],
+  .tms-portal [style*='1fr) 400px'] { grid-template-columns: minmax(0, 1fr) !important; }
+  .tms-shell [style*='grid-template-columns: 7rem'],
+  .tms-shell [style*='grid-template-columns: 8rem'],
+  .tms-shell [style*='grid-template-columns: 9rem'],
+  .tms-shell [style*='grid-template-columns: 5rem'],
+  .tms-shell [style*='grid-template-columns: 1fr 7rem'],
+  .tms-shell [style*='grid-template-columns: minmax(96px'],
+  .tms-shell [style*='1fr) 6rem'] { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .tms-shell .tms-kpi-tile:not(.tms-phone-keep *) [style*='align-items: baseline'] { flex-wrap: wrap; row-gap: 2px; }
+  .tms-shell .tms-kpi-tile:not(.tms-phone-keep *) [style*='font-size: 30px'] { font-size: clamp(20px, 6.4vw, 30px) !important; white-space: nowrap; }
+  .tms-shell .tabular-nums.truncate:not(.tms-phone-keep *),
+  .tms-shell [style*='tabular-nums'][style*='ellipsis']:not(.tms-phone-keep *) { overflow: visible !important; text-overflow: clip !important; white-space: nowrap; }
+}
+
+/* ── Older dialogs and side sheets on phones ──────────────────────────────────────────────────────────
+   The shadcn Dialog / Sheet (Expenses, Fuel, Insurance, PODs, Feedback ...) are not tms-dialog-content, so the sheet rules above miss
+   them. While the app shell is mounted it tags them data-phone-sheet (phoneTables.ts), so the driver app's dialogs are untouched. On a
+   phone a dialog becomes a full-width bottom sheet that scrolls; a side sheet takes the full width with tighter padding. */
+@media (max-width: 640px) {
+  .tms-portal[data-phone-sheet='dialog'] {
+    left: 0 !important; right: 0; top: auto !important; bottom: 0; transform: none !important;
+    width: 100vw !important; max-width: 100vw !important; max-height: 92dvh; overflow-y: auto;
+    padding: 16px 14px max(16px, env(safe-area-inset-bottom, 0px)) !important;
+    border-radius: var(--tms-radius-card) var(--tms-radius-card) 0 0;
+  }
+  .tms-portal[data-phone-sheet='side'] { width: 100vw !important; max-width: 100vw !important; }
+  .tms-portal[data-phone-sheet='side'] .px-8,
+  .tms-portal[data-phone-sheet='side'] .px-6 { padding-left: 14px; padding-right: 14px; }
+}

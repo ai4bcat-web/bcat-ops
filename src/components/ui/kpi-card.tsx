@@ -28,7 +28,7 @@ export function KpiCard({
     deltaDir === 'up' ? 'var(--tms-badge-green)' : deltaDir === 'down' ? 'var(--tms-badge-red)' : 'var(--tms-text-2)'
 
   return (
-    <div style={{ background: 'var(--tms-card)', borderRadius: 12, border: '1px solid var(--tms-border)', boxShadow: 'var(--tms-shadow)', position: 'relative', overflow: 'hidden' }}>
+    <div className="tms-kpi-tile" style={{ background: 'var(--tms-card)', borderRadius: 12, border: '1px solid var(--tms-border)', boxShadow: 'var(--tms-shadow)', position: 'relative', overflow: 'hidden' }}>
       {accent && (
         <div style={{
           position: 'absolute', top: -40, right: -40, width: 140, height: 140,
