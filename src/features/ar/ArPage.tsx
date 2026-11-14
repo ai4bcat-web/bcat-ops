@@ -84,6 +84,8 @@ import { useBillingGrant, BILLING_GRANT_MESSAGE } from './useBillingGrant'
 import { attachmentStateText, useInvoiceAttachmentPlans } from './useInvoiceAttachmentPlans'
 import type { InvoiceAttachmentPlanRow } from '@/lib/invoiceDelivery'
 import type { FactoringItem } from '@/types'
+import { ArInvoicedCard, ArPaidCard, ArReadyCard, ProfitCheckCard, ReviewReasonCard } from '@/features/finance/AccountingCards'
+import { arInvoicedStats, arPaidStats, arReadyStats, reviewReasonCounts } from '@/features/finance/accountingStats'
 import type { ArPaymentRecord, CustomerRecord, InvoiceRecord, ShipmentRecord, UserProfileRecord } from '@/types/tms'
 
 /** Which dialog is open, and the one thing it is open about. Mount is the `open` flag. */
@@ -581,6 +583,15 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       busy,
     })
 
+  const onParty = (id: string | null) => setOwed({ ...owed, parties: id ? [id] : [] })
+  const tabCard = tab === 'ready' ? <ArReadyCard stats={arReadyStats(queue.READY, factorReadiness, asOf)} />
+    : tab === 'invoiced' ? (
+      <ArInvoicedCard stats={arInvoicedStats(queue.INVOICED, asOf)} due={owed.due} onDue={(due) => setOwed({ ...owed, due })} parties={owed.parties} onParty={onParty} />
+    )
+    : tab === 'paid' ? <ArPaidCard stats={arPaidStats(queue.PAID, paymentFacts.linesByInvoice)} monthLabel={monthLabel(month)} />
+    : tab === 'review' ? <ReviewReasonCard counts={reviewReasonCounts(needsReview.rows)} total={needsReview.rows.length} />
+    : null
+
   return (
     <>
       <div className="tms-page">
@@ -615,6 +626,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
                 division={owed.divisions.length === 1 ? owed.divisions[0] : null}
                 onDivision={(key) => setOwed({ ...owed, divisions: key ? [key] : [], due: owed.due })}
               />
+              {tabCard}
+              <ProfitCheckCard asOf={asOf} testId="ar-profit-check" />
               {owedFilterActive(owed) && (
                 <OwedSummary
                   title={owedSelectionLabel(owed, customerLabel, divisionLabel)}
