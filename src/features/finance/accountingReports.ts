@@ -12,15 +12,15 @@ import {
 import { PAYMENT_METHOD_LABEL, paymentLinesByInvoice, settlementOf } from '@/lib/daysToPay'
 import { billsExpected } from '@/features/ap/apViews'
 import type { FinanceReviewShipment } from '@/lib/apiClient'
-import type { ArPaymentRecord, CarrierBillRecord, InvoiceRecord, LaneRateSampleRecord } from '@/types/tms'
-import { REVIEW_REASON_LABEL, reviewReasonKeys, type ReviewReasonKey } from './accountingStats'
+import type { ApPaymentRecord, ArPaymentRecord, CarrierBillRecord, InvoiceRecord, LaneRateSampleRecord } from '@/types/tms'
+import { REVIEW_REASON_LABEL, billPaymentLines, reviewReasonKeys, type BillingMismatches, type ReviewReasonKey } from './accountingStats'
 
 export type ReportSide = 'AR' | 'AP'
 
 export type AccountingReportKind =
   | 'arAgingSummary' | 'arAgingDetail' | 'arOpen' | 'arPayments' | 'arDaysToPay'
   | 'apAging' | 'apOpen' | 'apPaid' | 'apExpected'
-  | 'marginByLoad' | 'needsReview'
+  | 'marginByLoad' | 'needsReview' | 'custPaidCarrierUnpaid' | 'carrierPaidNotBilled'
 
 export interface ReportStatusOption { key: string; label: string }
 
@@ -37,6 +37,8 @@ export interface AccountingReportDef {
 
 const ALL: ReportStatusOption = { key: 'all', label: 'All' }
 
+const AP_METHOD_LABEL: Record<string, string> = { ACH: 'ACH', CHECK: 'Paper check', WIRE: 'Wire', ZELLE: 'Zelle', VENMO: 'Venmo', EFT: 'EFT', OTHER: 'Other' }
+
 export const ACCOUNTING_REPORTS: AccountingReportDef[] = [
   { kind: 'arAgingSummary', title: 'AR aging by customer', side: 'AR', dateBasis: null, partyLabel: 'Customer', statuses: [ALL, { key: 'late', label: 'Customers with late invoices' }] },
   { kind: 'arAgingDetail', title: 'AR aging detail (by invoice)', side: 'AR', dateBasis: 'Invoice date', partyLabel: 'Customer', statuses: [ALL, { key: 'late', label: 'Past due' }, ...AR_AGING_BUCKETS.map((b) => ({ key: b, label: `${AR_AGING_BUCKET_LABEL[b]} days` }))] },
@@ -45,9 +47,11 @@ export const ACCOUNTING_REPORTS: AccountingReportDef[] = [
   { kind: 'arDaysToPay', title: 'Days to pay by customer', side: 'AR', dateBasis: 'Invoice date', partyLabel: 'Customer', statuses: [ALL] },
   { kind: 'apAging', title: 'AP aging by carrier', side: 'AP', dateBasis: null, partyLabel: 'Carrier', statuses: [ALL, { key: 'late', label: 'Carriers with past-due bills' }] },
   { kind: 'apOpen', title: 'Open bills', side: 'AP', dateBasis: 'Due date', partyLabel: 'Carrier', statuses: [ALL, { key: 'late', label: 'Past due' }, { key: 'IN_REVIEW', label: 'In review' }, { key: 'TO_BE_PAID', label: 'To be paid' }, { key: 'PARTIAL', label: 'Partially paid' }, { key: 'FACTOR', label: 'Pay to factor' }] },
-  { kind: 'apPaid', title: 'Bills paid', side: 'AP', dateBasis: 'Paid date', partyLabel: 'Carrier', statuses: [ALL, { key: 'FACTOR', label: 'Paid to factor' }, { key: 'CARRIER', label: 'Paid direct' }] },
+  { kind: 'apPaid', title: 'Bills paid', side: 'AP', dateBasis: 'Paid date', partyLabel: 'Carrier', statuses: [ALL, { key: 'ACH', label: 'ACH' }, { key: 'CHECK', label: 'Paper check' }, { key: 'otherMethod', label: 'Other method' }, { key: 'FACTOR', label: 'Paid to factor' }, { key: 'CARRIER', label: 'Paid direct' }] },
   { kind: 'apExpected', title: 'Expected carrier cost (not yet billed)', side: 'AP', dateBasis: 'Recorded date', partyLabel: 'Carrier', statuses: [ALL, { key: 'flagged', label: 'Needs fix' }] },
   { kind: 'marginByLoad', title: 'Margin by load (internal)', side: 'both', dateBasis: 'Load date', partyLabel: 'Customer or carrier', statuses: [ALL, { key: 'negative', label: 'Negative margin only' }, { key: 'thin', label: 'Under 10% margin' }] },
+  { kind: 'custPaidCarrierUnpaid', title: 'Customer paid, carrier unpaid', side: 'both', dateBasis: null, partyLabel: 'Customer or carrier', statuses: [ALL] },
+  { kind: 'carrierPaidNotBilled', title: 'Carrier paid, not billed', side: 'both', dateBasis: null, partyLabel: 'Customer or carrier', statuses: [ALL] },
   { kind: 'needsReview', title: 'Needs review list', side: 'both', dateBasis: 'Flagged date', partyLabel: 'Customer', statuses: [ALL, ...(Object.keys(REVIEW_REASON_LABEL) as ReviewReasonKey[]).map((k) => ({ key: k, label: REVIEW_REASON_LABEL[k] }))] },
 ]
 
@@ -75,6 +79,8 @@ export interface ReportData {
   bills?: CarrierBillRecord[]
   samples?: LaneRateSampleRecord[]
   review?: FinanceReviewShipment[]
+  apPayments?: ApPaymentRecord[]
+  mismatches?: BillingMismatches
 }
 
 export type Cell = string | number | null
@@ -213,14 +219,41 @@ export function buildAccountingReport(kind: AccountingReportKind, data: ReportDa
       }
     }
     case 'apPaid': {
+      const lines = billPaymentLines(data.apPayments ?? [])
+      const methodOf = (b: CarrierBillRecord) => lines.get(b.id)?.method ?? null
       const rows = (data.bills ?? [])
-        .filter((b) => b.status === 'PAID' && inRange(b.paidAt, f) && nameMatch(b.carrierName, f) && (all || b.payeeKind === f.status))
+        .filter((b) => b.status === 'PAID' && inRange(b.paidAt, f) && nameMatch(b.carrierName, f))
+        .filter((b) => {
+          if (all) return true
+          const m = methodOf(b)
+          if (f.status === 'ACH' || f.status === 'CHECK') return m === f.status
+          if (f.status === 'otherMethod') return m !== 'ACH' && m !== 'CHECK'
+          return b.payeeKind === f.status
+        })
         .sort((a, b) => String(a.paidAt).localeCompare(String(b.paidAt)))
       return {
-        columns: ['Paid date', 'Carrier', 'PRO', 'Bill #', 'Bill date', 'Due date', 'Pay to', 'Net', 'Paid'],
-        rows: rows.map((b) => [ymd(b.paidAt), b.carrierName ?? '', b.shipmentNumber ?? '', b.billNumber ?? '', ymd(b.billDate), ymd(b.dueAt),
-          b.payeeKind === 'FACTOR' ? (b.remitTo?.name ?? 'Factor') : 'Carrier', usd(b.netCents), usd(b.paidCents)]),
+        columns: ['Paid date', 'Carrier', 'PRO', 'Bill #', 'Bill date', 'Due date', 'Pay to', 'Method', 'Check / ref #', 'Net', 'Paid'],
+        rows: rows.map((b) => {
+          const line = lines.get(b.id)
+          return [ymd(b.paidAt), b.carrierName ?? '', b.shipmentNumber ?? '', b.billNumber ?? '', ymd(b.billDate), ymd(b.dueAt),
+            b.payeeKind === 'FACTOR' ? (b.remitTo?.name ?? 'Factor') : 'Carrier', line?.method ? AP_METHOD_LABEL[line.method] ?? line.method : '', line?.reference ?? '',
+            usd(b.netCents), usd(b.paidCents)]
+        }),
       }
+    }
+    case 'custPaidCarrierUnpaid':
+    case 'carrierPaidNotBilled': {
+      const list = (kind === 'custPaidCarrierUnpaid' ? data.mismatches?.customerPaidCarrierUnpaid : data.mismatches?.carrierPaidNotBilled) ?? []
+      const rows = list.filter((r) => nameMatch(r.customerName, f) || nameMatch(r.carrierName, f))
+      return kind === 'custPaidCarrierUnpaid'
+        ? {
+          columns: ['PRO', 'Customer', 'Invoice #', 'Invoice total', 'Customer paid', 'Carrier', 'Bill status', 'Carrier balance', 'Bill due'],
+          rows: rows.map((r) => [r.shipmentNumber, r.customerName, r.invoiceNumber ?? '', usd(r.invoiceCents), r.paidOn ?? '', r.carrierName, r.billStatus, usd(r.billCents), r.billDueOrPaid ?? '']),
+        }
+        : {
+          columns: ['PRO', 'Carrier', 'Carrier paid', 'Paid on', 'Invoice'],
+          rows: rows.map((r) => [r.shipmentNumber, r.carrierName, usd(r.billCents), r.billDueOrPaid ?? '', 'None']),
+        }
     }
     case 'apExpected': {
       const flagged = new Map((data.review ?? []).map((r) => [r.id, r.financeReviewReason ?? '']))

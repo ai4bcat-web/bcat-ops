@@ -1,14 +1,17 @@
 /**
  * The reads behind one accounting report: only what the chosen report needs, over the months
- * its date range spans. Payments are read per customer (the index is by customer), four at a time.
+ * its date range spans. Payments (AR and AP) are one paginated list each; the tables are small.
  */
 import {
-  listArPaymentsByCustomer, listBillsByMonth, listFinanceReviewShipments, listInvoicesByMonth, listOpenBills, listOpenInvoices,
+  listApPayments, listArPayments, listBillsByMonth, listFinanceReviewShipments, listInvoicesByMonth, listOpenBills, listOpenInvoices,
 } from '@/lib/apiClient'
 import { loadSamples } from '@/lib/reportsClient'
 import { monthsBetween } from '@/lib/reporting'
-import type { ArPaymentRecord, CarrierBillRecord, InvoiceRecord } from '@/types/tms'
+import { cachedList } from '@/lib/listCache'
+import { isAljexBill } from '@/features/ap/apQueue'
+import type { CarrierBillRecord, InvoiceRecord } from '@/types/tms'
 import type { AccountingReportKind, ReportData, ReportFilters } from './accountingReports'
+import { billingMismatches, type BillingMismatches } from './accountingStats'
 
 /** `'YYYY-MM-DD'` moved by whole months (day clamped to 01 — only the month matters here). */
 function monthShift(day: string, by: number): string {
@@ -37,18 +40,22 @@ async function billsIn(months: string[]): Promise<CarrierBillRecord[]> {
   return sets.flat()
 }
 
-async function paymentsFor(customerIds: string[]): Promise<ArPaymentRecord[]> {
-  const ids = [...new Set(customerIds.filter(Boolean))]
-  const out: ArPaymentRecord[] = []
-  let next = 0
-  const worker = async () => {
-    while (next < ids.length) {
-      const id = ids[next++]
-      try { out.push(...await listArPaymentsByCustomer(id)) } catch { /* a customer that fails to read is left out */ }
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker))
-  return out
+const MISMATCH_PAID_DAYS = 90
+
+/**
+ * The profit check's two mismatch lists, read once per five minutes for both pages: open
+ * invoices and a year of invoices (to find each bill's invoice), open bills, and the bills
+ * paid in the last 90 days (older Aljex-era payments have no invoice here and are left out).
+ */
+export function loadBillingMismatches(asOf: string): Promise<BillingMismatches> {
+  return cachedList(`acct:mismatches:${asOf}`, async () => {
+    const [openInvoices, invoices, openBills, recentBills] = await Promise.all([
+      listOpenInvoices(), invoicesIn(monthsBetween(monthShift(asOf, -12), asOf)), listOpenBills(), billsIn(monthsBetween(monthShift(asOf, -6), asOf)),
+    ])
+    const cutoff = new Date(Date.parse(`${asOf}T00:00:00Z`) - MISMATCH_PAID_DAYS * 86_400_000).toISOString().slice(0, 10)
+    const paidBills = recentBills.filter((b) => b.status === 'PAID' && (b.paidAt ?? '').slice(0, 10) >= cutoff && !isAljexBill(b))
+    return billingMismatches({ openInvoices, invoices, openBills: openBills.filter((b) => !isAljexBill(b)), paidBills })
+  }, { ttlMs: 300_000 })
 }
 
 export async function loadAccountingReport(kind: AccountingReportKind, f: ReportFilters): Promise<ReportData> {
@@ -58,13 +65,14 @@ export async function loadAccountingReport(kind: AccountingReportKind, f: Report
     case 'arOpen':
       return { openInvoices: await listOpenInvoices() }
     case 'arPayments': {
-      const [openInvoices, invoices] = await Promise.all([listOpenInvoices(), invoicesIn(windowMonths(f, 3, 6))])
-      const payments = await paymentsFor([...openInvoices, ...invoices].map((inv) => inv.customerId))
+      // Every payment in the range, all customers (one list read). Invoices only name what each
+      // payment was applied to; one a year or more older shows its id instead of its number.
+      const [payments, openInvoices, invoices] = await Promise.all([listArPayments(), listOpenInvoices(), invoicesIn(windowMonths(f, 3, 12))])
       return { openInvoices, invoices, payments }
     }
     case 'arDaysToPay': {
-      const invoices = await invoicesIn(windowMonths(f, 12))
-      return { invoices, payments: await paymentsFor(invoices.filter((inv) => inv.status === 'PAID').map((inv) => inv.customerId)) }
+      const [invoices, payments] = await Promise.all([invoicesIn(windowMonths(f, 12)), listArPayments()])
+      return { invoices, payments }
     }
     case 'apAging':
     case 'apOpen':
@@ -73,8 +81,13 @@ export async function loadAccountingReport(kind: AccountingReportKind, f: Report
       const [openBills, review] = await Promise.all([listOpenBills(), listFinanceReviewShipments().catch(() => [])])
       return { openBills, review }
     }
-    case 'apPaid':
-      return { bills: await billsIn(windowMonths(f, 3, 3)) }
+    case 'apPaid': {
+      const [bills, apPayments] = await Promise.all([billsIn(windowMonths(f, 3, 3)), listApPayments()])
+      return { bills, apPayments }
+    }
+    case 'custPaidCarrierUnpaid':
+    case 'carrierPaidNotBilled':
+      return { mismatches: await loadBillingMismatches(f.asOf) }
     case 'marginByLoad': {
       const to = f.to || f.asOf
       const read = await loadSamples(f.from || monthShift(to, -2), to)

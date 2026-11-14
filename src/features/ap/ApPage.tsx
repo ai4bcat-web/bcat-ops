@@ -66,6 +66,8 @@ import { estimatedDueAt, isAljexBill, payablesQueue, proOf, termsLabel, type ApR
 import { useBillFacts } from './useBillFacts'
 import { ApSummaryStrip } from './components/ApSummaryStrip'
 import { AccountingReportsDialog } from '@/features/finance/AccountingReportsDialog'
+import { useApPaymentLines } from '@/features/finance/useApPaymentLines'
+import type { AccountingReportKind } from '@/features/finance/accountingReports'
 import { ApAgingCard, ApExpectedCard, ApPaidCard, ProfitCheckCard, ReviewReasonCard } from '@/features/finance/AccountingCards'
 import { apAgingStats, apExpectedStats, apPaidStats, reviewReasonCounts } from '@/features/finance/accountingStats'
 import { OwedFilterBar } from '@/features/ar/components/OwedFilterBar'
@@ -144,7 +146,8 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     chip === 'NEEDS_REVIEW' ? undefined : historySince,
   )
   const [dialog, setDialog] = useState<ApDialog | null>(null)
-  const [reportsOpen, setReportsOpen] = useState(false)
+  const apPaymentLines = useApPaymentLines(tab === 'paid')
+  const [reportsOpen, setReportsOpen] = useState<AccountingReportKind | 'menu' | null>(null)
   const [busy, setBusy] = useState(false)
 
   const awaiting = useApWorklist('AWAITING_INVOICE')
@@ -468,7 +471,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     : tab === 'aging' ? (
       <ApAgingCard stats={apAgingStats(agingBills, asOf)} due={owed.due} onDue={(due) => setOwed({ ...owed, due })} parties={owed.parties} onParty={onCarrier} />
     )
-    : tab === 'paid' ? <ApPaidCard stats={apPaidStats(settled, facts)} monthLabel={monthLabel(month)} />
+    : tab === 'paid' ? <ApPaidCard stats={apPaidStats(settled, facts, apPaymentLines)} monthLabel={monthLabel(month)} />
     : tab === 'review' ? <ReviewReasonCard counts={reviewReasonCounts(needsReview.rows)} total={needsReview.rows.length} />
     : null
   const openDrawer = (bill: CarrierBillRecord) => setDrawerId(bill.id)
@@ -614,7 +617,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
               onTab={setTab}
             />
             {apTabCard}
-            <ProfitCheckCard asOf={asOf} testId="ap-profit-check" />
+            <ProfitCheckCard asOf={asOf} onOpenReport={setReportsOpen} testId="ap-profit-check" />
             {owedFilterActive(owed) && (
               <OwedSummary
                 title={owedSelectionLabel(owed, carrierLabel, divisionLabel)}
@@ -633,7 +636,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
               onClick={() => { exportOutstandingPayables().then((n) => toast.success(`Exported ${n} outstanding payables`)).catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not export')) }}>
               <Download size={14} aria-hidden="true" /> Export outstanding
             </button>
-            <button type="button" className="tms-btn tms-btn-secondary tms-btn-sm" data-testid="ap-reports" onClick={() => setReportsOpen(true)}>
+            <button type="button" className="tms-btn tms-btn-secondary tms-btn-sm" data-testid="ap-reports" onClick={() => setReportsOpen('menu')}>
               <FileBarChart size={14} aria-hidden="true" /> Reports
             </button>
             </>
@@ -788,7 +791,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           onPaymentInfo={(bill) => setDialog({ kind: 'payinfo', bill })}
         />
       )}
-      {reportsOpen && <AccountingReportsDialog side="AP" asOf={asOf} onClose={() => setReportsOpen(false)} />}
+      {reportsOpen && <AccountingReportsDialog side="AP" asOf={asOf} initialKind={reportsOpen === 'menu' ? null : reportsOpen} onClose={() => setReportsOpen(null)} />}
       {dialog?.kind === 'report' && (
         <ApReportDialog
           kind={dialog.report}

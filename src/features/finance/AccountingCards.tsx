@@ -7,10 +7,11 @@ import { useEffect, useState } from 'react'
 import { TmsListCard, type TmsListRow } from '@/features/tms/kit'
 import { formatCents } from '@/lib/invoiceBuild'
 import { loadSamples } from '@/lib/reportsClient'
+import { loadBillingMismatches } from './loadAccountingReport'
 import { DUE_BUCKET_LABEL, type DueBucket } from '@/features/ar/owedFilters'
 import {
   REVIEW_REASON_LABEL, profitCheck, type ApAgingStats, type ApExpectedStats, type ApPaidStats, type ArInvoicedStats,
-  type ArPaidStats, type ArReadyStats, type Money, type PartyMoney, type ProfitCheck, type ReviewReasonKey,
+  type ArPaidStats, type ArReadyStats, type BillingMismatches, type Money, type PartyMoney, type ProfitCheck, type ReviewReasonKey,
 } from './accountingStats'
 
 const n = (count: number, unit: string) => `${count} ${unit}${count === 1 ? '' : 's'}`
@@ -51,7 +52,12 @@ function partyRows(top: PartyMoney[], unit: string, active: readonly string[], o
 
 const money = (m: Money, unit: string) => ({ value: formatCents(m.cents), sub: n(m.count, unit) })
 
-export function ArReadyCard({ stats }: { stats: ArReadyStats }) {
+export function ArReadyCard({ stats, deliveredNotReady, onLoadReview }: {
+  stats: ArReadyStats
+  /** Delivered loads still in Load Review; null while it is being read. */
+  deliveredNotReady?: number | null
+  onLoadReview?: () => void
+}) {
   return (
     <TmsListCard
       title="Ready to invoice"
@@ -61,6 +67,15 @@ export function ArReadyCard({ stats }: { stats: ArReadyStats }) {
         { key: 'factor-ok', label: 'Ready to factor ✓', value: stats.factorReady == null ? null : String(stats.factorReady), title: 'Factor-billed loads with every OTR field' },
         { key: 'factor-missing', label: 'Factor · missing info', value: stats.factorMissing == null ? null : String(stats.factorMissing), tone: stats.factorMissing ? 'warn' : 'default' },
         { key: 'oldest', label: 'Oldest waiting', value: days(stats.oldestDays), sub: 'since released', tone: (stats.oldestDays ?? 0) > 7 ? 'warn' : 'default' },
+        {
+          key: 'not-ready',
+          label: 'Delivered, not ready',
+          value: deliveredNotReady == null ? null : String(deliveredNotReady),
+          sub: 'still in Load Review',
+          title: 'Delivered loads waiting on paperwork in Load Review · opens Load Review',
+          tone: deliveredNotReady ? 'warn' : 'default',
+          ...(onLoadReview ? { onClick: onLoadReview } : {}),
+        },
       ]}
     />
   )
@@ -157,6 +172,9 @@ export function ApPaidCard({ stats, monthLabel }: { stats: ApPaidStats; monthLab
       testId="ap-tab-card"
       rows={[
         { key: 'paid', label: 'Paid', ...money(stats.paid, 'bill') },
+        { key: 'ach', label: 'ACH', ...money(stats.ach, 'bill') },
+        { key: 'check', label: 'Paper check', ...money(stats.check, 'bill') },
+        ...(stats.other.count ? [{ key: 'other-method', label: 'Other / not recorded', ...money(stats.other, 'bill') }] : []),
         { key: 'car', label: 'Delivery → paid · car shipping', value: days(stats.carAvgDays), sub: `${n(stats.carCount, 'bill')} · target 2 d`, tone: (stats.carAvgDays ?? 0) > 2 ? 'warn' : 'default' },
         { key: 'other', label: 'Delivery → paid · other', value: days(stats.otherAvgDays), sub: n(stats.otherCount, 'bill') },
       ]}
@@ -165,8 +183,22 @@ export function ApPaidCard({ stats, monthLabel }: { stats: ApPaidStats; monthLab
 }
 
 /** Month-to-date margin from the per-load lane samples; read once per month (the reports cache). */
-export function ProfitCheckCard({ asOf, testId }: { asOf: string; testId?: string }) {
+export function ProfitCheckCard({ asOf, testId, onOpenReport }: {
+  asOf: string
+  testId?: string
+  /** Opens Reports on the matching list. */
+  onOpenReport?: (kind: 'marginByLoad' | 'custPaidCarrierUnpaid' | 'carrierPaidNotBilled') => void
+}) {
   const [check, setCheck] = useState<ProfitCheck | null>(null)
+  const [mismatch, setMismatch] = useState<BillingMismatches | null>(null)
+  useEffect(() => {
+    let alive = true
+    Promise.resolve()
+      .then(() => loadBillingMismatches(asOf))
+      .then((m) => { if (alive) setMismatch(m) })
+      .catch(() => { /* the mismatch rows stay on their dashes */ })
+    return () => { alive = false }
+  }, [asOf])
   useEffect(() => {
     let alive = true
     // Through a resolved promise so a missing read (an older backend, a test mock) is caught, not thrown.
@@ -192,6 +224,25 @@ export function ProfitCheckCard({ asOf, testId }: { asOf: string; testId?: strin
           value: check ? String(check.negative.length) : null,
           tone: check && check.negative.length ? 'bad' : 'default',
           title: worst ? `Worst: ${worst}` : 'None',
+          ...(onOpenReport ? { onClick: () => onOpenReport('marginByLoad') } : {}),
+        },
+        {
+          key: 'cust-paid',
+          label: 'Customer paid, carrier unpaid',
+          value: mismatch ? formatCents(mismatch.customerPaidCarrierUnpaid.reduce((t, r) => t + r.billCents, 0)) : null,
+          sub: mismatch ? n(mismatch.customerPaidCarrierUnpaid.length, 'load') : null,
+          title: 'The customer paid the invoice in full; the carrier bill is still open · opens the list',
+          tone: mismatch?.customerPaidCarrierUnpaid.length ? 'warn' : 'default',
+          ...(onOpenReport ? { onClick: () => onOpenReport('custPaidCarrierUnpaid') } : {}),
+        },
+        {
+          key: 'paid-not-billed',
+          label: 'Carrier paid, not billed',
+          value: mismatch ? formatCents(mismatch.carrierPaidNotBilled.reduce((t, r) => t + r.billCents, 0)) : null,
+          sub: mismatch ? n(mismatch.carrierPaidNotBilled.length, 'load') : null,
+          title: 'Carrier bill paid in the last 90 days with no invoice for the load · opens the list',
+          tone: mismatch?.carrierPaidNotBilled.length ? 'bad' : 'default',
+          ...(onOpenReport ? { onClick: () => onOpenReport('carrierPaidNotBilled') } : {}),
         },
       ]}
     />

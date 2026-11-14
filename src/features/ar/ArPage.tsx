@@ -27,7 +27,7 @@ import { allApEmails } from '@/lib/billingMethod'
 import { useAuthUser } from '@/hooks/useAuth'
 import { isOwnerOrAdmin } from '@/lib/accountingAccess'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Download, FileBarChart, Landmark, Mail } from 'lucide-react'
 import { toast } from 'sonner'
 import { BillingGapsPanel } from './components/BillingGapsPanel'
@@ -86,6 +86,8 @@ import { attachmentStateText, useInvoiceAttachmentPlans } from './useInvoiceAtta
 import type { InvoiceAttachmentPlanRow } from '@/lib/invoiceDelivery'
 import type { FactoringItem } from '@/types'
 import { AccountingReportsDialog } from '@/features/finance/AccountingReportsDialog'
+import type { AccountingReportKind } from '@/features/finance/accountingReports'
+import { useDeliveredNotReady } from './useDeliveredNotReady'
 import { ArInvoicedCard, ArPaidCard, ArReadyCard, ProfitCheckCard, ReviewReasonCard } from '@/features/finance/AccountingCards'
 import { arInvoicedStats, arPaidStats, arReadyStats, reviewReasonCounts } from '@/features/finance/accountingStats'
 import type { ArPaymentRecord, CustomerRecord, InvoiceRecord, ShipmentRecord, UserProfileRecord } from '@/types/tms'
@@ -165,7 +167,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const [tab, setTab] = useState<ArPageTab>('ready')
   const needsReview = useNeedsReview()
   const [dialog, setDialog] = useState<ArDialog | null>(null)
-  const [reportsOpen, setReportsOpen] = useState(false)
+  const [reportsOpen, setReportsOpen] = useState<AccountingReportKind | 'menu' | null>(null)
   const [busy, setBusy] = useState(false)
   const canRelease = useBillingGrant()
   const authUser = useAuthUser()
@@ -409,6 +411,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   }
 
   const factorReadiness = useFactorReadiness(queue.READY, tab === 'ready', factorVersion)
+  const deliveredNotReady = useDeliveredNotReady(tab === 'ready')
+  const navigate = useNavigate()
 
   const runBatchGenerate = () => {
     setBusy(true)
@@ -574,7 +578,9 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     })
 
   const onParty = (id: string | null) => setOwed({ ...owed, parties: id ? [id] : [] })
-  const tabCard = tab === 'ready' ? <ArReadyCard stats={arReadyStats(queue.READY, factorReadiness, asOf)} />
+  const tabCard = tab === 'ready' ? (
+      <ArReadyCard stats={arReadyStats(queue.READY, factorReadiness, asOf)} deliveredNotReady={deliveredNotReady} onLoadReview={() => navigate('/tms/load-review')} />
+    )
     : tab === 'invoiced' ? (
       <ArInvoicedCard stats={arInvoicedStats(queue.INVOICED, asOf)} due={owed.due} onDue={(due) => setOwed({ ...owed, due })} parties={owed.parties} onParty={onParty} />
     )
@@ -593,7 +599,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
               onClick={() => { exportOutstandingReceivables().then((n) => toast.success(`Exported ${n} outstanding receivables`)).catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not export')) }}>
               <Download size={14} aria-hidden="true" /> Export outstanding
             </button>
-            <button type="button" className="tms-btn tms-btn-secondary tms-btn-sm" data-testid="ar-reports" onClick={() => setReportsOpen(true)}>
+            <button type="button" className="tms-btn tms-btn-secondary tms-btn-sm" data-testid="ar-reports" onClick={() => setReportsOpen('menu')}>
               <FileBarChart size={14} aria-hidden="true" /> Reports
             </button>
             {tab !== 'review' && current.actions}
@@ -620,7 +626,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
                 onDivision={(key) => setOwed({ ...owed, divisions: key ? [key] : [], due: owed.due })}
               />
               {tabCard}
-              <ProfitCheckCard asOf={asOf} testId="ar-profit-check" />
+              <ProfitCheckCard asOf={asOf} onOpenReport={setReportsOpen} testId="ar-profit-check" />
               {owedFilterActive(owed) && (
                 <OwedSummary
                   title={owedSelectionLabel(owed, customerLabel, divisionLabel)}
@@ -645,7 +651,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         )}
       </div>
 
-      {reportsOpen && <AccountingReportsDialog side="AR" asOf={asOf} onClose={() => setReportsOpen(false)} />}
+      {reportsOpen && <AccountingReportsDialog side="AR" asOf={asOf} initialKind={reportsOpen === 'menu' ? null : reportsOpen} onClose={() => setReportsOpen(null)} />}
       {dialog?.kind === 'generate' && (
         <GenerateInvoiceDialog
           orderId={dialog.orderId}

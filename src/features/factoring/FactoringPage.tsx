@@ -50,6 +50,8 @@ import { CustomerPaidCell, CustomerPaidDialog } from './CustomerPaidCell'
 import { formatPaidOn } from './formatPaidOn'
 import { ResendToOtrDialog } from './ResendToOtrDialog'
 import { offersResend } from '@/lib/factoringResubmit'
+import { chicagoDateStr } from '@/lib/date'
+import { FactoringCards } from './FactoringCards'
 
 // ── Status labels ────────────────────────────────────────────────────────────
 
@@ -926,6 +928,8 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         )}
         {/* What the queue is worth, not just how many rows are in it. */}
         <StatusTotals items={items} />
+        <FactoringCards items={items} asOf={chicagoDateStr(new Date())} customerName={(item) => customerOf(item).name}
+          onTab={(key) => { setActiveTab(key); resetPaging() }} />
         <div className="tms-dense-body">
           <DenseGrid<FactoringItem>
             aria-label="Factoring queue"

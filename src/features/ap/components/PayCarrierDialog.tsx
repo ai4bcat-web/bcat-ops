@@ -36,7 +36,8 @@ import type {
   CreditApplication,
 } from '@/types/tms'
 
-const METHODS: ApPaymentMethod[] = ['ACH', 'WIRE', 'CHECK', 'ZELLE', 'VENMO', 'EFT', 'OTHER']
+const METHODS: ApPaymentMethod[] = ['ACH', 'CHECK', 'WIRE', 'ZELLE', 'VENMO', 'EFT', 'OTHER']
+const METHOD_LABEL: Record<ApPaymentMethod, string> = { ACH: 'ACH', CHECK: 'Paper check', WIRE: 'Wire', ZELLE: 'Zelle', VENMO: 'Venmo', EFT: 'EFT', OTHER: 'Other' }
 
 /** Approved bills are payable; one in review has not been agreed to yet. */
 const PAYABLE: Partial<Record<CarrierBillStatus, true>> = { TO_BE_PAID: true, PARTIAL: true }
@@ -191,8 +192,11 @@ export function PayCarrierDialog({ carrierId, preselectBillIds, open, onOpenChan
     setAllocations(next)
   }
 
+  // A paper check needs its number, the same rule as Mark paid on Receivable (#426).
+  const checkNumberMissing = method === 'CHECK' && reference.trim() === ''
+
   const submit = () => {
-    if (!method) return
+    if (!method || checkNumberMissing) return
     setPosting(true)
     setError(null)
     recordApPayment({
@@ -229,7 +233,7 @@ export function PayCarrierDialog({ carrierId, preselectBillIds, open, onOpenChan
       footer={
         <>
           <TmsButton variant="ghost" onClick={() => onOpenChange(false)} disabled={posting}>Cancel</TmsButton>
-          <TmsButton variant="primary" onClick={submit} disabled={disabled || !plan.ok || unallocated}>
+          <TmsButton variant="primary" onClick={submit} disabled={disabled || !plan.ok || unallocated || checkNumberMissing}>
             {posting ? 'Posting…' : 'Post'}
           </TmsButton>
         </>
@@ -260,15 +264,16 @@ export function PayCarrierDialog({ carrierId, preselectBillIds, open, onOpenChan
                 disabled={disabled}
                 onChange={(e) => setMethod(e.target.value as ApPaymentMethod)}
               >
-                {METHODS.map((row) => <option key={row} value={row}>{row.toLowerCase()}</option>)}
+                {METHODS.map((row) => <option key={row} value={row}>{METHOD_LABEL[row]}</option>)}
               </TmsSelect>
             </TmsField>
-            <TmsField label="Reference">
+            <TmsField label={method === 'CHECK' ? 'Check #' : 'Check / ref #'}>
               <TmsInput
                 aria-label="Payment reference"
                 value={reference}
                 disabled={disabled}
-                placeholder="cheque or trace #"
+                aria-invalid={checkNumberMissing || undefined}
+                placeholder={method === 'CHECK' ? 'required for a paper check' : 'trace or ref # (optional)'}
                 onChange={(e) => setReference(e.target.value)}
               />
             </TmsField>

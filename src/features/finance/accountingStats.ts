@@ -11,7 +11,7 @@ import { averageDaysToPay, settlementOf, type InvoicePaymentLine } from '@/lib/d
 import { CAR_SHIPPING_DIVISION } from '@/lib/carShipper'
 import type { BillFactsIndex } from '@/features/ap/apQueue'
 import type { FinanceReviewShipment } from '@/lib/apiClient'
-import type { CarrierBillRecord, LaneRateSampleRecord } from '@/types/tms'
+import type { ApPaymentMethod, ApPaymentRecord, CarrierBillRecord, InvoiceRecord, LaneRateSampleRecord } from '@/types/tms'
 
 export interface Money { count: number; cents: number }
 export interface PartyMoney extends Money { id: string; name: string }
@@ -205,6 +205,10 @@ export function apAgingStats(bills: readonly CarrierBillRecord[], asOf: string):
 
 export interface ApPaidStats {
   paid: Money
+  ach: Money
+  check: Money
+  /** Other methods, or a bill with no payment row (marked paid by import). */
+  other: Money
   /** Delivery → paid, in days: car shipping (2-day target) and everything else. */
   carAvgDays: number | null
   carCount: number
@@ -212,10 +216,17 @@ export interface ApPaidStats {
   otherCount: number
 }
 
-export function apPaidStats(bills: readonly CarrierBillRecord[], facts: BillFactsIndex): ApPaidStats {
+export function apPaidStats(bills: readonly CarrierBillRecord[], facts: BillFactsIndex, lines: ReadonlyMap<string, BillPaymentLine> = new Map()): ApPaidStats {
   const car: number[] = []
   const other: number[] = []
+  const ach: Money = { count: 0, cents: 0 }
+  const check: Money = { count: 0, cents: 0 }
+  const otherMethod: Money = { count: 0, cents: 0 }
   for (const b of bills) {
+    const m = lines.get(b.id)?.method
+    const bucket = m === 'ACH' ? ach : m === 'CHECK' ? check : otherMethod
+    bucket.count += 1
+    bucket.cents += b.paidCents || b.netCents || 0
     const f = facts.get(b.shipmentId)
     const from = dayNum(f?.deliveredAt)
     const to = dayNum(b.paidAt)
@@ -226,6 +237,9 @@ export function apPaidStats(bills: readonly CarrierBillRecord[], facts: BillFact
   }
   return {
     paid: { count: bills.length, cents: bills.reduce((s, b) => s + (b.paidCents || b.netCents || 0), 0) },
+    ach,
+    check,
+    other: otherMethod,
     carAvgDays: mean1(car),
     carCount: car.length,
     otherAvgDays: mean1(other),
@@ -266,4 +280,93 @@ export function profitCheck(samples: readonly LaneRateSampleRecord[]): ProfitChe
   const profitCents = revenueCents - costCents
   negative.sort((a, b) => a.profitCents - b.profitCents)
   return { loads, revenueCents, costCents, profitCents, marginBps: revenueCents ? Math.round((profitCents * 10_000) / revenueCents) : null, negative }
+}
+
+// ── Billing mismatches (profit check) ───────────────────────────────────────
+
+export interface MismatchRow {
+  shipmentId: string
+  shipmentNumber: string
+  customerName: string
+  carrierName: string
+  invoiceNumber: string | null
+  invoiceCents: number | null
+  paidOn: string | null
+  billCents: number
+  billStatus: string
+  billDueOrPaid: string | null
+}
+
+export interface BillingMismatches {
+  /** The customer has paid the invoice in full and the carrier bill is still open. */
+  customerPaidCarrierUnpaid: MismatchRow[]
+  /** The carrier bill is paid and no live invoice exists for the shipment. */
+  carrierPaidNotBilled: MismatchRow[]
+}
+
+const LIVE_INVOICE = (inv: { status: string }) => inv.status !== 'VOID'
+const ymd10 = (iso: string | null | undefined) => (iso ?? '').slice(0, 10) || null
+
+/**
+ * The two ways the money on one load can be out of step. `invoices` should reach back far
+ * enough to hold the invoice of any bill in `paidBills` (the loader reads a year).
+ */
+export function billingMismatches(input: {
+  openInvoices: readonly InvoiceRecord[]
+  invoices: readonly InvoiceRecord[]
+  openBills: readonly CarrierBillRecord[]
+  paidBills: readonly CarrierBillRecord[]
+}): BillingMismatches {
+  const byShipment = new Map<string, InvoiceRecord>()
+  for (const inv of [...input.invoices, ...input.openInvoices]) {
+    if (!LIVE_INVOICE(inv)) continue
+    const cur = byShipment.get(inv.shipmentId)
+    // A paid invoice wins over an older open one for the same load.
+    if (!cur || (inv.status === 'PAID' && cur.status !== 'PAID')) byShipment.set(inv.shipmentId, inv)
+  }
+  const row = (b: CarrierBillRecord, inv: InvoiceRecord | undefined, when: string | null): MismatchRow => ({
+    shipmentId: b.shipmentId,
+    shipmentNumber: b.shipmentNumber ?? inv?.shipmentNumber ?? b.shipmentId,
+    customerName: inv?.customerName ?? '',
+    carrierName: b.carrierName ?? '',
+    invoiceNumber: inv?.number ?? null,
+    invoiceCents: inv?.totalCents ?? null,
+    paidOn: ymd10(inv?.paidAt),
+    billCents: b.status === 'PAID' ? (b.paidCents || b.netCents) : b.balanceCents,
+    billStatus: b.datesPending ? 'Expected' : b.status,
+    billDueOrPaid: when,
+  })
+  const customerPaidCarrierUnpaid: MismatchRow[] = []
+  for (const b of input.openBills) {
+    if (b.status === 'PAID' || b.status === 'VOID' || !(b.balanceCents > 0)) continue
+    const inv = byShipment.get(b.shipmentId)
+    if (inv?.status === 'PAID') customerPaidCarrierUnpaid.push(row(b, inv, ymd10(b.dueAt)))
+  }
+  const carrierPaidNotBilled: MismatchRow[] = []
+  const seen = new Set<string>()
+  for (const b of input.paidBills) {
+    if (b.status !== 'PAID' || seen.has(b.id) || byShipment.has(b.shipmentId)) continue
+    seen.add(b.id)
+    carrierPaidNotBilled.push(row(b, undefined, ymd10(b.paidAt)))
+  }
+  const byPro = (a: MismatchRow, b: MismatchRow) => a.shipmentNumber.localeCompare(b.shipmentNumber)
+  return { customerPaidCarrierUnpaid: customerPaidCarrierUnpaid.sort(byPro), carrierPaidNotBilled: carrierPaidNotBilled.sort(byPro) }
+}
+
+// ── AP payment method ───────────────────────────────────────────────────────
+
+export interface BillPaymentLine { method: ApPaymentMethod | null; reference: string | null; paidAt: string }
+
+/** The latest live payment applied to each bill: its method and check/ref #. */
+export function billPaymentLines(payments: readonly ApPaymentRecord[]): Map<string, BillPaymentLine> {
+  const out = new Map<string, BillPaymentLine>()
+  for (const p of payments) {
+    if (p.kind !== 'PAYMENT' || p.reversedByPaymentId) continue
+    for (const a of p.applications ?? []) {
+      if (!(a.amountCents > 0)) continue
+      const cur = out.get(a.billId)
+      if (!cur || p.paidAt > cur.paidAt) out.set(a.billId, { method: p.method ?? null, reference: p.reference ?? null, paidAt: p.paidAt })
+    }
+  }
+  return out
 }
