@@ -1,0 +1,145 @@
+/* Own fleet "Covered by" card. Same surface as .tms-covered-card; the group shows as a left accent and the badge. */
+.tms-shell .tms-ofc {
+  --ofc-accent: var(--tms-badge-gray);
+  --ofc-tint: var(--tms-badge-gray-tint);
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px 10px 14px;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-left: 4px solid var(--ofc-accent);
+  border-radius: var(--tms-radius);
+  font-size: 13px;
+  min-width: 0;
+}
+
+.tms-shell .tms-ofc--owner-operator { --ofc-accent: var(--tms-badge-purple); --ofc-tint: var(--tms-badge-purple-tint); }
+.tms-shell .tms-ofc--local { --ofc-accent: var(--tms-badge-turquoise); --ofc-tint: var(--tms-badge-turquoise-tint); }
+.tms-shell .tms-ofc--box-truck { --ofc-accent: var(--tms-badge-blue); --ofc-tint: var(--tms-badge-blue-tint); }
+
+.tms-shell .tms-ship-card--saved .tms-ofc {
+  border-top-color: var(--tms-section-saved-border);
+  border-right-color: var(--tms-section-saved-border);
+  border-bottom-color: var(--tms-section-saved-border);
+}
+
+.tms-shell .tms-ofc-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.tms-shell .tms-ofc-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-ofc-head-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.tms-shell .tms-ofc-link {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--tms-primary);
+  text-decoration: underline;
+}
+
+.tms-shell .tms-ofc-body,
+.tms-shell .tms-ofc-empty {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.tms-shell .tms-ofc-avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ofc-accent);
+  background: var(--ofc-tint);
+  border: 1px solid var(--ofc-accent);
+}
+
+.tms-shell .tms-ofc-avatar--empty {
+  color: var(--tms-text-2);
+  background: var(--tms-bg);
+  border-style: dashed;
+  border-color: var(--tms-border);
+}
+
+.tms-shell .tms-ofc-who {
+  display: grid;
+  gap: 2px;
+  min-width: 160px;
+}
+
+.tms-shell .tms-ofc-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-ofc-units {
+  color: var(--tms-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.tms-shell .tms-ofc-facts {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 16px;
+  min-width: 0;
+}
+
+.tms-shell .tms-ofc-fact {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tms-shell .tms-ofc-fact-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tms-text-2);
+}
+
+.tms-shell .tms-ofc-fact-value {
+  color: var(--tms-text);
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.tms-shell .tms-ofc-fact-value a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.tms-shell .tms-ofc-picker {
+  padding-top: 8px;
+  border-top: 1px solid var(--tms-border);
+  max-width: 560px;
+}
+
+@media (max-width: 640px) {
+  .tms-shell .tms-ofc-body { flex-wrap: wrap; }
+  .tms-shell .tms-ofc-facts { flex-basis: 100%; grid-template-columns: 1fr 1fr; }
+  .tms-shell .tms-ofc-head-end { margin-left: 0; flex-basis: 100%; }
+  .tms-shell .tms-ofc-picker { max-width: none; }
+}
