@@ -72,7 +72,9 @@
 
   /* Everything that was a multi-column grid goes to one column. */
   .tms-shell .tms-grid-2, .tms-shell .tms-grid-3, .tms-shell .tms-grid-4, .tms-shell .tms-meta-cols-3, .tms-shell .tms-intake-grid { grid-template-columns: minmax(0, 1fr); }
-  .tms-shell .tms-stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* As many tiles as fit at 140px (two on most phones); a tile's amount never wraps mid-number ("$145,616. / 79" on Factored). */
+  .tms-shell .tms-stat-row { grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); }
+  .tms-shell .tms-kpi-card-value, .tms-portal .tms-kpi-card-value { overflow-wrap: normal; white-space: nowrap; font-size: clamp(16px, 5.2vw, 22px); }
   .tms-shell .tms-topbar { padding-left: 8px; padding-right: 8px; }
   .tms-shell .tms-topbar-icons { gap: 4px; }
   .tms-shell .tms-page-title, .tms-shell h1 { font-size: 18px; }
