@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { FactoringItem } from '@/types'
-import { isOtrRejected, mayInvoiceManually, needsManualInvoice, otrRejection, otrRejectionReason } from './otrRejection'
+import { inOtrRejectedTab, isOtrRejected, mayInvoiceManually, needsManualInvoice, otrRejection, otrRejectionReason } from './otrRejection'
 import { manualInvoiceChangeNote, notesWithChange } from './manualInvoiceMove'
 
 const row = (over: Partial<FactoringItem>): FactoringItem => ({ id: 'p', proNumber: 'p', status: 'NEED_TO_FACTOR', ...over }) as FactoringItem
@@ -66,6 +66,12 @@ describe('OTR rejected tab and reason', () => {
     expect(isOtrRejected({ ...base, otrError: 'Amount does not match the rate con' })).toBe(true)
     expect(isOtrRejected({ ...base, otrError: '400: OTR auth failed (400)' })).toBe(false)
     expect(isOtrRejected({ ...base, status: 'FACTORED', manualReason: 'NO_BUY' })).toBe(false)
+  })
+  it('the tab also holds rows parked to go out by hand, but not finished ones', () => {
+    expect(inOtrRejectedTab({ ...base, status: 'MANUAL_INVOICE', manualReason: 'MANUAL' })).toBe(true)
+    expect(inOtrRejectedTab({ ...base, otrStatus: 4 })).toBe(true)
+    expect(inOtrRejectedTab(base)).toBe(false)
+    expect(inOtrRejectedTab({ ...base, status: 'INVOICED_MANUALLY', manualReason: 'MANUAL' })).toBe(false)
   })
   it('keeps the reason after the row left the queue', () => {
     expect(otrRejectionReason({ ...base, status: 'ARCHIVED', manualReason: 'NO_BUY', otrError: 'OTR will not buy from MC 9' })).toBe('OTR will not buy from MC 9')

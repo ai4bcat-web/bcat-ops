@@ -91,7 +91,7 @@ describe('filters', () => {
     const labels = screen.getAllByRole('tab')
       .map((b) => b.textContent?.replace(/\d+$/, '').trim())
       .filter((t) => ['Need to factor', 'Pending with OTR', 'Invoice manually', 'All', 'Factored', 'Invoiced manually'].includes(t ?? ''))
-    expect(labels).toEqual(['Pending with OTR', 'Invoice manually', 'All', 'Factored'])
+    expect(labels).toEqual(['Pending with OTR', 'All', 'Factored'])
     expect(screen.getByRole('tab', { name: /^OTR rejected/ })).toBeInTheDocument()
     expect(screen.getByTestId('factor-moved-note')).toHaveTextContent(/Ready to invoice \(1 now\)/)
   })
@@ -420,14 +420,14 @@ describe('the dense grid', () => {
 })
 
 describe('invoicing by hand', () => {
-  it('flags a No Buy broker on the row and files it under Invoice manually', async () => {
+  it('flags a No Buy broker on the row and files it under OTR rejected', async () => {
     await setup([
       item({ id: 'a', proNumber: 'A1', status: 'NEED_TO_FACTOR' }),
       item({ id: 'b', proNumber: 'B2', status: 'MANUAL_INVOICE', manualReason: 'NO_BUY', brokerCheckResult: 'NO_BUY', brokerMcChecked: '592002' }),
     ])
     fireEvent.click(screen.getByRole('tab', { name: /^Factored/ }))
     expect(screen.queryByText('B2')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('tab', { name: /^Invoice manually/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^OTR rejected/ }))
     expect(screen.getByText('B2')).toBeInTheDocument()
     expect(screen.getByText('No buy')).toBeInTheDocument()
     expect(screen.getByText(/OTR will not buy from MC 592002/)).toBeInTheDocument()
@@ -446,7 +446,7 @@ describe('invoicing by hand', () => {
 
   it('shows the No buy reason OTR gave and the button on a No buy row', async () => {
     await setup([item({ id: 'b', proNumber: 'B2', status: 'MANUAL_INVOICE', manualReason: 'NO_BUY', brokerCheckResult: 'NO_BUY', otrError: 'OTR will not buy from MC 592002 (No Buy): not approved' })])
-    fireEvent.click(screen.getByRole('tab', { name: /^Invoice manually/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^OTR rejected/ }))
     expect(screen.getByText('No buy')).toBeInTheDocument()
     expect(screen.getByText(/not approved/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Invoice manually for PRO B2' })).toBeInTheDocument()
@@ -454,7 +454,7 @@ describe('invoicing by hand', () => {
 
   it('opens a manual row to its checklist, not the OTR editor', async () => {
     await setup([item({ id: 'b', proNumber: 'B2', status: 'MANUAL_INVOICE', manualReason: 'NO_BUY' })])
-    fireEvent.click(screen.getByRole('tab', { name: /^Invoice manually/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^OTR rejected/ }))
     fireEvent.click(screen.getByRole('button', { name: /Open the steps for PRO B2/ }))
     expect(screen.getByTestId('manual-panel')).toBeInTheDocument()
     expect(screen.queryByTestId('otr-panel')).not.toBeInTheDocument()
@@ -540,6 +540,13 @@ describe('invoices sent by hand', () => {
 })
 
 describe('OTR rejected', () => {
+  it('also holds rows parked to go out by hand, so the old Invoice manually rows stay in view', async () => {
+    await setup([item({ id: 'mi', proNumber: 'MI7', status: 'MANUAL_INVOICE', manualReason: 'MANUAL' })])
+    expect(screen.getByRole('tab', { name: /^OTR rejected/ })).toHaveTextContent('1')
+    fireEvent.click(screen.getByRole('tab', { name: /^OTR rejected/ }))
+    expect(screen.getByText('MI7')).toBeInTheDocument()
+  })
+
   it('lists what OTR turned down, not our own auth failures, and moves one to manual invoice after a confirmation', async () => {
     const api = await import('@/lib/apiClient')
     const move = vi.mocked(api.moveToManualInvoice).mockResolvedValue({ proNumber: 'NB5', orderId: 'o', customerId: 'c', voidedInvoice: null, note: '' })
@@ -550,6 +557,7 @@ describe('OTR rejected', () => {
     fireEvent.click(screen.getByRole('tab', { name: /^OTR rejected/ }))
     expect(screen.getByText('NB5')).toBeInTheDocument()
     expect(screen.queryByText('AU6')).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: /^Invoice manually/ })).not.toBeInTheDocument()
     fireEvent.click(screen.getByTestId('move-manual-nb'))
     expect(screen.getByTestId('move-manual-dialog')).toHaveTextContent('OTR will not buy from MC 7')
     expect(move).not.toHaveBeenCalled()

@@ -43,7 +43,7 @@ import { loadFromFactoringItem } from './loadFromInvoice'
 import { ManualInvoicePanel } from './ManualInvoicePanel'
 import { manualSentInfo } from '@/lib/manualInvoice'
 import { noBuyInfo } from '@/lib/noBuy'
-import { isOtrRejected, mayInvoiceManually, needsManualInvoice, otrRejection } from '@/lib/otrRejection'
+import { inOtrRejectedTab, isOtrRejected, mayInvoiceManually, needsManualInvoice, otrRejection } from '@/lib/otrRejection'
 import { MoveToManualDialog } from './MoveToManualDialog'
 import { InvoiceManuallyDialog } from './InvoiceManuallyDialog'
 import { CustomerPaidCell, CustomerPaidDialog } from './CustomerPaidCell'
@@ -71,7 +71,8 @@ const FACTORING_STATUS_LABEL: Record<FactoringItemStatus, string> = {
  */
 // Need to factor is no longer a tab (Ryne 2026-11-14): those loads are batch factored from Invoicing → Ready to invoice.
 // Invoiced manually is not a tab either: those loads are invoiced, and show in Invoicing → Invoiced. OTR rejected takes its place.
-const FILTER_ORDER = ['PENDING_WITH_OTR', 'MANUAL_INVOICE', 'ALL', 'FACTORED', 'OTR_REJECTED', 'ARCHIVED'] as const
+// The Invoice manually tab is folded into OTR rejected (Ryne 2026-11-14): one place for everything going out by hand.
+const FILTER_ORDER = ['PENDING_WITH_OTR', 'OTR_REJECTED', 'ALL', 'FACTORED', 'ARCHIVED'] as const
 type FilterKey = (typeof FILTER_ORDER)[number]
 
 const RED = { color: 'var(--tms-badge-red)' }
@@ -492,7 +493,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     PENDING_WITH_OTR: items.filter((i) => i.status === 'PENDING_WITH_OTR').length,
     MANUAL_INVOICE: items.filter((i) => i.status === 'MANUAL_INVOICE').length,
     FACTORED: items.filter((i) => i.status === 'FACTORED').length,
-    OTR_REJECTED: items.filter((i) => isOtrRejected(i)).length,
+    OTR_REJECTED: items.filter((i) => inOtrRejectedTab(i)).length,
     ARCHIVED: items.filter((i) => i.status === 'ARCHIVED').length,
   }), [items])
 
@@ -507,7 +508,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       .filter((item) =>
         rejectedOnly ? otrRejection(item) != null
           : activeTab === 'ALL' ? item.status !== 'ARCHIVED'
-            : activeTab === 'OTR_REJECTED' ? isOtrRejected(item)
+            : activeTab === 'OTR_REJECTED' ? inOtrRejectedTab(item)
               : item.status === activeTab,
       )
       .filter((item) => activeTab !== 'PENDING_WITH_OTR' || !otrFilter || otrLabelOf(item) === otrFilter)
