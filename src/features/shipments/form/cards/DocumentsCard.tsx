@@ -258,7 +258,7 @@ function DocumentsCardImpl({ values, ctx, documentApi = liveDocumentApi }: CardP
               <div className="tms-card-docslot-head">
                 {onFile ? <Check size={14} aria-hidden /> : <Circle size={14} aria-hidden />}
                 <strong>{label}</strong>
-                <span className="tms-muted text-xs">{onFile ? 'On file' : queuedDocs.length > 0 ? 'Queued' : 'Missing'}</span>
+                <span className="tms-muted text-xs">{onFile ? 'On file' : queuedDocs.length > 0 ? 'Queued' : 'NEED'}</span>
               </div>
               {docs.length === 0 && queuedDocs.length === 0 ? <p className="tms-muted text-xs">{hint}</p> : null}
               {docs.length > 0 ? (

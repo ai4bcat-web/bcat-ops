@@ -1003,12 +1003,12 @@ function BoardPane({
             <Link
               to={`/tms/shipments/${row.id}/edit#docs-${docType}`}
               className="tms-board-link"
-              title={`${label} missing: open this shipment's Documents`}
+              title={`Need ${label}: open this shipment's Documents`}
               data-testid={`doc-cell-${docType}`}
               data-state="missing"
               onClick={(e) => e.stopPropagation()}
             >
-              <TmsBadge tone="red">Missing</TmsBadge>
+              <TmsBadge tone="red">NEED</TmsBadge>
             </Link>
           )
         }
@@ -1161,7 +1161,7 @@ function BoardPane({
       { label: 'Open', value: open },
       { label: 'In transit', value: moving },
       { label: 'Delivered', value: delivered },
-      { label: 'Missing docs', value: docs, tone: docs > 0 ? 'warn' : undefined },
+      { label: 'Need docs', value: docs, tone: docs > 0 ? 'warn' : undefined },
       {
         label: 'Past delivery date',
         value: pastDelivery,
