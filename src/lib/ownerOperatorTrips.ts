@@ -100,6 +100,22 @@ export function ratePerMile(freight: number | null | undefined, miles: number | 
 }
 
 /**
+ * The week's rate per mile: freight over miles across the loads that HAVE miles. A load
+ * with no miles is left out of both sides rather than counted as zero miles, which would
+ * inflate the rate. Null when no load has miles. Display only; pay never reads it.
+ */
+export function totalRatePerMile(trips: ReadonlyArray<{ freightAmount: number | null | undefined; miles: number | null | undefined }>): { miles: number; rate: number | null } {
+  let miles = 0
+  let freight = 0
+  for (const t of trips) {
+    if (t.miles == null || !Number.isFinite(t.miles) || t.miles <= 0 || t.freightAmount == null) continue
+    miles += t.miles
+    freight += t.freightAmount
+  }
+  return { miles, rate: ratePerMile(freight, miles) }
+}
+
+/**
  * Load ids arrive dirty from the TMS import: 53 production loads carry the literal
  * string 'N/A' in `tmsId` rather than null, and `aljexId` is padded ("14452  ").
  * Treating 'N/A' as a real id would label every one of those loads identically on a

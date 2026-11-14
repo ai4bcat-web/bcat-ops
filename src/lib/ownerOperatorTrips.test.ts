@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ownerOpTripsFor, OWNER_OP_FIRST_PERIOD, ratePerMile } from './ownerOperatorTrips'
+import { ownerOpTripsFor, OWNER_OP_FIRST_PERIOD, ratePerMile, totalRatePerMile } from './ownerOperatorTrips'
 
 const driverId = 'driver-1'
 
@@ -117,5 +117,19 @@ describe('ratePerMile', () => {
   it('refuses nonsense rather than returning NaN', () => {
     expect(ratePerMile(Number.NaN, 371)).toBeNull()
     expect(ratePerMile(1400, -5)).toBeNull()
+  })
+})
+
+describe('totalRatePerMile', () => {
+  it('is freight over miles across the loads that have miles, leaving no-mile loads out of both sides', () => {
+    expect(totalRatePerMile([
+      { freightAmount: 1000, miles: 241 },
+      { freightAmount: 1400, miles: 371 },
+      { freightAmount: 2500, miles: null },
+    ])).toEqual({ miles: 612, rate: 3.92 })
+  })
+
+  it('has no rate when no load has miles', () => {
+    expect(totalRatePerMile([{ freightAmount: 900, miles: null }])).toEqual({ miles: 0, rate: null })
   })
 })

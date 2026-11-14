@@ -237,7 +237,9 @@ describe('OwnerOperatorPayPage', () => {
     expect(screen.queryByText('TMS-123')).not.toBeInTheDocument()
     expect(screen.getByText('Acme')).toBeInTheDocument()
     expect(screen.getByText('Chicago, IL → Detroit, MI')).toBeInTheDocument()
-    expect(screen.getByText('250')).toBeInTheDocument()
+    // The load row and the totals row both show the week's 250 miles.
+    expect(screen.getAllByText('250')).toHaveLength(2)
+    expect(screen.getAllByText('$1.80/mi').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('$450.00').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('$189.00').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('Check amount').closest('div')?.parentElement).toHaveTextContent('$189.00')

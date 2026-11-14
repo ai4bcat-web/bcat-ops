@@ -23,8 +23,11 @@ import {
   driverDocValidationError,
   DRIVER_DOC_ACCEPT,
   type SubmissionKind,
+  type SubmissionWithDocs,
 } from '@/lib/driverSubmissionsClient'
 import { useLoadDriverDocs } from '@/hooks/useLoadDriverDocs'
+import { useAppStore } from '@/store/useAppStore'
+import { attachDriverDoc } from '@/lib/apiClient'
 import { DocumentPreview } from '@/features/documents/DocumentPreview'
 import type { Driver } from '@/types'
 
@@ -136,6 +139,24 @@ export function SettlementDocUpload({
     )
   }
 
+  /**
+   * The upload also lands in the shipment's Documents, so the shipment page and this
+   * settlement show the same paperwork. Filing is idempotent per page; a failure is
+   * reported but does not undo the upload, which the settlement already counts.
+   */
+  async function fileOnShipment(saved: SubmissionWithDocs) {
+    const shipmentId = useAppStore.getState().loads.find((l) => l.id === loadId)?.shipmentId
+    if (!shipmentId) return
+    const type = kind === 'POD' ? 'POD' : 'RATE_CON'
+    try {
+      for (const doc of saved.docs.filter((d) => d.kind === kind)) {
+        await attachDriverDoc({ shipmentId, loadId, submissionDocId: doc.id, type })
+      }
+    } catch (err) {
+      toast.error(`Uploaded, but not filed on the shipment: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
   async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const picked = Array.from(e.target.files ?? [])
     e.target.value = ''
@@ -149,7 +170,7 @@ export function SettlementDocUpload({
 
     setBusy(true)
     try {
-      await staffUploadDriverDoc({
+      const saved = await staffUploadDriverDoc({
         driver: { id: driver.id, name: driver.name, email: driver.email },
         kind,
         files: picked,
@@ -157,6 +178,7 @@ export function SettlementDocUpload({
         referenceNumber: proNumber || undefined,
         loadId,
       })
+      await fileOnShipment(saved)
       toast.success(
         kind === 'POD'
           ? `POD uploaded${proNumber ? ` for PRO ${proNumber}` : ''} — this load can be paid now`

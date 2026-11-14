@@ -122,7 +122,7 @@ export const GENERATED_DOCUMENT_TYPES = [
 ] as const satisfies readonly ShipmentDocumentType[]
 
 /** What a driver-app document may be attached to a shipment as. */
-export const DRIVER_ATTACHABLE_TYPES = ['POD', 'PHOTO', 'OTHER'] as const satisfies readonly ShipmentDocumentType[]
+export const DRIVER_ATTACHABLE_TYPES = ['POD', 'RATE_CON', 'PHOTO', 'OTHER'] as const satisfies readonly ShipmentDocumentType[]
 
 export const PDF_CONTENT_TYPE = 'application/pdf'
 

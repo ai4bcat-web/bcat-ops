@@ -8,10 +8,10 @@
  * duplicating its precedence logic.
  */
 
-import { assembleOtrInvoice, type LoadSlice, type ManualOverrides, type OtrReadiness } from '@/lib/otrInvoice'
+import { assembleOtrInvoice, normalizeZip, type LoadSlice, type ManualOverrides, type OtrReadiness } from '@/lib/otrInvoice'
 import { loadHasPod, loadHasRatecon, type PodIndex } from '@/lib/podPresence'
 import { getStops } from '@/lib/stops'
-import type { Load } from '@/types'
+import type { Load, Stop } from '@/types'
 import type { CustomerRecord, LocationRecord } from '@/types/tms'
 
 export interface OtrSettlementInput {
@@ -43,9 +43,18 @@ function originAndDestinationStops(load: Load) {
   return { origin, destination }
 }
 
-/** Pick city/state/ZIP out of a LocationRecord for assembleOtrInvoice. */
-function locationSlice(loc: LocationRecord | undefined) {
-  return loc ? { city: loc.city, state: loc.state, zip: loc.zip } : undefined
+/**
+ * City/state/ZIP for one end, the way the shipment page shows it: the stop's own address
+ * first, then the Location it links to. A stop with a ZIP and no linked Location (20039)
+ * used to read as ZIP missing.
+ */
+function placeSlice(stop: Stop | undefined, loc: LocationRecord | undefined) {
+  const addr = (stop as { address?: { city?: string | null; state?: string | null; zip?: string | null } | null } | undefined)?.address ?? null
+  const zip = normalizeZip(addr?.zip) ?? normalizeZip(loc?.zip)
+  const city = addr?.city || loc?.city
+  const state = addr?.state || loc?.state
+  if (!city && !state && !zip) return undefined
+  return { city, state, zip }
 }
 
 /**
@@ -78,8 +87,8 @@ export function otrSettlementReadiness(input: OtrSettlementInput): OtrReadiness 
   return assembleOtrInvoice({
     load: loadSlice,
     customerMcNumber: customer?.mcNumber,
-    originLocation: locationSlice(originLocation),
-    destinationLocation: locationSlice(destinationLocation),
+    originLocation: placeSlice(origin, originLocation),
+    destinationLocation: placeSlice(destination, destinationLocation),
     manual,
     submissionDate: submissionDate ?? load.deliveryAppt.slice(0, 10),
     hasPod: loadHasPod(podIndex, load),

@@ -18,12 +18,14 @@ import {
   type DriverPayCreditInput,
   type FuelTransaction,
   listFactoringItems,
+  listShipmentDocuments,
   type CustomerRecord,
   type LocationRecord,
 } from '@/lib/apiClient'
 import { listPods } from '@/lib/podsClient'
 import { listDriverSubmissions } from '@/lib/driverSubmissionsClient'
 import { buildPodIndex, podUploadedAt, type PodIndex, type PodSubmissionLike } from '@/lib/podPresence'
+import { shipmentDocPresence } from '@/lib/shipmentDocPresence'
 import { splitPayableTrips, type PayHoldReason } from '@/lib/payHold'
 import type { ManualOverrides } from '@/lib/otrInvoice'
 import { useFuelTransactions } from './useFuelTransactions'
@@ -110,7 +112,7 @@ function periodEnd(periodStart: string): string {
  * read looks identical to no POD at all, and that distinction now decides whether a
  * driver gets paid, so a partial read is treated as no knowledge.
  */
-async function loadPodIndex(): Promise<{ index: PodIndex; known: boolean }> {
+async function loadPodIndex(): Promise<{ inputs: PodInputs; known: boolean }> {
   const jobsdoneLoadIds: string[] = []
   let known = true
 
@@ -147,7 +149,31 @@ async function loadPodIndex(): Promise<{ index: PodIndex; known: boolean }> {
     known = false
   }
 
-  return { index: buildPodIndex({ jobsdoneLoadIds, submissions }), known }
+  return { inputs: { jobsdoneLoadIds, submissions }, known }
+}
+
+interface PodInputs { jobsdoneLoadIds: string[]; submissions: PodSubmissionLike[] }
+
+/**
+ * The POD and rate-con status the shipment page shows, as POD-index entries for each load:
+ * a document filed on the shipment counts on the settlement too. Read per shipment, for
+ * the week's loads only. A shipment whose documents cannot be read adds nothing; the
+ * driver and JobsDone stores still answer for it.
+ */
+async function loadShipmentDocSubmissions(loadsByShipment: Map<string, string[]>): Promise<PodSubmissionLike[]> {
+  const out: PodSubmissionLike[] = []
+  await Promise.all([...loadsByShipment].map(async ([shipmentId, loadIds]) => {
+    try {
+      const docs = await listShipmentDocuments(shipmentId)
+      for (const loadId of loadIds) {
+        const p = shipmentDocPresence(docs, loadId)
+        if (p.pod || p.ratecon) out.push({ loadId, hasPodDoc: p.pod, hasRateconDoc: p.ratecon, podUploadedAt: p.podUploadedAt })
+      }
+    } catch (err) {
+      console.warn('[owner-operator-pay] could not read shipment documents for', shipmentId, err)
+    }
+  }))
+  return out
 }
 
 /**
@@ -198,7 +224,12 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
   const { loads } = useLoads()
   const [customers, setCustomers] = useState<CustomerRecord[]>([])
   const [locations, setLocations] = useState<LocationRecord[]>([])
-  const [podIndex, setPodIndex] = useState<PodIndex>(() => buildPodIndex({ jobsdoneLoadIds: [], submissions: [] }))
+  const [podInputs, setPodInputs] = useState<PodInputs>({ jobsdoneLoadIds: [], submissions: [] })
+  const [shipmentDocSubs, setShipmentDocSubs] = useState<PodSubmissionLike[]>([])
+  const podIndex = useMemo<PodIndex>(
+    () => buildPodIndex({ jobsdoneLoadIds: podInputs.jobsdoneLoadIds, submissions: [...podInputs.submissions, ...shipmentDocSubs] }),
+    [podInputs, shipmentDocSubs],
+  )
   // Starts false: until the PODs have actually been read we know nothing, and holding
   // pay on no knowledge is the one outcome worth ruling out by construction.
   const [podsKnown, setPodsKnown] = useState(false)
@@ -233,7 +264,7 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
         setSettings(s)
         setDeductions(d)
         setCredits(creds)
-        setPodIndex(pods.index)
+        setPodInputs(pods.inputs)
         setPodsKnown(pods.known)
         setManualByLoadId(manual)
         setError(null)
@@ -246,9 +277,28 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
       })
       .finally(() => setLoading(false)),
   [])
-  const refresh = useCallback(() => { setLoading(true); return load() }, [load])
+  const [docsVersion, setDocsVersion] = useState(0)
+  const refresh = useCallback(() => { setLoading(true); setDocsVersion((v) => v + 1); return load() }, [load])
 
   useEffect(() => { void load() }, [load])
+
+  // The shipment page's Documents, for the loads this week and last week can settle.
+  const shipmentKey = useMemo(() => {
+    const byShipment = new Map<string, string[]>()
+    for (const l of loads) {
+      if (!l.shipmentId) continue
+      const day = (l.deliveryAppt ?? '').slice(0, 10)
+      if (day < prevStart || day > end) continue
+      byShipment.set(l.shipmentId, [...(byShipment.get(l.shipmentId) ?? []), l.id])
+    }
+    return JSON.stringify([...byShipment].sort())
+  }, [loads, prevStart, end])
+  useEffect(() => {
+    let live = true
+    const byShipment = new Map<string, string[]>(JSON.parse(shipmentKey) as [string, string[]][])
+    void loadShipmentDocSubmissions(byShipment).then((subs) => { if (live) setShipmentDocSubs(subs) })
+    return () => { live = false }
+  }, [shipmentKey, docsVersion])
 
   const rows = useMemo<OwnerOperatorPayRow[]>(() => {
     const driverById = new Map(drivers.map((d) => [d.id, d]))

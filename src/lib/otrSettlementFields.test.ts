@@ -152,5 +152,21 @@ describe('otrSettlementReadiness', () => {
     const old = otrSettlementReadiness({ load: load(), customersById, locationsById, podIndex })
     expect(old.payload.PoNumber).toBe('PO-1')
   })
+
+  it("takes ZIPs from the stop's own address, and reads a dashless ZIP+4 (20039, 20031)", () => {
+    const { customersById, locationsById } = maps([customer()], [location({ id: 'loc-ep', zip: '799285900', city: 'EL PASO', state: 'TX' })])
+    const podIndex = buildPodIndex({ jobsdoneLoadIds: [], submissions: [] })
+    const r = otrSettlementReadiness({
+      load: load({
+        stops: [
+          stop({ id: 'pu', type: 'pickup', sequence: 0, locationId: 'loc-ep' }),
+          { ...stop({ id: 'de', type: 'delivery', sequence: 1 }), address: { city: 'MIDLAND', state: 'TX', zip: '79703' } } as Stop,
+        ],
+      }),
+      customersById, locationsById, podIndex,
+    })
+    expect(r.payload.FromZip).toBe('79928')
+    expect(r.payload.ToZip).toBe('79703')
+  })
 })
 
