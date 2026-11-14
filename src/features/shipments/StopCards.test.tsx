@@ -71,6 +71,39 @@ describe('StopCards menu', () => {
     expect(String(input.patch.arrivedAt) < String(input.patch.departedAt)).toBe(true)
   })
 
+  it('books an FCFS window with typed MM/DD date and 24-hour times', async () => {
+    render(<StopCards stops={stops} locations={[]} onAction={onAction} />)
+    openMenu('Stop 2 actions')
+    await waitFor(() => expect(screen.getByText('Change appointment')).toBeTruthy())
+    fireEvent.click(screen.getByText('Change appointment'))
+
+    await waitFor(() => expect(screen.getByTestId('stop-apptKind-fcfs')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('stop-apptKind-fcfs'))
+    fireEvent.change(screen.getByLabelText('Appointment'), { target: { value: '11/16/2026' } })
+    fireEvent.change(screen.getByLabelText('Appointment from (24-hour)'), { target: { value: '0800' } })
+    fireEvent.change(screen.getByLabelText('Appointment to (24-hour)'), { target: { value: '1400' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(onAction).toHaveBeenCalledTimes(1))
+    const input = onAction.mock.calls[0][0]
+    expect(input).toMatchObject({ op: 'SET_APPT', stopId: 'd1', patch: { apptType: 'fcfs' } })
+    expect(Date.parse(String(input.patch.apptEnd)) - Date.parse(String(input.patch.appt))).toBe(6 * 3600_000)
+  })
+
+  it('refuses an FCFS window that closes before it opens', async () => {
+    render(<StopCards stops={stops} locations={[]} onAction={onAction} />)
+    openMenu('Stop 2 actions')
+    await waitFor(() => expect(screen.getByText('Change appointment')).toBeTruthy())
+    fireEvent.click(screen.getByText('Change appointment'))
+    await waitFor(() => expect(screen.getByTestId('stop-apptKind-fcfs')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('stop-apptKind-fcfs'))
+    fireEvent.change(screen.getByLabelText('Appointment'), { target: { value: '2026-11-16T14:00' } })
+    fireEvent.change(screen.getByLabelText('Appointment to (24-hour)'), { target: { value: '0800' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.getByText('The FCFS window must end after it opens.')).toBeTruthy())
+    expect(onAction).not.toHaveBeenCalled()
+  })
+
   it('refuses an out time before the in time', async () => {
     render(<StopCards stops={stops} locations={[]} onAction={onAction} />)
     openMenu('Stop 1 actions')

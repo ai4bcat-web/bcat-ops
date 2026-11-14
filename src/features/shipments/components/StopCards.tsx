@@ -7,7 +7,9 @@
  */
 import { useState } from 'react'
 import { MoreHorizontal, MapPin, Plus, ArrowUpDown, Trash2, Clock, CalendarClock, Tag } from 'lucide-react'
-import { TmsBadge, TmsButton, TmsCard, TmsDialog, TmsInput, TmsMetaList, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsCard, TmsDialog, TmsMetaList, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { DateTime24Input } from '../form/DateTime24Input'
+import '../form/form.css'
 import { Label } from '@/components/ui/label'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -210,6 +212,9 @@ function StopDialog({ state, locations, busy, onClose, onSubmit }: {
 }) {
   const { op, stop } = state
   const [appt, setAppt] = useState(stop?.appt ? formatDateTimeInput(stop.appt) : '')
+  // Appt = one booked time; FCFS = a first-come window on one day (From–To), as on the order form.
+  const [fcfs, setFcfs] = useState(stop?.apptType === 'fcfs')
+  const [apptEnd, setApptEnd] = useState(stop?.apptType === 'fcfs' && stop?.apptEnd ? formatDateTimeInput(stop.apptEnd) : '')
   const [requestedStart, setRequestedStart] = useState(stop?.requestedStart ? formatDateTimeInput(stop.requestedStart) : '')
   const [requestedEnd, setRequestedEnd] = useState(stop?.requestedEnd ? formatDateTimeInput(stop.requestedEnd) : '')
   const [requestedBy, setRequestedBy] = useState(stop?.apptRequestedBy ?? '')
@@ -236,9 +241,20 @@ function StopDialog({ state, locations, busy, onClose, onSubmit }: {
 
   const submit = () => {
     setError(null)
+    const apptPatch = (): Record<string, unknown> | null => {
+      if (!appt) { setError(fcfs ? 'Enter the FCFS date and the window opening time.' : 'Pick an appointment date and time.'); return null }
+      if (fcfs) {
+        if (!apptEnd) { setError('Enter the time the FCFS window closes.'); return null }
+        if (apptEnd <= appt) { setError('The FCFS window must end after it opens.'); return null }
+        return { appt: fromDateTimeInput(appt), apptType: 'fcfs', apptEnd: fromDateTimeInput(apptEnd) }
+      }
+      // Leaving FCFS makes it a booked time; any other type (TBD, range) is the server's to keep.
+      return { appt: fromDateTimeInput(appt), apptEnd: null, ...(stop?.apptType === 'fcfs' ? { apptType: 'exact' } : {}) }
+    }
     if (op === 'SET_APPT') {
-      if (!appt) { setError('Pick an appointment date and time.'); return }
-      onSubmit({ op, stopId: stop?.id, patch: { appt: fromDateTimeInput(appt), apptRequestedBy: requestedBy || undefined, apptNote: apptNote || undefined } })
+      const a = apptPatch()
+      if (!a) return
+      onSubmit({ op, stopId: stop?.id, patch: { ...a, apptRequestedBy: requestedBy || undefined, apptNote: apptNote || undefined } })
       return
     }
     if (op === 'SET_REQUESTED') {
@@ -276,9 +292,10 @@ function StopDialog({ state, locations, busy, onClose, onSubmit }: {
         city: location?.city && location?.state ? `${location.city}, ${location.state}` : location?.city,
       }
       if (op === 'ADD') {
-        if (!appt) { setError('Pick an appointment date and time.'); return }
+        const a = apptPatch()
+        if (!a) return
         patch.type = stopType
-        patch.appt = fromDateTimeInput(appt)
+        Object.assign(patch, a)
       }
       onSubmit({ op, stopId: stop?.id, patch })
       return
@@ -345,19 +362,33 @@ function StopDialog({ state, locations, busy, onClose, onSubmit }: {
           )}
           {(op === 'SET_APPT' || op === 'ADD') && (
             <div>
-              <Label className="tms-field-label">Appointment</Label>
-              <TmsInput aria-label="Appointment" type="datetime-local" value={appt} onChange={(e) => setAppt(e.target.value)} className="h-9 text-sm" />
+              <div className="flex items-center justify-between gap-2">
+                <Label className="tms-field-label">Appointment</Label>
+                <span className="ship-appt-kind" role="group" aria-label="Appointment type">
+                  {([['Appt', false], ['FCFS', true]] as const).map(([text, on]) => (
+                    <button
+                      key={text} type="button" aria-pressed={fcfs === on} data-testid={`stop-apptKind-${on ? 'fcfs' : 'appt'}`}
+                      onClick={() => { setFcfs(on); if (!on) setApptEnd('') }}
+                    >{text}</button>
+                  ))}
+                </span>
+              </div>
+              {fcfs ? (
+                <DateTime24Input inputProps={{ 'aria-label': 'Appointment' }} value={appt} onChange={setAppt} endValue={apptEnd} onEndChange={setApptEnd} />
+              ) : (
+                <DateTime24Input inputProps={{ 'aria-label': 'Appointment' }} value={appt} onChange={setAppt} />
+              )}
             </div>
           )}
           {(op === 'SET_REQUESTED') && (
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <Label className="tms-field-label">Requested from</Label>
-                <TmsInput aria-label="Requested from" type="datetime-local" value={requestedStart} onChange={(e) => setRequestedStart(e.target.value)} className="h-9 text-sm" />
+                <DateTime24Input inputProps={{ 'aria-label': 'Requested from' }} value={requestedStart} onChange={setRequestedStart} />
               </div>
               <div>
                 <Label className="tms-field-label">Requested to</Label>
-                <TmsInput aria-label="Requested to" type="datetime-local" value={requestedEnd} onChange={(e) => setRequestedEnd(e.target.value)} className="h-9 text-sm" />
+                <DateTime24Input inputProps={{ 'aria-label': 'Requested to' }} value={requestedEnd} onChange={setRequestedEnd} />
               </div>
             </div>
           )}
@@ -379,11 +410,11 @@ function StopDialog({ state, locations, busy, onClose, onSubmit }: {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <Label className="tms-field-label">In</Label>
-                <TmsInput aria-label="In time" type="datetime-local" value={arrivedAt} onChange={(e) => setArrivedAt(e.target.value)} className="h-9 text-sm" />
+                <DateTime24Input inputProps={{ 'aria-label': 'In time' }} value={arrivedAt} onChange={setArrivedAt} />
               </div>
               <div>
                 <Label className="tms-field-label">Out</Label>
-                <TmsInput aria-label="Out time" type="datetime-local" value={departedAt} onChange={(e) => setDepartedAt(e.target.value)} className="h-9 text-sm" />
+                <DateTime24Input inputProps={{ 'aria-label': 'Out time' }} value={departedAt} onChange={setDepartedAt} />
               </div>
             </div>
           )}
