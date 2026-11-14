@@ -27,6 +27,9 @@ describe('computeArSummary', () => {
     expect(s).toMatchObject({
       pendingOtrCents: 5_000, pendingOtrCount: 1, pendingShippersCents: 10_000, pendingShippersCount: 1,
       lateCents: 5_000, lateCount: 1, otrDaysToPay: 2, shipperDaysToPay: 10,
+      openCents: 15_000, openCount: 2,
+      // Thursday 11/12: the week runs from Monday 11/09.
+      collectedWeekCents: 20_000, collectedWeekCount: 2, collectedMonthCents: 20_000, collectedMonthCount: 2,
     })
     expect(s.byDivision).toEqual([
       { key: 'BROKERAGE', label: 'BCAT Logistics', cents: 10_000, division: 'BROKERAGE', divisionLabel: 'BCAT Logistics', subLabel: null, count: 1 },

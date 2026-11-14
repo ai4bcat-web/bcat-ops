@@ -32,6 +32,14 @@ export interface ArSummary {
   lateCount: number
   otrDaysToPay: number | null
   shipperDaysToPay: number | null
+  /** Every open (sent) balance, factored or not. */
+  openCents: number
+  openCount: number
+  /** Invoices settled this calendar week (Mon–Sun) / month, by their paid date. */
+  collectedWeekCents: number
+  collectedWeekCount: number
+  collectedMonthCents: number
+  collectedMonthCount: number
   byDivision: ArDivisionSlice[]
 }
 
@@ -93,10 +101,24 @@ export function computeArSummary(input: {
     slices.set(key, slice)
   }
 
-  const since = (dayMs(asOf) ?? 0) - PAY_WINDOW_DAYS * DAY_MS
+  const today = dayMs(asOf) ?? 0
+  const since = today - PAY_WINDOW_DAYS * DAY_MS
+  const weekStart = today - ((new Date(today).getUTCDay() + 6) % 7) * DAY_MS
+  const month = asOf.slice(0, 7)
+  let collectedWeekCents = 0
+  let collectedWeekCount = 0
+  let collectedMonthCents = 0
+  let collectedMonthCount = 0
+  const counted = new Set<string>()
   const otr: number[] = []
   const shippers: number[] = []
   for (const inv of paid) {
+    if (inv.status === 'PAID' && inv.paidAt && !counted.has(inv.id)) {
+      counted.add(inv.id)
+      const at = dayMs(inv.paidAt)
+      if (inv.paidAt.slice(0, 7) === month) { collectedMonthCents += inv.totalCents; collectedMonthCount += 1 }
+      if (at != null && at >= weekStart && at <= today) { collectedWeekCents += inv.totalCents; collectedWeekCount += 1 }
+    }
     if (inv.status !== 'PAID' || isImportedInvoice(inv)) continue
     const paidAt = dayMs(inv.paidAt)
     if (paidAt == null || paidAt < since) continue
@@ -121,6 +143,12 @@ export function computeArSummary(input: {
     lateCount,
     otrDaysToPay: mean(otr),
     shipperDaysToPay: mean(shippers),
+    openCents: pendingOtrCents + pendingShippersCents,
+    openCount: pendingOtrCount + pendingShippersCount,
+    collectedWeekCents,
+    collectedWeekCount,
+    collectedMonthCents,
+    collectedMonthCount,
     byDivision: [...slices.values()].sort((a, b) => b.cents - a.cents),
   }
 }

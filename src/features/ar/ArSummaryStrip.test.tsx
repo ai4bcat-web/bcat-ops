@@ -14,6 +14,8 @@ const summary = (byDivision: ArDivisionSlice[]): ArSummary => ({
   pendingShippersCents: 700_00, pendingShippersCount: 3,
   lateCents: 100_00, lateCount: 1,
   otrDaysToPay: 4.1, shipperDaysToPay: 33.8,
+  openCents: 1000_00, openCount: 5,
+  collectedWeekCents: 0, collectedWeekCount: 0, collectedMonthCents: 0, collectedMonthCount: 0,
   byDivision,
 })
 
@@ -56,7 +58,9 @@ describe('ArSummaryStrip list cards', () => {
     ])} division="BROKERAGE" onDivision={onDivision} /></div>)
     expect(screen.getByRole('region', { name: 'Receivables totals' })).toBeTruthy()
     expect(screen.getByRole('region', { name: 'Open AR by division' })).toBeTruthy()
-    expect(screen.getByText('$1,000.00')).toBeTruthy()
+    // Open AR in the totals card and the division card's total.
+    expect(screen.getAllByText('$1,000.00')).toHaveLength(2)
+    expect(screen.getByText('Open AR')).toBeTruthy()
     // The Ivan Cartage group has no division-only slice, so it is not a button.
     expect(screen.queryByRole('button', { name: /Ivan Cartage/ })).toBeNull()
     const active = screen.getByRole('button', { name: /BCAT Logistics/ })

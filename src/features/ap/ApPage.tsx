@@ -65,6 +65,8 @@ import { ApReportDialog, CashRequirementsDialog } from './components/ApReportDia
 import { estimatedDueAt, isAljexBill, payablesQueue, proOf, termsLabel, type ApReportKind, type BillFactsIndex } from './apQueue'
 import { useBillFacts } from './useBillFacts'
 import { ApSummaryStrip } from './components/ApSummaryStrip'
+import { ApAgingCard, ApExpectedCard, ApPaidCard, ProfitCheckCard, ReviewReasonCard } from '@/features/finance/AccountingCards'
+import { apAgingStats, apExpectedStats, apPaidStats, reviewReasonCounts } from '@/features/finance/accountingStats'
 import { OwedFilterBar } from '@/features/ar/components/OwedFilterBar'
 import { OwedSummary } from '@/features/ar/components/OwedSummary'
 import {
@@ -459,6 +461,14 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       </div>
     </>
   )
+  const onCarrier = (id: string | null) => setOwed({ ...owed, parties: id ? [id] : [] })
+  const apTabCard = tab === 'expected' ? <ApExpectedCard stats={apExpectedStats(expectedBills, reviewByShipment, asOf)} />
+    : tab === 'aging' ? (
+      <ApAgingCard stats={apAgingStats(agingBills, asOf)} due={owed.due} onDue={(due) => setOwed({ ...owed, due })} parties={owed.parties} onParty={onCarrier} />
+    )
+    : tab === 'paid' ? <ApPaidCard stats={apPaidStats(settled, facts)} monthLabel={monthLabel(month)} />
+    : tab === 'review' ? <ReviewReasonCard counts={reviewReasonCounts(needsReview.rows)} total={needsReview.rows.length} />
+    : null
   const openDrawer = (bill: CarrierBillRecord) => setDrawerId(bill.id)
   const chargesFor = (bill: CarrierBillRecord) => setDialog({ kind: 'charges', loadCarrierId: bill.loadCarrierId, shipmentId: bill.shipmentId, bill })
 
@@ -601,6 +611,8 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
               onCashRequirements={() => setDialog({ kind: 'cash' })}
               onTab={setTab}
             />
+            {apTabCard}
+            <ProfitCheckCard asOf={asOf} testId="ap-profit-check" />
             {owedFilterActive(owed) && (
               <OwedSummary
                 title={owedSelectionLabel(owed, carrierLabel, divisionLabel)}
