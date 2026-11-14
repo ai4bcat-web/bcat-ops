@@ -44,6 +44,7 @@ import { SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
 import { boardStatusOf, detailValuesFor, type BoardCarrier } from '@/lib/shipmentViewDefs'
 import { assignmentChipText } from './carrierLadder'
 import { isReleasedToInvoicing } from '@/lib/shipmentLists'
+import { loadInvoiceStatusOf, loadInvoiceStatusText, type LoadInvoiceStatus } from '@/lib/loadInvoiceStatus'
 import { effectiveShipmentType, shipmentTypeLabel } from '@/lib/shipmentTypes'
 export { ALJEX_COLUMN_KEYS, boardStatusOf, matchesBoardFilters } from '@/lib/shipmentViewDefs'
 
@@ -129,6 +130,8 @@ export type ShipmentRow = ShipmentRecord & {
   stops?: Stop[] | null
   /** Step F — already released to accounting when either of these is set. */
   readyToInvoiceAt?: string | null
+  /** Where the invoice stands, read by the board from the open invoices and the OTR queue (`loadInvoiceStatusOf`). */
+  invoiceStatus?: LoadInvoiceStatus | null
   invoiceId?: string | null
   // ── R2 column catalog (projected by the data layer; every one null when unknown) ──
   /** Rep and audit ids resolved to profile names; null when no profile matches. */
@@ -294,10 +297,19 @@ export function isVoided(row: ShipmentRow): boolean {
 /** What a delivered shipment already released to invoicing reads as. Display only: the stored status stays DELIVERED. */
 export const RELEASED_LABEL = 'RELEASED'
 
-/** The board status as the person reads it: DELIVERED becomes RELEASED once the order left DOCS_NEEDED. */
+/**
+ * The board status as the person reads it: a load past Load Review (released to invoicing, the same
+ * `isReleasedToInvoicing` rule that takes it off Active) reads RELEASED whatever its stop status (Ryne
+ * 2026-11-14); where its money stands is the invoice pill beside it. Voided and canceled loads keep theirs.
+ */
 export function displayStatusOf(row: ShipmentRow): BoardStatusKey | 'CANCELED' | typeof RELEASED_LABEL {
   const status = boardStatusOf(row)
-  return status === 'DELIVERED' && isReleasedToInvoicing(row) ? RELEASED_LABEL : status
+  return status !== 'VOIDED' && status !== 'CANCELED' && isReleasedToInvoicing(row) ? RELEASED_LABEL : status
+}
+
+/** The row's invoice status: the board's live read when it has one, the order's cached AR fields otherwise. */
+export function invoiceStatusOfRow(row: ShipmentRow): LoadInvoiceStatus {
+  return row.invoiceStatus ?? loadInvoiceStatusOf(row)
 }
 
 // ── R2 board status, tone and stop progress ─────────────────────────────────
@@ -963,6 +975,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'invoicedAt', label: 'Invoiced At', group: 'Order', value: (r) => formatBoardDateTime(r.invoicedAt), width: 140 },
   { key: 'paidAt', label: 'Paid At', group: 'Order', value: (r) => formatBoardDateTime(r.paidAt), width: 140 },
   { key: 'arBalance', label: 'AR Balance', group: 'Order', value: (r) => formatCentsOrEmpty(r.arBalanceCents), width: 120 },
+  { key: 'invoiceStatus', label: 'Invoice Status', group: 'Order', value: (r) => loadInvoiceStatusText(invoiceStatusOfRow(r), formatBoardDate), width: 150 },
   { key: 'factoringItem', label: 'Factoring Item', group: 'Order', value: (r) => r.factoringItemId ?? '', width: 140 },
   {
     key: 'docsRequired',

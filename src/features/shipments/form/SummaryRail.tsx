@@ -10,6 +10,7 @@ import { formatCents } from '@/lib/invoiceBuild'
 import type { IntakeLoadRecord } from '@/types/intake'
 import { ActivityBlock } from './ActivityBlock'
 import { ProgressBlock } from './ProgressBlock'
+import { RailInvoiceStatus } from './RailInvoiceStatus'
 import { RailTrackingBlock } from './RailTrackingBlock'
 import { RateHistoryRail } from './RateHistoryRail'
 import { sliceOf, type CardProps } from './cards/cardRegistry'
@@ -99,6 +100,7 @@ function SummaryRailImpl({ common, summary, rows, attempted, Roles, RateHistory,
               {money.priced ? <span className="tms-rail-dot" data-testid="rail-margin-dot" data-tone={money.tone} role="img" aria-label={TONE_WORD[money.tone]} /> : null}
             </span>
           </div>
+          <RailInvoiceStatus bundle={ctx.bundle} />
         </section>
 
         <RailTrackingBlock bundle={ctx.bundle} onSendTrackingLink={ctx.actions.openSendInfo} />

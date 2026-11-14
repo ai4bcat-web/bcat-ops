@@ -46,3 +46,25 @@ describe('fitColumnWidths', () => {
     expect(w.n).toBe(520) // capped
   })
 })
+
+describe('resolveTeamLayout introduced columns', () => {
+  const valid = ['status', 'invoiceStatus', 'proNumber']
+  const intro = [{ key: 'invoiceStatus', after: 'status', since: '2026-11-14T12:00:00.000Z' }]
+  const saved = (over: Record<string, unknown>) => ({ id: TEAM_DEFAULT_COLUMN_TEMPLATE_ID, columns: ['status', 'proNumber'], widths: null, pinned: ['status', 'proNumber'], ...over }) as never
+
+  it('puts a new column right after its anchor, pinned with it, in a layout saved before it shipped', () => {
+    const layout = resolveTeamLayout([saved({ updatedAt: '2026-11-10T00:00:00.000Z' })], valid, valid, [], intro)
+    expect(layout.columns).toEqual(['status', 'invoiceStatus', 'proNumber'])
+    expect(layout.pinned).toEqual(['status', 'invoiceStatus', 'proNumber'])
+  })
+
+  it('leaves a layout saved since alone, so an admin can hide the column', () => {
+    const layout = resolveTeamLayout([saved({ updatedAt: '2026-11-15T00:00:00.000Z' })], valid, valid, [], intro)
+    expect(layout.columns).toEqual(['status', 'proNumber'])
+  })
+
+  it('skips a layout that does not show the anchor', () => {
+    const layout = resolveTeamLayout([saved({ columns: ['proNumber'], pinned: null, updatedAt: '2026-11-10T00:00:00.000Z' })], valid, valid, [], intro)
+    expect(layout.columns).toEqual(['proNumber'])
+  })
+})

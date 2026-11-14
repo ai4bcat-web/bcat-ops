@@ -82,7 +82,7 @@ import { formatCents } from '@/lib/invoiceBuild'
 import { customerDisplayName, isCustomerUnresolved } from '@/lib/customerResolution'
 import { displayName } from '@/lib/roles'
 import { inShipmentList, monthsOfYear, parseShipmentList, shipmentYears, type ShipmentList, type ShipmentYear } from '@/lib/shipmentLists'
-import { chicagoYear } from '@/lib/date'
+import { chicagoYear, formatBoardDate } from '@/lib/date'
 import { currentMonth, monthsCovering } from '@/lib/shipmentWindows'
 import { SEED_DIVISIONS, topLevelOf } from '@/lib/ownership'
 import { cn } from '@/lib/utils'
@@ -111,12 +111,16 @@ import {
   docsMissingOf,
   type ShipmentRow,
   profitByDivision,
+  invoiceStatusOfRow,
 } from './shipmentViews'
+import { useRowsWithInvoiceStatus } from './useBoardInvoiceStatus'
+import { loadInvoiceStatusText } from '@/lib/loadInvoiceStatus'
 import {
   ACTIONS_COLUMN,
   SHIPMENT_COLUMN_KEYS,
   SHIPMENT_DEFAULT_COLUMNS,
   SHIPMENT_DEFAULT_FROZEN,
+  SHIPMENT_INTRODUCED_COLUMNS,
   SHIPMENT_GRID_COLUMNS,
   sentence,
 } from './shipmentGridColumns'
@@ -380,11 +384,13 @@ export function ShipmentsBoard() {
 
   // Union of working rows, All's year, Voided's period and exact PRO matches.
   // Each pane applies its own scope; voided rows can appear only in the Voided pane.
-  const allRows = useMemo<ShipmentRow[]>(() => {
+  const loadedRows = useMemo<ShipmentRow[]>(() => {
     const byId = new Map<string, ShipmentRow>()
     for (const set of [workingRows, windowRows, allYearsRows, voidedRows, proRows, searchRows]) for (const r of set) byId.set(r.id, r as ShipmentRow)
     return [...byId.values()]
   }, [workingRows, windowRows, allYearsRows, voidedRows, proRows, searchRows])
+  // Released loads (All, or a search) carry their invoice status from the open invoices and the OTR queue.
+  const allRows = useRowsWithInvoiceStatus(loadedRows, wantsAllList)
 
 
   // Every year the data has shown so far, kept after a narrower year is picked so the selector does not shrink.
@@ -611,7 +617,7 @@ function BoardPane({
     defaultSort: DEFAULT_SORT,
   })
   const teamLayout = useMemo(
-    () => resolveTeamLayout(columnTemplates, SHIPMENT_COLUMN_KEYS, SHIPMENT_DEFAULT_COLUMNS, SHIPMENT_DEFAULT_FROZEN),
+    () => resolveTeamLayout(columnTemplates, SHIPMENT_COLUMN_KEYS, SHIPMENT_DEFAULT_COLUMNS, SHIPMENT_DEFAULT_FROZEN, SHIPMENT_INTRODUCED_COLUMNS),
     [columnTemplates],
   )
   // An admin's unsaved edit of the team layout; null outside edit mode.
@@ -944,6 +950,14 @@ function BoardPane({
           ? <Link className="tms-link tms-board-link" to={`/tms/carriers/${carrierId}`} title={carrierHoverText(row)} onClick={(e) => e.stopPropagation()}>{label}</Link>
           : <span className={cn(label === 'Need to cover' && 'tms-muted')} title={carrierHoverText(row)}>{label}</span>
         return <span className="flex items-center gap-1" data-testid="carrier-cell">{name}<TrackingModeNotSetRowChip row={row} /></span>
+      }
+      if (columnKey === 'invoiceStatus') {
+        const inv = invoiceStatusOfRow(row)
+        return (
+          <TmsBadge tone={inv.tone} title={inv.reason ?? undefined} data-testid="invoice-status-pill">
+            {loadInvoiceStatusText(inv, formatBoardDate)}
+          </TmsBadge>
+        )
       }
       if (columnKey === 'arStatus' || columnKey === 'apStatus') {
         const value = columnKey === 'arStatus' ? row.arStatus : row.apStatus

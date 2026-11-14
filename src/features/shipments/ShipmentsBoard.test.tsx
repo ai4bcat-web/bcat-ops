@@ -162,6 +162,8 @@ vi.mock('./intake/useIntakeLoads', () => ({ useOpenIntakeCount: () => 0 }))
 
 vi.mock('@/lib/apiClient', () => ({
   countOpenIntakeLoads: async () => 0,
+  listOpenInvoices: async () => [],
+  listFactoringItems: async () => [],
   listShipmentColumnTemplates,
   listShipmentsByNumber: async () => [],
   listShipmentIdsBySearch: (...args: unknown[]) => __searchIds(...args),
@@ -886,8 +888,8 @@ describe('ShipmentsBoard', () => {
     it('opens with Status, RC, POD, PRO # and Customer Ref # fixed on the left, no side panel and the stats strip always on', async () => {
       renderBoard('/tms/shipments', [row('S001')])
       await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
-      const heads = [...document.querySelectorAll('thead th')].slice(1, 6)
-      expect(heads.map((h) => h.textContent)).toEqual(['Status', 'RC', 'POD', 'PRO #', 'Customer Ref #'])
+      const heads = [...document.querySelectorAll('thead th')].slice(1, 7)
+      expect(heads.map((h) => h.textContent)).toEqual(['Status', 'Invoice Status', 'RC', 'POD', 'PRO #', 'Customer Ref #'])
       expect(heads[0]).toHaveClass('tms-dg-sticky')
       expect(screen.queryByText('Statuses')).toBeNull()
       expect(screen.getByRole('region', { name: 'Summary' })).toHaveTextContent('Shipments')
