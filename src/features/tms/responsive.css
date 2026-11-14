@@ -203,7 +203,8 @@
     display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px 10px;
     padding: 10px 0; border-bottom: 1px solid var(--tms-border);
   }
-  .tms-portal .tms-table-stack td { display: block; min-width: 0 !important; padding: 0; border: 0; text-align: left !important; }
+  .tms-portal .tms-table-stack td { display: block; height: auto !important; min-width: 0 !important; padding: 0; border: 0; white-space: normal; text-align: left !important; }
+  .tms-portal .tms-table-wrap:has(> .tms-table-stack) { overflow: visible; }
   .tms-portal .tms-table-stack td[data-label]::before {
     content: attr(data-label); display: block; font-size: 11px; color: var(--tms-muted); margin-bottom: 2px;
   }
