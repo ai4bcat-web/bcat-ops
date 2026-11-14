@@ -3,7 +3,8 @@
  * with the reason it was flagged. The same list sits on the Invoicing (AR) and Payables (AP) pages;
  * the carrier note (`financeReviewApNote`, carrier pay) is shown on the AP page only.
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { Search } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { TmsButton, TmsInput, TmsTable, type ColumnDef } from '@/features/tms/kit'
@@ -21,6 +22,13 @@ interface Props {
 
 export function NeedsReviewList({ rows, error, side, onCleared }: Props) {
   const [busy, setBusy] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const shown = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return rows
+    return rows.filter((row) => [row.number, row.customerName, row.financeReviewReason, side === 'AP' ? row.financeReviewApNote : null]
+      .some((v) => v != null && String(v).toLowerCase().includes(q)))
+  }, [rows, search, side])
   const clear = (row: FinanceReviewShipment) => {
     setBusy(row.id)
     financeAction('CLEAR_FINANCE_REVIEW', { shipmentId: row.id })
@@ -75,7 +83,14 @@ export function NeedsReviewList({ rows, error, side, onCleared }: Props) {
   return (
     <div data-testid={`needs-review-${side.toLowerCase()}`}>
       {error && <p style={{ color: 'var(--tms-badge-red)' }} className="text-sm">{error}</p>}
-      <TmsTable columns={columns} rows={rows} rowKey={(row) => row.id} empty="Nothing needs review." />
+      <div className="tms-dense-bar">
+        <Search size={14} className="tms-muted" aria-hidden="true" />
+        <TmsInput className="tms-dense-search" aria-label="Search" data-testid={`needs-review-search-${side.toLowerCase()}`}
+          placeholder={side === 'AP' ? 'Search PRO, customer, carrier note…' : 'Search PRO, customer, reason…'}
+          value={search} onChange={(e) => setSearch(e.target.value)} />
+        <span className="tms-muted">{shown.length === rows.length ? `${rows.length} rows` : `${shown.length} of ${rows.length} rows`}</span>
+      </div>
+      <TmsTable columns={columns} rows={shown} rowKey={(row) => row.id} empty="Nothing needs review." />
     </div>
   )
 }

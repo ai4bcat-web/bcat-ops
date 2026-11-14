@@ -1240,8 +1240,9 @@ describe('RECORD_PAYMENT', () => {
     const invoice = table(TABLES.invoice).get(invoiceId)!
     expect(invoice).toMatchObject({ status: 'PAID', balanceCents: 0 })
     expect(invoice.arOpen).toBeUndefined()
-    expect(invoice.paidAt).toBeTruthy()
-    expect(table(TABLES.order).get(ORDER_ID)).toMatchObject({ arStatus: 'PAID', arBalanceCents: 0 })
+    // Dated the day the money came in, not the day it was keyed (days to pay reads it).
+    expect(invoice.paidAt).toBe('2026-10-25T12:00:00.000Z')
+    expect(table(TABLES.order).get(ORDER_ID)).toMatchObject({ arStatus: 'PAID', arBalanceCents: 0, paidAt: '2026-10-25T12:00:00.000Z' })
   })
 
   it('keeps an overpayment on the row as customer credit', async () => {

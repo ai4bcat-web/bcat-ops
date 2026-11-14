@@ -30,6 +30,7 @@ import { useCustomerQuotes } from '@/hooks/useCustomerQuotes'
 import { creditSummaryForCustomer, effectiveCustomerStatus, boardTab } from '@/lib/customerCredit'
 import { oldestOpenInvoiceDays } from '@/lib/arAging'
 import { useCustomerAr } from '@/hooks/useCustomerAr'
+import { customerDaysToPay } from '@/lib/daysToPay'
 import { loadStatus } from '@/lib/loadStatus'
 import { laneLabelFor } from '@/lib/laneKey'
 import { QUOTE_STATUS_LABEL } from '@/lib/quotes'
@@ -164,6 +165,8 @@ export function CustomerProfile({
     { orders, shipments, loads },
     { oldestOpenInvoiceDays: oldestOpenInvoiceDays(ar.invoices, new Date().toISOString()) },
   ), [customer, settings, orders, shipments, loads, ar.invoices])
+
+  const daysToPay = useMemo(() => customerDaysToPay(ar.invoices, ar.payments), [ar.invoices, ar.payments])
 
   const effectiveStatus = useMemo(
     () => effectiveCustomerStatus(customer, lastLoadAt, new Date().toISOString()),
@@ -334,6 +337,13 @@ export function CustomerProfile({
             </TmsCard>
             <TmsCard title="Billing method">
               <BillingMethodFields value={value} set={set} errors={errors} factor={settings?.factorRemitTo ?? null} />
+            </TmsCard>
+            <TmsCard title="Days to pay">
+              <p className="text-sm" data-testid="customer-days-to-pay">
+                {daysToPay.averageDays == null
+                  ? 'No paid invoices yet.'
+                  : <><strong>{daysToPay.averageDays} days</strong> on average, invoice date to paid date, across {daysToPay.count} paid invoice{daysToPay.count === 1 ? '' : 's'}.</>}
+              </p>
             </TmsCard>
             <CreditLimitCard
               policy={creditSummary.policy}

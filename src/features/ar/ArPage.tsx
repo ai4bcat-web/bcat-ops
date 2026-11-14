@@ -73,6 +73,9 @@ import { CreditMemoDialog } from './components/CreditMemoDialog'
 import { GenerateInvoiceDialog } from './components/GenerateInvoiceDialog'
 import { ReasonDialog } from './components/ReasonDialog'
 import { ReceivePaymentDialog } from './components/ReceivePaymentDialog'
+import { MarkPaidDialog } from './components/MarkPaidDialog'
+import { useCustomerPaymentFacts, type CustomerPaymentFacts } from '@/hooks/useCustomerPaymentFacts'
+import { PAYMENT_METHOD_LABEL, averageDaysToPay, daysToPayText, settlementOf } from '@/lib/daysToPay'
 import { SendToFactorDialog } from './components/SendToFactorDialog'
 import { useBillingGrant, BILLING_GRANT_MESSAGE } from './useBillingGrant'
 import { attachmentStateText, useInvoiceAttachmentPlans } from './useInvoiceAttachmentPlans'
@@ -91,6 +94,7 @@ type ArDialog =
   | { kind: 'factor'; invoiceId: string }
   | { kind: 'void'; invoice: InvoiceRecord }
   | { kind: 'reverse'; payment: ArPaymentRecord }
+  | { kind: 'markPaid'; invoices: InvoiceRecord[] }
 
 /** One shipment the batch would not bill, and exactly what the release gate said. */
 interface BatchRefusal {
@@ -292,6 +296,15 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     }
   }, [unbilled.rows, open.invoices, paidInvoices, lookups, releasedByOrder, billedBy, factorByItemId, owed, asOf])
 
+  // Paid date / ACH-check / ref # and days to pay, read for the customers on the Invoiced and Paid tabs.
+  const [paymentsVersion, setPaymentsVersion] = useState(0)
+  const factCustomerIds = useMemo(() => {
+    if (tab === 'paid') return queue.PAID.map((r) => r.customerId ?? '')
+    if (tab === 'invoiced' && (groupBy === 'customer' || owed.parties.length > 0)) return queue.INVOICED.map((r) => r.customerId ?? '')
+    return []
+  }, [tab, queue, groupBy, owed.parties.length])
+  const paymentFacts = useCustomerPaymentFacts(factCustomerIds, paymentsVersion)
+
   // Ready to invoice reads each shipment's board row for its reference, lane, carrier and carrier pay (internal only).
   const readyShipmentIds = useMemo(
     () => (tab === 'ready' ? [...new Set(queue.READY.map((row) => row.shipmentId))] : []),
@@ -361,9 +374,11 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const divisionLabel = (key: string) => divisionOptions.find((o) => o.key === key)?.label ?? key
 
 
-  const refreshAll = () =>
-    Promise.all([unbilled.refresh(), invoiced.refresh(), open.refresh(), customerAr.refresh(), loadMonth()])
+  const refreshAll = () => {
+    setPaymentsVersion((v) => v + 1)
+    return Promise.all([unbilled.refresh(), invoiced.refresh(), open.refresh(), customerAr.refresh(), loadMonth()])
       .then(() => undefined)
+  }
 
   const closeAndRefresh = () => {
     setDialog(null)
@@ -516,6 +531,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onBatchGenerate: runBatchGenerate,
       onReview: (invs) => setDialog({ kind: 'review', invoices: invs }),
       onEdit: (inv) => setDialog({ kind: 'edit', invoice: inv }),
+      onMarkPaid: (invs) => setDialog({ kind: 'markPaid', invoices: invs }),
+      paymentFacts,
     })
     : tab === 'payments' ? paymentsView({
       banner: errorBanner,
@@ -618,6 +635,13 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           onDone={closeAndRefresh}
         />
       )}
+      {dialog?.kind === 'markPaid' && (
+        <MarkPaidDialog
+          invoices={dialog.invoices}
+          onClose={() => setDialog(null)}
+          onDone={() => { setSelected([]); void refreshAll() }}
+        />
+      )}
       {dialog?.kind === 'edit' && (
         <InvoiceEditDrawer
           invoice={dialog.invoice}
@@ -631,6 +655,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           onSend={(inv) => setDialog({ kind: 'review', invoices: [inv] })}
           onFactor={(inv) => setDialog({ kind: 'factor', invoiceId: inv.id })}
           onPayment={(inv) => setDialog({ kind: 'payment', customerId: inv.customerId, customerName: inv.customerName ?? '', invoiceId: inv.id })}
+          onMarkPaid={(inv) => setDialog({ kind: 'markPaid', invoices: [inv] })}
           onVoid={(inv) => setDialog({ kind: 'void', invoice: inv })}
         />
       )}
@@ -783,6 +808,7 @@ function dateCol<T>(key: string, header: string, of: (row: T) => string | null, 
 function queueView({
   status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, factorByItemId, customerById,
   attachmentPlans, boardById, shipmentsById, months, month, paidLoading, onMonth, onSelect, onGenerate, onBatchGenerate, onReview, onEdit,
+  onMarkPaid, paymentFacts,
 }: {
   status: ArQueueStatus
   rows: ArQueueRow[]
@@ -807,11 +833,20 @@ function queueView({
   onBatchGenerate: () => void
   onReview: (invoices: InvoiceRecord[]) => void
   onEdit: (invoice: InvoiceRecord) => void
+  onMarkPaid: (invoices: InvoiceRecord[]) => void
+  paymentFacts: CustomerPaymentFacts
 }): ListView {
   const ready = status === 'READY'
   const invoiced = status === 'INVOICED'
   const toggle = (orderId: string) => {
     onSelect(selected.includes(orderId) ? selected.filter((id) => id !== orderId) : [...selected, orderId])
+  }
+  // Sent invoices paid by hand. Factored ones are settled by OTR, not marked paid here.
+  const payable = (row: ArQueueRow) => invoiced && !!row.invoice && !row.factored && row.balanceCents > 0
+  const settlement = (row: ArQueueRow) => (row.invoice ? settlementOf(row.invoice, paymentFacts.linesByInvoice.get(row.invoice.id)) : null)
+  const paymentsText = (row: ArQueueRow) => {
+    const lines = row.invoiceId ? paymentFacts.linesByInvoice.get(row.invoiceId) ?? [] : []
+    return lines.map((l) => `${formatDay(l.receivedOn)} · ${l.method ? PAYMENT_METHOD_LABEL[l.method] ?? l.method : 'Write-off'}${l.reference ? ` #${l.reference}` : ''} · ${formatCents(l.amountCents)}`).join('\n')
   }
   const sentText = (row: ArQueueRow) =>
     row.sentAt ? `${formatDay(row.sentAt)}${row.sentTo ? ` → ${row.sentTo}` : ''}` : row.invoiceId ? 'Not sent' : '—'
@@ -856,7 +891,7 @@ function queueView({
   ]
 
   const columns: Array<Col<ArQueueRow>> = [
-    ...(ready ? [{ key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 40 } as Col<ArQueueRow>] : []),
+    ...(ready || invoiced ? [{ key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 40 } as Col<ArQueueRow>] : []),
     { key: 'shipment', header: 'PRO', group: 'Shipment', text: (row) => row.shipmentNumber ?? row.shipmentId, extraPx: 16 },
     { key: 'invoice', header: 'Invoice #', group: 'Invoice', text: (row) => row.invoiceNumber ?? '—' },
     {
@@ -877,7 +912,7 @@ function queueView({
     dateCol<ArQueueRow>('due', 'Due', (row) => row.dueAt),
     moneyCol<ArQueueRow>('amount', 'Amount', (row) => row.amountCents),
     moneyCol<ArQueueRow>('balance', 'Balance', (row) => row.balanceCents),
-    { key: 'status', header: 'Status', group: 'Invoice', text: (row) => (row.shortPaid ? `Short paid ${formatCents(row.balanceCents)} open` : AR_QUEUE_STATUS_LABEL[row.status]), filter: 'multi', optionsOf: (row) => opt(AR_QUEUE_STATUS_LABEL[row.status]) },
+    { key: 'status', header: 'Status', group: 'Invoice', text: (row) => (row.shortPaid ? `Partially paid ${formatCents(row.balanceCents)} open` : AR_QUEUE_STATUS_LABEL[row.status]), filter: 'multi', optionsOf: (row) => opt(AR_QUEUE_STATUS_LABEL[row.status]) },
     { key: 'sent', header: 'Sent', group: 'Invoice', text: sentText, sortValue: (row) => row.sentAt ?? '' },
     {
       key: 'age', header: 'Days since invoice', group: 'Invoice', align: 'right',
@@ -889,9 +924,22 @@ function queueView({
       sortValue: (row) => row.daysPastDue ?? -99999, filter: 'number', numberOf: (row) => row.daysPastDue ?? 0, numberUnit: 'days',
     },
     ...(ready || invoiced ? attachmentColumns(attachmentPlans) : []),
-    ...(status === 'PAID' ? [dateCol<ArQueueRow>('paidAt', 'Paid on', (row) => row.paidAt)] : []),
+    ...(status === 'PAID' ? [
+      dateCol<ArQueueRow>('paidAt', 'Paid on', (row) => settlement(row)?.paidOn ?? row.paidAt),
+      {
+        key: 'payMethod', header: 'Method', group: 'Payment', filter: 'multi',
+        text: (row) => { const m = settlement(row)?.method; return m ? PAYMENT_METHOD_LABEL[m] ?? m : '—' },
+        optionsOf: (row) => { const m = settlement(row)?.method; return opt(m ? PAYMENT_METHOD_LABEL[m] ?? m : '—') },
+      } as Col<ArQueueRow>,
+      { key: 'payRef', header: 'Check / ref #', group: 'Payment', text: (row) => settlement(row)?.reference ?? '—' } as Col<ArQueueRow>,
+      {
+        key: 'daysToPay', header: 'Days to pay', group: 'Payment', align: 'right',
+        text: (row) => { const d = settlement(row)?.daysToPay; return d == null ? '—' : `${d}d` },
+        sortValue: (row) => settlement(row)?.daysToPay ?? -1, filter: 'number', numberOf: (row) => settlement(row)?.daysToPay ?? 0, numberUnit: 'days',
+      } as Col<ArQueueRow>,
+    ] : []),
     ...(invoiced ? [{ key: 'factor', header: 'Factor', group: 'Invoice', text: factorText, filter: 'multi', optionsOf: (row: ArQueueRow) => opt(factorText(row)) } as Col<ArQueueRow>] : []),
-    { key: 'actions', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: ready ? 96 : 48 } as Col<ArQueueRow>,
+    { key: 'actions', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: ready ? 96 : invoiced ? 120 : 48 } as Col<ArQueueRow>,
   ]
 
   const renderCell = (row: ArQueueRow, key: string): ReactNode => {
@@ -902,7 +950,8 @@ function queueView({
             type="checkbox"
             aria-label={`Select ${row.shipmentNumber ?? row.orderId}`}
             checked={selected.includes(row.orderId)}
-            disabled={row.reasons.length > 0}
+            disabled={invoiced ? !payable(row) : row.reasons.length > 0}
+            title={invoiced && !payable(row) ? (row.factored ? 'Factored: OTR settles it' : 'Nothing open to pay') : undefined}
             onChange={() => toggle(row.orderId)}
           />
         )
@@ -941,7 +990,10 @@ function queueView({
         return <span className="font-medium" title="Internal: customer rate − carrier pay. Never shown to the customer." style={profit < 0 ? { color: 'var(--tms-badge-red)' } : undefined}>{formatCents(profit)}</span>
       }
       case 'status':
-        if (row.shortPaid) return <TmsBadge tone="orange">Short paid {formatCents(row.balanceCents)} open</TmsBadge>
+        if (row.shortPaid) {
+          const history = paymentsText(row)
+          return <TmsBadge tone="orange" title={history || undefined} data-testid="ar-partially-paid">Partially paid · {formatCents(row.balanceCents)} open</TmsBadge>
+        }
         if (row.status === 'READY' && row.reasons.length > 0) {
           return <span className="flex items-center gap-1"><TmsBadge tone="red">Blocked</TmsBadge><span style={{ color: 'var(--tms-badge-red)' }}>{row.reasons.join('; ')}</span></span>
         }
@@ -999,7 +1051,10 @@ function queueView({
         }
         if (!inv) return null
         return (
-          <span className="flex justify-end">
+          <span className="flex items-center justify-end gap-1">
+            {payable(row) && (
+              <TmsButton size="sm" aria-label={`Mark invoice ${inv.number} paid`} disabled={busy} onClick={() => onMarkPaid([inv])}>Mark paid</TmsButton>
+            )}
             <button type="button" className="tms-icon-btn tms-icon-btn-plain" aria-label={`View or edit invoice ${inv.number}`} title="Open invoice" onClick={() => onEdit(inv)}><Eye size={15} /></button>
           </span>
         )
@@ -1039,6 +1094,20 @@ function queueView({
           </TmsButton>
         </>
       )}
+      {invoiced && (() => {
+        const picked = rows.filter((row) => selected.includes(row.orderId) && payable(row)).map((row) => row.invoice as InvoiceRecord)
+        return (
+          <>
+            <span className="text-sm tms-muted">{picked.length} selected</span>
+            <TmsButton variant="primary" aria-label="Mark selected invoices paid" data-testid="ar-mark-paid-batch"
+              disabled={busy || picked.length === 0}
+              title={picked.length === 0 ? 'Tick sent invoices (filter or group by customer to pick one customer\'s)' : undefined}
+              onClick={() => onMarkPaid(picked)}>
+              Mark {picked.length || ''} paid
+            </TmsButton>
+          </>
+        )
+      })()}
       {status === 'PAID' && (
         <>
           <TmsSelect aria-label="Invoice month" value={month} onChange={(e) => onMonth(e.target.value)}>
@@ -1085,12 +1154,31 @@ function queueView({
         order: (shown) => orderByGroup(shown, groupBy),
         header: (key, shown) => {
           const t = groupTotals(shown)
+          const customerId = groupBy === 'customer' ? shown.find((r) => r.customerId)?.customerId ?? null : null
+          const dtp = customerId
+            ? (status === 'PAID'
+              ? averageDaysToPay(shown.map((r) => settlement(r)).filter((x): x is NonNullable<typeof x> => x != null))
+              : paymentFacts.daysToPayByCustomer.get(customerId))
+            : undefined
+          const groupPayable = invoiced ? shown.filter(payable) : []
+          const allPicked = groupPayable.length > 0 && groupPayable.every((r) => selected.includes(r.orderId))
           return (
             <span className="flex items-center gap-3" data-testid="ar-group-head">
               <strong>{key}</strong>
               <span className="tms-muted">{t.count} {ready ? 'shipment' : 'invoice'}{t.count === 1 ? '' : 's'}</span>
               <span>{formatCents(t.amountCents)}</span>
               {invoiced && <span className="tms-muted">{formatCents(t.balanceCents)} open</span>}
+              {dtp && <span className="tms-muted" data-testid="ar-group-days-to-pay" title={status === 'PAID' ? 'Invoices shown on this tab' : 'All of this customer\'s paid invoices'}>{daysToPayText(dtp)}</span>}
+              {groupPayable.length > 0 && (
+                <button type="button" className="tms-link text-sm" data-testid="ar-group-select"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    const ids = groupPayable.map((r) => r.orderId)
+                    onSelect(allPicked ? selected.filter((id) => !ids.includes(id)) : [...new Set([...selected, ...ids])])
+                  }}>
+                  {allPicked ? 'Clear' : `Select all ${groupPayable.length}`}
+                </button>
+              )}
             </span>
           )
         },

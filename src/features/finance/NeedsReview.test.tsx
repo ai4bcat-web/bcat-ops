@@ -53,6 +53,15 @@ describe('NeedsReviewList', () => {
     expect(setDeliveredDate).toHaveBeenCalledWith({ shipmentId: 'shp-1', deliveredDate: '2026-10-13' })
   })
 
+  it('searches its own rows by PRO, customer or reason', () => {
+    render(<MemoryRouter><NeedsReviewList side="AR" rows={rows} error={null} onCleared={() => {}} /></MemoryRouter>)
+    fireEvent.change(screen.getByTestId('needs-review-search-ar'), { target: { value: 'spot' } })
+    expect(screen.queryByText('BATORY FOODS')).toBeNull()
+    expect(screen.getByText('1 of 2 rows')).toBeTruthy()
+    fireEvent.change(screen.getByTestId('needs-review-search-ar'), { target: { value: '14433' } })
+    expect(screen.getByText('BATORY FOODS')).toBeTruthy()
+  })
+
   it('lists the oldest flag first', () => {
     expect(sortReview(rows).map((r) => r.number)).toEqual(['13823', '14433'])
   })
