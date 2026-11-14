@@ -475,7 +475,8 @@ export function DashboardPage() {
           data-source={kpi.source ?? ''}
           data-asof={kpi.asOf ?? ''}
           data-kpi-flips={kpi.flips}
-          style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(6, minmax(0, 1fr))', gap: 12 }}
+          // Phones and tablets: as many columns as fit at 240px each (one on a phone), so a card is never narrower than its amounts.
+          style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))' : 'repeat(6, minmax(0, 1fr))', gap: 12 }}
         >
           {/* Loads, Revenue and Broker covered come from the rollup together; `display: contents` keeps them grid items. */}
           <div
