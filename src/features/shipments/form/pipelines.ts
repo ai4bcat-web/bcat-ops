@@ -102,8 +102,8 @@ const fail = (message: string, bundle: ShipmentBundle | null = null): PipelineRe
 
 const eq = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
 
-function precheck(values: ShipmentFormValues, ctx: PipelineCtx, level: ValidationLevel, mode: 'create' | 'edit'): string | null {
-  const blocking = blockingIssues(validateForm(values, { level, mode, customer: ctx.customer, settings: ctx.settings }))
+function precheck(values: ShipmentFormValues, ctx: PipelineCtx, level: ValidationLevel, mode: 'create' | 'edit', existingLoad = false): string | null {
+  const blocking = blockingIssues(validateForm(values, { level, mode, customer: ctx.customer, settings: ctx.settings, existingLoad }))
   return blocking.length > 0 ? issueSummary(blocking) : null
 }
 
@@ -425,7 +425,7 @@ function carrierDetailsPatch(slot: CarrierSlot, lc: LoadCarrierRecord, withLegs:
  * never calls SAVE_ORDER_FORM.
  */
 export async function runEditSave(values: ShipmentFormValues, ctx: PipelineCtx, bundle: ShipmentBundle): Promise<PipelineResult> {
-  const problem = precheck(values, ctx, 'create', 'edit')
+  const problem = precheck(values, ctx, 'create', 'edit', bundle.shipment.status !== 'DRAFT')
   if (problem) return fail(problem, bundle)
   if (bundle.shipment.status === 'DRAFT') {
     const r = new Runner(bundle, new Set(), ['save', 'revTag', 'salesRep', 'dispatcher', 'assignDriver', 'deliveryDriver'])

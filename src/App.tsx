@@ -185,6 +185,9 @@ export default function App() {
                   <Route path="carriers/:id" element={<RequirePage page={['carriers', 'tms']}><DormantPage page="carrierProfile"><CarriersPage /></DormantPage></RequirePage>} />
                   <Route path="invoicing/factored" element={<RequirePage page={['factoring']}><DormantPage page="invoicingAr"><InvoicingPage /></DormantPage></RequirePage>} />
                   <Route path="factors" element={<Navigate to="/tms/invoicing/factored" replace />} />
+                  {/* The To factor tab moved into Ready to invoice (Ryne 2026-11-14). */}
+                  <Route path="invoicing/to-factor" element={<Navigate to="/tms/invoicing" replace />} />
+                  <Route path="invoicing/factored/to-factor" element={<Navigate to="/tms/invoicing" replace />} />
                   <Route path="customers" element={<RequirePage page={['customers', 'tms']}><CustomersPage /></RequirePage>} />
                   {/* Step AW D.2: who is billed how. Same grant as the Customers list. */}
                   <Route path="customers/billing-setup" element={<RequirePage page={['customers', 'tms']}><DormantPage page="billingSetup"><BillingSetupPage /></DormantPage></RequirePage>} />

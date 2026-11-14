@@ -178,6 +178,7 @@ import {
 import { salesRepForDivision } from '../../../src/lib/divisionSalesRep'
 import { parseRateConSnapshot, rateConThreadHeaders, revisedRateConSubject } from '../../../src/lib/rateConRevision'
 import { buildAddressDetailsEmail, type AddressDetailsStopInput } from '../../../src/lib/addressDetailsEmail'
+import { factorGapsAtCreate, factorGapsError, orderPoNumber, routeEnds } from '../../../src/lib/factorReadyAtCreate'
 import { LEAD_STAGES, promotionFor } from '../../../src/lib/crm/promote'
 import { batchShipmentTask, BATCH_TASK_ACTIONS } from './batch'
 import { INTAKE_ACTIONS, reconcileOpenIntake, runIntakeAction, type IntakeAction, type IntakeDeps } from './intake'
@@ -2466,11 +2467,33 @@ interface SavedForm {
   totals: FinancialsTotals
 }
 
+interface SaveOrderFormOpts {
+  /**
+   * The factor-ready rule (src/lib/factorReadyAtCreate) on a strict save. Off only for the server's own
+   * callers — quote conversion and the dev demo seed — never from a request: the flag is not read from input.
+   */
+  factorCheck?: boolean
+}
+
+/**
+ * Ryne 2026-11-14: a load is built with everything OTR needs that is known at booking (PO, rate, both ends'
+ * city/state/ZIP, the customer's billing method and MC) so it can be factored the day it reaches Ready to invoice.
+ */
+function assertFactorReadyAtCreate(customer: Row | null, references: Row[], stops: Row[], revenueCents: number): void {
+  const message = factorGapsError(factorGapsAtCreate({
+    customer: customer as unknown as Parameters<typeof factorGapsAtCreate>[0]['customer'],
+    poNumber: orderPoNumber(references as unknown as Parameters<typeof orderPoNumber>[0]),
+    customerRateCents: revenueCents,
+    ...routeEnds(stops as unknown as Parameters<typeof routeEnds>[0]),
+  }))
+  if (message) throw new Error(message)
+}
+
 /**
  * Rewrite one draft's order, its stops and its charges in a single transaction.
  * Shared by SAVE_ORDER_FORM and SUBMIT_ORDER, which re-saves before it submits.
  */
-async function saveOrderForm(input: Row, caller: Caller): Promise<SavedForm> {
+async function saveOrderForm(input: Row, caller: Caller, opts: SaveOrderFormOpts = {}): Promise<SavedForm> {
   const shipmentId = assertString(input.shipmentId, 'shipmentId')
   const expectedUpdatedAt = assertExpectedUpdatedAt(input)
   const bundle = await readBundle(shipmentId)
@@ -2535,6 +2558,7 @@ async function saveOrderForm(input: Row, caller: Caller): Promise<SavedForm> {
     pricingDefaultsOf(customer),
     marginFloorBpsOf(settings),
   )
+  if (!draftSave && opts.factorCheck !== false) assertFactorReadyAtCreate(customer, references, stops, totals.revenueCents)
 
   const now = nowIso()
   const orderIdValue = String(order.id)
@@ -2662,7 +2686,7 @@ async function saveOrderForm(input: Row, caller: Caller): Promise<SavedForm> {
 
 // ── SUBMIT_ORDER ─────────────────────────────────────────────────────────────
 
-async function submitOrder(input: Row, caller: Caller): Promise<Row> {
+async function submitOrder(input: Row, caller: Caller, opts: SaveOrderFormOpts = {}): Promise<Row> {
   const shipmentId = assertString(input.shipmentId, 'shipmentId')
   const carrierRepId = optionalString(input.carrierRepId, 100)
   // The UI autosaves before submit, so any expectedUpdatedAt it carried is stale.
@@ -2683,7 +2707,7 @@ async function submitOrder(input: Row, caller: Caller): Promise<Row> {
   assertStopShape(submitStops, true)
   input.expectedUpdatedAt = String(currentShipment.updatedAt ?? '')
   delete input.draftSave
-  const saved = await saveOrderForm(input, caller)
+  const saved = await saveOrderForm(input, caller, opts)
   const shipment = saved.bundle.shipment
   const mode = optionalEnum(shipment.mode, SHIPMENT_MODES, 'mode') ?? 'FTL'
   if (!isTruckloadMode(mode)) {
@@ -8884,8 +8908,10 @@ const quoteDeps: QuoteDeps = {
   checkCredit,
   assertCreditClear,
   createShipment,
-  saveOrderForm,
-  submitOrder,
+  // A converted quote opens as a shipment the dispatcher then completes in the form; the factor-ready rule
+  // applies there, not here, where a refusal would void the conversion.
+  saveOrderForm: (input: Row, caller: Caller) => saveOrderForm(input, caller, { factorCheck: false }),
+  submitOrder: (input: Row, caller: Caller) => submitOrder(input, caller, { factorCheck: false }),
   bookCarrier,
   voidShipmentForQuote,
   assertNoInvoicedOrders,
@@ -9166,8 +9192,8 @@ const demoDeps: DemoDeps = {
   isDevStack: IS_DEV_STACK,
   actions: {
     createShipment,
-    saveOrderForm: async (input: Row, caller: Caller) => ({ bundle: (await saveOrderForm(input, caller)).bundle as unknown as Row }),
-    submitOrder,
+    saveOrderForm: async (input: Row, caller: Caller) => ({ bundle: (await saveOrderForm(input, caller, { factorCheck: false })).bundle as unknown as Row }),
+    submitOrder: (input: Row, caller: Caller) => submitOrder(input, caller, { factorCheck: false }),
     setShipmentStatus,
     assignCarrierRep,
     bookCarrier,

@@ -18,6 +18,7 @@
  */
 import { canEmailTo, DOCUMENT_TYPE_LABELS, normalizeRequiredDocTypes, requiredDocTypesFor } from './shipmentDocuments'
 import { isShipmentVoided } from './shipmentVoid'
+import { isFactorBilled } from './factorBilling'
 import type {
   Address,
   BillToParty,
@@ -208,7 +209,7 @@ export function formatCents(cents: number): string {
 export interface InvoiceReadinessInput {
   order: Pick<OrderRecord, 'id' | 'arStatus' | 'revenueCents' | 'references'>
   shipment: Pick<ShipmentRecord, 'number' | 'status' | 'deletedAt' | 'voidedAt'> | null | undefined
-  customer: Pick<CustomerRecord, 'requiredReferences' | 'factored' | 'name'> | null | undefined
+  customer: Pick<CustomerRecord, 'requiredReferences' | 'factored' | 'billingMethod' | 'name'> | null | undefined
   settings: Pick<TmsSettings, 'defaultRequiredReferences' | 'factorRemitTo'> | null | undefined
   charges: readonly LoadChargeRecord[]
   gate: Pick<DocGateResult, 'missing'> | null | undefined
@@ -268,9 +269,9 @@ export function invoiceReadiness(input: InvoiceReadinessInput): InvoiceReadiness
   // A factored customer's bill has to tell them to pay the factor. With no factor
   // remit-to configured it would print our own address, and the customer would pay
   // money the factor has already advanced into the wrong account.
-  if (customer?.factored === true && !trimmed(settings?.factorRemitTo?.name)) {
+  if (isFactorBilled(customer) && !trimmed(settings?.factorRemitTo?.name)) {
     reasons.push(
-      `${customer.name ?? 'This customer'} is factored, but no factor remit-to is set up in AR settings; the invoice would tell them to pay us.`,
+      `${customer?.name ?? 'This customer'} is factored, but no factor remit-to is set up in AR settings; the invoice would tell them to pay us.`,
     )
   }
 
@@ -284,17 +285,17 @@ function trimmed(value: string | null | undefined): string | null {
 }
 
 /**
- * Where this invoice says to pay. A factored customer pays the factor — and only on
- * `factored === true`: null means nobody has decided, and money does not go to a
- * factor on a maybe.
+ * Where this invoice says to pay. A factored customer pays the factor: billing method
+ * FACTOR, or the older `factored === true` (./factorBilling). A customer nobody has
+ * decided on pays us — money does not go to a factor on a maybe.
  */
 export function remitToFor(
   division: Pick<Division, 'name' | 'legalName' | 'remitToName' | 'remitToAddress' | 'remitToEmail'> | null | undefined,
-  customer: Pick<CustomerRecord, 'factored'> | null | undefined,
+  customer: Pick<CustomerRecord, 'factored' | 'billingMethod'> | null | undefined,
   settings: Pick<TmsSettings, 'factorRemitTo'> | null | undefined,
 ): RemitTo {
   const factor = settings?.factorRemitTo
-  if (customer?.factored === true && factor && trimmed(factor.name)) {
+  if (isFactorBilled(customer) && factor && trimmed(factor.name)) {
     return {
       name: factor.name.trim(),
       address: factor.address ?? null,
@@ -626,7 +627,7 @@ function freightText(input: InvoiceDataInput, order: NonNullable<InvoiceDataInpu
  */
 export function invoiceData(input: InvoiceDataInput): InvoiceInput {
   const { invoice, customer, division, settings } = input
-  const factored = invoice.factored === true || customer?.factored === true
+  const factored = invoice.factored === true || isFactorBilled(customer)
   const remitTo = invoice.remitTo ?? remitToFor(division, customer, settings)
   const billTo: InvoiceBillTo = invoice.billTo ?? {
     name: trimmed(customer?.name) ?? trimmed(invoice.customerName) ?? '',

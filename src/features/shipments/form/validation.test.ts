@@ -15,15 +15,33 @@ describe('required fields by action', () => {
     expect(blockingIssues(validateForm(v, { ...base, level: 'draft', customer: null }))).toEqual([])
   })
 
-  it('Create on an empty form lists exactly the Aljex reds', () => {
-    const issues = blockingIssues(validateForm(emptyValues(), { ...base, level: 'create', customer: null }))
+  it('Create on an empty form lists exactly the Aljex reds, plus what OTR needs to factor it', () => {
+    const all = blockingIssues(validateForm(emptyValues(), { ...base, level: 'create', customer: null }))
+    expect(all.filter((i) => i.id.includes(':factor:')).map((i) => i.id)).toEqual([
+      'rates:factor:RATE_MISSING', 'pickup:factor:PICKUP_CITY', 'pickup:factor:PICKUP_STATE', 'pickup:factor:PICKUP_ZIP',
+      'consignee:factor:DELIVERY_CITY', 'consignee:factor:DELIVERY_STATE', 'consignee:factor:DELIVERY_ZIP',
+    ])
+    const issues = all.filter((i) => !i.id.includes(':factor:'))
     expect(issues.map((i) => i.label)).toEqual(
       expect.arrayContaining(['Name', 'Equipment', 'Division', 'Weight', 'Description']))
     const labels = new Set(issues.map((i) => `${i.section}:${i.label}`))
     expect(labels).toContain('pickup:Name')
     expect(labels).toContain('pickup:Ready')
     expect(issues).toHaveLength(8)
-    expect(issueSummary(issues)).toMatch(/^8 required fields missing — /)
+    expect(issueSummary(all)).toMatch(/^15 required fields missing — /)
+  })
+
+  it('factor-ready at booking: MC and billing method for the customer, and the rule only warns on a load past draft', () => {
+    const v = filledValues()
+    const noMc = { ...CUSTOMER, mcNumber: '' }
+    expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: noMc })).map((i) => i.id)).toEqual(['customer:factor:CUSTOMER_MC'])
+    const unset = { ...CUSTOMER, billingMethod: null }
+    expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: unset })).map((i) => i.id)).toEqual(['customer:factor:BILLING_METHOD'])
+    v.stops[2].zip = ''
+    expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: CUSTOMER })).map((i) => i.id)).toEqual(['consignee:factor:DELIVERY_ZIP'])
+    const old = validateForm(v, { ...base, mode: 'edit', level: 'create', customer: noMc, existingLoad: true })
+    expect(blockingIssues(old)).toEqual([])
+    expect(old.filter((i) => i.id.includes(':factor:')).map((i) => i.severity)).toEqual(['warn', 'warn'])
   })
 
   it('a filled form passes Create; LTL does not need equipment', () => {
@@ -79,7 +97,9 @@ describe('required fields by action', () => {
     const v = filledValues(); v.stops[2].state = 'Texas'; v.stops[2].zip = '75'
     const ids = blockingIssues(validateForm(v, { ...base, level: 'submit', customer: CUSTOMER })).map((i) => i.id)
     expect(ids).toEqual(expect.arrayContaining(['consignee:state:2', 'consignee:zip:2']))
-    expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: CUSTOMER }))).toEqual([])
+    // Create used to let these through; the consignee is now needed to factor the load.
+    expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: CUSTOMER })).map((i) => i.id))
+      .toEqual(['consignee:factor:DELIVERY_STATE', 'consignee:factor:DELIVERY_ZIP'])
   })
 
   it('the form → RequiredFieldSubject adapter agrees with the gate on what is missing', () => {

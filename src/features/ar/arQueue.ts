@@ -14,6 +14,7 @@ import { daysLate, daysSinceInvoice } from '@/lib/arAging'
 import { deliveredTimeOf } from '@/lib/deliveredAt'
 import type { ArWorklistRow } from '@/hooks/useArWorklist'
 import type { InvoiceRecord, ShipmentRecord } from '@/types/tms'
+import type { FactoringItem } from '@/types'
 
 export type ArQueueStatus = 'READY' | 'INVOICED' | 'PAID'
 
@@ -62,6 +63,11 @@ export interface ArQueueRow {
   reasons: string[]
   invoice: InvoiceRecord | null
   worklist: ArWorklistRow | null
+  /**
+   * A factoring queue row still waiting to go to OTR (Need to factor), shown in Ready to invoice since the
+   * To factor tab was folded in here (Ryne 2026-11-14). Batch Factor submits it; it has no order to generate.
+   */
+  factorItem?: FactoringItem | null
 }
 
 export interface ArQueueLookups {
@@ -162,6 +168,56 @@ export function invoiceRow(inv: InvoiceRecord, l: ArQueueLookups, releasedAt?: s
     invoice: inv,
     worklist: null,
   }
+}
+
+/**
+ * Queue rows still waiting to go to OTR, as Ready to invoice rows — the loads the To factor tab used to hold.
+ * A row already covered by a Ready order (same order or shipment) is not added twice; that order row carries it.
+ */
+export function factorQueueRows(
+  items: readonly FactoringItem[], covered: readonly ArQueueRow[], invoicesById: Map<string, InvoiceRecord>, l: ArQueueLookups,
+): ArQueueRow[] {
+  const orders = new Set(covered.map((r) => r.orderId))
+  const shipments = new Set(covered.map((r) => r.shipmentId))
+  return items
+    .filter((item) => item.status === 'NEED_TO_FACTOR')
+    .filter((item) => !(item.orderId && orders.has(item.orderId)) && !(item.shipmentId && shipments.has(item.shipmentId)))
+    .map((item) => {
+      const inv = item.invoiceId ? invoicesById.get(item.invoiceId) ?? null : null
+      const shipment = item.shipmentId ? l.shipmentsById.get(item.shipmentId) ?? null : null
+      const amountCents = inv?.totalCents ?? (item.otrAmount != null ? Math.round(item.otrAmount * 100) : 0)
+      return {
+        key: `factor:${item.id}`,
+        status: 'READY' as const,
+        orderId: item.orderId ?? `factor:${item.id}`,
+        shipmentId: item.shipmentId ?? '',
+        shipmentNumber: item.proNumber || shipment?.number || null,
+        invoiceId: inv?.id ?? null,
+        invoiceNumber: inv?.number ?? null,
+        customerId: item.customerId ?? inv?.customerId ?? null,
+        customerName: inv?.customerName || item.otrManualFields?.CustomerName || '—',
+        ...common(shipment, l),
+        deliveredAt: deliveredTimeOf(shipment),
+        releasedAt: item.receivedAt ?? null,
+        invoiceDate: inv?.invoiceDate ?? null,
+        dueAt: null,
+        amountCents,
+        paidCents: 0,
+        balanceCents: amountCents,
+        sentAt: null,
+        sentTo: null,
+        sentCount: 0,
+        daysPastDue: null,
+        shortPaid: false,
+        daysSinceInvoice: null,
+        factored: true,
+        paidAt: null,
+        reasons: [],
+        invoice: inv,
+        worklist: null,
+        factorItem: item,
+      }
+    })
 }
 
 /** READY rows: released (UNBILLED) and delivered. Undelivered orders are dropped, not flagged. */

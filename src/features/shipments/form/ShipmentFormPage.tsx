@@ -268,7 +268,8 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   const { run } = form
   const blocking = blockingIssues(form.issues)
   const attempted = form.attempt !== null && blocking.length > 0
-  const rows = useMemo(() => requiredRows(values, mode, { customer: form.customer, settings }), [values, mode, form.customer, settings])
+  const existingLoad = Boolean(bundle && bundle.shipment.status !== 'DRAFT')
+  const rows = useMemo(() => requiredRows(values, mode, { customer: form.customer, settings, existingLoad }), [values, mode, form.customer, settings, existingLoad])
   const progress = useMemo(() => requiredProgress(rows), [rows])
   const sectionStates = useMemo(
     () => Object.fromEntries(CARD_ORDER.map((k) => [k, sectionState(k, values, form.savedValues, bundle ?? null)])) as Record<CardKey, SectionState>,
