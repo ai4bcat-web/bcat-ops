@@ -15,7 +15,7 @@
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Download } from 'lucide-react'
+import { Download, FileBarChart } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   TmsBadge, TmsButton, TmsCard, TmsField, TmsSelect, type TmsTabGroup,
@@ -65,6 +65,7 @@ import { ApReportDialog, CashRequirementsDialog } from './components/ApReportDia
 import { estimatedDueAt, isAljexBill, payablesQueue, proOf, termsLabel, type ApReportKind, type BillFactsIndex } from './apQueue'
 import { useBillFacts } from './useBillFacts'
 import { ApSummaryStrip } from './components/ApSummaryStrip'
+import { AccountingReportsDialog } from '@/features/finance/AccountingReportsDialog'
 import { ApAgingCard, ApExpectedCard, ApPaidCard, ProfitCheckCard, ReviewReasonCard } from '@/features/finance/AccountingCards'
 import { apAgingStats, apExpectedStats, apPaidStats, reviewReasonCounts } from '@/features/finance/accountingStats'
 import { OwedFilterBar } from '@/features/ar/components/OwedFilterBar'
@@ -143,6 +144,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     chip === 'NEEDS_REVIEW' ? undefined : historySince,
   )
   const [dialog, setDialog] = useState<ApDialog | null>(null)
+  const [reportsOpen, setReportsOpen] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const awaiting = useApWorklist('AWAITING_INVOICE')
@@ -626,10 +628,15 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
             </>
           )}
           actions={(
+            <>
             <button type="button" className="tms-btn tms-btn-secondary tms-btn-sm" data-testid="export-outstanding-payables" title="Every open bill with every field"
               onClick={() => { exportOutstandingPayables().then((n) => toast.success(`Exported ${n} outstanding payables`)).catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not export')) }}>
               <Download size={14} aria-hidden="true" /> Export outstanding
             </button>
+            <button type="button" className="tms-btn tms-btn-secondary tms-btn-sm" data-testid="ap-reports" onClick={() => setReportsOpen(true)}>
+              <FileBarChart size={14} aria-hidden="true" /> Reports
+            </button>
+            </>
           )}
         />
         <BillingGapsPanel onFixed={() => void refreshAll()} />
@@ -781,6 +788,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           onPaymentInfo={(bill) => setDialog({ kind: 'payinfo', bill })}
         />
       )}
+      {reportsOpen && <AccountingReportsDialog side="AP" asOf={asOf} onClose={() => setReportsOpen(false)} />}
       {dialog?.kind === 'report' && (
         <ApReportDialog
           kind={dialog.report}
