@@ -1,7 +1,7 @@
 /**
  * Duplicate this shipment from inside its edit form: how many copies (1-20), then the existing DUPLICATE_SHIPMENT action. A copy keeps the
  * customer, stops, freight and customer rates; it does not keep the carrier, driver, documents, POD or status, and its customer ref (PO)
- * starts BLANK because every shipment needs its own.
+ * and stop dates start BLANK because every shipment needs its own.
  */
 import { useState } from 'react'
 import { toast } from 'sonner'
@@ -28,7 +28,7 @@ export function DuplicateDialog({ shipmentId, number, onClose, onDone }: {
       // Name the new PROs: a few reads, never more than five.
       const numbers = (await Promise.all(res.created.slice(0, 5).map((id) => getShipmentBundle(id).then((b) => b.shipment.number).catch(() => null)))).filter((n): n is string => !!n)
       const named = numbers.length > 0 ? ` PRO ${numbers.join(', ')}${res.created.length > numbers.length ? ` and ${res.created.length - numbers.length} more` : ''}` : ''
-      toast.success(`Duplicated ${number}: created${named || ` ${res.created.length} ${res.created.length === 1 ? 'copy' : 'copies'}`}. Enter the customer ref on each.`)
+      toast.success(`Duplicated ${number}: created${named || ` ${res.created.length} ${res.created.length === 1 ? 'copy' : 'copies'}`}. Enter the pickup and delivery dates and the customer ref on each.`)
       onDone(res.created)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not duplicate the shipment')

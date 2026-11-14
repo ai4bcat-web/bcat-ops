@@ -5704,6 +5704,37 @@ describe('DUPLICATE_SHIPMENT', () => {
     expect(stops.map((s) => s.appt)).toEqual(['2026-03-09T13:00:00.000Z', '2026-03-10T13:00:00.000Z'])
     expect(stops.every((s) => s.driverId === null && s.arrivedAt === null)).toBe(true)
   })
+  it('a copy with no new dates starts with blank appointments and none of the source booking', async () => {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    const load = table(TABLES.load).get(ids.loadId)!
+    const sourceStops = JSON.parse(String(load.stops)) as Row[]
+    sourceStops[0] = { ...sourceStops[0], appt: '2026-11-06T13:00:00.000Z', apptStatus: 'confirmed', apptProofs: { request: 'k' }, apptThreadTs: '1.2', requestedStart: '2026-11-06T12:00:00.000Z' }
+    sourceStops[1] = { ...sourceStops[1], appt: '2026-11-06T14:00:00.000Z', apptType: 'fcfs', apptEnd: '2026-11-06T20:00:00.000Z' }
+    load.stops = JSON.stringify(sourceStops)
+    const result = (await call('DUPLICATE_SHIPMENT', { shipmentId: ids.shipmentId, copies: [{}] })) as { created: string[] }
+    const copied = [...table(TABLES.load).values()].find((l) => l.shipmentId === result.created[0])!
+    const stops = JSON.parse(String(copied.stops)) as Row[]
+    expect(stops.map((s) => s.appt)).toEqual(['', ''])
+    expect(stops.map((s) => s.apptEnd)).toEqual([null, null])
+    expect(stops[1].apptType).toBe('fcfs')
+    expect(stops[0]).not.toHaveProperty('apptStatus')
+    expect(stops[0]).not.toHaveProperty('apptProofs')
+    expect(stops[0]).not.toHaveProperty('apptThreadTs')
+    expect(stops[0].requestedStart).toBeNull()
+  })
+  it('a copy moved to new dates keeps an FCFS window its length', async () => {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    const load = table(TABLES.load).get(ids.loadId)!
+    const sourceStops = JSON.parse(String(load.stops)) as Row[]
+    sourceStops[1] = { ...sourceStops[1], appt: '2026-11-06T14:00:00.000Z', apptType: 'fcfs', apptEnd: '2026-11-06T20:00:00.000Z' }
+    load.stops = JSON.stringify(sourceStops)
+    const result = (await call('DUPLICATE_SHIPMENT', { shipmentId: ids.shipmentId, copies: [{ pickupAppt: '2026-11-16T13:00:00.000Z', deliveryAppt: '2026-11-16T14:00:00.000Z' }] })) as { created: string[] }
+    const copied = [...table(TABLES.load).values()].find((l) => l.shipmentId === result.created[0])!
+    const stops = JSON.parse(String(copied.stops)) as Row[]
+    expect(stops[1]).toMatchObject({ appt: '2026-11-16T14:00:00.000Z', apptEnd: '2026-11-16T20:00:00.000Z', apptType: 'fcfs' })
+  })
   it('a copy starts with a blank PO and keeps the other references, unless a caller explicitly sets clearReference false', async () => {
     const ids = await createDraft()
     await saveForm(ids.shipmentId)

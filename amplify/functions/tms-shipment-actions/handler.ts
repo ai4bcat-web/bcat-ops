@@ -4178,17 +4178,34 @@ function shiftStops(
   keepDriver: boolean,
 ): StopShape[] {
   return stops.map((s) => {
+    // The copy is new freight: its dates, requested window and Appts-page booking
+    // (status, screenshots, thread) never come from the source. A stop keeps only its
+    // place and its Appt/FCFS type (every other appt* field is dropped); the dates are whatever the caller moved it to, or
+    // blank for a person to type (the source's dates on a copy are how 20057/20058
+    // ended up stuck on the source's Nov 6).
+    const moved = s.type === 'pickup' ? pickupAppt : s.type === 'delivery' ? deliveryAppt : null
+    const kept = Object.fromEntries(Object.entries(s).filter(([k]) => !k.startsWith('appt') || k === 'apptType'))
     const next: StopShape = {
-      ...s,
+      ...kept,
       id: `stp-${randomUUID()}`,
       arrivedAt: null,
       departedAt: null,
+      appt: moved ?? '',
+      apptEnd: moved ? shiftedEnd(s, moved) : null,
+      requestedStart: null,
+      requestedEnd: null,
       ...(keepDriver ? {} : { driverId: null, truckId: null }),
     }
-    if (s.type === 'pickup' && pickupAppt) next.appt = pickupAppt
-    if (s.type === 'delivery' && deliveryAppt) next.appt = deliveryAppt
     return next
   })
+}
+
+/** An FCFS window moved to a new open time keeps its length. */
+function shiftedEnd(s: StopShape, moved: string): string | null {
+  const start = Date.parse(String(s.appt ?? ''))
+  const end = Date.parse(String(s.apptEnd ?? ''))
+  if (s.apptType !== 'fcfs' || Number.isNaN(start) || Number.isNaN(end) || end <= start) return null
+  return new Date(Date.parse(moved) + (end - start)).toISOString()
 }
 
 async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
