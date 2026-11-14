@@ -29,7 +29,7 @@ const SUF = '-5ucwdyvwivelbo4k4jomvrwel4-NONE'
 const T = (m) => m + SUF
 const ACTOR = 'aljex-arap-2025'
 const ACTOR_EMAIL = 'aljex-arap-2025@bcatcorp.com'
-const ORDER = ['A', 'C', 'K', 'D', 'E', 'G', 'B', 'F']
+const ORDER = ['A', 'C', 'K', 'D', 'E', 'G', 'B', 'F', 'M', 'S']
 const SAFE_ACTIONS = new Set(['REVISE_INVOICE', 'RECORD_PAYMENT', 'VOID_INVOICE', 'RECALC_CHARGES'])   // none of these e-mail or reach OTR
 const SHIPMENT_ACTIONS = new Set(['RECALC_CHARGES'])   // tms-shipment-actions; the rest are tms-finance-actions
 const MODES = new Set(['FTL', 'PTL', 'BULK', 'DRAYAGE', 'INTERMODAL', 'RLTL', 'LTL', 'AIR', 'OCEAN', 'RAIL'])   // ShipmentMode / OrderMode; never TRUCKLOAD
