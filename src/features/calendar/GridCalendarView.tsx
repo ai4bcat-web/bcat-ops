@@ -73,9 +73,9 @@ interface AvailabilityStrip {
   time?:      string | null
 }
 
-function apptDisplay(iso: string | undefined | null, type: string | undefined | null, yard: boolean): string {
+function apptDisplay(iso: string | undefined | null, type: string | undefined | null, yard: boolean, apptEnd?: string | null): string {
   if (yard) return 'Yard'
-  return apptTimeLabel(iso, type)
+  return apptTimeLabel(iso, type, apptEnd)
 }
 
 function apptDate(iso: string | undefined | null): string {
@@ -242,8 +242,11 @@ function LoadCard({
   const deTyp  = stopMode ? (role === 'delivery' ? stop!.apptType : null) : load.deliveryApptType
   const puYard = stopMode ? false : isDelivery
   const deYard = stopMode ? false : (role === 'pickup')
-  const puTime = apptDisplay(puIso, puTyp, puYard)
-  const deTime = apptDisplay(deIso, deTyp, deYard)
+  // FCFS shows its window ("FCFS 08:00–14:00"), not a bare "FCFS".
+  const puEnd  = stopMode ? (role === 'pickup'   ? stop!.apptEnd : null) : load.pickupApptEnd
+  const deEnd  = stopMode ? (role === 'delivery' ? stop!.apptEnd : null) : load.deliveryApptEnd
+  const puTime = apptDisplay(puIso, puTyp, puYard, puEnd)
+  const deTime = apptDisplay(deIso, deTyp, deYard, deEnd)
   // Same workflow chips as the Appts page, per end.
   const puStatus = puYard ? null : stopMode ? (role === 'pickup' ? apptWorkflowStatus(stop!, load) : null) : endStatus(load, 'pickup')
   const deStatus = deYard ? null : stopMode ? (role === 'delivery' ? apptWorkflowStatus(stop!, load) : null) : endStatus(load, 'delivery')

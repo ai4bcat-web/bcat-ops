@@ -67,6 +67,10 @@ describe('apptTimeLabel', () => {
     expect(apptTimeLabel(at0930, 'tbd')).toBe('NEED 09:30')
   })
 
+  it('shows an FCFS window when it has an end', () => {
+    expect(apptTimeLabel(fromDateTimeInput('2026-08-20T08:00'), 'fcfs', fromDateTimeInput('2026-08-20T14:00'))).toBe('FCFS 08:00–14:00')
+  })
+
   it('renders a range as a span', () => {
     expect(apptTimeLabel(at0930, 'range', fromDateTimeInput('2026-08-20T11:00')))
       .toBe('09:30–11:00')
