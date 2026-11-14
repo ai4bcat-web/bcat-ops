@@ -90,6 +90,12 @@ export interface RateConExtract {
 /** The slice of a Load this module needs. Keeps the signature honest. */
 export interface LoadSlice {
   aljexId?: string | null
+  /**
+   * The shipment's customer ref (its customer-visible PO), for a load that belongs to a
+   * shipment. It is the PO the shipment invoices and factors under, so it beats the rate
+   * con's PO and the pickup number. Absent for old loads.
+   */
+  customerRef?: string | null
   pickupNumber?: string | null
   /** CENTS, as stored. */
   rate?: number | null
@@ -313,6 +319,7 @@ export function assembleOtrInvoice(input: AssembleInput): OtrReadiness {
   ])
   set('PoNumber', [
     ['manual', m.PoNumber],
+    ['load', load.customerRef],
     ['ratecon', rc?.poNumber],
     ['load', load.pickupNumber],
   ])

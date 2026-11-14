@@ -417,6 +417,7 @@ function defaultTables(): Record<string, Record<string, Record<string, unknown>>
     'Load-test': {
       'load-c-1': {
         id: 'load-c-1',
+        shipmentId: 'shp-c-1',
         tmsId: 'TMS-450',
         aljexId: '14452',
         pickupNumber: 'PO-450',
@@ -1170,7 +1171,8 @@ describe('driver-app-api handler', () => {
       const wed = body.trips.find((t: { loadId?: string }) => t.loadId === 'TMS-450')
       expect(wed.factoring).toMatchObject({
         invoiceNo: '14452',
-        poNumber: 'PO-450',
+        // A shipment's load factors under the shipment's customer ref (mirrored into tmsId), not the pickup number.
+        poNumber: 'TMS-450',
         brokerMc: '123456',
         invoiceAmount: 450,
         invoiceDate: '2026-09-29',
@@ -1187,6 +1189,8 @@ describe('driver-app-api handler', () => {
 
       const saturday = body.trips.find((t: { loadId?: string }) => t.loadId === '14452')
       expect(saturday.factoring.podPresent).toBe(true)
+      // An old load with no shipment keeps the pickup number as its PO.
+      expect(saturday.factoring.poNumber).toBe('PO-SAT')
       expect(saturday.factoring.blocked).toBe(false)
     })
 

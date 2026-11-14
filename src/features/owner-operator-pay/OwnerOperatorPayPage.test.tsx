@@ -12,6 +12,8 @@ import type { DriverPaySetting } from '@/lib/apiClient'
 import { FACTORING_FEE_LABEL, type DriverPayStatement } from '@/lib/driverPay'
 import type { OtrReadiness } from '@/lib/otrInvoice'
 import { DRIVER_PORTAL_URL } from '@/lib/driverPortal'
+import { useAppStore } from '@/store/useAppStore'
+import type { Load } from '@/types'
 
 const useOwnerOperatorPayMock = vi.hoisted(() => vi.fn())
 
@@ -232,7 +234,7 @@ describe('OwnerOperatorPayPage', () => {
     render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
 
     expect(screen.getAllByText('Test Driver').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText('TMS-123')).toBeInTheDocument()
+    expect(screen.queryByText('TMS-123')).not.toBeInTheDocument()
     expect(screen.getByText('Acme')).toBeInTheDocument()
     expect(screen.getByText('Chicago, IL → Detroit, MI')).toBeInTheDocument()
     expect(screen.getByText('250')).toBeInTheDocument()
@@ -456,8 +458,8 @@ describe('OwnerOperatorPayPage', () => {
     }
   })
   it('leads the trips table with PRO # and PO #', () => {
-    // They are how the office and OTR both name a load, so they come before the
-    // internal Load ID rather than after it.
+    // They are how the office and OTR both name a load. The internal load id is not
+    // shown at all: it was the customer ref under another name (Ryne, 2026-11-14).
     const row = baseRow({
       trips: [trip({ readiness: readiness({ payload: { InvoiceNo: '13364', PoNumber: 'PO-7' } }) })],
     })
@@ -465,12 +467,13 @@ describe('OwnerOperatorPayPage', () => {
     render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
 
     const headers = screen.getAllByRole('columnheader').map((th) => th.textContent)
-    expect(headers.slice(0, 3)).toEqual(['PRO #', 'PO #', 'Load ID'])
+    expect(headers.slice(0, 3)).toEqual(['PRO #', 'PO #', 'Customer'])
+    expect(headers).not.toContain('Load ID')
 
     const cells = screen.getByText('13364').closest('tr')!.querySelectorAll('td')
     expect(cells[0]).toHaveTextContent('13364')
     expect(cells[1]).toHaveTextContent('PO-7')
-    expect(cells[2]).toHaveTextContent('TMS-1')
+    expect(cells[2]).not.toHaveTextContent('TMS-1')
   })
 
   it('leaves the PRO blank rather than standing another id in for it', () => {
@@ -600,5 +603,39 @@ describe('OwnerOperatorPayPage', () => {
     expect(pod.title).toMatch(/not paid without it/)
     expect(rc.title).toMatch(/optional here/)
     expect(rc.title).toMatch(/factoring queue/)
+  })
+
+  describe('PRO column', () => {
+    const trip = (id: string): OwnerOpTrip => ({
+      id, loadId: `TMS-${id}`, customer: 'Acme', origin: 'Chicago, IL', destination: 'Detroit, MI',
+      miles: 250, freightAmount: 450, deliveredAt: '2026-09-29T10:00:00Z',
+    })
+    const renderWith = (loads: Partial<Load>[], t: OwnerOpTrip) => {
+      useAppStore.setState({ loads: loads as Load[] })
+      useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [baseRow({ trips: [t] })] }))
+      render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
+    }
+    afterEach(() => { useAppStore.setState({ loads: [] }) })
+
+    it('links a load that belongs to a shipment to the shipment page, not the load drawer', () => {
+      renderWith([{ id: 'l1', shipmentId: 'shp-1' }], trip('l1'))
+      const link = screen.getByTestId('settlement-pro-link')
+      expect(link.tagName).toBe('A')
+      expect(link).toHaveAttribute('href', '/tms/shipments/shp-1')
+    })
+
+    it('still opens an old load with no shipment in the load drawer', () => {
+      renderWith([{ id: 'l2', shipmentId: null }], trip('l2'))
+      expect(screen.queryByTestId('settlement-pro-link')).not.toBeInTheDocument()
+      const btn = screen.getByRole('button', { name: /Open the load for PRO/ })
+      fireEvent.click(btn)
+      expect(useAppStore.getState().selectedLoadId).toBe('l2')
+    })
+
+    it('shows plain text when the row never resolved to a load', () => {
+      renderWith([], trip('nope'))
+      expect(screen.queryByTestId('settlement-pro-link')).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Open the load for PRO/ })).not.toBeInTheDocument()
+    })
   })
 })

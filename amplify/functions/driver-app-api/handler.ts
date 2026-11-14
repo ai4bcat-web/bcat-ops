@@ -844,6 +844,9 @@ async function loadOwnerOperatorRawTrips(driverId: string): Promise<RawAmazonTri
 interface LoadFactoringRow {
   id: string
   aljexId?: string | null
+  /** A shipment's load mirrors the shipment's customer ref (its factoring PO) here. */
+  tmsId?: string | null
+  shipmentId?: string | null
   pickupNumber?: string | null
   rate?: number | null
   deliveryAppt?: string | null
@@ -924,7 +927,9 @@ function factoringFieldsFor(
   const customer = load.customerId ? customers.get(load.customerId) : undefined
   const fields: Omit<FactoringFields, 'blocked'> = {
     invoiceNo: cleanFactoringValue(load.aljexId),
-    poNumber: cleanFactoringValue(load.pickupNumber),
+    // The PO a shipment factors under is its customer ref, mirrored into tmsId; the pickup
+    // number is only the PO for an old load with no shipment.
+    poNumber: (load.shipmentId ? cleanFactoringValue(load.tmsId) : null) ?? cleanFactoringValue(load.pickupNumber),
     brokerMc: cleanFactoringValue(customer?.mcNumber),
     // Load.rate is CENTS; the OTR invoice amount is DOLLARS.
     invoiceAmount: load.rate != null && Number.isFinite(load.rate) ? Math.round(load.rate) / 100 : null,

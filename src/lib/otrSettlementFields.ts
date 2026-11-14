@@ -59,6 +59,9 @@ export function otrSettlementReadiness(input: OtrSettlementInput): OtrReadiness 
 
   const loadSlice: LoadSlice = {
     aljexId: load.aljexId,
+    // A shipment's load mirrors the shipment's customer ref (PO) into tmsId — the same PO
+    // the shipment's invoice and OTR submission use — so the settlement shows that one.
+    customerRef: load.shipmentId ? load.tmsId : null,
     pickupNumber: load.pickupNumber,
     rate: load.rate,
     originCity: load.originCity,
