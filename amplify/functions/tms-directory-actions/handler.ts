@@ -3349,15 +3349,24 @@ async function archiveShipmentView(
   return archived
 }
 
-/** The one Shipments column layout everybody sees. Keep in step with src/features/shipments/teamColumnLayout.ts. */
+/** The Shipments column layouts everybody sees: All (the original id), Active and Voided. Keep in step with src/features/shipments/teamColumnLayout.ts. */
 const TEAM_DEFAULT_COLUMN_TEMPLATE_ID = 'shipments-team-default'
+const TEAM_DEFAULT_COLUMN_TEMPLATE_IDS: ReadonlySet<string> = new Set([
+  TEAM_DEFAULT_COLUMN_TEMPLATE_ID,
+  `${TEAM_DEFAULT_COLUMN_TEMPLATE_ID}-active`,
+  `${TEAM_DEFAULT_COLUMN_TEMPLATE_ID}-voided`,
+])
+
+function isTeamDefaultTemplate(id: string): boolean {
+  return TEAM_DEFAULT_COLUMN_TEMPLATE_IDS.has(id)
+}
 
 function isColumnLayoutAdmin(caller: Caller): boolean {
   return caller.email === OWNER_EMAIL || (caller.groups ?? []).includes(ADMIN_GROUP)
 }
 
 function assertCanWriteTeamDefault(id: string, caller: Caller): void {
-  if (id === TEAM_DEFAULT_COLUMN_TEMPLATE_ID && !isColumnLayoutAdmin(caller)) {
+  if (isTeamDefaultTemplate(id) && !isColumnLayoutAdmin(caller)) {
     throw new Error('Forbidden: only an admin can set the team default column layout')
   }
 }
@@ -3411,11 +3420,11 @@ async function saveColumnTemplate(
   const id = optionalString(input.id, 64) ?? newId()
   assertCanWriteTeamDefault(id, caller)
   // The team default is read by everyone by definition.
-  const shared = id === TEAM_DEFAULT_COLUMN_TEMPLATE_ID ? true : optionalBoolean(input.shared) ?? false
+  const shared = isTeamDefaultTemplate(id) ? true : optionalBoolean(input.shared) ?? false
 
   const tableName = SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME
   const existing = await getById(tableName, id)
-  if (existing && id !== TEAM_DEFAULT_COLUMN_TEMPLATE_ID) {
+  if (existing && !isTeamDefaultTemplate(id)) {
     authorizeColumnTemplateMutation(existing, caller)
   }
 
@@ -3454,7 +3463,7 @@ async function deleteColumnTemplate(
   const tableName = SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME
   const existing = await getById(tableName, id)
   if (!existing) throw new Error(`Column template not found: ${id}`)
-  if (id !== TEAM_DEFAULT_COLUMN_TEMPLATE_ID) authorizeColumnTemplateMutation(existing, caller)
+  if (!isTeamDefaultTemplate(id)) authorizeColumnTemplateMutation(existing, caller)
 
   try {
     await dynamo.send(

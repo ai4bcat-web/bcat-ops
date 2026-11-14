@@ -888,8 +888,9 @@ describe('ShipmentsBoard', () => {
     it('opens with Status, RC, POD, PRO # and Customer Ref # fixed on the left, no side panel and the stats strip always on', async () => {
       renderBoard('/tms/shipments', [row('S001')])
       await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
-      const heads = [...document.querySelectorAll('thead th')].slice(1, 7)
-      expect(heads.map((h) => h.textContent)).toEqual(['Status', 'Invoice Status', 'RC', 'POD', 'PRO #', 'Customer Ref #'])
+      // Active (the default list) leaves Invoice Status out; All shows it right after Status.
+      const heads = [...document.querySelectorAll('thead th')].slice(1, 6)
+      expect(heads.map((h) => h.textContent)).toEqual(['Status', 'RC', 'POD', 'PRO #', 'Customer Ref #'])
       expect(heads[0]).toHaveClass('tms-dg-sticky')
       expect(screen.queryByText('Statuses')).toBeNull()
       expect(screen.getByRole('region', { name: 'Summary' })).toHaveTextContent('Shipments')
@@ -1152,9 +1153,28 @@ describe('ShipmentsBoard team column layout', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
     fireEvent.click(screen.getByRole('button', { name: 'Save as team default' }))
     await waitFor(() => expect(saveShipmentColumnTemplate).toHaveBeenCalledTimes(1))
+    // Edited on Active (the default list), so it saves Active's own layout and leaves All's row alone.
+    expect(vi.mocked(saveShipmentColumnTemplate).mock.calls[0][0]).toMatchObject({
+      id: 'shipments-team-default-active',
+      shared: true,
+      columns: ['proNumber', 'originCity', 'destinationCity'],
+    })
+  })
+
+  it('on All, the layout edit saves the original team default row, and the Columns dialog names the list', async () => {
+    vi.mocked(saveShipmentColumnTemplate).mockResolvedValue({})
+    vi.mocked(listShipmentColumnTemplates).mockResolvedValue([teamTemplate(['proNumber', 'originCity'])])
+    renderBoard('/tms/shipments?list=all', [row('S001', { status: 'DELIVERED' })])
+    await screen.findByText('S001')
+    fireEvent.click(screen.getByRole('button', { name: /Edit layout/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Columns$/ }))
+    expect(await screen.findByText('Columns for All')).toBeTruthy()
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Destination' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save as team default' }))
+    await waitFor(() => expect(saveShipmentColumnTemplate).toHaveBeenCalledTimes(1))
     expect(vi.mocked(saveShipmentColumnTemplate).mock.calls[0][0]).toMatchObject({
       id: 'shipments-team-default',
-      shared: true,
       columns: ['proNumber', 'originCity', 'destinationCity'],
     })
   })

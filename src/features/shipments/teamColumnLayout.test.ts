@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fitColumnWidths, resolveTeamLayout, TEAM_DEFAULT_COLUMN_TEMPLATE_ID } from './teamColumnLayout'
+import { fitColumnWidths, resolveListLayout, resolveTeamLayout, TEAM_DEFAULT_COLUMN_TEMPLATE_ID, teamTemplateIdFor } from './teamColumnLayout'
 
 const VALID = ['proNumber', 'status', 'originCity']
 const DEFAULTS = ['proNumber', 'status']
@@ -66,5 +66,45 @@ describe('resolveTeamLayout introduced columns', () => {
   it('skips a layout that does not show the anchor', () => {
     const layout = resolveTeamLayout([saved({ columns: ['proNumber'], pinned: null, updatedAt: '2026-11-10T00:00:00.000Z' })], valid, valid, [], intro)
     expect(layout.columns).toEqual(['proNumber'])
+  })
+})
+
+describe('resolveListLayout (per-list team layouts)', () => {
+  const VALID = ['status', 'invoiceStatus', 'factorInfo', 'proNumber', 'customerName']
+  const DEFAULTS = ['status', 'invoiceStatus', 'proNumber', 'customerName']
+  const INTRODUCED = [{ key: 'invoiceStatus', after: 'status', since: '2026-11-14T07:00:00.000Z' }]
+  // The one layout saved before the lists split, from before Invoice Status existed.
+  const legacyAll = { id: TEAM_DEFAULT_COLUMN_TEMPLATE_ID, columns: ['status', 'proNumber', 'customerName'], widths: { proNumber: 90 }, pinned: ['status'], updatedAt: '2026-11-11T21:33:13.939Z' }
+
+  it('defaults: All shows Invoice Status right after Status, Active hides it, Voided follows All', () => {
+    expect(resolveListLayout('all', [], VALID, DEFAULTS).columns).toEqual(['status', 'invoiceStatus', 'proNumber', 'customerName'])
+    expect(resolveListLayout('active', [], VALID, DEFAULTS).columns).toEqual(['status', 'proNumber', 'customerName'])
+    expect(resolveListLayout('voided', [], VALID, DEFAULTS).columns).toEqual(['status', 'invoiceStatus', 'proNumber', 'customerName'])
+  })
+
+  it('migrates the saved layout: every list starts from it, All gains Invoice Status, Active does not', () => {
+    const all = resolveListLayout('all', [legacyAll], VALID, DEFAULTS, ['status'], INTRODUCED)
+    const active = resolveListLayout('active', [legacyAll], VALID, DEFAULTS, ['status'], INTRODUCED)
+    expect(all).toEqual({ columns: ['status', 'invoiceStatus', 'proNumber', 'customerName'], widths: { proNumber: 90 }, pinned: ['status', 'invoiceStatus'] })
+    expect(active).toEqual({ columns: ['status', 'proNumber', 'customerName'], widths: { proNumber: 90 }, pinned: ['status'] })
+  })
+
+  it('once a list has its own saved row, that row wins: the migration does not run again', () => {
+    const activeOwn = { id: teamTemplateIdFor('active'), columns: ['status', 'invoiceStatus', 'proNumber'], widths: {}, pinned: [], updatedAt: '2026-11-15T00:00:00.000Z' }
+    expect(resolveListLayout('active', [legacyAll, activeOwn], VALID, DEFAULTS, ['status'], INTRODUCED).columns).toEqual(['status', 'invoiceStatus', 'proNumber'])
+  })
+
+  it('an edit saved for one list lands only on that list', () => {
+    const activeOwn = { id: teamTemplateIdFor('active'), columns: ['customerName', 'status'], widths: {}, pinned: [], updatedAt: '2026-11-15T00:00:00.000Z' }
+    const templates = [legacyAll, activeOwn]
+    expect(resolveListLayout('active', templates, VALID, DEFAULTS, ['status'], INTRODUCED).columns).toEqual(['customerName', 'status'])
+    expect(resolveListLayout('all', templates, VALID, DEFAULTS, ['status'], INTRODUCED).columns).toEqual(['status', 'invoiceStatus', 'proNumber', 'customerName'])
+    expect(resolveListLayout('voided', templates, VALID, DEFAULTS, ['status'], INTRODUCED).columns).toEqual(['status', 'invoiceStatus', 'proNumber', 'customerName'])
+  })
+
+  it('keeps All on the original template id and gives Active and Voided their own', () => {
+    expect(teamTemplateIdFor('all')).toBe(TEAM_DEFAULT_COLUMN_TEMPLATE_ID)
+    expect(teamTemplateIdFor('active')).toBe('shipments-team-default-active')
+    expect(teamTemplateIdFor('voided')).toBe('shipments-team-default-voided')
   })
 })
