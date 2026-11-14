@@ -9,7 +9,7 @@ import autoTable from 'jspdf-autotable'
 import type { OwnerOperatorPayRow } from '@/hooks/useOwnerOperatorPay'
 import { tripPayAmount, FACTORING_FEE_LABEL } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
-import { ratePerMile, totalRatePerMile } from '@/lib/ownerOperatorTrips'
+import { ratePerMile, settlementDateLabel, totalRatePerMile, type SettlementDate } from '@/lib/ownerOperatorTrips'
 import { PAY_HOLD_LABEL } from '@/lib/payHold'
 import { weekLabelLong } from '@/features/driver-pay/week'
 import { loadImage, COMPANY_NAME } from '@/lib/payPdf'
@@ -25,6 +25,12 @@ export function ownerOperatorPdfFilename(row: Pick<OwnerOperatorPayRow, 'driver'
 }
 
 /** The rows of the loads table, as printed. Exported so the figures can be pinned without rendering a PDF. */
+function pdfDate(d: SettlementDate | undefined): string {
+  const label = settlementDateLabel(d)
+  if (!label) return '—'
+  return d?.actual ? label : `${label} appt`
+}
+
 export function ownerOperatorPdfRows(row: OwnerOperatorPayRow): string[][] {
   const held = new Map(row.heldTrips.map((h) => [h.trip.id, h.reason]))
   return row.trips.map((t) => {
@@ -35,6 +41,8 @@ export function ownerOperatorPdfRows(row: OwnerOperatorPayRow): string[][] {
       pro,
       t.customer || '—',
       [t.origin, t.destination].filter(Boolean).join('  ->  ') || '—',
+      pdfDate(t.dates?.pickup),
+      pdfDate(t.dates?.delivery),
       t.miles != null ? t.miles.toLocaleString() : '—',
       money(t.freightAmount),
       rpm != null ? `$${rpm.toFixed(2)}` : '—',
@@ -115,15 +123,15 @@ export async function buildOwnerOperatorStatementPdf(row: OwnerOperatorPayRow, p
 
   // ── Loads table ─────────────────────────────────────────────────────────────
   const foot: Array<Array<string | { content: string; colSpan: number }>> = [
-    [{ content: 'Freight total', colSpan: 7 }, money(statement.gross)],
-    [{ content: `Driver share (${pct(setting.payPercent)})`, colSpan: 7 }, money(statement.driverAmount)],
+    [{ content: 'Freight total', colSpan: 9 }, money(statement.gross)],
+    [{ content: `Driver share (${pct(setting.payPercent)})`, colSpan: 9 }, money(statement.driverAmount)],
   ]
-  if (row.heldFreight > 0) foot.push([{ content: 'Held for POD — not on this check', colSpan: 7 }, money(row.heldFreight)])
+  if (row.heldFreight > 0) foot.push([{ content: 'Held for POD — not on this check', colSpan: 9 }, money(row.heldFreight)])
   const weekRpm = totalRatePerMile(trips)
-  if (weekRpm.rate != null) foot.push([{ content: `Rate per mile (${weekRpm.miles.toLocaleString()} mi on loads with miles)`, colSpan: 7 }, `${money(weekRpm.rate)}/mi`])
+  if (weekRpm.rate != null) foot.push([{ content: `Rate per mile (${weekRpm.miles.toLocaleString()} mi on loads with miles)`, colSpan: 9 }, `${money(weekRpm.rate)}/mi`])
   autoTable(doc, {
     startY: y + 40,
-    head: [['PRO #', 'Customer', 'Route', 'Miles', 'Freight', 'Rate/mi', 'On this check', 'Amount']],
+    head: [['PRO #', 'Customer', 'Route', 'Pickup', 'Delivery', 'Miles', 'Freight', 'Rate/mi', 'On this check', 'Amount']],
     body: ownerOperatorPdfRows(row),
     foot,
     theme: 'striped',

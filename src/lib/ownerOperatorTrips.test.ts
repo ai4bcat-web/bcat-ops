@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ownerOpTripsFor, OWNER_OP_FIRST_PERIOD, ratePerMile, totalRatePerMile } from './ownerOperatorTrips'
+import { ownerOpTripsFor, OWNER_OP_FIRST_PERIOD, ratePerMile, totalRatePerMile, settlementStopDates, settlementDateLabel } from './ownerOperatorTrips'
 
 const driverId = 'driver-1'
 
@@ -131,5 +131,26 @@ describe('totalRatePerMile', () => {
 
   it('has no rate when no load has miles', () => {
     expect(totalRatePerMile([{ freightAmount: 900, miles: null }])).toEqual({ miles: 0, rate: null })
+  })
+})
+
+describe('settlementStopDates', () => {
+  it('uses what happened, else the appointment', () => {
+    const d = settlementStopDates([
+      { type: 'delivery', sequence: 1, appt: '2026-11-13T15:00:00Z' },
+      { type: 'pickup', sequence: 0, appt: '2026-11-10T14:00:00Z', departedAt: '2026-11-10T16:30:00Z' },
+    ], null)
+    expect(d.pickup).toEqual({ at: '2026-11-10T16:30:00Z', actual: true })
+    expect(d.delivery).toEqual({ at: '2026-11-13T15:00:00Z', actual: false })
+  })
+
+  it("takes the load's delivered time first", () => {
+    expect(settlementStopDates([{ type: 'delivery', appt: '2026-11-09T15:00:00Z' }], '2026-11-09T15:14:53Z').delivery)
+      .toEqual({ at: '2026-11-09T15:14:53Z', actual: true })
+  })
+
+  it('labels in Central time, blank when unknown', () => {
+    expect(settlementDateLabel({ at: '2026-11-10T03:00:00Z', actual: true })).toBe('11/09')
+    expect(settlementDateLabel({ at: null, actual: false })).toBe('')
   })
 })
