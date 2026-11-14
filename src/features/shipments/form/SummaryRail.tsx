@@ -12,6 +12,7 @@ import { ActivityBlock } from './ActivityBlock'
 import { ProgressBlock } from './ProgressBlock'
 import { RailInvoiceStatus } from './RailInvoiceStatus'
 import { RailTrackingBlock } from './RailTrackingBlock'
+import { RailOtrRejectedBlock } from './RailOtrRejectedBlock'
 import { RateHistoryRail } from './RateHistoryRail'
 import { sliceOf, type CardProps } from './cards/cardRegistry'
 import { carrierBreakdown } from './cards/ratesSummary'
@@ -102,6 +103,8 @@ function SummaryRailImpl({ common, summary, rows, attempted, Roles, RateHistory,
           </div>
           <RailInvoiceStatus bundle={ctx.bundle} />
         </section>
+
+        <RailOtrRejectedBlock bundle={ctx.bundle} />
 
         <RailTrackingBlock bundle={ctx.bundle} onSendTrackingLink={ctx.actions.openSendInfo} />
 

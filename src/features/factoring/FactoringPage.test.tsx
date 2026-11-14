@@ -49,6 +49,8 @@ vi.mock('@/lib/apiClient', () => ({
   getLoads: vi.fn().mockResolvedValue([]),
   listLoadsByShipmentIds: vi.fn().mockResolvedValue([]),
   listShipmentsByNumber: vi.fn().mockResolvedValue([]),
+  graphqlErrorText: (e: unknown) => String(e),
+  moveToManualInvoice: vi.fn(),
 }))
 vi.mock('@/hooks/useDirectory', () => ({ useDirectory: () => ({ customers: [], locations: [] }) }))
 
@@ -89,7 +91,8 @@ describe('filters', () => {
     const labels = screen.getAllByRole('tab')
       .map((b) => b.textContent?.replace(/\d+$/, '').trim())
       .filter((t) => ['Need to factor', 'Pending with OTR', 'Invoice manually', 'All', 'Factored', 'Invoiced manually'].includes(t ?? ''))
-    expect(labels).toEqual(['Pending with OTR', 'Invoice manually', 'All', 'Factored', 'Invoiced manually'])
+    expect(labels).toEqual(['Pending with OTR', 'Invoice manually', 'All', 'Factored'])
+    expect(screen.getByRole('tab', { name: /^OTR rejected/ })).toBeInTheDocument()
     expect(screen.getByTestId('factor-moved-note')).toHaveTextContent(/Ready to invoice \(1 now\)/)
   })
 
@@ -520,32 +523,38 @@ describe('invoices sent by hand', () => {
     manualInvoicedAt: '2026-10-28T15:10:00Z',
   })
 
-  it('logs when each one went out, who sent it and where, on the Invoiced manually tab', async () => {
+  it('has no Invoiced manually tab any more; a row sent by hand still shows who sent it and where, under All', async () => {
     await setup([sentRow, item({ id: 'n1', proNumber: 'N1' })])
-    fireEvent.click(screen.getByRole('tab', { name: /^Invoiced manually/ }))
-    expect(screen.getByRole('columnheader', { name: /^Sent/i })).toBeInTheDocument()
-    expect(screen.queryByRole('columnheader', { name: /^Received/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: /^Invoiced manually/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: /^All/ }))
     const cell = screen.getByLabelText(/PRO H1 sent by hand/)
     expect(cell).toHaveTextContent('by ruben')
     expect(cell).toHaveTextContent('to ap@broker.com')
-  })
-
-  it('lists the newest send first', async () => {
-    const older = item({
-      id: 'h0', proNumber: 'H0', status: 'INVOICED_MANUALLY', receivedAt: '2026-10-20T10:00:00Z',
-      manualSteps: { emailed: { at: '2026-10-20T12:00:00Z', by: 'dennis@bcatcorp.com' } },
-      manualInvoicedAt: '2026-10-20T12:00:00Z',
-    })
-    await setup([older, sentRow])
-    fireEvent.click(screen.getByRole('tab', { name: /^Invoiced manually/ }))
-    const labels = screen.getAllByLabelText(/sent by hand/).map((el) => el.getAttribute('aria-label') ?? '')
-    expect(labels[0]).toContain('PRO H1')
-    expect(labels[1]).toContain('PRO H0')
   })
 
   it('keeps the Received column everywhere else', async () => {
     await setup([sentRow])
     fireEvent.click(screen.getByRole('tab', { name: /^All/ }))
     expect(screen.getByRole('columnheader', { name: /^Received/i })).toBeInTheDocument()
+  })
+})
+
+describe('OTR rejected', () => {
+  it('lists what OTR turned down, not our own auth failures, and moves one to manual invoice after a confirmation', async () => {
+    const api = await import('@/lib/apiClient')
+    const move = vi.mocked(api.moveToManualInvoice).mockResolvedValue({ proNumber: 'NB5', orderId: 'o', customerId: 'c', voidedInvoice: null, note: '' })
+    const { refresh } = await setup([
+      item({ id: 'nb', proNumber: 'NB5', status: 'MANUAL_INVOICE', brokerCheckResult: 'NO_BUY', manualReason: 'NO_BUY', otrError: 'OTR will not buy from MC 7' }),
+      item({ id: 'au', proNumber: 'AU6', status: 'PENDING_WITH_OTR', otrError: '400: OTR auth failed (400)' }),
+    ])
+    fireEvent.click(screen.getByRole('tab', { name: /^OTR rejected/ }))
+    expect(screen.getByText('NB5')).toBeInTheDocument()
+    expect(screen.queryByText('AU6')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('move-manual-nb'))
+    expect(screen.getByTestId('move-manual-dialog')).toHaveTextContent('OTR will not buy from MC 7')
+    expect(move).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('move-manual-confirm'))
+    await waitFor(() => expect(move).toHaveBeenCalledWith({ factoringItemId: 'nb' }))
+    await waitFor(() => expect(refresh).toHaveBeenCalled())
   })
 })

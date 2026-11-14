@@ -1079,7 +1079,12 @@ export async function markInvoiceSent(input: Row, caller: Caller): Promise<Row> 
  * against a bill we would be un-issuing. The row is kept VOID with its PDF: somebody
  * out there has a copy of that document and the file is the record of what they got.
  */
-export async function voidInvoice(input: Row, caller: Caller): Promise<Row> {
+export async function voidInvoice(
+  input: Row,
+  caller: Caller,
+  /** Internal only (never read from input): MOVE_TO_MANUAL_INVOICE on a bill OTR already turned down. */
+  opts: { otrRejected?: boolean } = {},
+): Promise<Row> {
   // Ryne 2026-11-12: voiding an invoice is an admin act (owner or ADMIN). Invoicing page access does not include it.
   if (!caller.isAdmin) throw new Error('Forbidden: only an admin can void an invoice')
   const invoiceId = assertString(input.invoiceId, 'invoiceId')
@@ -1097,7 +1102,7 @@ export async function voidInvoice(input: Row, caller: Caller): Promise<Row> {
   const factoringRow = invoice.factoringItemId
     ? await getById(FACTORING_ITEM_TABLE_NAME, invoice.factoringItemId)
     : null
-  if (factoringRow?.otrInvoiceId) {
+  if (factoringRow?.otrInvoiceId && !opts.otrRejected) {
     throw new Error(`This invoice was submitted to OTR as invoice ${String(factoringRow.otrInvoiceId)}; it cannot be voided here`)
   }
 

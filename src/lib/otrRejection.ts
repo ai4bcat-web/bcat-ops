@@ -54,3 +54,29 @@ export function mayInvoiceManually(
   const admin = (user?.groups ?? []).includes('ADMIN') || (user?.email ?? '').trim().toLowerCase() === 'ryne@bcatcorp.com'
   return { allowed: admin, override: admin }
 }
+
+/**
+ * The OTR rejected tab (Ryne 2026-11-14): rows OTR itself turned down — No buy, Dead, or an error
+ * OTR sent back — still in the queue. Our own failures to reach OTR (an auth or connection error)
+ * are not OTR rejecting anything, so they stay where they are.
+ */
+export function isOtrRejected(item: Parameters<typeof otrRejection>[0]): boolean {
+  const r = otrRejection(item)
+  if (!r) return false
+  return r.kind !== 'ERROR' || !OWN_FAILURE.test(r.reason)
+}
+
+const OWN_FAILURE = /auth failed|unauthori[sz]ed|timed? ?out|network|ECONN|fetch failed|not configured/i
+
+/**
+ * Why OTR turned this load down, for the shipment page — whatever the row's status now, so the
+ * reason is still there after the load was moved to manual invoice. Null when OTR never did.
+ */
+export function otrRejectionReason(item: Parameters<typeof otrRejection>[0]): string | null {
+  const { noBuy, reason } = noBuyInfo(item)
+  if (noBuy) return reason ?? 'OTR will not buy this invoice'
+  if (otrStatusMeta(item.otrStatus)?.code === 4) return 'OTR marked this invoice Dead: it will not be funded'
+  const error = item.otrError?.trim()
+  if (error && !OWN_FAILURE.test(error)) return `OTR refused it: ${error}`
+  return null
+}
