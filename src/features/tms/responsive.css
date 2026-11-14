@@ -56,6 +56,8 @@
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   .tms-portal.tms-dialog-content.tms-dialog-wide, .tms-portal.tms-dialog-content.tms-dialog-xl { max-width: 100vw; }
+  /* The AR invoice is a full-screen sheet on phones. */
+  .tms-portal.tms-dialog-content.tms-dialog-xl.tms-dialog-invoice { top: 0; width: 100vw; height: 100dvh; max-height: 100dvh; max-width: 100vw; border-radius: 0; }
   .tms-portal .tms-dialog-foot, .tms-portal .tms-dialog-footer { flex-wrap: wrap; }
   .tms-portal .tms-dialog-foot > *, .tms-portal .tms-dialog-footer > * { flex: 1 1 auto; }
 

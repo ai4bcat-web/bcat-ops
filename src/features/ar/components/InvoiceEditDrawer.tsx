@@ -13,7 +13,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { TmsBadge, TmsButton, TmsDrawer, TmsInput, TmsSelect } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsDialog, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { getInvoicePdfUrl, getTmsSettings, graphqlErrorText, renderInvoicePdf, reviseInvoice } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
 import { invoiceAttachmentName, invoiceCompanyName, invoicePoNumber } from '@/lib/invoiceIdentity'
@@ -121,9 +121,11 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
   const set = (i: number, patch: Partial<Draft>) => setDrafts((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
   const rev = (current.revision ?? 1) > 1 ? ` Rev ${current.revision}` : ''
 
+  // Ryne 2026-11-14: the invoice opens in the middle of the page (centered dialog; a full-screen sheet on phones).
   return (
-    <TmsDrawer
+    <TmsDialog
       open
+      className="tms-dialog-xl tms-dialog-invoice"
       onOpenChange={(open) => { if (!open) onClose() }}
       title={`Invoice ${current.number}${rev}`}
       description={`${current.customerName ?? ''} · PRO ${pro}${po ? ` · PO ${po}` : ''} · ${formatCents(current.totalCents)} · balance ${formatCents(current.balanceCents)}`}
@@ -247,6 +249,6 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
             ? <iframe title={`Invoice ${current.number} PDF`} src={pdfUrl} style={{ width: '100%', height: 520, border: '1px solid var(--tms-border)' }} />
             : <p className="tms-muted">{current.pdfKey ? 'Loading the PDF…' : 'No PDF stored yet.'}</p>}
       </div>
-    </TmsDrawer>
+    </TmsDialog>
   )
 }

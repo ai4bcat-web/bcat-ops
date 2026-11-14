@@ -1130,6 +1130,8 @@
 
 .tms-portal.tms-dialog-content.tms-dialog-wide { max-width: 920px; }
 .tms-portal.tms-dialog-content.tms-dialog-xl { max-width: 1100px; }
+/* The AR invoice (Ryne 2026-11-14): centered, wide enough for the PDF preview, scrolls inside the viewport. */
+.tms-portal.tms-dialog-content.tms-dialog-xl.tms-dialog-invoice { width: 90vw; max-width: min(90vw, 1100px); max-height: 92vh; }
 
 .tms-portal .tms-dialog-head {
   display: flex;
