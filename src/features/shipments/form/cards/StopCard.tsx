@@ -26,6 +26,7 @@ import { pushRecent, rankWithRecents, readRecents, recentFirst } from './recents
 import { Typeahead, type TypeaheadItem } from './Typeahead'
 import { StopActualTimes } from './StopActualTimes'
 import { DateTime24Input } from '../DateTime24Input'
+import { followAppt, withAppt } from '../readyDefault'
 import { parseHoursRange, splitLocal } from '@/lib/dateTime24'
 
 export interface StopCardProps {
@@ -74,7 +75,7 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
   const err = (def: LabelDef) => issueFor(ctx, section, def.testId)
   const isBatory = requiresApptProofs({ customer: ctx.customer?.name ?? '', customerApptWorkflow: ctx.customer?.apptWorkflow ?? null })
   const nameDef = d('name', first)
-  const readyDef = d('ready', first)
+  const readyDef = d('ready')
   const addressIssue = [d('city'), d('state'), d('zip')].some((def) => err(def))
 
   const ensureLocations = ctx.directory.ensureLocations
@@ -121,14 +122,16 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
     disabled: base.disabled,
     onChange: (e: { target: { value: string } }) => onChange({ [key]: clean(e.target.value) } as Partial<FormStop>),
   })
-  const dtField = (def: LabelDef, key: 'ready' | 'appt' | 'mustDeliver', req?: boolean) => (
-    <LField span={6} def={def} required={req} error={err(def)}>
+  const dtField = (def: LabelDef, key: 'ready' | 'appt' | 'mustDeliver', req?: boolean, hint?: string) => (
+    <LField span={6} def={def} required={req} error={err(def)} hint={hint}>
       <DateTime24Input inputProps={ctl(def)} value={stop[key]} disabled={base.disabled} onChange={(v) => onChange({ [key]: v } as Partial<FormStop>)} />
     </LField>
   )
 
   // Appt = one booked time; FCFS = a first-come window on one day (From–To), prefilled from the hours when they read as one.
-  const setFcfs = (fcfs: boolean) => onChange((prev) => {
+  const setFcfs = (fcfs: boolean) => onChange((prev) => followAppt(prev, fcfsState(prev, fcfs)))
+  const setAppt = (v: string) => onChange((prev) => withAppt(prev, v))
+  const fcfsState = (prev: FormStop, fcfs: boolean): FormStop => {
     if (fcfs === prev.fcfs) return prev
     if (!fcfs) return { ...prev, fcfs: false, apptEnd: '' }
     const day = splitLocal(prev.appt || prev.ready).date
@@ -136,8 +139,8 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
     if (day && win && !prev.appt) return { ...prev, fcfs: true, appt: `${day}T${win.from}`, apptEnd: `${day}T${win.to}` }
     if (day && win && !prev.apptEnd) return { ...prev, fcfs: true, apptEnd: `${day}T${win.to}` }
     return { ...prev, fcfs: true }
-  })
-  const apptDef = d('appt')
+  }
+  const apptDef = d('appt', first && !delivery)
   const apptKind = (
     <span className="ship-appt-kind" role="group" aria-label={`Appointment type (stop ${index + 1})`}>
       {([['Appt', false], ['FCFS', true]] as const).map(([text, on]) => (
@@ -149,14 +152,14 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
     </span>
   )
   const apptField = (
-    <LField span={6} def={apptDef} error={err(apptDef)} hint={apptKind}>
+    <LField span={6} def={apptDef} required={first && !delivery} error={err(apptDef)} hint={apptKind}>
       {stop.fcfs ? (
         <DateTime24Input
           inputProps={ctl(apptDef)} value={stop.appt} endValue={stop.apptEnd} disabled={base.disabled}
-          onChange={(v) => onChange({ appt: v })} onEndChange={(v) => onChange({ apptEnd: v })}
+          onChange={setAppt} onEndChange={(v) => onChange({ apptEnd: v })}
         />
       ) : (
-        <DateTime24Input inputProps={ctl(apptDef)} value={stop.appt} disabled={base.disabled} onChange={(v) => onChange({ appt: v })} />
+        <DateTime24Input inputProps={ctl(apptDef)} value={stop.appt} disabled={base.disabled} onChange={setAppt} />
       )}
     </LField>
   )
@@ -255,7 +258,7 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
         </ColGroup>
         <ColGroup title="Schedule & freight">
         <FieldGrid>
-          {delivery ? dtField(d('mustDeliver'), 'mustDeliver') : dtField(readyDef, 'ready', first)}
+          {delivery ? dtField(d('mustDeliver'), 'mustDeliver') : dtField(readyDef, 'ready', false, stop.appt && stop.ready === stop.appt ? 'Same as appt' : undefined)}
           {apptField}
           <LField span={6} def={d('refNo')}><TmsInput {...txt('refNo')} /></LField>
           <LField span={6} def={d('hours')}><TmsInput {...txt('hours')} /></LField>

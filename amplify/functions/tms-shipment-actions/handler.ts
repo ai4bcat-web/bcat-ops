@@ -1184,7 +1184,8 @@ function validateStop(item: unknown, index: number): StopShape {
     appt,
     apptType: optionalString(s.apptType, 32),
     apptEnd,
-    requestedStart: optionalIso(s.requestedStart, `stops[${index}].requestedStart`),
+    // Ryne 2026-11-14: a pickup with no Ready is ready at its appointment (src/features/shipments/form/readyDefault.ts).
+    requestedStart: optionalIso(s.requestedStart, `stops[${index}].requestedStart`) ?? (type === 'pickup' && appt ? appt : null),
     requestedEnd: optionalIso(s.requestedEnd, `stops[${index}].requestedEnd`),
     apptRequestedBy: optionalEnum(s.apptRequestedBy, APPT_REQUESTED_BY, `stops[${index}].apptRequestedBy`),
     apptNote: optionalString(s.apptNote, 1000),
@@ -4195,7 +4196,7 @@ function shiftStops(
       departedAt: null,
       appt: moved ?? '',
       apptEnd: moved ? shiftedEnd(s, moved) : null,
-      requestedStart: null,
+      requestedStart: s.type === 'pickup' && moved ? moved : null,
       requestedEnd: null,
       ...(keepDriver ? {} : { driverId: null, truckId: null }),
     }
@@ -4874,9 +4875,12 @@ function applyStopOp(stopsIn: StopRow[], op: StopOp, stopId: string | null, patc
     }
     case 'SET_APPT': {
       const i = indexOfStop()
+      const appt = assertIso(patch.appt, 'patch.appt')
       stops = stops.map((s, idx) => idx === i ? {
         ...s,
-        appt: assertIso(patch.appt, 'patch.appt'),
+        appt,
+        // A pickup's Ready follows its appointment while it is blank or still the old appointment.
+        ...(s.type === 'pickup' && (!s.requestedStart || s.requestedStart === s.appt) ? { requestedStart: appt } : {}),
         apptEnd: optionalIso(patch.apptEnd, 'patch.apptEnd'),
         apptType: optionalString(patch.apptType, 32) ?? s.apptType ?? null,
         apptNote: optionalString(patch.apptNote, 1000),

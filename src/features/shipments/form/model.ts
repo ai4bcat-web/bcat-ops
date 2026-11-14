@@ -604,7 +604,8 @@ function stopFromRecord(s: Stop, order: OrderRecord | undefined, role: 'first-pi
   const apptIso = appt || ''
   const tbd = apptType === 'tbd'
   const mustOnly = !!requestedEnd && requestedEnd === apptIso
-  const ready = requestedStart ? isoToInput(requestedStart) : tbd && !mustOnly ? isoToInput(apptIso) : ''
+  // A pickup with no Ready of its own shows its appointment there (readyDefault.ts: Ready follows the appointment).
+  const ready = requestedStart ? isoToInput(requestedStart) : (tbd && !mustOnly) || (type === 'pickup' && apptIso) ? isoToInput(apptIso) : ''
   const extra: Partial<Stop> = { ...rest }
   const otherRefs = (refs ?? []).filter((r) => !(role === 'other' && r.code.toUpperCase() === (type === 'pickup' ? 'PICKUP' : 'DELIVERY')))
   if (otherRefs.length > 0) extra.refs = otherRefs

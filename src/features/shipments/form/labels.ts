@@ -126,6 +126,7 @@ export const LABEL = {
   pickup: {
     name: def('pickup', 'name', 'Name', { required: true }),
     ready: def('pickup', 'ready', 'Ready', { required: true }),
+    appt: def('pickup', 'appt', 'Appt', { required: true }),
   },
   history: {
     yesterday: def('history', 'yesterday', 'Yesterday'),
