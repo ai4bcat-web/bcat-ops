@@ -93,7 +93,7 @@ import {
   type Row,
 } from './store'
 
-const METHODS: readonly ApPaymentMethod[] = ['ACH', 'WIRE', 'CHECK', 'ZELLE', 'VENMO', 'EFT', 'OTHER']
+const METHODS: readonly ApPaymentMethod[] = ['ACH', 'WIRE', 'CHECK', 'ZELLE', 'VENMO', 'EFT', 'CARD', 'OTHER']
 const MAX_NOTE = 2000
 /** The AP half of the planner speaks about bills and carriers, not invoices and customers. */
 const AP_VOCABULARY = { party: 'carrier', document: 'bill' } as const

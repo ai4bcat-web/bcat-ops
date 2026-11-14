@@ -52,7 +52,7 @@ import { ReviewRequirementsField } from './ReviewRequirementsField'
 import { CustomerArTab } from './CustomerArTab'
 import { CustomerHistoryTab } from './CustomerHistoryTab'
 import { AgingStatementDialog } from '@/features/ar/components/AgingStatementDialog'
-import { changeNeedsReason, diffCustomer } from '@/lib/customerAudit'
+import { changeNeedsReason, customerFieldLabel, diffCustomer } from '@/lib/customerAudit'
 import { StatusActionDialog } from './StatusActionDialog'
 import { FlowDefaultsCard } from './FlowDefaultsCard'
 import { TrackingPrefsFields } from './TrackingPrefsFields'
@@ -204,13 +204,29 @@ export function CustomerProfile({
   )
   const reasonMissing = reasonRequired && changeReason.trim() === ''
 
+  // Ryne 2026-11-14: a Save that does nothing is a bug. It closes on success, and anything that
+  // stops it (a field on another tab, a missing reason, the server) is named beside the button.
+  const [saveProblem, setSaveProblem] = useState<string | null>(null)
+  const errorSummary = Object.entries(errors).map(([field, message]) => `${customerFieldLabel(field)}: ${message}`)
   const save = async () => {
-    if (Object.keys(errors).length > 0 || reasonMissing) return
+    if (errorSummary.length > 0) {
+      setSaveProblem(`Fix before saving — ${errorSummary.join('; ')}`)
+      return
+    }
+    if (reasonMissing) {
+      setSaveProblem('Give a reason for this change before saving.')
+      document.getElementById('customer-change-reason')?.focus()
+      return
+    }
     setSaving(true)
+    setSaveProblem(null)
     try {
       const reason = changeReason.trim()
       await onSave(customer, { ...stripRecord(toRecord({ includeStatus: false })), ...(reason ? { changeReason: reason } : {}) })
       setChangeReason('')
+      onClose()
+    } catch (err) {
+      setSaveProblem(err instanceof Error ? err.message : 'Could not save this customer')
     } finally {
       setSaving(false)
     }
@@ -238,16 +254,17 @@ export function CustomerProfile({
               id="customer-change-reason"
               data-testid="customer-change-reason"
               aria-label="Reason for change"
-              placeholder={reasonRequired ? 'Reason for change (required for billing changes)' : 'Reason for change (optional)'}
+              placeholder={reasonRequired ? 'Reason for change (required)' : 'Reason for change (optional)'}
               value={changeReason}
               maxLength={500}
               onChange={(e) => setChangeReason(e.target.value)}
               aria-invalid={reasonMissing || undefined}
             />
-            {reasonMissing && <p className="mt-0.5 text-xs text-[color:var(--tms-badge-red)]">Say why the payment method, terms, factoring or billing e-mail is changing.</p>}
+            {reasonMissing && <p className="mt-0.5 text-xs text-[color:var(--tms-badge-red)]">Required: say why the payment method, terms, factoring or billing e-mail is changing.</p>}
+            {saveProblem && <p role="alert" data-testid="customer-save-problem" className="mt-0.5 text-xs text-[color:var(--tms-badge-red)]">{saveProblem}</p>}
           </div>
           <TmsButton onClick={onClose}>Cancel</TmsButton>
-          <TmsButton variant="primary" onClick={save} disabled={saving || Object.keys(errors).length > 0 || reasonMissing}>{saving ? 'Saving…' : 'Save'}</TmsButton>
+          <TmsButton variant="primary" onClick={() => { void save() }} disabled={saving}>{saving ? 'Saving…' : 'Save'}</TmsButton>
         </>
       }
     >
@@ -338,7 +355,7 @@ export function CustomerProfile({
                   </TmsField>
                 </div>
                 <div className="tms-grid tms-grid-2">
-                  <TmsField label="Payment terms (days)">
+                  <TmsField label="Payment terms (days)" error={errors.paymentTermsDays}>
                     <TmsInput type="number" min={0} value={value.paymentTermsDays} onChange={(e) => set('paymentTermsDays', e.target.value)} />
                   </TmsField>
                   <TmsField label="Default division">

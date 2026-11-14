@@ -67,6 +67,7 @@ export const AP_PAYMENT_METHOD_LABEL: Record<ApPaymentMethod, string> = {
   ZELLE: 'Zelle',
   VENMO: 'Venmo',
   EFT: 'EFT',
+  CARD: 'Credit card (Amex)',
   OTHER: 'Other',
 }
 

@@ -28,7 +28,7 @@ import {
 } from '@/features/tms/kit'
 import type { TmsTone } from '@/features/tms/kit'
 import { TmsTabStrip } from '@/features/tms/kit'
-import { changeNeedsReason, diffCustomer } from '@/lib/customerAudit'
+import { changeNeedsReason, customerFieldLabel, diffCustomer } from '@/lib/customerAudit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
 import { ClearFiltersButton, ColumnsButton, DensityToggle, DenseKpiStrip, SummaryToggle } from '@/features/tms/grid/DenseControls'
 import {
@@ -536,7 +536,7 @@ export function CustomersPage() {
           <div className="tms-dense-filters" id="customers-filters" data-open={filtersOpen ? 'true' : undefined}>
           <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('invoiceEmail', { values: includeFactored ? ['MISSING', 'INVALID', 'FACTORED_QUEUE_ONLY'] : ['MISSING', 'INVALID'] }) }}>Missing invoice e-mail ({emailCounts.missing + (includeFactored ? emailCounts.factored : 0)})</TmsButton>
           <label><input type="checkbox" checked={includeFactored} onChange={(e) => { setIncludeFactored(e.target.checked); if (filters.invoiceEmail?.values?.includes('MISSING')) setColumnFilter('invoiceEmail', { values: e.target.checked ? ['MISSING', 'INVALID', 'FACTORED_QUEUE_ONLY'] : ['MISSING', 'INVALID'] }) }} /> Include factored</label>
-          <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('invoiceEmail', { values: ['FACTORED_QUEUE_ONLY'] }) }}>Factored, missing invoice e-mail ({emailCounts.factored})</TmsButton>
+          <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('invoiceEmail', { values: ['FACTORED_QUEUE_ONLY'] }) }}>Factored, no invoice e-mail (not required) ({emailCounts.factored})</TmsButton>
           <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('billingMethod', { values: ['NOT_SET'] }) }}>Billing method not set ({billingNotSetCount})</TmsButton>
           <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('factorFlag', { values: ['MISSING_MC'] }) }}>Factored broker, missing MC ({factorFlagCounts.MISSING_MC})</TmsButton>
           <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('factorFlag', { values: ['NEEDS_TYPE'] }) }}>Factored, type not set ({factorFlagCounts.NEEDS_TYPE})</TmsButton>
@@ -717,9 +717,9 @@ function CustomerModal({ open, initial, divisions, existingCustomers = [], isAdm
   const reasonMissing = reasonRequired && changeReason.trim() === ''
 
   const save = async () => {
-    if (Object.keys(errors).length > 0) { toast.error('Please fix the errors above'); return }
+    if (Object.keys(errors).length > 0) { toast.error(`Fix before saving — ${Object.entries(errors).map(([f, m]) => `${customerFieldLabel(f)}: ${m}`).join('; ')}`); return }
     if (guard.blocked) { toast.error('This customer already exists'); return }
-    if (reasonMissing) { toast.error('Say why the billing details are changing'); return }
+    if (reasonMissing) { toast.error('Give a reason for this change before saving'); document.getElementById('customer-modal-change-reason')?.focus(); return }
     setSaving(true)
     try {
       const base = guard.overrideReason ? { ...toRecord(), duplicateOverrideReason: guard.overrideReason } : toRecord()
@@ -744,7 +744,7 @@ function CustomerModal({ open, initial, divisions, existingCustomers = [], isAdm
               id="customer-modal-change-reason"
               data-testid="customer-modal-change-reason"
               aria-label="Reason for change"
-              placeholder={reasonRequired ? 'Reason for change (required for billing changes)' : 'Reason for change (optional)'}
+              placeholder={reasonRequired ? 'Reason for change (required)' : 'Reason for change (optional)'}
               value={changeReason}
               maxLength={500}
               onChange={(e) => setChangeReason(e.target.value)}
@@ -753,7 +753,7 @@ function CustomerModal({ open, initial, divisions, existingCustomers = [], isAdm
             />
           )}
           <TmsButton onClick={onClose}>Cancel</TmsButton>
-          <TmsButton variant="primary" onClick={save} disabled={saving || guard.blocked || reasonMissing || (isNew && Object.keys(errors).length > 0)}>{saving ? 'Saving…' : 'Save'}</TmsButton>
+          <TmsButton variant="primary" onClick={save} disabled={saving || guard.blocked}>{saving ? 'Saving…' : 'Save'}</TmsButton>
         </>
       }
     >

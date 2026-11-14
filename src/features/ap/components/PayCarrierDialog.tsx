@@ -36,8 +36,8 @@ import type {
   CreditApplication,
 } from '@/types/tms'
 
-const METHODS: ApPaymentMethod[] = ['ACH', 'CHECK', 'WIRE', 'ZELLE', 'VENMO', 'EFT', 'OTHER']
-const METHOD_LABEL: Record<ApPaymentMethod, string> = { ACH: 'ACH', CHECK: 'Paper check', WIRE: 'Wire', ZELLE: 'Zelle', VENMO: 'Venmo', EFT: 'EFT', OTHER: 'Other' }
+const METHODS: ApPaymentMethod[] = ['ACH', 'CHECK', 'WIRE', 'ZELLE', 'CARD', 'VENMO', 'EFT', 'OTHER']
+const METHOD_LABEL: Record<ApPaymentMethod, string> = { ACH: 'ACH', CHECK: 'Paper check', WIRE: 'Wire', ZELLE: 'Zelle', VENMO: 'Venmo', EFT: 'EFT', CARD: 'Credit card (Amex)', OTHER: 'Other' }
 
 /** Approved bills are payable; one in review has not been agreed to yet. */
 const PAYABLE: Partial<Record<CarrierBillStatus, true>> = { TO_BE_PAID: true, PARTIAL: true }

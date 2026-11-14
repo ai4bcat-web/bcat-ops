@@ -13,7 +13,7 @@ import type { CarrierBillRecord } from '@/types/tms'
 import { payToLabel, remitEmailOf } from '../apViews'
 
 const METHOD_LABEL: Record<string, string> = {
-  ACH: 'ACH', WIRE: 'Wire', CHECK: 'Check', ZELLE: 'Zelle', VENMO: 'Venmo', EFT: 'EFT',
+  ACH: 'ACH', WIRE: 'Wire', CHECK: 'Check', ZELLE: 'Zelle', VENMO: 'Venmo', EFT: 'EFT', CARD: 'Credit card (Amex)', OTHER: 'Other',
 }
 
 const masked = (last4?: string | null) => (last4 ? `•••• ${last4}` : null)

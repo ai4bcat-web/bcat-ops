@@ -3280,7 +3280,7 @@ export type ApPayeeKind = 'CARRIER' | 'FACTOR'
 
 export type ApPaymentKind = 'PAYMENT' | 'CREDIT_MEMO' | 'REVERSAL'
 
-export type ApPaymentMethod = 'ACH' | 'WIRE' | 'CHECK' | 'ZELLE' | 'VENMO' | 'EFT' | 'OTHER'
+export type ApPaymentMethod = 'ACH' | 'WIRE' | 'CHECK' | 'ZELLE' | 'VENMO' | 'EFT' | 'CARD' | 'OTHER'
 
 /**
  * Where a carrier's money goes, snapshotted onto the bill at Record.

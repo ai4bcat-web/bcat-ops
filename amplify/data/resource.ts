@@ -2626,7 +2626,7 @@ const schema = a.schema(stageTypes({
       // The typed date at noon UTC, so the carrier index sorts by the day the money
       // left and a timezone cannot slide a payment into the previous month.
       paidAt:          a.datetime().required(),
-      method:          a.enum(['ACH', 'WIRE', 'CHECK', 'ZELLE', 'VENMO', 'EFT', 'OTHER']),
+      method:          a.enum(['ACH', 'WIRE', 'CHECK', 'ZELLE', 'VENMO', 'EFT', 'CARD', 'OTHER']),
       reference:       a.string(),
       amountCents:     a.integer().required(),
       appliedCents:    a.integer().required(),

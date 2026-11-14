@@ -73,6 +73,7 @@ const METHOD_LABEL: Record<ApPaymentMethod, string> = {
   ZELLE: 'Zelle',
   VENMO: 'Venmo',
   EFT: 'EFT',
+  CARD: 'Credit card',
   OTHER: 'Other',
 }
 
