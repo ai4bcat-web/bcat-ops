@@ -31,7 +31,6 @@ const VIEW_OPTIONS: { value: CalendarView; label: string }[] = [
   { value: 'month', label: 'Month' },
 ]
 
-const PHONE_VIEW_OPTIONS: { value: CalendarView; label: string }[] = [{ value: 'list', label: 'Unassigned' }, ...VIEW_OPTIONS]
 
 const FILTER_CHIPS = [
   { key: 'readyToInvoice'    as const, label: 'Ready to Invoice',     Icon: CheckCircle2,          activeColor: 'var(--tms-badge-green)', activeBg: 'var(--tms-badge-green-tint)'  },
@@ -74,7 +73,7 @@ export function CalendarToolbar({
 
       {/* ── View tabs ────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', gap: 2, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', borderRadius: 9, padding: 3, flexShrink: 0, ...(phone ? { flex: '1 1 auto' } : {}), ...at(2) }}>
-        {(phone ? PHONE_VIEW_OPTIONS : VIEW_OPTIONS).map(({ value, label }) => {
+        {VIEW_OPTIONS.map(({ value, label }) => {
           const active = currentView === value
           return (
             <button

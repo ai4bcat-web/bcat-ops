@@ -17,14 +17,15 @@ vi.mock('@/components/DriverFilterMenu', () => ({ DriverFilterMenu: () => <span>
 import { CalendarToolbar } from './CalendarToolbar'
 
 const props = {
-  currentView: 'list' as const, dateLabel: 'Nov 14, 2026', onPrev: vi.fn(), onNext: vi.fn(), onToday: vi.fn(), onViewChange: vi.fn(),
+  currentView: 'day' as const, dateLabel: 'Nov 14, 2026', onPrev: vi.fn(), onNext: vi.fn(), onToday: vi.fn(), onViewChange: vi.fn(),
   drivers: [], visibleDriverIds: new Set<string>(), onVisibleDriversChange: vi.fn(),
 }
 
 describe('CalendarToolbar on a phone', () => {
-  it('offers the List view (labelled Unassigned), and keeps the filter chips behind a Filters button that counts the active ones', () => {
+  it('offers no List view, and keeps the filter chips behind a Filters button that counts the active ones', () => {
     render(<MemoryRouter><CalendarToolbar {...props} phone /></MemoryRouter>)
-    expect(screen.getByRole('button', { name: 'Unassigned' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'List' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Day' })).toBeTruthy()
     const toggle = screen.getByRole('button', { name: /Filters \(1\)/ })
     const chips = document.getElementById('calendar-filters')!
     expect(chips.style.display).toBe('none')
@@ -35,8 +36,7 @@ describe('CalendarToolbar on a phone', () => {
 
   it('keeps the desktop bar as it was: no List, no Filters button, chips inline', () => {
     render(<MemoryRouter><CalendarToolbar {...props} currentView="day" /></MemoryRouter>)
-    // Only the Unassigned filter chip; the List view (labelled Unassigned on a phone) is not offered.
-    expect(screen.getAllByRole('button', { name: 'Unassigned' })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'List' })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Filters/ })).toBeNull()
     expect(document.getElementById('calendar-filters')!.style.display).toBe('flex')
     expect(screen.getByRole('button', { name: 'New Shipment' }).textContent).toContain('New Shipment')

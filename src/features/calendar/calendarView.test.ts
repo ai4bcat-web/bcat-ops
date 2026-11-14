@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { initialCalendarView, rememberPhoneView, effectiveCalendarView } from './calendarView'
+import { initialCalendarView, rememberPhoneView } from './calendarView'
 
 const memory = () => {
   const m = new Map<string, string>()
@@ -25,14 +25,9 @@ describe('calendar view', () => {
     expect(initialCalendarView(true, { getItem: () => { throw new Error('blocked') } })).toBe('day')
   })
 
-  it('drops a List remembered under the old key', () => {
-    const s = memory(); s.setItem('calendar.phoneView', 'list')
+  it('opens on Day when a removed List view was remembered', () => {
+    const s = memory(); s.setItem('calendar.phoneView.v2', 'list')
     expect(initialCalendarView(true, s)).toBe('day')
   })
 
-  it('shows List only on a phone', () => {
-    expect(effectiveCalendarView('list', true)).toBe('list')
-    expect(effectiveCalendarView('list', false)).toBe('day')
-    expect(effectiveCalendarView('month', false)).toBe('month')
-  })
 })
