@@ -15,6 +15,7 @@ import { deliveredTimeOf } from '@/lib/deliveredAt'
 import type { ArWorklistRow } from '@/hooks/useArWorklist'
 import type { InvoiceRecord, ShipmentRecord } from '@/types/tms'
 import type { FactoringItem } from '@/types'
+import { invoiceAmountOf } from '@/features/factoring/factoringTotals'
 
 export type ArQueueStatus = 'READY' | 'INVOICED' | 'PAID'
 
@@ -170,22 +171,43 @@ export function invoiceRow(inv: InvoiceRecord, l: ArQueueLookups, releasedAt?: s
   }
 }
 
+/** PROs that already have a live (not voided) invoice: its number, a PRO-shaped id, or its shipment's PRO. */
+function invoicedPros(invoicesById: Map<string, InvoiceRecord>, l: ArQueueLookups): Set<string> {
+  const pros = new Set<string>()
+  for (const inv of invoicesById.values()) {
+    if (inv.status === 'VOID') continue
+    if (inv.number) pros.add(inv.number.trim())
+    // Imported invoices are keyed by their PRO and may carry no number of their own.
+    if (/^\d+$/.test(inv.id)) pros.add(inv.id)
+    const pro = l.shipmentsById.get(inv.shipmentId)?.number
+    if (pro) pros.add(pro.trim())
+  }
+  return pros
+}
+
 /**
  * Queue rows still waiting to go to OTR, as Ready to invoice rows — the loads the To factor tab used to hold.
  * A row already covered by a Ready order (same order or shipment) is not added twice; that order row carries it.
+ * Nor is an unlinked row whose PRO already has a live invoice: an e-mail row for a PRO billed elsewhere
+ * (11836, 2026-11-14) is not new work, and showed as a $0 load.
  */
 export function factorQueueRows(
   items: readonly FactoringItem[], covered: readonly ArQueueRow[], invoicesById: Map<string, InvoiceRecord>, l: ArQueueLookups,
 ): ArQueueRow[] {
   const orders = new Set(covered.map((r) => r.orderId))
   const shipments = new Set(covered.map((r) => r.shipmentId))
+  const invoiced = invoicedPros(invoicesById, l)
   return items
     .filter((item) => item.status === 'NEED_TO_FACTOR')
     .filter((item) => !(item.orderId && orders.has(item.orderId)) && !(item.shipmentId && shipments.has(item.shipmentId)))
+    // A row linked to its own invoice is that invoice waiting to go to OTR; only an unlinked row is matched by PRO.
+    .filter((item) => Boolean(item.invoiceId) || !(item.proNumber && invoiced.has(item.proNumber.trim())))
     .map((item) => {
       const inv = item.invoiceId ? invoicesById.get(item.invoiceId) ?? null : null
       const shipment = item.shipmentId ? l.shipmentsById.get(item.shipmentId) ?? null : null
-      const amountCents = inv?.totalCents ?? (item.otrAmount != null ? Math.round(item.otrAmount * 100) : 0)
+      // Unlinked rows carry their amount in the cached OTR payload; 0 only when nothing has resolved one.
+      const payloadDollars = item.otrAmount ?? invoiceAmountOf(item)
+      const amountCents = inv?.totalCents ?? (payloadDollars != null ? Math.round(payloadDollars * 100) : 0)
       return {
         key: `factor:${item.id}`,
         status: 'READY' as const,

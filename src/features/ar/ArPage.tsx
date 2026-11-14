@@ -312,7 +312,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         const readyOrders = new Set(ready.map((r) => r.orderId))
         const rows = keep([...split.drafts.filter((r) => !readyOrders.has(r.orderId)), ...ready])
         // The loads the To factor tab held: queue rows not yet at OTR. Always listed, whatever the billed-by view.
-        const invoicesById = new Map(open.invoices.map((inv) => [inv.id, inv]))
+        // Paid invoices too: a queue row for a PRO that is already billed and paid is not new work either.
+        const invoicesById = new Map([...paidInvoices, ...open.invoices].map((inv) => [inv.id, inv]))
         return [...rows, ...factorQueueRows(factoringItems, rows, invoicesById, lookups)]
       })(),
       INVOICED: keep(split.invoiced),
