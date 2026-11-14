@@ -452,6 +452,13 @@ describe('the AR dense grid', () => {
     // PRO opens the invoice drawer, with the send action inside it.
     fireEvent.click(within(grid).getByRole('button', { name: 'Open invoice for PRO S-1001' }))
     expect(await screen.findByRole('button', { name: 'Send invoice' })).toBeTruthy()
+    // Ryne 2026-11-14: it opens in the middle of the page (a centered dialog), and Esc closes it.
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.className).toContain('tms-dialog-invoice')
+    expect(dialog.className).not.toContain('tms-drawer')
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    await settle()
+    expect(screen.queryByRole('dialog')).toBeNull()
     authGroups.current = []
   })
 })
