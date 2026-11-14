@@ -31,7 +31,7 @@ const VIEW_OPTIONS: { value: CalendarView; label: string }[] = [
   { value: 'month', label: 'Month' },
 ]
 
-const PHONE_VIEW_OPTIONS: { value: CalendarView; label: string }[] = [{ value: 'list', label: 'List' }, ...VIEW_OPTIONS]
+const PHONE_VIEW_OPTIONS: { value: CalendarView; label: string }[] = [{ value: 'list', label: 'Unassigned' }, ...VIEW_OPTIONS]
 
 const FILTER_CHIPS = [
   { key: 'readyToInvoice'    as const, label: 'Ready to Invoice',     Icon: CheckCircle2,          activeColor: 'var(--tms-badge-green)', activeBg: 'var(--tms-badge-green-tint)'  },

@@ -7,9 +7,9 @@ const memory = () => {
 }
 
 describe('calendar view', () => {
-  it('opens a desktop on Day and a phone on List', () => {
+  it('opens a desktop and a phone on Day', () => {
     expect(initialCalendarView(false, memory())).toBe('day')
-    expect(initialCalendarView(true, memory())).toBe('list')
+    expect(initialCalendarView(true, memory())).toBe('day')
   })
 
   it('reopens a phone on the view last picked there', () => {
@@ -20,9 +20,14 @@ describe('calendar view', () => {
   })
 
   it('ignores a stored value that is not a view, and storage that throws', () => {
-    const s = memory(); s.setItem('calendar.phoneView', 'agenda')
-    expect(initialCalendarView(true, s)).toBe('list')
-    expect(initialCalendarView(true, { getItem: () => { throw new Error('blocked') } })).toBe('list')
+    const s = memory(); s.setItem('calendar.phoneView.v2', 'agenda')
+    expect(initialCalendarView(true, s)).toBe('day')
+    expect(initialCalendarView(true, { getItem: () => { throw new Error('blocked') } })).toBe('day')
+  })
+
+  it('drops a List remembered under the old key', () => {
+    const s = memory(); s.setItem('calendar.phoneView', 'list')
+    expect(initialCalendarView(true, s)).toBe('day')
   })
 
   it('shows List only on a phone', () => {
