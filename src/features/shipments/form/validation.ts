@@ -19,6 +19,7 @@ import { MAX } from './constants'
 import { carrierLinehaulLine, financialPreview, firstPickupIndex, lastDeliveryIndex } from './mapping'
 import { isShipmentTypeKey } from '@/lib/shipmentTypes'
 import { factorGapsAtCreate, type FactorGapCode } from '@/lib/factorReadyAtCreate'
+import { isFactorBilled } from '@/lib/factorBilling'
 import { carrierSlotsOf, parseInteger, type CarrierSlot, type FormStop, type ShipmentFormValues } from './model'
 import type { FormIssue, SectionKey } from './sectionProps'
 
@@ -110,8 +111,8 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
   const submit = o.level === 'submit'
   const push = (
     section: SectionKey, field: string, fieldKey: string, label: string, message: string,
-    severity: 'error' | 'warn' = 'error',
-  ) => { issues.push({ id: `${section}:${field}`, section, fieldKey, label, message, severity }) }
+    severity: 'error' | 'warn' = 'error', marked = false,
+  ) => { issues.push({ id: `${section}:${field}`, section, fieldKey, label, message, severity, ...(marked ? { marked: true } : {}) }) }
   const red = (section: SectionKey, field: string, def: { testId: string; text: string }, message: string) =>
     push(section, field, def.testId, def.text, message, strictRed ? 'error' : 'warn')
 
@@ -261,6 +262,9 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
   // factored the day it reaches Ready to invoice. The PO is the rule above; the rest is added here.
   if (strictRed) {
     const severity: 'error' | 'warn' = o.existingLoad ? 'warn' : 'error'
+    // Past draft, a factored load's gaps stay on the field as required (without blocking the save) so they are fixed before
+    // Load Review, which refuses a factored load without them (Ryne 2026-11-14).
+    const marked = Boolean(o.existingLoad) && !typed && isFactorBilled(o.customer)
     const pick = fp >= 0 ? values.stops[fp] : null
     const drop = ld >= 0 ? values.stops[ld] : null
     const gaps = factorGapsAtCreate({
@@ -274,7 +278,7 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
     for (const gap of gaps) {
       const t = FACTOR_GAP_TARGET[gap.code]
       if (!t || taken.has(`${t.section}:${t.fieldKey}`)) continue
-      push(t.section, `factor:${gap.code}`, t.fieldKey, t.label, gap.message, severity)
+      push(t.section, `factor:${gap.code}`, t.fieldKey, t.label, gap.message, severity, marked)
     }
   }
 

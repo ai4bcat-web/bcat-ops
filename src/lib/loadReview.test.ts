@@ -391,3 +391,18 @@ describe('loadReviewRefusal', () => {
     expect(releaseGateMessages(err.message)).toEqual(sentences)
   })
 })
+
+describe('factoring fields (Ryne 2026-11-14)', () => {
+  it('a factored row missing what OTR needs fails Load details, and points at the stops for a ZIP', () => {
+    const verdict = evaluateLoadReview({ row: delivered({ factorGaps: ['PO_MISSING', 'DELIVERY_ZIP'] }) })
+    const factor = verdict.checks.details.reasons.filter((r) => r.code.startsWith('FACTOR_'))
+    expect(factor.map((r) => r.message)).toEqual(['Missing for factoring: PO', 'Missing for factoring: Consignee ZIP'])
+    expect(factor[1].action).toEqual({ kind: 'OPEN_TAB', tab: 'stops' })
+    expect(verdict.ok).toBe(false)
+  })
+
+  it('imported history and the server extras do not repeat it', () => {
+    expect(failingReasons(evaluateLoadReview({ row: delivered({ factorGaps: ['PO_MISSING'], legacyImported: true }) })).some((r) => r.code.startsWith('FACTOR_'))).toBe(false)
+    expect(failingReasons(evaluateLoadReview({ row: delivered({ factorGaps: ['PO_MISSING'] }), extras: [] })).some((r) => r.code.startsWith('FACTOR_'))).toBe(false)
+  })
+})

@@ -76,6 +76,7 @@ import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { planPendingCarrierBills, readPendingBillContext, writePendingBill } from '../_shared/pendingCarrierBill'
 import { hasGap, isReleasedOrder, reconcileReleasedOrder, type ReconcileFinding } from '../../../src/lib/billingReconcile'
 import { evaluateReleaseGate, releaseGateError, type ReleaseGateResult } from '../../../src/lib/releaseGate'
+import { factorGapsForLoad, orderPoNumber, routeEnds, type FactorReadyInput } from '../../../src/lib/factorReadyAtCreate'
 import { evaluateLoadReview, loadReviewExtras, loadReviewRefusal, type LoadReviewReason } from '../../../src/lib/loadReview'
 import { profitFromFacts, resolveReviewRequirements, type ReviewFacts, type ReviewRequirement } from '../../../src/lib/reviewRequirements'
 import {
@@ -96,6 +97,7 @@ import type {
   ShipmentDocumentRecord,
   TmsSettings,
 } from '../../../src/types/tms'
+import type { Stop } from '../../../src/types'
 
 /**
  * What this module needs from the router: the shipment store it already built,
@@ -1319,12 +1321,43 @@ function reviewFacts(bundle: Bundle, order: Row): ReviewFacts {
 
 /** The review extras, typed from the raw rows. Imported history is exempt inside the lib. */
 function reviewExtras(bundle: Bundle, order: Row, customer: Row | null, settings: Row | null, gateOwnsPod = true): LoadReviewReason[] {
-  return loadReviewExtras({
-    shipment: { legacyImported: bundle.shipment.legacyImported === true },
-    facts: reviewFacts(bundle, order),
-    // The release gate already refuses on a missing POD (with its own sentence); a push has no gate.
-    requirements: reviewRequirementsFor(customer, settings).filter((key) => !gateOwnsPod || key !== 'podReceived'),
+  return [
+    ...loadReviewExtras({
+      shipment: { legacyImported: bundle.shipment.legacyImported === true },
+      facts: reviewFacts(bundle, order),
+      // The release gate already refuses on a missing POD (with its own sentence); a push has no gate.
+      requirements: reviewRequirementsFor(customer, settings).filter((key) => !gateOwnsPod || key !== 'podReceived'),
+    }),
+    ...factorReviewReasons(bundle, order, customer),
+  ]
+}
+
+/**
+ * Ryne 2026-11-14: a factored load does not go into Load Review, nor out of it, until it carries what OTR needs from
+ * booking (src/lib/factorReadyAtCreate). The push and the review release both read this list, so an automatic push after a
+ * driver's status update simply does not happen yet; the status update itself is never refused. Imported history is exempt.
+ */
+function factorReviewReasons(bundle: Bundle, order: Row, customer: Row | null): LoadReviewReason[] {
+  if (bundle.shipment.legacyImported === true) return []
+  const orderId = String(order.id ?? '')
+  const stops: Stop[] = []
+  for (const load of bundle.loads) {
+    if (load.voidedAt || load.deletedAt) continue
+    if (load.orderId != null && orderId && String(load.orderId) !== orderId) continue
+    for (const stop of (Array.isArray(load.stops) ? load.stops : []) as Stop[]) stops.push(stop)
+  }
+  const gaps = factorGapsForLoad({
+    customer: customer as unknown as FactorReadyInput['customer'],
+    poNumber: orderPoNumber(order.references as Parameters<typeof orderPoNumber>[0]),
+    customerRateCents: numberOrNull(order.revenueCents),
+    ...routeEnds(stops),
   })
+  return gaps.map((gap) => ({
+    code: `FACTOR_${gap.code}`,
+    message: gap.message,
+    check: 'details' as const,
+    action: { kind: 'OPEN_TAB' as const, tab: gap.code.startsWith('PICKUP') || gap.code.startsWith('DELIVERY') ? 'stops' as const : 'overview' as const },
+  }))
 }
 
 /** The sentence a push is refused with while the shipment has not fully delivered; null once it has. */

@@ -7,7 +7,7 @@ import type { FormCtx, SectionKey } from '../sectionProps'
 
 /** The blocking message for one control, matched by its `data-testid`. */
 export function issueFor(ctx: FormCtx, section: SectionKey, testId: string): string | undefined {
-  return ctx.issues.find((i) => i.section === section && i.fieldKey === testId && i.severity === 'error')?.message
+  return ctx.issues.find((i) => i.section === section && i.fieldKey === testId && (i.severity === 'error' || i.marked))?.message
 }
 
 /** The attributes every labelled control carries. */

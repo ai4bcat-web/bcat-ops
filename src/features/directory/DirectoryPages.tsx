@@ -66,6 +66,7 @@ import { LocationDetail } from './components/LocationDetail'
 import { CustomerProfile } from './components/CustomerProfile'
 import { CustomerOrgDefaults } from './components/CustomerOrgDefaults'
 import { AddNoteDialog } from './components/AddNoteDialog'
+import { CUSTOMER_FACTOR_FLAG_LABEL, customerFactorFlag } from '@/lib/factorReadyAtCreate'
 
 function stripRecord<T extends { id: string; createdAt: string; updatedAt: string }>(record: T): Omit<T, 'id' | 'createdAt' | 'updatedAt'> {
   const { id, createdAt, updatedAt, ...rest } = record
@@ -121,13 +122,13 @@ const billingEmailCount = (c: CustomerRecord) => (c.billingEmail ?? '').split(/[
 const yesNo = (v: boolean | null | undefined) => (v === true ? 'Yes' : 'No')
 const opt = (v: string | null | undefined) => (v ? [{ value: v, label: v }] : [])
 
-const DEFAULT_COLUMNS = ['name', 'status', 'billingMethod', 'invoiceEmail', 'noaEmail', 'shipments', 'owner', 'lastTouch', 'nextStep', 'credit', 'terms', 'contact', 'city']
+const DEFAULT_COLUMNS = ['name', 'status', 'billingMethod', 'factorFlag', 'invoiceEmail', 'noaEmail', 'shipments', 'owner', 'lastTouch', 'nextStep', 'credit', 'terms', 'contact', 'city']
 /** Columns fed by CRM_LIST_ACCOUNTS `withActivity`. */
 const ACTIVITY_COLUMN_KEYS = ['openAr', 'lastShipment', 'shipments']
 const ALL_COLUMN_KEYS = [
   ...DEFAULT_COLUMNS,
   'team', 'billingEmails', 'factored', 'email', 'state',
-  'division', 'stage', 'nextDue', 'openTasks', 'phone', 'mc', 'dot', 'archived', 'aljexCode', 'industry', 'leadSource', 'created',
+  'division', 'stage', 'nextDue', 'openTasks', 'phone', 'mc', 'customerType', 'dot', 'archived', 'aljexCode', 'industry', 'leadSource', 'created',
   ...ACTIVITY_COLUMN_KEYS,
 ]
 const ACTIONS_KEY = 'actions'
@@ -205,6 +206,19 @@ const gridCatalog: Array<DenseColumn<CustomerRow>> = [
     { key: 'city', header: 'City', group: 'Contact', text: (r) => r.record.billingAddress?.city ?? '' },
     { key: 'state', header: 'State', group: 'Contact', text: (r) => r.record.billingAddress?.state ?? '', filter: 'multi', optionsOf: (r) => opt(r.record.billingAddress?.state) },
     { key: 'mc', header: 'MC', group: 'Authority', text: (r) => r.record.mcNumber ?? '' },
+    { key: 'customerType', header: 'Type', group: 'Authority', text: (r) => (r.record.customerType === 'BROKER' ? 'Broker' : r.record.customerType === 'SHIPPER' ? 'Shipper' : ''), filter: 'multi' },
+    {
+      // Ryne 2026-11-14: a broker we factor must have an MC; a factored customer with no type is flagged until someone sets it.
+      key: 'factorFlag', header: 'Factoring setup', group: 'Authority',
+      text: (r) => { const f = customerFactorFlag(r.record); return f ? CUSTOMER_FACTOR_FLAG_LABEL[f] : '' },
+      filter: 'multi',
+      optionsOf: (r) => { const f = customerFactorFlag(r.record); return f ? [{ value: f, label: CUSTOMER_FACTOR_FLAG_LABEL[f] }] : [{ value: 'OK', label: 'Nothing missing' }] },
+      fixedOptions: [
+        { value: 'MISSING_MC', label: CUSTOMER_FACTOR_FLAG_LABEL.MISSING_MC },
+        { value: 'NEEDS_TYPE', label: CUSTOMER_FACTOR_FLAG_LABEL.NEEDS_TYPE },
+        { value: 'OK', label: 'Nothing missing' },
+      ],
+    },
     { key: 'dot', header: 'DOT', group: 'Authority', text: (r) => r.record.dotNumber ?? '' },
     { key: ACTIONS_KEY, header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 110 },
 ]
@@ -318,6 +332,14 @@ export function CustomersPage() {
   const [duplicatesOnly, setDuplicatesOnly] = useState(false)
   // Phones: the filter chips and secondary actions sit behind a Filters button (desktop shows them inline, as before).
   const [filtersOpen, setFiltersOpen] = useState(false)
+  const factorFlagCounts = useMemo(() => {
+    const counts = { MISSING_MC: 0, NEEDS_TYPE: 0 }
+    for (const row of rowsWithStatus) {
+      const flag = customerFactorFlag(row.record)
+      if (flag) counts[flag]++
+    }
+    return counts
+  }, [rowsWithStatus])
   const emailCounts = useMemo(() => {
     const counts = { missing: 0, factored: 0 }
     for (const row of rowsWithStatus) {
@@ -408,6 +430,11 @@ export function CustomersPage() {
             {addresses[0]}{addresses.length > 1 ? ` +${addresses.length - 1}` : ''}
           </span>
         )
+      }
+      case 'factorFlag': {
+        const flag = customerFactorFlag(c)
+        if (!flag) return null
+        return <TmsBadge tone={flag === 'MISSING_MC' ? 'red' : 'orange'} data-testid={`factor-flag-${c.id}`}>{flag === 'MISSING_MC' ? 'Missing MC' : 'Type not set'}</TmsBadge>
       }
       case 'noaEmail': return c.noaEmail?.trim() ? <span title="Notice of assignment">{c.noaEmail}</span> : <span className="tms-muted">—</span>
       case 'billingMethod': return <BillingMethodBadge customer={c} />
@@ -511,6 +538,8 @@ export function CustomersPage() {
           <label><input type="checkbox" checked={includeFactored} onChange={(e) => { setIncludeFactored(e.target.checked); if (filters.invoiceEmail?.values?.includes('MISSING')) setColumnFilter('invoiceEmail', { values: e.target.checked ? ['MISSING', 'INVALID', 'FACTORED_QUEUE_ONLY'] : ['MISSING', 'INVALID'] }) }} /> Include factored</label>
           <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('invoiceEmail', { values: ['FACTORED_QUEUE_ONLY'] }) }}>Factored, missing invoice e-mail ({emailCounts.factored})</TmsButton>
           <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('billingMethod', { values: ['NOT_SET'] }) }}>Billing method not set ({billingNotSetCount})</TmsButton>
+          <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('factorFlag', { values: ['MISSING_MC'] }) }}>Factored broker, missing MC ({factorFlagCounts.MISSING_MC})</TmsButton>
+          <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('factorFlag', { values: ['NEEDS_TYPE'] }) }}>Factored, type not set ({factorFlagCounts.NEEDS_TYPE})</TmsButton>
           <TmsButton size="sm" variant={duplicatesOnly ? 'primary' : undefined} aria-pressed={duplicatesOnly} data-testid="customers-duplicates-chip" onClick={() => { setActiveTab('all'); setDuplicatesOnly((v) => !v); setPageSize(PAGE_SIZE) }}>Possible duplicates ({duplicateCount})</TmsButton>
           {isManager && (
             <span role="group" aria-label="Account scope" style={{ display: 'inline-flex', gap: 4 }} data-testid="crm-scope">

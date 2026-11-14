@@ -144,7 +144,10 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
 
   // ── issues: nothing is shown until the first Save/Create/Submit attempt, then live ──
   const issues = useMemo<FormIssue[]>(
-    () => (attempt ? validateForm(values, { level: attempt, mode, customer, settings, existingLoad }) : []),
+    // Before any attempt, an active factored load still shows what it is missing for factoring (marked, never blocking).
+    () => (attempt
+      ? validateForm(values, { level: attempt, mode, customer, settings, existingLoad })
+      : existingLoad ? validateForm(values, { level: 'create', mode, customer, settings, existingLoad }).filter((i) => i.marked) : []),
     [attempt, values, mode, customer, settings, existingLoad],
   )
 

@@ -26,6 +26,11 @@ export interface FormIssue {
   message: string
   /** `error` blocks the action it was computed for; `warn` never blocks. */
   severity: 'error' | 'warn'
+  /**
+   * A `warn` the field still shows as required: a factored load past draft missing what OTR needs (Ryne 2026-11-14).
+   * It never blocks a save; it blocks the push into Load Review, server-side.
+   */
+  marked?: boolean
 }
 
 /** What a section's Add Check Call row hands back. */

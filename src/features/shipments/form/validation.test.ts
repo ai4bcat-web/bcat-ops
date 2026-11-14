@@ -44,6 +44,10 @@ describe('required fields by action', () => {
     const old = validateForm(v, { ...base, mode: 'edit', level: 'create', customer: noMc, existingLoad: true })
     expect(blockingIssues(old)).toEqual([])
     expect(old.filter((i) => i.id.includes(':factor:')).map((i) => i.severity)).toEqual(['warn', 'warn'])
+    // A factored load past draft keeps its gaps marked as required on the field (Ryne 2026-11-14), still never blocking a save.
+    expect(old.filter((i) => i.id.includes(':factor:')).every((i) => i.marked === true)).toBe(true)
+    const manual = validateForm(v, { ...base, mode: 'edit', level: 'create', customer: { ...CUSTOMER, billingMethod: 'MANUAL' }, existingLoad: true })
+    expect(manual.filter((i) => i.marked)).toEqual([])
   })
 
   it('a filled form passes Create; LTL does not need equipment', () => {

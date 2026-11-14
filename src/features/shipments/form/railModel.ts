@@ -69,9 +69,10 @@ export function cardOfSection(section: string): RailRow['card'] {
  */
 export function requiredRows(values: ShipmentFormValues, mode: 'create' | 'edit', opts: RequiredOpts = {}): RailRow[] {
   const level: ValidationLevel = opts.level ?? 'create'
-  const blocking = blockingIssues(validateForm(values, {
+  const all = validateForm(values, {
     level, mode, customer: opts.customer ?? null, settings: opts.settings ?? null, existingLoad: opts.existingLoad,
-  }))
+  })
+  const blocking = blockingIssues(all)
   const byId = new Map(blocking.map((i) => [i.id, i]))
   const truckload = (TRUCKLOAD_MODES as string[]).includes(values.mode)
   const covered = new Set<string>()
@@ -83,7 +84,8 @@ export function requiredRows(values: ShipmentFormValues, mode: 'create' | 'edit'
     rows.push({ key: f.key, label: f.label, done: !hit, fieldKey: hit?.fieldKey ?? f.fieldKey, card: f.card, message: hit?.message ?? '' })
   }
   // Everything OTR needs to factor the load is one row, pointing at the first thing missing.
-  const factorGaps = blocking.filter((i) => i.id.includes(':factor:') && !covered.has(i.id))
+  // A factored load past draft keeps the row too: its gaps are marked, not blocking (they block Load Review instead).
+  const factorGaps = all.filter((i) => i.id.includes(':factor:') && (i.severity === 'error' || i.marked) && !covered.has(i.id))
   for (const i of blocking) {
     if (covered.has(i.id) || i.id.includes(':factor:')) continue
     rows.push({ key: i.id, label: i.label, done: false, fieldKey: i.fieldKey, card: cardOfSection(i.section), message: i.message })

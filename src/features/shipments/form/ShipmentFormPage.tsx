@@ -271,6 +271,10 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   const existingLoad = Boolean(bundle && bundle.shipment.status !== 'DRAFT')
   const rows = useMemo(() => requiredRows(values, mode, { customer: form.customer, settings, existingLoad }), [values, mode, form.customer, settings, existingLoad])
   const progress = useMemo(() => requiredProgress(rows), [rows])
+  // Past draft, a factored load's missing factoring fields are marked on the form but never block a save (Ryne 2026-11-14):
+  // they block Submit for Review (and the server's push) instead.
+  const factorRow = existingLoad ? rows.find((r) => r.key === 'factorReady' && !r.done) ?? null : null
+  const saveReady = progress.ready || (factorRow != null && rows.every((r) => r.done || r.key === 'factorReady'))
   const sectionStates = useMemo(
     () => Object.fromEntries(CARD_ORDER.map((k) => [k, sectionState(k, values, form.savedValues, bundle ?? null)])) as Record<CardKey, SectionState>,
     [values, form.savedValues, bundle],
@@ -313,7 +317,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
         : bundle.shipment.legacyImported === true ? 'Imported history is not reviewed'
           : orderOf && orderOf.arStatus !== 'DOCS_NEEDED' ? `Already released (${String(orderOf.arStatus)})`
             : bundle.shipment.loadReviewPushedAt ? 'Already in Load Review'
-              : notDeliveredBlock(bundle)
+              : notDeliveredBlock(bundle) ?? (factorRow ? `${factorRow.label}: ${factorRow.message}` : null)
   const onSubmitForReview = useCallback(async () => {
     if (!bundle) return
     if (form.dirty) {
@@ -491,7 +495,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
 
       <ActionBar
         createMode={mode === 'create'} status={status} dirty={form.dirty} savedAt={bundle?.shipment.updatedAt ?? form.savedAt}
-        done={progress.done} total={progress.total} ready={progress.ready} busy={busy} voided={voided} onRun={onRun} onSaveExit={() => { void onSaveExit() }} onDiscard={cancel}
+        done={progress.done} total={progress.total} ready={saveReady} busy={busy} voided={voided} onRun={onRun} onSaveExit={() => { void onSaveExit() }} onDiscard={cancel}
         onSubmitForReview={mode === 'edit' ? () => { void onSubmitForReview() } : undefined}
         submitReviewBlocked={submitReviewBlocked}
         onDuplicate={mode === 'edit' && bundle ? () => setDuplicating(true) : undefined}

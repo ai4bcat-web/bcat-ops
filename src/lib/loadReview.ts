@@ -28,6 +28,7 @@ import {
   type ReleaseGateResult,
   type ReleaseGateError,
 } from './releaseGate'
+import { FACTOR_GAP_LABEL, type FactorGapCode } from './factorReadyAtCreate'
 
 export type LoadReviewCheckKey = 'salesRep' | 'revDivision' | 'details' | 'charges' | 'documents'
 
@@ -109,6 +110,8 @@ export interface LoadReviewRow {
   reference?: string | null
   customerReference?: string | null
   loadReviewPushedAt?: string | null
+  /** What a factor-billed load is missing for factoring (useShipments derives it); null = not judged. */
+  factorGaps?: FactorGapCode[] | null
 }
 
 /**
@@ -334,6 +337,12 @@ export function evaluateLoadReview(input: {
       facts: reviewFactsOfRow(row),
       requirements: (input.requirements ?? DEFAULT_REVIEW_REQUIREMENTS).filter((key) => key !== 'podReceived'),
     }))
+    // Ryne 2026-11-14: a factored load cannot leave Load Review without what OTR needs from booking. The server's
+    // extras carry the same list (with its full sentences) once the drawer has read them.
+    for (const code of row.legacyImported === true ? [] : row.factorGaps ?? []) {
+      const tab: LoadReviewTab = code.startsWith('PICKUP') || code.startsWith('DELIVERY') ? 'stops' : 'overview'
+      reasons.push(reason(`FACTOR_${code}`, `Missing for factoring: ${FACTOR_GAP_LABEL[code]}`, 'details', openTab(tab)))
+    }
   }
   if (input.revDivisionActive === false && !blank(row.revDivision)) {
     reasons.push(reason('REV_DIVISION_INACTIVE', 'Revenue division is inactive', 'revDivision', { kind: 'SET_REV_DIVISION' }))

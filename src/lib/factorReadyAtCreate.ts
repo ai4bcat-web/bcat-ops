@@ -15,7 +15,7 @@
  * on a strict save (as a refusal), so the two cannot disagree about what is missing.
  * Relative imports only: the shipment Lambda bundles this file by path.
  */
-import { mcRequiredForFactoring, type CustomerType, type FactorBillingCustomer } from './factorBilling'
+import { isFactorBilled, mcRequiredForFactoring, type CustomerType, type FactorBillingCustomer } from './factorBilling'
 import { ordered, placeOf } from './factorHandoff'
 import type { Stop } from '../types'
 
@@ -112,4 +112,62 @@ export function routeEnds(stops: Stop[] | null | undefined): { pickup: FactorPla
     pickup: picks.length ? placeOf(picks[0]) : null,
     delivery: drops.length ? placeOf(drops[drops.length - 1]) : null,
   }
+}
+
+/** Short names for a flag: "Missing for factoring: PO, Pick Up ZIP". */
+export const FACTOR_GAP_LABEL: Record<FactorGapCode, string> = {
+  PO_MISSING: 'PO',
+  RATE_MISSING: 'Customer rate',
+  PICKUP_CITY: 'Pick Up city',
+  PICKUP_STATE: 'Pick Up state',
+  PICKUP_ZIP: 'Pick Up ZIP',
+  DELIVERY_CITY: 'Consignee city',
+  DELIVERY_STATE: 'Consignee state',
+  DELIVERY_ZIP: 'Consignee ZIP',
+  CUSTOMER_MC: 'Customer MC #',
+  BILLING_METHOD: 'Billing method',
+}
+
+/**
+ * The same gaps for a load that already exists (Ryne 2026-11-14): active, in Load Review or past it.
+ * Only a factor-billed customer's load is flagged; any other load answers []. Derived every time it is
+ * read, never stored, so a fixed field clears the flag on the next read.
+ */
+export function factorGapsForLoad(input: FactorReadyInput): FactorGap[] {
+  if (!isFactorBilled(input.customer)) return []
+  return factorGapsAtCreate(input)
+}
+
+/** "Missing for factoring: PO, Pick Up ZIP"; empty when nothing is missing. */
+export function factorGapSummary(codes: readonly FactorGapCode[]): string {
+  if (codes.length === 0) return ''
+  return `Missing for factoring: ${codes.map((c) => FACTOR_GAP_LABEL[c]).join(', ')}`
+}
+
+/** What a customer record we factor must carry: a broker needs an MC. Null when it is fine. */
+export function customerMcRequiredError(customer: FactorBillingCustomer & { mcNumber?: string | null; customerType?: CustomerType | null }): string | null {
+  if (!mcRequiredForFactoring(customer)) return null
+  return text(customer.mcNumber) ? null : 'Enter the MC number — it is required for every broker we factor (OTR looks the broker up by MC).'
+}
+
+/** A customer we factor whose type nobody has set: flagged, never blocked (Ryne 2026-11-14). */
+export function customerNeedsType(customer: FactorBillingCustomer & { customerType?: CustomerType | null }): boolean {
+  return isFactorBilled(customer) && !customer.customerType
+}
+
+export type CustomerFactorFlag = 'MISSING_MC' | 'NEEDS_TYPE'
+
+export const CUSTOMER_FACTOR_FLAG_LABEL: Record<CustomerFactorFlag, string> = {
+  MISSING_MC: 'Missing MC — required for factoring',
+  NEEDS_TYPE: 'Customer type not set (Broker / Shipper)',
+}
+
+/**
+ * What a customer we factor still owes its record, derived (never stored): a broker without an MC, or a type nobody set.
+ * Null for a manually billed customer or a complete one.
+ */
+export function customerFactorFlag(customer: FactorBillingCustomer & { mcNumber?: string | null; customerType?: CustomerType | null }): CustomerFactorFlag | null {
+  if (customerMcRequiredError(customer)) return 'MISSING_MC'
+  if (customerNeedsType(customer)) return 'NEEDS_TYPE'
+  return null
 }

@@ -7,7 +7,7 @@ import { optionsOfRow, type DenseColumn, type DenseOption } from '@/features/tms
 import { customerDisplayName } from '@/lib/customerResolution'
 import { LADDER_FILTER_OPTIONS, assignmentChipText } from './carrierLadder'
 import { boardStatusOf } from '@/lib/shipmentViewDefs'
-import { BOARD_COLUMNS, displayStatusOf, carrierSortKey, invoiceStatusOfRow, rowShipmentType, type ShipmentRow } from './shipmentViews'
+import { BOARD_COLUMNS, displayStatusOf, carrierSortKey, factorInfoText, invoiceStatusOfRow, openFactorGaps, rowShipmentType, type ShipmentRow } from './shipmentViews'
 import type { IntroducedColumn } from './teamColumnLayout'
 import { LOAD_INVOICE_STATUS_LABEL, LOAD_INVOICE_STATUS_ORDER } from '@/lib/loadInvoiceStatus'
 import { SHIPMENT_TYPES, shipmentTypeLabel } from '@/lib/shipmentTypes'
@@ -66,6 +66,11 @@ const BOARD_STATUS_ORDER = ['OPEN', 'COVERED', 'DISPATCHED', 'ARRIVED', 'DEPARTE
 
 export const STATUS_OPTIONS: DenseOption[] = BOARD_STATUS_ORDER.map((s) => ({ value: s, label: sentence(s) }))
 
+/** Factoring Info filter: flagged, or nothing to fix (not factored, complete, or already invoiced). */
+export const FACTOR_INFO_OPTIONS: DenseOption[] = [
+  { value: 'MISSING', label: 'Missing factoring info' },
+  { value: 'OK', label: 'Nothing missing' },
+]
 export const INVOICE_STATUS_OPTIONS: DenseOption[] = LOAD_INVOICE_STATUS_ORDER.map((k) => ({ value: k, label: LOAD_INVOICE_STATUS_LABEL[k] }))
 
 export const SHIPMENT_TYPE_OPTIONS: DenseOption[] = SHIPMENT_TYPES.map((t) => ({ value: t.key, label: t.label }))
@@ -113,6 +118,18 @@ export const SHIPMENT_GRID_COLUMNS: DenseColumn<ShipmentRow>[] = BOARD_COLUMNS.m
         return [{ value: s.key, label: s.label }]
       },
       sortValue: (row) => LOAD_INVOICE_STATUS_ORDER.indexOf(invoiceStatusOfRow(row).key),
+    }
+  }
+  if (col.key === 'factorInfo') {
+    // Ryne 2026-11-14: a factored load missing what OTR needs is flagged until it is invoiced. The cell says "Missing 3"; the tooltip lists them.
+    return {
+      ...base,
+      width: 110,
+      filter: 'multi',
+      text: factorInfoText,
+      fixedOptions: FACTOR_INFO_OPTIONS,
+      optionsOf: (row) => [openFactorGaps(row).length > 0 ? FACTOR_INFO_OPTIONS[0] : FACTOR_INFO_OPTIONS[1]],
+      sortValue: (row) => openFactorGaps(row).length,
     }
   }
   if (col.key === 'carrierAssignment') {
@@ -189,6 +206,8 @@ export const SHIPMENT_DEFAULT_FROZEN = ['status', 'invoiceStatus', 'rateConPrese
  */
 export const SHIPMENT_INTRODUCED_COLUMNS: IntroducedColumn[] = [
   { key: 'invoiceStatus', after: 'status', since: '2026-11-14T07:00:00.000Z' },
+  // Factoring Info beside Invoice Status (Ryne 2026-11-14): what a factored load is missing before it can be factored.
+  { key: 'factorInfo', after: 'invoiceStatus', since: '2026-11-14T09:00:00.000Z' },
 ]
 
 /** The Actions column the page appends after the chosen columns. */

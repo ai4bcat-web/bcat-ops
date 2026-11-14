@@ -32,6 +32,7 @@ import { validateCommissionPlans, validatePaySchedule } from '../../../src/lib/c
 import { validateAutomationPatch } from '../../../src/lib/trackingAutomation'
 import { CUSTOMER_TRACKING_MODES, DRIVER_SMS_TARGETS, TRACKING_METHODS } from '../../../src/lib/trackingPrefs'
 import { CUSTOMER_TYPES } from '../../../src/lib/factorBilling'
+import { customerMcRequiredError } from '../../../src/lib/factorReadyAtCreate'
 import { teamMembership, validateTeams } from '../../../src/lib/teams'
 import { REVIEW_REQUIREMENTS, normalizeReviewRequirements } from '../../../src/lib/reviewRequirements'
 import { SEED_DIVISIONS, SEED_RULES, validateDivisions, validateRules } from '../../../src/lib/ownership'
@@ -1419,6 +1420,9 @@ async function upsertCustomer(
   if (!isCreate && !opts.imported && !changeReason && changeNeedsReason(diffCustomer(existing, item))) {
     throw new Error(REASON_REQUIRED_MESSAGE)
   }
+  // Ryne 2026-11-14: a broker we factor carries an MC from the day it is created. Imports keep what the source had.
+  const mcError = opts.imported ? null : customerMcRequiredError(item as Parameters<typeof customerMcRequiredError>[0])
+  if (mcError) throw new Error(mcError)
   const auditCustomer = (before: Record<string, unknown> | null, after: Record<string, unknown>) =>
     auditCustomerChange(
       (entityType, entityId, auditAction, changes) => writeAudit(entityType, entityId, auditAction, caller, changes),
