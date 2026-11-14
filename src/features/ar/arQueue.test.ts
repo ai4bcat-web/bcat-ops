@@ -82,4 +82,46 @@ describe('factorQueueRows (the folded-in To factor tab)', () => {
     expect(rows[0]).toMatchObject({ status: 'READY', shipmentNumber: '11836', amountCents: 37_500, factored: true, orderId: 'factor:11836' })
     expect(rows[0].factorItem?.id).toBe('11836')
   })
+
+  const invoice = (over: Record<string, unknown>) => ({ id: 'inv-1', number: null, shipmentId: 's-1', status: 'ISSUED', totalCents: 37_500, paidCents: 0, balanceCents: 37_500, ...over }) as never
+
+  it('skips an unlinked row whose PRO already has a live invoice (by invoice number, PRO-shaped id or shipment PRO)', () => {
+    const lk = { ...l, shipmentsById: new Map([['s-9', { id: 's-9', number: '900' }]]) as never }
+    const invoices = new Map<string, never>([
+      ['11836', invoice({ id: '11836' })],
+      ['inv-2', invoice({ id: 'inv-2', number: '500' })],
+      ['inv-3', invoice({ id: 'inv-3', shipmentId: 's-9' })],
+      ['inv-4', invoice({ id: 'inv-4', number: '700', status: 'VOID' })],
+    ])
+    const rows = factorQueueRows([
+      item({ id: 'a', proNumber: '11836' }),
+      item({ id: 'b', proNumber: '500' }),
+      item({ id: 'c', proNumber: '900' }),
+      item({ id: 'd', proNumber: '700' }),
+      item({ id: 'e', proNumber: '800' }),
+    ], [], invoices, lk)
+    expect(rows.map((r) => r.key)).toEqual(['factor:d', 'factor:e'])
+  })
+
+  it('keeps a row linked to its own invoice, even though that PRO is invoiced', () => {
+    const invoices = new Map<string, never>([['inv-2', invoice({ id: 'inv-2', number: '500' })]])
+    const rows = factorQueueRows([item({ id: 'b', proNumber: '500', invoiceId: 'inv-2' })], [], invoices, l)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ invoiceId: 'inv-2', amountCents: 37_500 })
+  })
+
+  it('shows an unlinked row at its cached OTR payload amount, and $0 only when nothing has one', () => {
+    const rows = factorQueueRows([
+      item({ id: 'p', proNumber: 'P', otrReadiness: { payload: { InvoiceAmount: 375 } } }),
+      item({ id: 'q', proNumber: 'Q', otrReadiness: { payload: { InvoiceAmount: '$1,250.50' } } }),
+      item({ id: 'r', proNumber: 'R', otrAmount: 90, otrReadiness: { payload: { InvoiceAmount: 375 } } }),
+      item({ id: 's', proNumber: 'S' }),
+    ], [], new Map(), l)
+    expect(rows.map((r) => [r.key, r.amountCents, r.balanceCents])).toEqual([
+      ['factor:p', 37_500, 37_500],
+      ['factor:q', 125_050, 125_050],
+      ['factor:r', 9_000, 9_000],
+      ['factor:s', 0, 0],
+    ])
+  })
 })
