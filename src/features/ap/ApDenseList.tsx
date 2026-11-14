@@ -9,6 +9,7 @@ import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { Eye, RefreshCw, Search } from 'lucide-react'
 import { TmsButton, TmsFilterChip, TmsHeadBand, TmsInput, TmsTabs, type TmsTabGroup } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
+import type { DenseCardLayout } from '@/features/tms/grid/denseCardLayout'
 import {
   ClearFiltersButton, ColumnsButton, DensityToggle, DenseKpiStrip, SummaryToggle, type DenseKpi,
 } from '@/features/tms/grid/DenseControls'
@@ -43,6 +44,8 @@ export interface ApListConfig<T> {
   /** Reused by other lists (Drivers): the search box hint and the grid's accessible name. Default to the AP wording. */
   searchPlaceholder?: string
   ariaLabel?: string
+  /** Phone cards: which columns go on top (DenseGrid's `cardLayout`). */
+  cardLayout?: DenseCardLayout
 }
 
 /** The page head and the two tab strips: kept mounted while the views under them swap. */
@@ -110,7 +113,7 @@ export function ApDenseList<T>({ config, email, onRefresh, pageFilters }: {
   pageFilters?: { count: number; onClear: () => void }
 }) {
   const {
-    gridId, columns, rows, rowKey, emptyText, banner, actions, filterChips, onAddFilter, onClearFilters, kpis, onRowClick, searchPlaceholder, ariaLabel,
+    gridId, columns, rows, rowKey, emptyText, banner, actions, filterChips, onAddFilter, onClearFilters, kpis, onRowClick, searchPlaceholder, ariaLabel, cardLayout,
   } = config
   const [filters, setFilters] = useState<DenseFilters>({})
   const [search, setSearch] = useState('')
@@ -209,6 +212,7 @@ export function ApDenseList<T>({ config, email, onRefresh, pageFilters }: {
           onResize={prefs.setWidth}
           onRowClick={onRowClick}
           empty={emptyText}
+          cardLayout={cardLayout}
         />
       </div>
     </div>

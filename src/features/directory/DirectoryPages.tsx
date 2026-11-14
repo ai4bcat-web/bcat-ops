@@ -6,7 +6,7 @@ import { PossibleDuplicateBadge } from './components/PossibleDuplicateBadge'
 import { buildDuplicateIndex, normalizeCustomerName } from '@/lib/customerDuplicates'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Archive, ArchiveRestore, MapPin, MessageSquarePlus, Merge, Pencil, Search, Settings2, Trash2, Users } from 'lucide-react'
+import { Archive, ArchiveRestore, MapPin, MessageSquarePlus, Merge, Pencil, Search, Settings2, SlidersHorizontal, Trash2, Users } from 'lucide-react'
 import { CustomerRemoveDialog } from './components/CustomerRemoveDialog'
 import { toast } from 'sonner'
 import { useAuth } from '@/hooks/useAuth'
@@ -316,6 +316,8 @@ export function CustomersPage() {
   }, [setParams])
   const [includeFactored, setIncludeFactored] = useState(false)
   const [duplicatesOnly, setDuplicatesOnly] = useState(false)
+  // Phones: the filter chips and secondary actions sit behind a Filters button (desktop shows them inline, as before).
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const emailCounts = useMemo(() => {
     const counts = { missing: 0, factored: 0 }
     for (const row of rowsWithStatus) {
@@ -493,6 +495,18 @@ export function CustomersPage() {
             onChange={(e) => { setQuery(e.target.value); setPageSize(PAGE_SIZE) }}
             className="tms-dense-search"
           />
+          <TmsButton
+            size="sm"
+            variant="secondary"
+            className="tms-dense-filters-toggle"
+            aria-expanded={filtersOpen}
+            aria-controls="customers-filters"
+            onClick={() => setFiltersOpen((v) => !v)}
+          >
+            <SlidersHorizontal size={14} aria-hidden="true" /> Filters{activeFilterCount(filters) + (duplicatesOnly ? 1 : 0) > 0 ? ` (${activeFilterCount(filters) + (duplicatesOnly ? 1 : 0)})` : ''}
+          </TmsButton>
+          {/* Layout-neutral on a desktop; on a phone these collapse behind the Filters button so the list starts near the top. */}
+          <div className="tms-dense-filters" id="customers-filters" data-open={filtersOpen ? 'true' : undefined}>
           <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('invoiceEmail', { values: includeFactored ? ['MISSING', 'INVALID', 'FACTORED_QUEUE_ONLY'] : ['MISSING', 'INVALID'] }) }}>Missing invoice e-mail ({emailCounts.missing + (includeFactored ? emailCounts.factored : 0)})</TmsButton>
           <label><input type="checkbox" checked={includeFactored} onChange={(e) => { setIncludeFactored(e.target.checked); if (filters.invoiceEmail?.values?.includes('MISSING')) setColumnFilter('invoiceEmail', { values: e.target.checked ? ['MISSING', 'INVALID', 'FACTORED_QUEUE_ONLY'] : ['MISSING', 'INVALID'] }) }} /> Include factored</label>
           <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('invoiceEmail', { values: ['FACTORED_QUEUE_ONLY'] }) }}>Factored, missing invoice e-mail ({emailCounts.factored})</TmsButton>
@@ -525,6 +539,7 @@ export function CustomersPage() {
             <TmsButton size="sm" variant="secondary" data-testid="export-all-customers" title="Every customer (archived too) with every field" onClick={() => void exportAll('customers')}>Export all (CSV)</TmsButton>
           )}
           <TmsButton size="sm" variant="secondary" onClick={() => navigate('/tms/customers/billing-setup')}>Billing setup</TmsButton>
+          </div>
           <TmsButton size="sm" variant="primary" onClick={() => setEditing('new')}>Customer</TmsButton>
         </div>
         <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />

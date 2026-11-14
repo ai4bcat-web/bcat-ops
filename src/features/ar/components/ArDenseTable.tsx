@@ -10,6 +10,7 @@ import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { Search } from 'lucide-react'
 import { TmsInput } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
+import type { DenseCardLayout } from '@/features/tms/grid/denseCardLayout'
 import {
   ClearFiltersButton, ColumnsButton, DenseKpiStrip, DensityToggle, SummaryToggle, type DenseKpi,
 } from '@/features/tms/grid/DenseControls'
@@ -32,6 +33,8 @@ export interface ArGrid<T> {
   renderCell?: (row: T, key: string) => ReactNode
   empty: ReactNode
   kpis?: DenseKpi[]
+  /** Phone cards: which columns go on top (DenseGrid's `cardLayout`). */
+  cardLayout?: DenseCardLayout
   /** Optional grouping: rows are re-ordered by group after sort and filter, a header row per group. */
   group?: {
     keyOf: (row: T) => string
@@ -46,7 +49,7 @@ export function ArDenseTable<T>({ grid, pageFilters }: {
   pageFilters?: { count: number; onClear: () => void }
 }) {
   const email = useAuthUser()?.email ?? ''
-  const { gridId, label, columns: catalogAll, rows, rowKey, renderCell, empty, kpis, group } = grid
+  const { gridId, label, columns: catalogAll, rows, rowKey, renderCell, empty, kpis, group, cardLayout } = grid
   const [filters, setFilters] = useState<DenseFilters>({})
   const [search, setSearch] = useState('')
 
@@ -132,6 +135,7 @@ export function ArDenseTable<T>({ grid, pageFilters }: {
           empty={empty}
           groupKeyOf={group?.keyOf}
           renderGroupHeader={group?.header}
+          cardLayout={cardLayout}
         />
       </div>
     </div>

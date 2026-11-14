@@ -1246,6 +1246,7 @@ function queueView({
       rows,
       rowKey: (row) => row.key,
       renderCell,
+      cardLayout: { title: 'shipment', party: 'customer', amount: invoiced ? 'balance' : 'amount', pills: ready ? ['factorReady'] : ['status'] },
       empty: ready
         ? 'Nothing released is waiting to be invoiced.'
         : invoiced ? 'No invoice has an open balance.' : `Nothing was collected in ${monthLabel(month)}.`,
@@ -1379,6 +1380,7 @@ function paymentsView({
       rows: shown,
       rowKey: (p) => p.id,
       renderCell,
+      cardLayout: { title: 'date', amount: 'amount', pills: ['kind'] },
       empty: customer ? `No cash has been posted for ${customer.name}.` : 'Choose a customer to see their cash rows.',
     },
   })
@@ -1470,6 +1472,7 @@ function agingView({
       rows: aging.byCustomer,
       rowKey: (row) => row.customerId,
       renderCell,
+      cardLayout: { title: 'customer', amount: 'total' },
       empty: 'Nothing is owed.',
     },
   })

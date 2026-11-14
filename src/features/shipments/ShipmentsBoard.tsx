@@ -1292,6 +1292,7 @@ function BoardPane({
               setCapRefusal(next.refusal)
             }}
             empty="No shipments match."
+            cardLayout={{ title: 'proNumber', party: 'customerName', amount: 'customerTotalRate', pills: ['status', 'invoiceStatus'], detailCount: 5 }}
           />
         )}
       </div>
