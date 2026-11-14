@@ -3389,7 +3389,7 @@ export async function listShipmentsByMonth(month: string): Promise<ShipmentRecor
   return readShipments((fields) => listAllByIndex<ShipmentRecord>('listShipmentByPickupMonthAndPickupAppt', { pickupMonth: month }, fields, 1000))
 }
 /** The shipment fields the Needs review list reads (Ryne 2026-11-13). */
-export type FinanceReviewShipment = Pick<ShipmentRecord, 'id' | 'number' | 'customerName' | 'status' | 'financeReviewAt' | 'financeReviewReason' | 'financeReviewApNote'>
+export type FinanceReviewShipment = Pick<ShipmentRecord, 'id' | 'number' | 'customerName' | 'status' | 'deliveredAt' | 'financeReviewAt' | 'financeReviewReason' | 'financeReviewApNote'>
 
 /** Every shipment flagged for AR/AP review: a filtered scan, since the flag is rare and has no index. */
 export async function listFinanceReviewShipments(): Promise<FinanceReviewShipment[]> {
@@ -3397,13 +3397,18 @@ export async function listFinanceReviewShipments(): Promise<FinanceReviewShipmen
   let nextToken: string | null = null
   do {
     const r = await client.graphql({
-      query: `query ListFinanceReview($nextToken: String) { listShipments(filter: { financeReviewAt: { attributeExists: true } }, limit: 1000, nextToken: $nextToken) { items { id number customerName status financeReviewAt financeReviewReason financeReviewApNote } nextToken } }`,
+      query: `query ListFinanceReview($nextToken: String) { listShipments(filter: { financeReviewAt: { attributeExists: true } }, limit: 1000, nextToken: $nextToken) { items { id number customerName status deliveredAt financeReviewAt financeReviewReason financeReviewApNote } nextToken } }`,
       variables: { nextToken },
     }) as { data: { listShipments: { items: (FinanceReviewShipment | null)[]; nextToken?: string | null } } }
     for (const item of r.data.listShipments.items) if (item) rows.push(item)
     nextToken = r.data.listShipments.nextToken ?? null
   } while (nextToken)
   return rows
+}
+
+/** Ryne 2026-11-13: set when a shipment delivered (`YYYY-MM-DD`); answers a "Missing delivered date" review flag and re-dates a car-shipping bill to delivered + 2. */
+export async function setDeliveredDate(input: { shipmentId: string; deliveredDate: string }): Promise<{ shipmentId: string; deliveredAt: string; reviewCleared: boolean; reviewReason: string | null; redatedBills: number }> {
+  return financeAction('SET_DELIVERED_DATE', input)
 }
 
 export async function listShipments(): Promise<ShipmentRecord[]> {

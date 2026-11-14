@@ -398,7 +398,7 @@ export function CustomersPage() {
         const addresses = invoiceAddresses(c)
         const factored = c.billingMethod === 'FACTOR'
         // Factored or not, the customer's own invoice address is shown: it's still who to talk to about the bill.
-        if (addresses.length === 0) return <TmsBadge tone="orange">Missing invoice e-mail</TmsBadge>
+        if (addresses.length === 0) return factored ? <InvoiceEmailBadge customer={c} /> : <TmsBadge tone="orange">Missing invoice e-mail</TmsBadge>
         const title = [addresses.join(', '), c.invoiceCopyEmails?.length ? `Copy: ${c.invoiceCopyEmails.join(', ')}` : '', factored ? 'Factored: invoices are submitted through OTR' : ''].filter(Boolean).join('\n')
         return (
           <span title={title} data-testid={`invoice-email-${c.id}`}>
@@ -415,7 +415,7 @@ export function CustomersPage() {
             {c.apptWorkflow === 'BATORY' && <TmsBadge tone="blue">BATORY</TmsBadge>}
             {c.active === false && <TmsBadge>ARCHIVED</TmsBadge>}
             <PossibleDuplicateBadge info={duplicates.get(c.id)} />
-            {!prefs.columns.includes('invoiceEmail') && ['MISSING', 'INVALID'].includes(customerInvoiceEmailState(c)) && <InvoiceEmailBadge customer={c} />}
+            {!prefs.columns.includes('invoiceEmail') && ['MISSING', 'INVALID', 'FACTORED_QUEUE_ONLY'].includes(customerInvoiceEmailState(c)) && <InvoiceEmailBadge customer={c} />}
             {!prefs.columns.includes('billingMethod') && billingStateOf(c) === 'NOT_SET' && <BillingMethodBadge customer={c} />}
           </span>
         )
@@ -494,7 +494,7 @@ export function CustomersPage() {
           />
           <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('invoiceEmail', { values: includeFactored ? ['MISSING', 'INVALID', 'FACTORED_QUEUE_ONLY'] : ['MISSING', 'INVALID'] }) }}>Missing invoice e-mail ({emailCounts.missing + (includeFactored ? emailCounts.factored : 0)})</TmsButton>
           <label><input type="checkbox" checked={includeFactored} onChange={(e) => { setIncludeFactored(e.target.checked); if (filters.invoiceEmail?.values?.includes('MISSING')) setColumnFilter('invoiceEmail', { values: e.target.checked ? ['MISSING', 'INVALID', 'FACTORED_QUEUE_ONLY'] : ['MISSING', 'INVALID'] }) }} /> Include factored</label>
-          <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('invoiceEmail', { values: ['FACTORED_QUEUE_ONLY'] }) }}>Factored: queue only ({emailCounts.factored})</TmsButton>
+          <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('invoiceEmail', { values: ['FACTORED_QUEUE_ONLY'] }) }}>Factored, missing invoice e-mail ({emailCounts.factored})</TmsButton>
           <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('billingMethod', { values: ['NOT_SET'] }) }}>Billing method not set ({billingNotSetCount})</TmsButton>
           <TmsButton size="sm" variant={duplicatesOnly ? 'primary' : undefined} aria-pressed={duplicatesOnly} data-testid="customers-duplicates-chip" onClick={() => { setActiveTab('all'); setDuplicatesOnly((v) => !v); setPageSize(PAGE_SIZE) }}>Possible duplicates ({duplicateCount})</TmsButton>
           {isManager && (
