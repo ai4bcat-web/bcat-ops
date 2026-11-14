@@ -2972,6 +2972,19 @@ describe('SAVE_COLUMN_TEMPLATE and DELETE_COLUMN_TEMPLATE', () => {
     expect(tables.templates.has('shipments-team-default')).toBe(true)
   })
 
+  it('treats the Active and Voided list layouts as team defaults too: admin-only, forced shared', async () => {
+    const tables = columnTemplateTables()
+    for (const id of ['shipments-team-default-active', 'shipments-team-default-voided']) {
+      await expect(
+        handler(event('SAVE_COLUMN_TEMPLATE', { id, name: 'x', columns: ['status'] }, TMS_CALLER)),
+      ).rejects.toThrow('only an admin can set the team default column layout')
+      const saved = (await handler(event('SAVE_COLUMN_TEMPLATE', { id, name: 'Team', columns: ['status'], shared: false }, ADMIN))) as Record<string, unknown>
+      expect(saved).toMatchObject({ shared: true, version: 1 })
+      await expect(handler(event('DELETE_COLUMN_TEMPLATE', { id }, TMS_CALLER))).rejects.toThrow('only an admin can set the team default column layout')
+      expect(tables.templates.has(id)).toBe(true)
+    }
+  })
+
   it('saves the team default with nothing pinned: an empty pinned list is valid (regression: it failed as "columns cannot be empty")', async () => {
     const tables = columnTemplateTables()
     const saved = (await handler(event('SAVE_COLUMN_TEMPLATE', {

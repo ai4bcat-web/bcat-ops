@@ -128,9 +128,10 @@ import {
 } from './shipmentGridColumns'
 import {
   fitColumnWidths,
-  resolveTeamLayout,
-  TEAM_DEFAULT_COLUMN_TEMPLATE_ID,
-  TEAM_DEFAULT_COLUMN_TEMPLATE_NAME,
+  listLabel,
+  resolveListLayout,
+  teamTemplateIdFor,
+  teamTemplateNameFor,
   type TeamColumnLayout,
 } from './teamColumnLayout'
 import type { BatchShipmentTask, CustomerRecord, LocationRecord, ShipmentColumnTemplateRecord, TmsSettings, UserProfileRecord } from '@/types/tms'
@@ -618,12 +619,14 @@ function BoardPane({
     validKeys: SHIPMENT_COLUMN_KEYS,
     defaultSort: DEFAULT_SORT,
   })
+  // Active, All and Voided each have their own team layout (an Active search across all years still uses Active's).
   const teamLayout = useMemo(
-    () => resolveTeamLayout(columnTemplates, SHIPMENT_COLUMN_KEYS, SHIPMENT_DEFAULT_COLUMNS, SHIPMENT_DEFAULT_FROZEN, SHIPMENT_INTRODUCED_COLUMNS),
-    [columnTemplates],
+    () => resolveListLayout(list, columnTemplates, SHIPMENT_COLUMN_KEYS, SHIPMENT_DEFAULT_COLUMNS, SHIPMENT_DEFAULT_FROZEN, SHIPMENT_INTRODUCED_COLUMNS),
+    [list, columnTemplates],
   )
-  // An admin's unsaved edit of the team layout; null outside edit mode.
+  // An admin's unsaved edit of the current list's team layout; null outside edit mode. Switching lists drops it so an edit never lands on another list.
   const [layoutDraft, setLayoutDraft] = useState<TeamColumnLayout | null>(null)
+  useEffect(() => { setLayoutDraft(null) }, [list])
   const [layoutSaving, setLayoutSaving] = useState(false)
   const layout = layoutDraft ?? teamLayout
   const columnKeys = layout.columns
@@ -711,14 +714,14 @@ function BoardPane({
     setLayoutSaving(true)
     try {
       await saveShipmentColumnTemplate({
-        id: TEAM_DEFAULT_COLUMN_TEMPLATE_ID,
-        name: TEAM_DEFAULT_COLUMN_TEMPLATE_NAME,
+        id: teamTemplateIdFor(list),
+        name: teamTemplateNameFor(list),
         columns: layoutDraft.columns,
         widths: layoutDraft.widths,
         pinned: layoutDraft.pinned,
         shared: true,
       })
-      toast.success('Team default saved. Everyone sees it now.')
+      toast.success(`${listLabel(list)} layout saved. Everyone sees it now.`)
       setLayoutDraft(null)
       refreshTemplates()
     } catch (err) {
@@ -726,7 +729,7 @@ function BoardPane({
     } finally {
       setLayoutSaving(false)
     }
-  }, [layoutDraft, refreshTemplates])
+  }, [layoutDraft, refreshTemplates, list])
 
   /** Every active shipment (the Active list, ignoring this page's tab, filters and columns) with every stored field. */
   const exportAllActive = useCallback(() => {
@@ -1212,7 +1215,7 @@ function BoardPane({
         )}
         {isAdmin && layoutDraft && (
           <>
-            <span className="text-xs text-muted-foreground" role="status">Editing the team layout: drag headers, resize, or use Columns.</span>
+            <span className="text-xs text-muted-foreground" role="status">Editing the team layout for {listLabel(list)}: drag headers, resize, or use Columns.</span>
             {JSON.stringify(layoutDraft) !== JSON.stringify(teamLayout) ? (
               <TmsBadge tone="orange" data-testid="layout-unsaved" title="Apply only changes this editing view. Save as team default to keep it for everyone.">Not saved yet</TmsBadge>
             ) : null}
@@ -1347,6 +1350,7 @@ function BoardPane({
       {isAdmin && layoutDraft && (
         <ColumnsDialog
           catalog={SHIPMENT_GRID_COLUMNS}
+          title={`Columns for ${listLabel(list)}`}
           open={columnsOpen}
           onOpenChange={setColumnsOpen}
           columns={layoutDraft.columns}
