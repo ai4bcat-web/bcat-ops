@@ -1143,7 +1143,7 @@ function queueView({
     <>
       {groupControl}
       {ready && (
-        <>
+        <div className="tms-batch-actions" data-active={selected.length > 0 ? 'true' : undefined}>
           <span className="text-sm tms-muted">
             {selected.length} selected{selected.length > BATCH_GENERATE_LIMIT ? ` — ${BATCH_GENERATE_LIMIT} at a time` : ''}
           </span>
@@ -1177,12 +1177,12 @@ function queueView({
           >
             <Mail size={14} /> Send {selectedDrafts.length || ''} invoice{selectedDrafts.length === 1 ? '' : 's'}
           </TmsButton>
-        </>
+        </div>
       )}
       {invoiced && (() => {
         const picked = rows.filter((row) => selected.includes(row.orderId) && payable(row)).map((row) => row.invoice as InvoiceRecord)
         return (
-          <>
+          <div className="tms-batch-actions" data-active={picked.length > 0 ? 'true' : undefined}>
             <span className="text-sm tms-muted">{picked.length} selected</span>
             <TmsButton variant="primary" aria-label="Mark selected invoices paid" data-testid="ar-mark-paid-batch"
               disabled={busy || picked.length === 0}
@@ -1190,7 +1190,7 @@ function queueView({
               onClick={() => onMarkPaid(picked)}>
               Mark {picked.length || ''} paid
             </TmsButton>
-          </>
+          </div>
         )
       })()}
       {status === 'PAID' && (

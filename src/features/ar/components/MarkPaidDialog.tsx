@@ -127,7 +127,7 @@ export function MarkPaidDialog({ invoices, onClose, onDone }: {
         </div>
       )}
       <div className="tms-table-wrap">
-        <table className="tms-table" data-testid="mark-paid-rows">
+        <table className="tms-table tms-table-stack" data-testid="mark-paid-rows">
           <thead>
             <tr>
               <th>Invoice</th>
@@ -147,23 +147,23 @@ export function MarkPaidDialog({ invoices, onClose, onDone }: {
               const partial = inv && cents > 0 && cents < inv.balanceCents
               return (
                 <tr key={row.invoiceId} data-testid={`mark-paid-row-${inv?.number ?? row.invoiceId}`}>
-                  <td>{inv?.number ?? row.invoiceId}</td>
-                  <td>{inv?.customerName ?? '—'}</td>
-                  <td style={{ textAlign: 'right' }}>{inv ? formatCents(inv.balanceCents) : '—'}</td>
-                  <td style={{ minWidth: 150 }}>
+                  <td data-label="Invoice">{inv?.number ?? row.invoiceId}</td>
+                  <td data-label="Customer">{inv?.customerName ?? '—'}</td>
+                  <td data-label="Open" style={{ textAlign: 'right' }}>{inv ? formatCents(inv.balanceCents) : '—'}</td>
+                  <td data-label="Paid date" style={{ minWidth: 150 }}>
                     <DateUsInput value={row.paidOn} onChange={(v) => edit(row.invoiceId, { paidOn: v })} inputProps={{ 'aria-label': `Paid date for ${inv?.number ?? ''}` }} />
                   </td>
-                  <td>
+                  <td data-label="Method">
                     <TmsSelect aria-label={`Method for ${inv?.number ?? ''}`} value={row.method} onChange={(e) => edit(row.invoiceId, { method: e.target.value as MarkPaidMethod })}>
                       {METHODS.map((m) => <option key={m} value={m}>{MARK_PAID_METHOD_LABEL[m]}</option>)}
                     </TmsSelect>
                   </td>
-                  <td>
+                  <td data-label="Check / ref #">
                     <TmsInput aria-label={`Check or reference number for ${inv?.number ?? ''}`} value={row.reference}
                       placeholder={row.method === 'CHECK' ? 'Check # (required)' : 'Optional'}
                       onChange={(e) => edit(row.invoiceId, { reference: e.target.value })} />
                   </td>
-                  <td style={{ textAlign: 'right', minWidth: 130 }}>
+                  <td data-label="Amount paid" style={{ textAlign: 'right', minWidth: 130 }}>
                     <TmsInput aria-label={`Amount paid for ${inv?.number ?? ''}`} inputMode="decimal" value={row.amount}
                       style={{ textAlign: 'right' }} onChange={(e) => edit(row.invoiceId, { amount: e.target.value })} />
                     {partial && <div className="text-xs tms-muted">Partial · {formatCents((inv?.balanceCents ?? 0) - cents)} stays open</div>}
