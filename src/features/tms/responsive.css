@@ -160,18 +160,34 @@
 
 /* ── Page heads and summary cards on phones (billing, directory, workstations) ──────────────────────
    The action cluster sits under the title, left-aligned, labels on one line ("Group by" was breaking in two). Summary cards in a head
-   band (Receivables, Open AR by division, Payables) become one swipeable row instead of a stack that pushed the tabs and table below
-   the fold. */
+   band (Receivables, Open AR by division, the tab card, Payables) stack one per line at full width. They were a sideways-swiping row,
+   which on a phone read as cards overlapping each other, the next one cut off at the screen edge (Ryne 2026-11-14). */
 @media (max-width: 640px) {
   .tms-shell .tms-page-actions { margin-left: 0; flex: 1 1 100%; justify-content: flex-start; gap: 6px; }
   .tms-shell .tms-page-actions label { white-space: nowrap; }
   .tms-shell .tms-head-band-cards,
-  .tms-portal .tms-head-band-cards {
-    display: flex; overflow-x: auto; scroll-snap-type: x mandatory; gap: 8px; padding-bottom: 4px;
-    -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
-  }
+  .tms-portal .tms-head-band-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; overflow: visible; }
   .tms-shell .tms-head-band-cards > *,
-  .tms-portal .tms-head-band-cards > * { flex: 0 0 min(88%, 340px); scroll-snap-align: start; }
+  .tms-portal .tms-head-band-cards > * { min-width: 0; width: 100%; max-width: 100%; }
+}
+
+/* Status tabs on phones (Ready to invoice · $0.00, Invoiced · $311,390.37 open ...): each tab keeps its label on one line and the row
+   scrolls sideways inside its own strip, instead of every tab squeezed to 180px with its amount broken onto a second line. */
+@media (max-width: 900px) {
+  .tms-shell .tms-ship-tab-board { max-width: none; white-space: nowrap; }
+  .tms-shell .tms-ship-tabs { overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+  /* Payable's pill tabs (To pay, Scheduled, Paid ...): same, one row that scrolls inside its pill. */
+  .tms-shell .tms-head-band-bottom .tms-quick-tabs { display: flex; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .tms-shell .tms-head-band-bottom .tms-quick-tab { flex: 0 0 auto; }
+}
+
+/* The sticky top bar on phones sits flush with the top of the screen. It floated a few pixels down as a rounded card, so the page
+   scrolling under it showed through above it and looked like the bar was laid over the controls. */
+@media (max-width: 900px) {
+  .tms-shell .tms-topbar { top: 0; border-top: 0; border-radius: 0; margin-inline: -8px; border-left: 0; border-right: 0; }
+  .tms-shell .tms-topbar::before {
+    content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 100vh; background: var(--tms-bg); pointer-events: none;
+  }
 }
 
 /* Workstation toolbars wrap their segmented filters in plain divs; a long filter row (Tracking's Focus tabs measure 603px) scrolls inside
