@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { customerFactorFlag, customerMcRequiredError, factorGapsAtCreate, factorGapsError, factorGapsForLoad, factorGapSummary, orderPoNumber, routeEnds } from './factorReadyAtCreate'
+import { customerFactorFlag, customerMcRequiredError, factorGapsAtCreate, factorGapsError, factorGapsForLoad, factorGapSummary, orderPoNumber, factoringPoNumber, routeEnds } from './factorReadyAtCreate'
 import { isFactorBilled } from './factorBilling'
 import type { Stop } from '../types'
 
@@ -102,3 +102,15 @@ describe('factor gaps after booking (Ryne 2026-11-14)', () => {
     expect(customerFactorFlag({ ...broker, billingMethod: 'MANUAL', customerType: null })).toBeNull()
   })
 })
+
+describe('factoringPoNumber', () => {
+  it('takes the PO reference first, then the Customer Ref', () => {
+    expect(factoringPoNumber([{ code: 'PO', value: 'P-1', visibility: 'CUSTOMER' }], 'REF-9')).toBe('P-1')
+    // Shipment 20000: the Customer Ref header is set, the order has no PO reference.
+    expect(factoringPoNumber([], 'M371205')).toBe('M371205')
+    expect(factoringPoNumber([{ code: 'PO', value: 'X', visibility: 'INTERNAL' }], 'M371205')).toBe('M371205')
+    expect(factoringPoNumber(null, 'N/A')).toBeNull()
+    expect(factoringPoNumber(null, '  ')).toBeNull()
+  })
+})
+

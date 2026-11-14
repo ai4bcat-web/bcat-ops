@@ -3,7 +3,7 @@ import { listCarriers, listCustomers, listDrivers, listQuotes, listUserProfiles 
 import type { LoadBoardSummary } from '@/lib/apiClient'
 import { loadBoardBundle, peekBoardBundle, type BoardBundle, type BoardView } from '@/lib/boardData'
 import { aggregateApStatus } from '@/lib/carrierTotals'
-import { factorGapsForLoad, orderPoNumber, routeEnds, type FactorGapCode } from '@/lib/factorReadyAtCreate'
+import { factorGapsForLoad, factoringPoNumber, routeEnds, type FactorGapCode } from '@/lib/factorReadyAtCreate'
 import { modelsAvailable } from '@/lib/modelAvailability'
 import type { BoardCarrier } from '@/lib/shipmentViewDefs'
 import type { Driver, Stop } from '@/types'
@@ -692,7 +692,7 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         factorGaps: s.legacyImported === true ? [] : stops && order
           ? factorGapsForLoad({
             customer: customer ?? null,
-            poNumber: orderPoNumber(order.references),
+            poNumber: factoringPoNumber(order.references, firstLoad?.tmsId),
             customerRateCents: order.revenueCents ?? null,
             ...routeEnds(stops),
           }).map((g) => g.code)

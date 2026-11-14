@@ -24,7 +24,6 @@ import { SettingsModal, CreditModal } from './OwnerOperatorPayForms'
 import { DeductionModal, WeeklyMileageRow, EmailModal } from '../driver-pay/DriverPayForms'
 import { SendDriverInvite } from './SendDriverInvite'
 import { SettlementDocUpload } from './SettlementDocUpload'
-import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { PAY_HOLD_LABEL, type PayHoldReason } from '@/lib/payHold'
 import { PAY_EMAIL_CC } from '@/lib/payEmail'
 
@@ -103,19 +102,16 @@ function OtrDoc({
 }
 
 /**
- * The PRO, as the way into the load it names.
+ * The PRO, as the way into the shipment it names.
  *
  * Every conversation about a settlement row is "what is going on with 14559" — and the
- * answer is on the load. Copying the number and hunting for it on the Loads page is the
- * step this removes. A load that belongs to a shipment links to the shipment page itself
- * (a real link, so ctrl/cmd-click opens a tab); an old load with no shipment still opens
- * in the load drawer. Falls back to plain text when the row never resolved to a load, so
- * an unlinked trip reads as unlinked rather than as a dead link.
+ * answer is on the shipment. It is a real link to the shipment page (ctrl/cmd-click opens a
+ * tab), never a side rail (Ryne, 2026-11-14). A row whose load has no shipment, or never
+ * resolved to a load, is plain text, so an unlinked trip reads as unlinked rather than as
+ * a dead link.
  */
 const PRO_LINK_STYLE: React.CSSProperties = {
-  border: 'none', background: 'none', padding: 0, cursor: 'pointer',
-  font: 'inherit', color: 'var(--tms-primary)', textDecoration: 'underline',
-  textUnderlineOffset: 2,
+  color: 'var(--tms-primary)', textDecoration: 'underline', textUnderlineOffset: 2,
 }
 
 function ProLink({
@@ -125,28 +121,13 @@ function ProLink({
   proNumber: string
   children: React.ReactNode
 }) {
-  const setSelectedLoad = useAppStore((st) => st.setSelectedLoad)
   const loads = useAppStore((st) => st.loads)
-  const load = loadId ? loads.find((l) => l.id === loadId) : undefined
-  if (!loadId || !load) return <>{children}</>
-  const label = `Open the shipment for PRO ${proNumber || loadId}`
-  if (load.shipmentId) {
-    return (
-      <Link to={`/tms/shipments/${encodeURIComponent(load.shipmentId)}`} aria-label={label} title="Open this shipment" style={PRO_LINK_STYLE} data-testid="settlement-pro-link">
-        {children}
-      </Link>
-    )
-  }
+  const shipmentId = loadId ? loads.find((l) => l.id === loadId)?.shipmentId : null
+  if (!shipmentId) return <>{children}</>
   return (
-    <button
-      type="button"
-      onClick={() => setSelectedLoad(loadId, 'view')}
-      aria-label={`Open the load for PRO ${proNumber || loadId}`}
-      title="Open this load"
-      style={PRO_LINK_STYLE}
-    >
+    <Link to={`/tms/shipments/${encodeURIComponent(shipmentId)}`} aria-label={`Open the shipment for PRO ${proNumber || loadId}`} title="Open this shipment" style={PRO_LINK_STYLE} data-testid="settlement-pro-link">
       {children}
-    </button>
+    </Link>
   )
 }
 
@@ -557,8 +538,6 @@ export function OwnerOperatorPayPage({ week, onWeek, viewSwitch, initialDriverId
         />
       )}
       {settingsFor && <SettingsModal driver={settingsFor} existing={pay.rows.find((r) => r.driver.id === settingsFor.id)?.baseSetting} onSave={async (patch, expectedUpdatedAt) => { await pay.saveSetting(settingsFor.id, patch, expectedUpdatedAt); setSettings(null) }} onClose={() => setSettings(null)} />}
-      {/* Opened by the PRO column for an old load that has no shipment. */}
-      <LoadDrawer />
     </TmsScrollPage>
   )
 }

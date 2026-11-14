@@ -216,6 +216,15 @@ describe('the queue row Send to Factor writes', () => {
     }))).toBe('SHARED-9')
   })
 
+  it("falls back to the order's PO and then the shipment's Customer Ref (shipment 20000)", () => {
+    const base = { invoice: invoice({ references: [] }), stops: STOPS, customer: customer() }
+    // The order carries the PO the invoice lacks.
+    expect(otrFieldsFor({ ...base, load: LOAD, order: order({ references: [{ code: 'PO', value: 'ORD-PO', level: 'ORDER', visibility: 'CUSTOMER' }] }) }).PoNumber).toBe('ORD-PO')
+    // Neither has one: the Customer Ref header, mirrored onto the load, is the PO.
+    expect(otrFieldsFor({ ...base, load: { ...LOAD, tmsId: 'M371205' }, order: order({ references: [] }) }).PoNumber).toBe('M371205')
+    expect('PoNumber' in otrFieldsFor({ ...base, load: { ...LOAD, tmsId: 'N/A' }, order: order({ references: [] }) })).toBe(false)
+  })
+
   it('omits a field it cannot fill rather than writing an empty string', () => {
     /*
      * assembleOtrInvoice treats a present field as answered. An empty PO would therefore
