@@ -44,7 +44,6 @@ import {
   type FactoringFields,
 } from './settlement'
 import { weekStartOfISO } from '../../../src/features/driver-pay/week'
-import { splitCityState, normalizeZip } from '../../../src/lib/otrInvoice'
 import { buildPodIndex, loadHasPod, type PodIndex } from '../../../src/lib/podPresence'
 import { normalizePro } from '../../../src/lib/proNumber'
 import { docTypeLabel, driverAdditionalDocType, isDriverDocType, loadExtraDocTypes } from '../../../src/lib/loadRequiredDocs'
@@ -115,6 +114,7 @@ import {
 import { notifyRateconSubmitted, notifyPodAdded,
   notifyMiscAdded, RATECON_SUBJECT_PREFIX, type SubmissionNotice, type ThreadRefs } from './notify'
 import { shipmentDocPresence, type ShipmentDocLike, type ShipmentDocPresence } from '../../../src/lib/shipmentDocPresence'
+import { stopPlace } from '../../../src/lib/stopPlace'
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}))
 const s3 = new S3Client({})
@@ -905,15 +905,10 @@ function placeFor(
   stop: StopFactoringRow | undefined,
   locations: Map<string, LocationFactoringRow>,
 ): { city: string | null; state: string | null; zip: string | null } {
-  const address = stop?.address ?? null
+  // The one stop-place reading (src/lib/stopPlace.ts); the Load's city text only when the stop has none.
   const location = stop?.locationId ? locations.get(stop.locationId) : undefined
-  const rawCity = cleanFactoringValue(address?.city) ?? cleanFactoringValue(stop?.city) ?? cleanFactoringValue(cityHint)
-  const split = splitCityState(rawCity)
-  return {
-    city: cleanFactoringValue(address?.city) ?? cleanFactoringValue(split.city) ?? cleanFactoringValue(location?.city),
-    state: cleanFactoringValue(address?.state) ?? cleanFactoringValue(split.state) ?? cleanFactoringValue(location?.state),
-    zip: normalizeZip(cleanFactoringValue(address?.zip) ?? cleanFactoringValue(location?.zip)) ?? null,
-  }
+  const place = stopPlace(stop ? { ...stop, city: stop.city ?? cityHint } : { city: cityHint }, location)
+  return { city: place.city, state: place.state, zip: place.zip }
 }
 
 function factoringFieldsFor(

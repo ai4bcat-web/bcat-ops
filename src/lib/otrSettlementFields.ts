@@ -8,11 +8,12 @@
  * duplicating its precedence logic.
  */
 
-import { assembleOtrInvoice, normalizeZip, type LoadSlice, type ManualOverrides, type OtrReadiness } from '@/lib/otrInvoice'
+import { assembleOtrInvoice, type LoadSlice, type ManualOverrides, type OtrReadiness } from '@/lib/otrInvoice'
 import { loadHasPod, loadHasRatecon, type PodIndex } from '@/lib/podPresence'
 import { getStops } from '@/lib/stops'
 import type { Load, Stop } from '@/types'
 import type { CustomerRecord, LocationRecord } from '@/types/tms'
+import { stopPlace, type StopPlaceLocation, type StopPlaceStop } from '@/lib/stopPlace'
 
 export interface OtrSettlementInput {
   load: Load
@@ -49,12 +50,9 @@ function originAndDestinationStops(load: Load) {
  * used to read as ZIP missing.
  */
 function placeSlice(stop: Stop | undefined, loc: LocationRecord | undefined) {
-  const addr = (stop as { address?: { city?: string | null; state?: string | null; zip?: string | null } | null } | undefined)?.address ?? null
-  const zip = normalizeZip(addr?.zip) ?? normalizeZip(loc?.zip)
-  const city = addr?.city || loc?.city
-  const state = addr?.state || loc?.state
-  if (!city && !state && !zip) return undefined
-  return { city, state, zip }
+  const p = stopPlace(stop as unknown as StopPlaceStop, loc as unknown as StopPlaceLocation)
+  if (!p.city && !p.state && !p.zip) return undefined
+  return { city: p.city, state: p.state, zip: p.zip }
 }
 
 /**
