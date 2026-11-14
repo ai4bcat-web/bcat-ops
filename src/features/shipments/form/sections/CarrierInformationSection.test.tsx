@@ -14,7 +14,8 @@ vi.mock('@/lib/apiClient', async (orig) => ({ ...(await orig<object>()), getCarr
 vi.mock('@/hooks/useDrivers', () => ({
   useDrivers: () => ({
     drivers: [
-      { id: 'd1', name: 'Alvaro Ruiz', phone: '+13125550101', email: 'alvaro@example.invalid', active: true, assignedTruckId: 't1', assignedTrailerId: 'tr1' },
+      { id: 'd1', name: 'Alvaro Ruiz', phone: '+13125550101', email: 'alvaro@example.invalid', active: true, assignedTruckId: 't1', assignedTrailerId: 'tr1', fleetGroup: 'OWNER_OPERATOR' },
+      { id: 'd4', name: 'Lena Local', phone: '', active: true, fleetGroup: 'LOCAL' },
       { id: 'd2', name: 'Brokered Freight', phone: '', active: true, type: 'broker' },
       { id: 'd3', name: 'Gone Driver', phone: '', active: false },
     ],
@@ -87,7 +88,7 @@ describe('CarrierInformationSection', () => {
     const picker = screen.getByLabelText('Driver 1') as HTMLSelectElement
     expect(picker.tagName).toBe('SELECT')
     // The truck's work phone (Step AK) is the number shown and filled, not the driver's own.
-    expect([...picker.options].map((o) => o.text)).toEqual(['Pick a driver', 'Alvaro Ruiz · Truck 12 · Trailer R-7 · (312) 555-0100'])
+    expect([...picker.options].map((o) => o.text)).toEqual(['Pick a driver', 'Alvaro Ruiz · Truck 12 · Trailer R-7 · (312) 555-0100', 'Lena Local'])
     expect(screen.queryByLabelText('Driver 2')).toBeNull()
     fireEvent.change(picker, { target: { value: 'd1' } })
     const update = onChange.mock.calls[0][0] as (p: ShipmentFormValues['carrier']) => ShipmentFormValues['carrier']
@@ -119,9 +120,49 @@ describe('CarrierInformationSection', () => {
   it('own fleet: nothing about the driver, truck or trailer can be typed', () => {
     setup({ isOwnFleet: true, driver1: { name: 'Alvaro Ruiz', phone: '+13125550100', email: '' }, truckNo: '12', trailerNo: 'R-7' })
     expect(screen.queryByRole('textbox', { name: 'Driver 1' })).toBeNull()
-    for (const label of ['Driver 1 Cell', 'Truck #', 'Trailer #']) {
+    // The driver's cell and e-mail are read from the record and shown on the card, not typed.
+    expect(screen.queryByLabelText('Driver 1 Cell')).toBeNull()
+    expect(screen.getByTestId('carrier-own-fleet-card-cell').textContent).toContain('(312) 555-0100')
+    for (const label of ['Truck #', 'Trailer #']) {
       expect((screen.getByLabelText(label) as HTMLInputElement).readOnly).toBe(true)
     }
+  })
+
+  it('own fleet: the "Covered by" card replaces the outside-carrier grid and names the driver\'s group', () => {
+    setup({ isOwnFleet: true, driver1: { name: 'Alvaro Ruiz', phone: '+13125550100', email: 'alvaro@example.invalid' }, truckNo: '12', trailerNo: 'R-7' })
+    const card = screen.getByTestId('carrier-own-fleet-card')
+    expect(card.getAttribute('data-kind')).toBe('OWNER_OPERATOR')
+    expect(screen.getByTestId('carrier-own-fleet-card-kind').textContent).toBe('Owner Operator')
+    expect(screen.getByTestId('carrier-own-fleet-card-name').textContent).toBe('Alvaro Ruiz')
+    expect(screen.getByTestId('carrier-own-fleet-card-units').textContent).toBe('Truck 12 · Trailer R-7')
+    expect(screen.queryByTestId('f-carrier-mc')).toBeNull()
+    // The picker lives on the card.
+    expect(card.contains(screen.getByLabelText('Driver 1'))).toBe(true)
+  })
+
+  it('own fleet with no driver yet: "Assign a driver" with the picker front and center; the group comes from the division', () => {
+    const values = emptyValues()
+    setup({ isOwnFleet: true }, {}, { ...values, ship: { ...values.ship, revDivision: 'LOCAL' } })
+    expect(screen.getByTestId('carrier-own-fleet-card-empty').textContent).toContain('Assign a driver')
+    expect(screen.getByTestId('carrier-own-fleet-card-kind').textContent).toBe('Local Driver')
+    expect(screen.getByTestId('carrier-own-fleet-card-picker').contains(screen.getByLabelText('Driver 1'))).toBe(true)
+  })
+
+  it('a covered owner-operator load: no Cover row, no rate con button, and a link to the driver\'s settlement week', () => {
+    const bundle = savedBundle({ loadStatus: 'BOOKED', loadCarriers: [{ id: 'lc-1', kind: 'OWN_ASSET', status: 'ACTIVE', driverId: 'd1', loadId: 'load-1' }] })
+    ;(bundle.loads[0] as { deliveryAppt?: string }).deliveryAppt = '2026-11-14T13:00:00.000Z'
+    setup({ isOwnFleet: true, driver1: { name: 'Alvaro Ruiz', phone: '', email: '' } }, { mode: 'edit', bundle })
+    expect(screen.queryByTestId('f-carrier-cover')).toBeNull()
+    expect(screen.getByTestId('carrier-own-fleet-card-state').textContent).toBe('Covered')
+    expect(screen.queryByTestId('f-carrier-sendRateConf')).toBeNull()
+    expect(screen.getByTestId('carrier-own-fleet-card-settlement').getAttribute('href')).toBe('/owner-operator-pay?week=2026-11-08&driver=d1')
+    expect(screen.getByTestId('carrier-own-fleet-card-position')).toBeTruthy()
+  })
+
+  it('an outside carrier keeps its own layout: no own-fleet card', () => {
+    setup({ carrierId: 'car-1' })
+    expect(screen.queryByTestId('carrier-own-fleet-card')).toBeNull()
+    expect(screen.getByTestId('f-carrier-mc')).toBeTruthy()
   })
 
   it('a brokered carrier keeps the free-text driver fields', () => {

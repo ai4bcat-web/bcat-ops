@@ -30,8 +30,13 @@ import { validateCarrierAdd } from '@/lib/carrierLegs'
 import { fieldAttrs } from './fieldAttrs'
 import { FindInvite } from './carrier/FindInvite'
 import { CoveredCarrierCard } from './carrier/CoveredCarrierCard'
+import { OwnFleetCoverCard } from './carrier/OwnFleetCoverCard'
+import { driverSettlementHref, ownFleetCoverKind } from '@/lib/ownFleetCoverage'
+import { summaryOf } from '../../workstations/tracking/trackingSummary'
 import { coveringCarrierId, useCoveringCarrier } from './carrier/useCoveringCarrier'
 import '../cards/moneyCards.css'
+
+const NO_PHONES = { truckId: null, truckNumber: null, work: null, personal: null, personalRaw: null }
 
 
 function policyText(carrier: CarrierRecord | null, type: InsurancePolicyType): string {
@@ -110,6 +115,19 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
   const divisionHint = predicted && ownership
     ? [predicted.revDivision, predicted.revSubdivision].filter(Boolean).map((code) => ownership.divisions.find((d) => d.code === code)?.name ?? code).join(' > ')
     : ''
+  // Own fleet: the "Covered by" card (group from the driver record, else the revenue division), with last position, ETA
+  // and POD read from the saved bundle without another poll (the Tracking panel below keeps the live view).
+  const coverKind = own ? ownFleetCoverKind(driver ?? null, draft.ship.revDivision) : null
+  // The ping age is read against the time the card opened; the Tracking panel below keeps the live clock.
+  const [openedAt] = useState(() => Date.now())
+  const ownSummary = useMemo(
+    () => (own && bundle ? summaryOf({ bundle, phones: NO_PHONES, lastKnown: null, nowMs: openedAt }) : undefined),
+    [own, bundle, openedAt],
+  )
+  const deliveryDriverName = value.deliveryDriverId ? roster.find((d) => d.id === value.deliveryDriverId)?.name ?? '' : ''
+  const settlementHref = coverKind === 'OWNER_OPERATOR'
+    ? driverSettlementHref(value.deliveryDriverId || pickedDriver?.id, bundle?.loads[0]?.deliveryAppt ?? bundle?.shipment.deliveryAppt)
+    : null
   const set = (patch: Partial<typeof value>) => onChange(patch)
   const setBits = (key: 'dispatcher' | 'driver1' | 'driver2', patch: Partial<typeof value.dispatcher>) =>
     onChange((p) => ({ ...p, [key]: { ...p[key], ...patch } }))
@@ -201,6 +219,60 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
     )
   }
 
+  const ownPicker = own ? (
+        <FieldGrid>
+          <Field span={12} label={LABEL.carrier.driver1.text} info="One driver per Ivan Cartage load">
+            <OwnFleetDriverPicker
+              roster={roster}
+              value={ownFleetDriverByName(roster, value.driver1.name)?.id ?? ''}
+              ariaLabel={LABEL.carrier.driver1.text}
+              testId={x(LABEL.carrier.driver1.testId)}
+              disabled={disabled}
+              showSummary={false}
+              onChange={(d) => onChange((p) => {
+                const fill = d ? ownFleetFill(d) : null
+                return {
+                  ...p,
+                  driver1: { name: fill?.driverName ?? '', phone: fill?.driverPhone ?? '', email: d?.email ?? '' },
+                  truckNo: fill?.truckNumber ?? '',
+                  trailerNo: fill?.trailerNumber ?? '',
+                }
+              })}
+            />
+            <label className="tms-muted text-xs" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+              <input
+                type="checkbox"
+                data-testid={x('carrier-split-driver')}
+                checked={splitDriver}
+                disabled={disabled}
+                onChange={(e) => {
+                  setSplitOpen(e.target.checked)
+                  if (!e.target.checked) set({ deliveryDriverId: '' })
+                }}
+              />
+              Different driver on the delivery
+            </label>
+            {splitDriver ? (
+              <div style={{ marginTop: 6 }}>
+                <OwnFleetDriverPicker
+                  roster={roster}
+                  value={value.deliveryDriverId}
+                  ariaLabel="Delivery driver"
+                  testId={x('carrier-delivery-driver')}
+                  placeholder="Pick the delivery driver"
+                  disabled={disabled}
+                  showSummary={false}
+                  onChange={(d) => set({ deliveryDriverId: d?.id ?? '' })}
+                />
+                <p className="tms-muted text-xs">Driver 1 takes the pickup; this driver takes the delivery. Leave it empty to keep Driver 1 on both.</p>
+              </div>
+            ) : null}
+            {!saved && divisionHint && <p className="tms-muted text-xs">Will count as {divisionHint}</p>}
+            {!saved && !isCustomerDefaultDivision(draft, ctx.customer) && <p className="tms-muted text-xs">The selected revenue division is retained; assigning a driver does not override a manual tag.</p>}
+          </Field>
+        </FieldGrid>
+  ) : null
+
   return (
     <div className="space-y-3" data-testid={x('section-carrier-body')}>
       {saved && !active && value.carrierId && (
@@ -215,6 +287,24 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
             dispatcher: value.dispatcher.name.trim(), dispatcherPhone: value.dispatcher.phone.trim(),
           }}
         />
+      ) : own ? (
+        <OwnFleetCoverCard
+          kind={coverKind}
+          covered={active != null}
+          driver={{
+            name: value.driver1.name, phone: value.driver1.phone, email: value.driver1.email,
+            truckNo: value.truckNo.trim(), trailerNo: value.trailerNo.trim(),
+          }}
+          deliveryDriver={deliveryDriverName || null}
+          summary={ownSummary}
+          settlementHref={settlementHref}
+          testId={x('carrier-own-fleet-card')}
+          headerAction={!pickerLocked ? (
+            <TmsButton size="sm" variant="ghost" aria-label={tag ? `Clear carrier ${tag}` : 'Clear carrier'} disabled={disabled} onClick={clear}>✕</TmsButton>
+          ) : null}
+        >
+          {ownPicker}
+        </OwnFleetCoverCard>
       ) : (
       <div className="tms-card-carrier-grid">
         <div className="space-y-1">
@@ -333,6 +423,7 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
       </div>
       )}
 
+      {own && active ? null : (
       <div className="flex flex-wrap items-center gap-2">
         <TmsButton
           variant="primary"
@@ -346,6 +437,7 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
         </TmsButton>
         {coverBlock && <span className="tms-muted text-xs" data-testid={x('carrier-cover-reason')}>{coverBlock}</span>}
       </div>
+      )}
 
       <ColGroups testId={x('carrier-cols')}>
         <ColGroup title="Dispatch & drivers">
@@ -363,62 +455,14 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
             onChange={(e) => setBits('dispatcher', { email: e.target.value })} />
         </Field>
 
-        {own ? (
-          <Field span={12} label={LABEL.carrier.driver1.text} info="One driver per Ivan Cartage load">
-            <OwnFleetDriverPicker
-              roster={roster}
-              value={ownFleetDriverByName(roster, value.driver1.name)?.id ?? ''}
-              ariaLabel={LABEL.carrier.driver1.text}
-              testId={x(LABEL.carrier.driver1.testId)}
-              disabled={disabled}
-              showSummary={false}
-              onChange={(d) => onChange((p) => {
-                const fill = d ? ownFleetFill(d) : null
-                return {
-                  ...p,
-                  driver1: { name: fill?.driverName ?? '', phone: fill?.driverPhone ?? '', email: d?.email ?? '' },
-                  truckNo: fill?.truckNumber ?? '',
-                  trailerNo: fill?.trailerNumber ?? '',
-                }
-              })}
-            />
-            <label className="tms-muted text-xs" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-              <input
-                type="checkbox"
-                data-testid={x('carrier-split-driver')}
-                checked={splitDriver}
-                disabled={disabled}
-                onChange={(e) => {
-                  setSplitOpen(e.target.checked)
-                  if (!e.target.checked) set({ deliveryDriverId: '' })
-                }}
-              />
-              Different driver on the delivery
-            </label>
-            {splitDriver ? (
-              <div style={{ marginTop: 6 }}>
-                <OwnFleetDriverPicker
-                  roster={roster}
-                  value={value.deliveryDriverId}
-                  ariaLabel="Delivery driver"
-                  testId={x('carrier-delivery-driver')}
-                  placeholder="Pick the delivery driver"
-                  disabled={disabled}
-                  showSummary={false}
-                  onChange={(d) => set({ deliveryDriverId: d?.id ?? '' })}
-                />
-                <p className="tms-muted text-xs">Driver 1 takes the pickup; this driver takes the delivery. Leave it empty to keep Driver 1 on both.</p>
-              </div>
-            ) : null}
-            {!saved && divisionHint && <p className="tms-muted text-xs">Will count as {divisionHint}</p>}
-            {!saved && !isCustomerDefaultDivision(draft, ctx.customer) && <p className="tms-muted text-xs">The selected revenue division is retained; assigning a driver does not override a manual tag.</p>}
-          </Field>
-        ) : (
+        {own ? null : (
           <Field span={12} label={LABEL.carrier.driver1.text}>
             <TmsInput {...fa(LABEL.carrier.driver1)} value={value.driver1.name} disabled={disabled} readOnly={typedLock}
               onChange={(e) => setBits('driver1', { name: e.target.value })} />
           </Field>
         )}
+        {!own && (
+          <>
         <Field span={6} label={LABEL.carrier.driver1Cell.text}>
           <TmsInput {...fa(LABEL.carrier.driver1Cell)} type="tel" value={value.driver1.phone} disabled={disabled} readOnly={typedLock}
             onChange={(e) => setBits('driver1', { phone: e.target.value })} />
@@ -427,6 +471,8 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
           <TmsInput {...fa(LABEL.carrier.driver1Email)} type="email" value={value.driver1.email} disabled={disabled} readOnly={own}
             onChange={(e) => setBits('driver1', { email: e.target.value })} />
         </Field>
+          </>
+        )}
 
         {!own && (
           <>
@@ -501,9 +547,10 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
         <TmsButton size="sm" data-testid={x('carrier-dispatch')} disabled={disabled || !active} title={active ? undefined : 'Cover a carrier first'} onClick={() => open('dispatch')}>
           Dispatch
         </TmsButton>
-        <TmsButton size="sm" data-testid={x(LABEL.carrier.sendRateConf.testId)} disabled={disabled || !active} title={active ? needSave : 'Cover a carrier first'} onClick={() => open('rateCon')}>
+        {/* An own-fleet assignment has no directory carrier, so SEND_RATE_CON refuses it: no button. */}
+        {own ? null : <TmsButton size="sm" data-testid={x(LABEL.carrier.sendRateConf.testId)} disabled={disabled || !active} title={active ? needSave : 'Cover a carrier first'} onClick={() => open('rateCon')}>
           {LABEL.carrier.sendRateConf.text}
-        </TmsButton>
+        </TmsButton>}
         <TmsButton size="sm" data-testid={x(LABEL.carrier.sendInfo.testId)} disabled={disabled || !active} title={active ? needSave : 'Cover a carrier first'} onClick={() => open('info')}>
           {LABEL.carrier.sendInfo.text}
         </TmsButton>
