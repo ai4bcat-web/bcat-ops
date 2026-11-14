@@ -36,7 +36,7 @@ import { laneLabelFor } from '@/lib/laneKey'
 import { QUOTE_STATUS_LABEL } from '@/lib/quotes'
 import { formatCents as formatQuoteCents } from '@/lib/invoiceBuild'
 import { formatCents } from '@/lib/tmsDirectory'
-import { useCustomerForm } from './useCustomerForm'
+import { useCustomerForm, type CustomerFormValue } from './useCustomerForm'
 import { INVOICE_FREQUENCY_OPTIONS } from './useCustomerForm'
 import { BillingMethodFields } from './BillingMethodFields'
 import { PossibleDuplicateBadge } from './PossibleDuplicateBadge'
@@ -275,7 +275,7 @@ export function CustomerProfile({
             </>
           }
           columns={[
-            { title: 'MC', rows: [{ label: 'MC #', value: customer.mcNumber || '—' }, { label: 'DOT #', value: customer.dotNumber || '—' }] },
+            { title: 'MC', rows: [{ label: 'Type', value: customer.customerType === 'BROKER' ? 'Broker' : customer.customerType === 'SHIPPER' ? 'Shipper' : 'Not set' }, { label: 'MC #', value: customer.mcNumber || '—' }, { label: 'DOT #', value: customer.dotNumber || '—' }] },
             { title: 'Billing', rows: [{ label: 'Terms', value: customer.paymentTermsDays != null ? `Net ${customer.paymentTermsDays}` : '—' }, { label: 'Method', value: customer.billingMethod === 'FACTOR' ? 'Factor' : customer.billingMethod === 'MANUAL' ? 'Manual' : 'Not set' }] },
             { title: 'Account owner', rows: [{ value: accountOwnerIds.length ? `${accountOwnerIds.length} assigned` : 'Unassigned' }] },
           ]}
@@ -298,11 +298,19 @@ export function CustomerProfile({
           <div style={{ display: 'grid', gap: 16 }}>
             <TmsCard title="Account">
               <div style={{ display: 'grid', gap: 16 }}>
-                <div className="tms-grid tms-grid-3">
+                <div className="tms-grid tms-grid-4">
                   <TmsField label="Customer name">
                     <TmsInput value={value.name} onChange={(e) => set('name', e.target.value)} />
                   </TmsField>
-                  <TmsField label="MC #">
+                  <TmsField label="Customer type">
+                    <TmsSelect
+                      value={value.customerType}
+                      onChange={(e) => set('customerType', e.target.value as CustomerFormValue['customerType'])}
+                      placeholder="— not set —"
+                      options={[{ value: 'BROKER', label: 'Broker' }, { value: 'SHIPPER', label: 'Shipper' }]}
+                    />
+                  </TmsField>
+                  <TmsField label={value.customerType === 'BROKER' && value.billingMethod === 'FACTOR' ? 'MC # (required to factor)' : 'MC #'}>
                     <TmsInput value={value.mcNumber} onChange={(e) => set('mcNumber', e.target.value)} />
                   </TmsField>
                   <TmsField label="DOT #">

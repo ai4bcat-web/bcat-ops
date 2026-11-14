@@ -72,6 +72,7 @@ export interface CustomerFormValue {
   contactPhone: string
   notes: string
   mcNumber: string
+  customerType: 'BROKER' | 'SHIPPER' | ''
   dotNumber: string
   billingContactName: string
   billingEmail: string
@@ -172,6 +173,7 @@ function emptyCustomerForm(initial?: CustomerRecord | null): CustomerFormValue {
     contactPhone: initial?.contactPhone ?? '',
     notes: initial?.notes ?? '',
     mcNumber: initial?.mcNumber ?? '',
+    customerType: initial?.customerType ?? '',
     dotNumber: initial?.dotNumber ?? '',
     billingContactName: initial?.billingContactName ?? '',
     billingEmail: initial?.billingEmail ?? '',
@@ -315,6 +317,7 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
     contactPhone: value.contactPhone.trim() || null,
     notes: value.notes.trim() || null,
     mcNumber: value.mcNumber.trim() || null,
+    customerType: value.customerType || null,
     dotNumber: value.dotNumber.trim() || null,
     billingContactName: value.billingContactName.trim() || null,
     billingEmail: value.billingEmail.trim() || null,

@@ -4,7 +4,7 @@ import { isFactorBilled } from './factorBilling'
 import type { Stop } from '../types'
 
 const full = {
-  customer: { name: 'ACME', billingMethod: 'FACTOR' as const, factored: null, mcNumber: '123456' },
+  customer: { name: 'ACME', billingMethod: 'FACTOR' as const, factored: null, mcNumber: '123456', customerType: 'BROKER' as const },
   poNumber: 'PO-1',
   customerRateCents: 150000,
   pickup: { city: 'Chicago', state: 'IL', zip: '60601' },
@@ -32,6 +32,13 @@ describe('factorGapsAtCreate', () => {
   it('a manually billed customer needs no MC; an unset billing method is a gap', () => {
     expect(factorGapsAtCreate({ ...full, customer: { ...full.customer, billingMethod: 'MANUAL', mcNumber: null } })).toEqual([])
     expect(factorGapsAtCreate({ ...full, customer: { ...full.customer, billingMethod: null } }).map((g) => g.code)).toEqual(['BILLING_METHOD'])
+  })
+
+  it('only a broker needs an MC: a factored shipper or an unset type does not (Ryne 2026-11-14)', () => {
+    const noMc = { ...full.customer, mcNumber: '' }
+    expect(factorGapsAtCreate({ ...full, customer: { ...noMc, customerType: 'BROKER' } }).map((g) => g.code)).toEqual(['CUSTOMER_MC'])
+    expect(factorGapsAtCreate({ ...full, customer: { ...noMc, customerType: 'SHIPPER' } })).toEqual([])
+    expect(factorGapsAtCreate({ ...full, customer: { ...noMc, customerType: null } })).toEqual([])
   })
 
   it('skips the customer checks when only a typed name exists', () => {

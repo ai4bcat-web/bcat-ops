@@ -35,6 +35,8 @@ describe('required fields by action', () => {
     const v = filledValues()
     const noMc = { ...CUSTOMER, mcNumber: '' }
     expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: noMc })).map((i) => i.id)).toEqual(['customer:factor:CUSTOMER_MC'])
+    // A factored shipper needs no MC (Ryne 2026-11-14).
+    expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: { ...noMc, customerType: 'SHIPPER' } }))).toEqual([])
     const unset = { ...CUSTOMER, billingMethod: null }
     expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: unset })).map((i) => i.id)).toEqual(['customer:factor:BILLING_METHOD'])
     v.stops[2].zip = ''

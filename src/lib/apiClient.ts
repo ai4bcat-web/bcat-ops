@@ -1358,6 +1358,9 @@ let customersHaveV8 = true
 // The billing setup the list, badges and chips read: never selected before, so every row looked unset.
 const CUSTOMER_V9_FIELDS = ['billingMethod', 'apEmail', 'apEmailsExtra', 'noaEmail', 'invoiceCopyEmails', 'billingNeedsReview']
 let customersHaveV9 = true
+// Broker or shipper (Ryne 2026-11-14): only a factored broker needs an MC.
+const CUSTOMER_V10_FIELDS = ['customerType']
+let customersHaveV10 = true
 const customerFields = () => [
   CUSTOMER_FIELDS_BASE,
   customersHaveV2 ? CUSTOMER_V2_FIELDS.join(' ') : '',
@@ -1368,6 +1371,7 @@ const customerFields = () => [
   customersHaveV7 ? CUSTOMER_V7_FIELDS.join(' ') : '',
   customersHaveV8 ? CUSTOMER_V8_FIELDS.join(' ') : '',
   customersHaveV9 ? CUSTOMER_V9_FIELDS.join(' ') : '',
+  customersHaveV10 ? CUSTOMER_V10_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 
 const LOCATION_FIELDS = `
@@ -1605,6 +1609,11 @@ async function fetchAllCustomers(): Promise<CustomerRecord[]> {
       return rows
     } catch (err) {
       if (attempt >= 8) throw err
+      if (customersHaveV10 && fieldNamed(CUSTOMER_V10_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Customer type yet — querying without it until deploy')
+        customersHaveV10 = false
+        continue
+      }
       if (customersHaveV9 && fieldNamed(CUSTOMER_V9_FIELDS, err)) {
         console.warn('[apiClient] backend has no Customer billing setup fields yet — querying without them until deploy')
         customersHaveV9 = false
