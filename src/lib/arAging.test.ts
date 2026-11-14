@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import type { InvoiceRecord, OrderRecord, ShipmentRecord } from '@/types/tms'
 import {
   AGING_BUCKETS,
-  AGING_BUCKET_LABEL,
   AP_AGING_CSV_HEADER,
   ageInvoices,
   ageOpenItems,

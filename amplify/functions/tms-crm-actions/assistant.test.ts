@@ -47,7 +47,7 @@ function scripted(steps: AssistantBlock[][], seen: StepRequest[] = []): Assistan
   let i = 0
   return { async step(req) { seen.push({ ...req, messages: structuredClone(req.messages) }); return { content: steps[i++] ?? [{ type: 'text', text: 'done' }] } } }
 }
-const use = (name: string, input: unknown, id = 't1'): AssistantBlock => ({ type: 'tool_use', id, name, input })
+const toolUse = (name: string, input: unknown, id = 't1'): AssistantBlock => ({ type: 'tool_use', id, name, input })
 const text = (t: string): AssistantBlock => ({ type: 'text', text: t })
 
 describe('parseAssistantInput', () => {
@@ -76,7 +76,7 @@ describe('assistantTurn', () => {
     const calls: string[] = []
     const seen: StepRequest[] = []
     const res = await assistantTurn(input, {
-      model: scripted([[use('find_shipment', { number: '20018' })], [text('It is in transit.')]], seen),
+      model: scripted([[toolUse('find_shipment', { number: '20018' })], [text('It is in transit.')]], seen),
       tools: tools(calls), today: '2026-11-11', nowMs: Date.now,
     })
     expect(res).toMatchObject({ reply: 'It is in transit.', toolsUsed: ['find_shipment'], modelError: null })
@@ -89,7 +89,7 @@ describe('assistantTurn', () => {
   it('turns a throwing tool into text the model can read, not a crash', async () => {
     const seen: StepRequest[] = []
     const res = await assistantTurn(input, {
-      model: scripted([[use('run_query', { queryId: 'fin.summary' })], [text('Could not look that up.')]], seen),
+      model: scripted([[toolUse('run_query', { queryId: 'fin.summary' })], [text('Could not look that up.')]], seen),
       tools: { runQuery: async () => { throw new Error('boom') }, findShipment: async () => '' }, today: '2026-11-11', nowMs: Date.now,
     })
     expect(res.reply).toBe('Could not look that up.')
@@ -99,7 +99,7 @@ describe('assistantTurn', () => {
   it('cuts an oversized tool result', async () => {
     const seen: StepRequest[] = []
     await assistantTurn(input, {
-      model: scripted([[use('run_query', { queryId: 'x' })], [text('ok')]], seen),
+      model: scripted([[toolUse('run_query', { queryId: 'x' })], [text('ok')]], seen),
       tools: { runQuery: async () => 'x'.repeat(50_000), findShipment: async () => '' }, today: '2026-11-11', nowMs: Date.now,
     })
     const content = (seen[1]!.messages[2]!.content as AssistantBlock[])[0] as { content: string }
@@ -108,7 +108,7 @@ describe('assistantTurn', () => {
 
   it('stops after the round cap and says so', async () => {
     const res = await assistantTurn(input, {
-      model: { step: async () => ({ content: [use('run_query', { queryId: 'fin.summary' })] }) },
+      model: { step: async () => ({ content: [toolUse('run_query', { queryId: 'fin.summary' })] }) },
       tools: tools([]), today: '2026-11-11', nowMs: Date.now,
     })
     expect(res.reply).toMatch(/too many lookups/)
@@ -150,27 +150,27 @@ describe('PREVIEW_ASSISTANT_CHAT through the router', () => {
 
   it('a run_query tool answers with the caller\'s own rows only', async () => {
     const adminSeen: StepRequest[] = []
-    await ask(admin, [[use('run_query', { queryId: 'fin.summary', metrics: ['revenue'], window: 'THIS_MONTH' })], [text('x')]], adminSeen)
+    await ask(admin, [[toolUse('run_query', { queryId: 'fin.summary', metrics: ['revenue'], window: 'THIS_MONTH' })], [text('x')]], adminSeen)
     expect(toolResultText(adminSeen)).toContain('777778777')
     const repSeen: StepRequest[] = []
-    await ask(repa, [[use('run_query', { queryId: 'fin.summary', metrics: ['revenue'], window: 'THIS_MONTH' })], [text('x')]], repSeen)
+    await ask(repa, [[toolUse('run_query', { queryId: 'fin.summary', metrics: ['revenue'], window: 'THIS_MONTH' })], [text('x')]], repSeen)
     expect(toolResultText(repSeen)).not.toMatch(/77777|ZZSENTINEL/i)
     expect(toolResultText(repSeen)).toContain('value\\":1000')
   })
 
   it('find_shipment hides a shipment the caller cannot see exactly like a missing one', async () => {
     const hidden: StepRequest[] = []
-    await ask(repa, [[use('find_shipment', { number: '20018' })], [text('x')]], hidden)
+    await ask(repa, [[toolUse('find_shipment', { number: '20018' })], [text('x')]], hidden)
     expect(toolResultText(hidden)).toContain('No shipment 20018 that you can see.')
     expect(toolResultText(hidden)).not.toContain('ZZSENTINEL')
     const missing: StepRequest[] = []
-    await ask(repa, [[use('find_shipment', { number: '99999' })], [text('x')]], missing)
+    await ask(repa, [[toolUse('find_shipment', { number: '99999' })], [text('x')]], missing)
     expect(toolResultText(missing)).toContain('No shipment 99999 that you can see.')
   })
 
   it('find_shipment returns the facts and names for a visible shipment', async () => {
     const seen: StepRequest[] = []
-    await ask(repa, [[use('find_shipment', { number: '20019' })], [text('x')]], seen)
+    await ask(repa, [[toolUse('find_shipment', { number: '20019' })], [text('x')]], seen)
     const out = toolResultText(seen)
     expect(out).toContain('DELIVERED')
     expect(out).toContain('Alpha Freight')
@@ -180,7 +180,7 @@ describe('PREVIEW_ASSISTANT_CHAT through the router', () => {
 
   it('an unknown name comes back as text for the model, not as a widened query', async () => {
     const seen: StepRequest[] = []
-    await ask(admin, [[use('run_query', { queryId: 'fin.summary', customerNames: ['Nobody Inc'] })], [text('x')]], seen)
+    await ask(admin, [[toolUse('run_query', { queryId: 'fin.summary', customerNames: ['Nobody Inc'] })], [text('x')]], seen)
     expect(toolResultText(seen)).toMatch(/No customer you can see matches/)
   })
 })
