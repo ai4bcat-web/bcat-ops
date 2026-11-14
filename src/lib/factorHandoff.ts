@@ -21,7 +21,7 @@
 // Relative, not `@/` — the tmsFinanceActions Lambda bundles this file by path for its
 // SEND_TO_FACTOR action, and the alias does not exist in the function build.
 import { customerRefOf } from './customerRef'
-import { normalizeZip, rateCentsToDollars, splitCityState } from './otrInvoice'
+import { rateCentsToDollars } from './otrInvoice'
 import type { OtrRequiredField } from './otrInvoice'
 import type { FactoringItem, Stop } from '../types'
 import type {
@@ -30,6 +30,7 @@ import type {
   OrderRecord,
   ShipmentRecord,
 } from '../types/tms'
+import { stopPlace, type StopPlaceStop } from './stopPlace'
 
 /**
  * The slice of a Load this module needs. `aljexId` is the PRO: a shipment-born load
@@ -78,13 +79,6 @@ function text(v: unknown): string | undefined {
   return t ? t : undefined
 }
 
-/** Two letters, uppercased — OTR rejects anything else, so send nothing instead. */
-function state(v: unknown): string | undefined {
-  const s = text(v)
-  if (!s) return undefined
-  return /^[A-Za-z]{2}$/.test(s) ? s.toUpperCase() : undefined
-}
-
 /** City · state · ZIP for one end of the run, from the stop's booked address. */
 interface Place {
   city?: string
@@ -100,12 +94,9 @@ interface Place {
  */
 export function placeOf(stop: Stop | undefined): Place {
   if (!stop) return {}
-  const label = splitCityState(stop.city)
-  return {
-    city: text(stop.address?.city) ?? label.city,
-    state: state(stop.address?.state) ?? label.state,
-    zip: normalizeZip(stop.address?.zip),
-  }
+  // The one stop-place reading (stopPlace.ts): address snapshot, then the "CITY, ST 12345" text.
+  const p = stopPlace(stop as unknown as StopPlaceStop)
+  return { city: p.city ?? undefined, state: p.state ?? undefined, zip: p.zip ?? undefined }
 }
 
 /** Stops of one type, in route order. */

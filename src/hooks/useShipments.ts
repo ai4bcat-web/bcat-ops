@@ -4,6 +4,7 @@ import type { LoadBoardSummary } from '@/lib/apiClient'
 import { loadBoardBundle, peekBoardBundle, type BoardBundle, type BoardView } from '@/lib/boardData'
 import { aggregateApStatus } from '@/lib/carrierTotals'
 import { customerRefOf } from '@/lib/customerRef'
+import { stopPlace, type StopPlaceStop } from '@/lib/stopPlace'
 import { factorGapsForLoad, factoringPoNumber, routeEnds, type FactorGapCode } from '@/lib/factorReadyAtCreate'
 import { modelsAvailable } from '@/lib/modelAvailability'
 import type { BoardCarrier } from '@/lib/shipmentViewDefs'
@@ -694,8 +695,9 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         customerReference: customerRefOf(referencesByShipment[s.id], firstLoad?.tmsId),
         pickupName: pickupStop?.name ?? firstLoad?.originName ?? null,
         consigneeName: deliveryStop?.name ?? lastLoad?.destinationName ?? null,
-        fromState: stateFromCity(pickupStop?.city) ?? stateFromCity(firstLoad?.originCity) ?? null,
-        toState: stateFromCity(deliveryStop?.city) ?? stateFromCity(lastLoad?.destinationCity) ?? null,
+        // The one stop-place reading (stopPlace.ts): the stop's address, then its "CITY, ST" text.
+        fromState: (pickupStop ? stopPlace(pickupStop as unknown as StopPlaceStop).state : null) ?? stateFromCity(firstLoad?.originCity) ?? null,
+        toState: (deliveryStop ? stopPlace(deliveryStop as unknown as StopPlaceStop).state : null) ?? stateFromCity(lastLoad?.destinationCity) ?? null,
         dispatcherAssignedId,
         dispatcherActualId,
         officeTeamKeys: s.salesRepId ? (teamKeysByRepId[s.salesRepId] ?? null) : null,
