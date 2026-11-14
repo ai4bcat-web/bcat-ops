@@ -20,6 +20,7 @@
  */
 // Relative, not `@/` — the tmsFinanceActions Lambda bundles this file by path for its
 // SEND_TO_FACTOR action, and the alias does not exist in the function build.
+import { customerRefOf } from './customerRef'
 import { normalizeZip, rateCentsToDollars, splitCityState } from './otrInvoice'
 import type { OtrRequiredField } from './otrInvoice'
 import type { FactoringItem, Stop } from '../types'
@@ -115,17 +116,6 @@ export function ordered(stops: Stop[] | null | undefined, type: Stop['type']): S
     .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
 }
 
-/** A customer-visible PO reference, read the way `invoicePoNumber` reads one. */
-function customerPoFrom(references: InvoiceRecord['references'] | null | undefined): string | undefined {
-  return invoicePoNumber({ references } as InvoiceRecord)
-}
-
-/** The shipment's Customer Ref as mirrored onto the load; "N/A" is the Load table's word for none. */
-function customerRefOf(tmsId: string | null | undefined): string | undefined {
-  const v = text(tmsId)
-  return v && v.toUpperCase() !== 'N/A' ? v : undefined
-}
-
 /**
  * The PO number as the invoice states it.
  *
@@ -134,13 +124,7 @@ function customerRefOf(tmsId: string | null | undefined): string | undefined {
  * bill they are being asked to pay.
  */
 export function invoicePoNumber(invoice: InvoiceRecord): string | undefined {
-  for (const ref of invoice.references ?? []) {
-    if (text(ref.code)?.toUpperCase() !== 'PO') continue
-    if (ref.visibility !== 'CUSTOMER' && ref.visibility !== 'ALL') continue
-    const value = text(ref.value)
-    if (value) return value
-  }
-  return undefined
+  return customerRefOf(invoice.references) ?? undefined
 }
 
 /**
@@ -167,7 +151,7 @@ export function otrFieldsFor(
 
   put('InvoiceNo', text(invoice.number))
   // PO reference first (the invoice's, then the order's), then the shipment's Customer Ref.
-  put('PoNumber', invoicePoNumber(invoice) ?? customerPoFrom(input.order?.references) ?? customerRefOf(load?.tmsId))
+  put('PoNumber', invoicePoNumber(invoice) ?? customerRefOf(input.order?.references, load?.tmsId) ?? undefined)
   put('BrokerMC', text(customer.mcNumber))
   // Dollars with two decimals, from cents. Never float arithmetic on the way in.
   put('InvoiceAmount', amount === undefined ? undefined : amount.toFixed(2))

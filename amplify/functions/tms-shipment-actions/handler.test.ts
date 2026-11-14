@@ -6165,6 +6165,12 @@ describe('BACKFILL_SHIPMENT', () => {
     })
     const order = [...table(TABLES.order).values()][0]
     expect(order).toMatchObject({ revenueCents: 185_000, arStatus: 'DOCS_NEEDED', shipmentId: shipment.id })
+    // The load's Customer Ref and pickup # become the order's references and are searchable (14934 had neither).
+    expect(order.references).toEqual([
+      { code: 'CUSTOMER_REF', label: 'Customer ref', value: '14589', level: 'ORDER', visibility: 'ALL' },
+      { code: 'PICKUP_REF', label: 'Pickup #', value: 'PU-1', level: 'ORDER', visibility: 'ALL' },
+    ])
+    expect(shipment.searchKey).toContain('pu-1')
     expect([...table(TABLES.financials).values()][0]).toMatchObject({ revenueCents: 185_000, costCents: 0 })
     expect([...table(TABLES.charge).values()][0]).toMatchObject({ side: 'CUSTOMER', code: 'LINEHAUL', amountCents: 185_000 })
     expect([...table(TABLES.carrier).values()][0]).toMatchObject({ kind: 'OWN_ASSET', status: 'ACTIVE', driverId: 'drv-1' })

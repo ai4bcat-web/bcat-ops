@@ -8494,6 +8494,23 @@ async function customerIdsByName(): Promise<Map<string, string | null>> {
  * particular, writing either candidate would hang one customer's revenue on another
  * customer's ledger, and the whole point is that neither id is written.
  */
+/** A load reference value worth keeping: trimmed, and not the Load table's "N/A" for none. */
+function backfillRef(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const t = v.trim()
+  return t && t.toUpperCase() !== 'N/A' ? t : null
+}
+
+/** The order references a backfilled shipment carries from its load. */
+export function backfillReferences(load: Row): Row[] {
+  const refs: Row[] = []
+  const customerRef = backfillRef(load.tmsId)
+  if (customerRef) refs.push({ code: 'CUSTOMER_REF', label: 'Customer ref', value: customerRef, level: 'ORDER', visibility: 'ALL' })
+  const pickup = backfillRef(load.pickupNumber)
+  if (pickup) refs.push({ code: 'PICKUP_REF', label: 'Pickup #', value: pickup, level: 'ORDER', visibility: 'ALL' })
+  return refs
+}
+
 function resolveBackfillCustomerId(load: Row, byName: Map<string, string | null>): string | null {
   const direct = optionalString(load.customerId, 100)
   if (direct) return direct
@@ -8737,7 +8754,7 @@ async function backfillShipments(input: Row, caller: Caller): Promise<Row> {
           pickupMonth,
           originCity: optionalString(load.originCity, 120),
           destinationCity: optionalString(load.destinationCity, 120),
-          searchKey: [plan.number, customerName, load.originCity, load.destinationCity, load.pickupNumber]
+          searchKey: [plan.number, customerName, load.originCity, load.destinationCity, backfillRef(load.tmsId), backfillRef(load.pickupNumber)]
             .filter(Boolean).join(' ').toLowerCase(),
           source: 'BACKFILL',
           createdBy: caller.email,
@@ -8754,7 +8771,8 @@ async function backfillShipments(input: Row, caller: Caller): Promise<Row> {
           customerName,
           mode: 'FTL',
           rateType: 'SPOT',
-          references: [],
+          // The load's Customer Ref and pickup #, coded as the Aljex import codes them, so the shipment shows and searches them (14934).
+          references: backfillReferences(load),
           freight: [],
           customerRateCents: plan.revenueCents,
           revenueCents: plan.revenueCents,
