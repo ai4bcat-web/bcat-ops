@@ -364,7 +364,7 @@ describe('IntakeBoard: already built as a PRO', () => {
     const notice = within(await openFlag('intake-flag-built')).getByTestId('intake-built-notice')
     expect(notice).toHaveTextContent('Already built')
     expect(notice).toHaveTextContent('Reference 573570079')
-    expect(within(notice).getByTestId('intake-built-link')).toHaveAttribute('href', '/tms/shipments/shp-43')
+    expect(within(notice).getByTestId('intake-built-link')).toHaveAttribute('href', '/tms/shipments/shp-43/edit')
     expect(api.listShipmentsBySearchKeys).toHaveBeenCalledTimes(1)
   })
 

@@ -26,6 +26,7 @@ import { SendDriverInvite } from './SendDriverInvite'
 import { SettlementDocUpload } from './SettlementDocUpload'
 import { PAY_HOLD_LABEL, type PayHoldReason } from '@/lib/payHold'
 import { PAY_EMAIL_CC } from '@/lib/payEmail'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
 const money = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 /** Every statement email copies the office, as the Amazon page does. */
@@ -125,7 +126,7 @@ function ProLink({
   const shipmentId = loadId ? loads.find((l) => l.id === loadId)?.shipmentId : null
   if (!shipmentId) return <>{children}</>
   return (
-    <Link to={`/tms/shipments/${encodeURIComponent(shipmentId)}`} aria-label={`Open the shipment for PRO ${proNumber || loadId}`} title="Open this shipment" style={PRO_LINK_STYLE} data-testid="settlement-pro-link">
+    <Link to={shipmentEditorPath(shipmentId)} aria-label={`Open the shipment for PRO ${proNumber || loadId}`} title="Open this shipment" style={PRO_LINK_STYLE} data-testid="settlement-pro-link">
       {children}
     </Link>
   )

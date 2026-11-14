@@ -92,7 +92,7 @@ describe('ActivityTab', () => {
       entry({ id: 's', kind: 'SHIPMENT_CREATED', derived: true, refs: { shipmentId: 'S-1' } }),
     ] }))
     expect(screen.getByTestId('crm-timeline-q').querySelector('a')?.getAttribute('href')).toBe('/tms/rates/Q-1')
-    expect(screen.getByTestId('crm-timeline-s').querySelector('a')?.getAttribute('href')).toBe('/tms/shipments/S-1')
+    expect(screen.getByTestId('crm-timeline-s').querySelector('a')?.getAttribute('href')).toBe('/tms/shipments/S-1/edit')
   })
 
   it('kind filters narrow the timeline', () => {

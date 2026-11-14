@@ -33,6 +33,7 @@ import { useBuiltMatches } from './useBuiltMatches'
 import { useIntakeLoad, useIntakeLoads } from './useIntakeLoads'
 import { useIntakePermissions } from './useIntakePermissions'
 import './intake.css'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
 const CONFLICT = /changed while you were editing/i
 /** The required-field catalog key -> the draft field it is entered in. */
@@ -223,7 +224,7 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
     }
     toast.success(`Moved to active as ${done.shipmentNumber}`)
     if (done.driverError) toast.error(`The shipment was created, but the driver was not booked: ${done.driverError}`)
-    navigate(`/tms/shipments/${done.shipmentId}`)
+    navigate(shipmentEditorPath(done.shipmentId))
   }
 
   async function dismiss() {

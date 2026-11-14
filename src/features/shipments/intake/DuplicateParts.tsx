@@ -13,6 +13,7 @@ import { formatDateTime } from '@/lib/date'
 import { intakeRowLabel, type DuplicateInfo } from '@/lib/intakeDuplicates'
 import type { BuiltMatch } from '@/lib/intakeBuilt'
 import type { IntakeLoadRecord } from '@/types/intake'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
 export function DeleteIntakeDialog({ row, open, onOpenChange, onDeleted }: {
   row: IntakeLoadRecord
@@ -125,7 +126,7 @@ export function BuiltNotice({ row, matches, isAdmin, onDelete, onChanged }: {
         {first.customerName ? ` ${first.customerName}'s` : ' a'} shipment. Delete this one?
       </span>
       {shown.map((m) => (
-        <Link key={m.shipmentId} className="tms-intake-dup-link" to={`/tms/shipments/${encodeURIComponent(m.shipmentId)}`} data-testid="intake-built-link">Open PRO {m.number}</Link>
+        <Link key={m.shipmentId} className="tms-intake-dup-link" to={shipmentEditorPath(m.shipmentId)} data-testid="intake-built-link">Open PRO {m.number}</Link>
       ))}
       {isAdmin ? <TmsButton size="sm" variant="destructive" data-testid="intake-built-delete" disabled={busy} onClick={onDelete}>Delete (already built)</TmsButton> : null}
       {isAdmin ? <TmsButton size="sm" variant="ghost" data-testid="intake-built-not" disabled={busy} onClick={() => { void notSame() }}>Not the same load</TmsButton> : null}

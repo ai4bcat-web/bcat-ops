@@ -11,6 +11,7 @@ import { TmsButton, TmsInput, TmsTable, type ColumnDef } from '@/features/tms/ki
 import { financeAction, setDeliveredDate, type FinanceReviewShipment } from '@/lib/apiClient'
 import { errorText } from '@/lib/errorText'
 import { formatDateShort } from '@/lib/date'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
 interface Props {
   rows: FinanceReviewShipment[]
@@ -70,7 +71,7 @@ export function NeedsReviewList({ rows, error, side, onCleared }: Props) {
     )
   }
   const columns: ColumnDef<FinanceReviewShipment>[] = [
-    { key: 'pro', header: 'PRO', render: (row) => <Link to={`/tms/shipments/${row.id}`}>{row.number ?? row.id}</Link>, text: (row) => String(row.number ?? '') },
+    { key: 'pro', header: 'PRO', render: (row) => <Link to={shipmentEditorPath(row.id)}>{row.number ?? row.id}</Link>, text: (row) => String(row.number ?? '') },
     { key: 'customer', header: 'Customer', render: (row) => row.customerName ?? '—', text: (row) => row.customerName ?? '' },
     { key: 'reason', header: 'Reason', render: (row) => row.financeReviewReason ?? '—', text: (row) => row.financeReviewReason ?? '' },
     ...(side === 'AP'

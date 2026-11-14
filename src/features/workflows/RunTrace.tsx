@@ -29,6 +29,7 @@ import { AGENTS, stepsOf } from '@/lib/workflows/agents'
 import type { TmsTone } from '@/features/tms/kit'
 import type { WorkflowRunRecord, WorkflowStep } from '@/types/tms'
 import { ProposalCard } from './proposalCards'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
 const STEP_TONES: Record<WorkflowStep['status'], TmsTone> = {
   DONE: statusTone('DELIVERED'),
@@ -186,7 +187,7 @@ function LinkedShipmentCard({ shipmentId }: { shipmentId: string }) {
   return (
     <TmsCard
       title="Linked shipment"
-      actions={<Link className="tms-btn tms-btn-secondary tms-btn-sm" to={`/tms/shipments/${shipmentId}`}>Open shipment</Link>}
+      actions={<Link className="tms-btn tms-btn-secondary tms-btn-sm" to={shipmentEditorPath(shipmentId)}>Open shipment</Link>}
     >
       {loading && !shipment ? <p className="tms-muted">Loading…</p> : (
         <Facts items={[
