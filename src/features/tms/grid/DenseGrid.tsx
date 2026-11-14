@@ -39,6 +39,8 @@ import {
   CAPS_WIDTH_FACTOR,
 } from './denseGridModel'
 import { DenseFilterPopover } from './DenseFilterPopover'
+import { DenseCards } from './DenseCards'
+import { usePhoneWidth, type DenseCardLayout } from './denseCardLayout'
 import './dense-grid.css'
 
 /** Rows mounted above and below the viewport. */
@@ -95,6 +97,8 @@ export interface DenseGridProps<T> {
   recentKey: string
   'aria-label': string
   testId?: string
+  /** Below 640px the rows draw as cards: which columns go on top. Omitted: the first column is the title. `false` keeps the table. */
+  cardLayout?: DenseCardLayout | false
 }
 
 type Item<T> = { kind: 'row'; row: T } | { kind: 'group'; key: string; rows: T[] }
@@ -147,7 +151,9 @@ export function DenseGrid<T>({
   testId,
   uppercase = false,
   rowHeights,
+  cardLayout,
 }: DenseGridProps<T>) {
+  const phone = usePhoneWidth()
   const rowHeight = rowHeights?.[density] ?? ROW_HEIGHT[density]
   const scrollRef = useRef<HTMLDivElement>(null)
   const [topRow, setTopRow] = useState(0)
@@ -326,6 +332,30 @@ export function DenseGrid<T>({
   const openColumn = openFilter ? columns.find((c) => c.key === openFilter.key) : undefined
   const allSelected = selectable && rows.length > 0 && rows.every((r) => selectedIds?.has(rowKey(r)))
   const someSelected = selectable && rows.some((r) => selectedIds?.has(rowKey(r)))
+
+  if (phone && cardLayout !== false) {
+    return (
+      <DenseCards
+        items={items}
+        rows={rows}
+        columns={columns}
+        layout={cardLayout}
+        rowKey={rowKey}
+        renderCell={renderCell}
+        selectable={selectable}
+        selectedIds={selectedIds}
+        onToggle={onToggle}
+        onToggleAll={onToggleAll}
+        onRowClick={onRowClick}
+        rowAttrs={rowAttrs}
+        toneOf={toneOf}
+        renderGroupHeader={renderGroupHeader}
+        empty={empty}
+        ariaLabel={ariaLabel}
+        testId={testId}
+      />
+    )
+  }
 
   return (
     <div className="tms-dg" data-density={density} style={{ '--dg-row-h': `${rowHeight}px` } as CSSProperties}>

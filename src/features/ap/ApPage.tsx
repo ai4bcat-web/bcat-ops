@@ -1039,6 +1039,7 @@ function awaitingView({ banner, rows, shared, busy, onRecord }: {
   const billable = rows.filter((row) => !isOwnFleet(row))
   return view<ApWorklistRow>({
     gridId: 'ap-awaiting',
+    cardLayout: { title: 'shipment', party: 'carrier', amount: 'cost', pills: ['paperwork'] },
     banner,
     columns,
     rows,
@@ -1167,6 +1168,7 @@ function reviewView({
 
   return view<CarrierBillRecord>({
     gridId: 'ap-review',
+    cardLayout: { title: 'bill', party: 'carrier', amount: 'net', pills: ['review'] },
     banner,
     columns,
     rows: bills,
@@ -1377,6 +1379,7 @@ function payableView({
 
   return view<CarrierBillRecord>({
     gridId: mode === 'aging' ? 'ap-aging' : 'ap-selected',
+    cardLayout: { title: 'bill', party: 'carrier', amount: 'balance', pills: ['status'] },
     onRowClick: onOpen,
     kpis,
     actions: (
@@ -1534,6 +1537,7 @@ function paidView({ banner, bills, shared, months, month, loading, onMonth, veri
 
   return view<CarrierBillRecord>({
     gridId: 'ap-paid',
+    cardLayout: { title: 'bill', party: 'carrier', amount: 'net' },
     kpis: [
       { label: `Paid in ${monthLabel(month)}`, value: bills.length },
       { label: 'Net paid', value: formatCents(sumCents(bills, (bill) => bill.netCents)) },
@@ -1638,6 +1642,7 @@ function paymentsView({
 
   return view<ApPaymentRecord>({
     gridId: 'ap-payments',
+    cardLayout: { title: 'date', amount: 'amount', pills: ['kind'] },
     actions: (
       <>
         <TmsSelect
@@ -1709,6 +1714,7 @@ function agingView({ errorBanner, aging, awaitingCents, awaitingCount, avgDaysTo
 
   return view<Row>({
     gridId: 'ap-aging',
+    cardLayout: { title: 'carrier', amount: 'total' },
     actions: (
       <TmsButton size="sm" aria-label="Download AP aging CSV" onClick={onCsv}>
         <Download size={14} /> CSV

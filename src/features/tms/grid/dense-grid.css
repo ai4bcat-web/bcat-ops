@@ -664,3 +664,73 @@
 
 /* Summary as stat cards (Invoicing, Payables). */
 .tms-shell .tms-dg-kpi-cards { padding: 8px 0 4px; }
+
+/* ── Phone cards (DenseCards, below 640px) ───────────────────────────────────────────────────────── */
+.tms-shell .tms-dg-cards {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  gap: 8px;
+  padding: 4px 0 8px;
+}
+
+.tms-shell .tms-dg-cards-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+  font-size: 13px;
+  color: var(--tms-text-2);
+}
+
+.tms-shell .tms-dg-cards-list { display: flex; flex-direction: column; gap: 8px; }
+
+.tms-shell .tms-dg-card-group {
+  padding: 6px 4px 0;
+  font-weight: 600;
+  color: var(--tms-text-2);
+}
+
+.tms-shell .tms-dg-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-card);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
+}
+
+.tms-shell .tms-dg-card[data-selected='true'] { background: var(--tms-surface-selected); border-color: var(--tms-primary); }
+.tms-shell .tms-dg-card[data-tone='voided'] .tms-dg-card-title,
+.tms-shell .tms-dg-card[data-tone='canceled'] .tms-dg-card-title { text-decoration: line-through; }
+
+.tms-shell .tms-dg-card-check,
+.tms-shell .tms-dg-card-lead input[type='checkbox'] { width: 20px; height: 20px; margin-top: 2px; accent-color: var(--tms-primary); flex: 0 0 auto; }
+.tms-shell .tms-dg-card-lead { flex: 0 0 auto; }
+
+.tms-shell .tms-dg-card-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.tms-shell .tms-dg-card-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.tms-shell .tms-dg-card-title { font-weight: 700; font-size: 15px; min-width: 0; overflow-wrap: anywhere; }
+.tms-shell .tms-dg-card-amount { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tms-shell .tms-dg-card-party { color: var(--tms-text-2); font-size: 13px; overflow-wrap: anywhere; }
+.tms-shell .tms-dg-card-pills { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-size: 12px; }
+
+.tms-shell .tms-dg-card-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 12px;
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+.tms-shell .tms-dg-card-details > div { min-width: 0; }
+.tms-shell .tms-dg-card-details dt { color: var(--tms-muted); font-size: 11px; text-transform: none; }
+.tms-shell .tms-dg-card-details dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+
+.tms-shell .tms-dg-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.tms-shell .tms-dg-card-actions .tms-btn { min-height: 40px; }

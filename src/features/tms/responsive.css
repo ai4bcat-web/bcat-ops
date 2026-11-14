@@ -210,3 +210,22 @@
   }
   .tms-portal .tms-table-stack td input, .tms-portal .tms-table-stack td select { width: 100%; text-align: left !important; }
 }
+
+/* Ready to invoice / Invoiced on a phone: the batch actions show only in the bottom bar once rows are ticked, not also (disabled, with
+   "0 selected") under the page title. */
+@media (max-width: 640px) {
+  .tms-shell .tms-page-actions .tms-batch-actions:not([data-active='true']) > * { display: none; }
+}
+
+/* Collapsible toolbar filters (Customers): inline on a desktop, behind a Filters button on a phone. */
+.tms-shell .tms-dense-filters { display: contents; }
+.tms-shell .tms-dense-filters-toggle { display: none; }
+@media (max-width: 640px) {
+  .tms-shell .tms-dense-filters-toggle { display: inline-flex; }
+  .tms-shell .tms-dense-filters:not([data-open='true']) { display: none; }
+  .tms-shell .tms-dense-filters[data-open='true'] {
+    display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 100%; padding: 8px;
+    border: 1px solid var(--tms-border); border-radius: var(--tms-radius-card); background: var(--tms-surface-subtle);
+  }
+  .tms-shell .tms-dense-filters[data-open='true'] .tms-dense-spacer { display: none; }
+}

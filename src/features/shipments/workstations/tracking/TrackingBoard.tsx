@@ -494,6 +494,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
             rowAttrs={rowAttrs}
             groupKeyOf={grouper ? (row) => grouper.describe(row, nameOf).key : undefined}
             renderGroupHeader={renderGroupHeader}
+            cardLayout={{ title: 'shipment', party: 'customer', pills: ['status'], detailCount: 6 }}
             empty={
               <span data-testid="tracking-empty">
                 {rows.length === 0 ? emptyMessage({ activeAssignee, includeUnsent, lifecycle }) : fitRows.length === 0 && focus ? FOCUS_EMPTY[focus] : 'No shipments match the column filters.'}
