@@ -37,6 +37,7 @@ import { QUOTE_STATUS_LABEL } from '@/lib/quotes'
 import { formatCents as formatQuoteCents } from '@/lib/invoiceBuild'
 import { formatCents } from '@/lib/tmsDirectory'
 import { useCustomerForm, type CustomerFormValue } from './useCustomerForm'
+import { CUSTOMER_FACTOR_FLAG_LABEL, customerFactorFlag } from '@/lib/factorReadyAtCreate'
 import { INVOICE_FREQUENCY_OPTIONS } from './useCustomerForm'
 import { BillingMethodFields } from './BillingMethodFields'
 import { PossibleDuplicateBadge } from './PossibleDuplicateBadge'
@@ -260,6 +261,11 @@ export function CustomerProfile({
               {customer.status ? <TmsBadge tone={statusTones[customer.status]}>{customer.status}</TmsBadge> : null}
               <PossibleDuplicateBadge info={duplicates.get(customer.id)} />
               <InvoiceEmailBadge customer={customer} />
+              {customerFactorFlag(customer) ? (
+                <TmsBadge tone={customerFactorFlag(customer) === 'MISSING_MC' ? 'red' : 'orange'} data-testid="customer-factor-flag">
+                  {CUSTOMER_FACTOR_FLAG_LABEL[customerFactorFlag(customer)!]}
+                </TmsBadge>
+              ) : null}
             </>
           }
           actions={
@@ -310,7 +316,7 @@ export function CustomerProfile({
                       options={[{ value: 'BROKER', label: 'Broker' }, { value: 'SHIPPER', label: 'Shipper' }]}
                     />
                   </TmsField>
-                  <TmsField label={value.customerType === 'BROKER' && value.billingMethod === 'FACTOR' ? 'MC # (required to factor)' : 'MC #'}>
+                  <TmsField label={value.customerType === 'BROKER' && value.billingMethod === 'FACTOR' ? 'MC # (required to factor)' : 'MC #'} error={errors.mcNumber}>
                     <TmsInput value={value.mcNumber} onChange={(e) => set('mcNumber', e.target.value)} />
                   </TmsField>
                   <TmsField label="DOT #">

@@ -5525,6 +5525,26 @@ describe('READY_TO_INVOICE', () => {
         expect(await extrasOf(await reviewable({ ...noRep, customer: { reviewRequirements: ['salesRep'] } }))).toEqual(['SALES_REP_MISSING'])
       })
 
+      it('a factored load cannot go into or out of Load Review without what OTR needs from booking (Ryne 2026-11-14)', async () => {
+        const factoredBroker = { reviewRequirements: [], billingMethod: 'FACTOR', customerType: 'BROKER', mcNumber: '123456' }
+        const ids = await reviewable({ customer: factoredBroker })
+        // Booked before the rule had its MC: take it away on the customer record, as an old customer would be.
+        const customerId = String(table(TABLES.order).get(ids.orderId)!.customerId)
+        table(TABLES.customer).set(customerId, { ...table(TABLES.customer).get(customerId)!, mcNumber: null })
+        const codes = await extrasOf(ids)
+        expect(codes).toContain('FACTOR_CUSTOMER_MC')
+        expect(codes.every((c) => c.startsWith('FACTOR_'))).toBe(true)
+        const pushed = (await call('BATCH_SHIPMENT_TASK', { task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: [ids.shipmentId] }, REVIEWER)) as { results: { ok: boolean; reasons?: string[] }[] }
+        expect(pushed.results[0].ok).toBe(false)
+        expect(pushed.results[0].reasons?.some((r) => /no MC number/.test(r))).toBe(true)
+        await expect(ready(ids.orderId, { review: REVIEW })).rejects.toThrow(/no MC number/)
+        // A shipper we factor needs no MC; a manually billed customer is never asked.
+        table(TABLES.customer).set(customerId, { ...table(TABLES.customer).get(customerId)!, customerType: 'SHIPPER' })
+        expect(await extrasOf(ids)).not.toContain('FACTOR_CUSTOMER_MC')
+        table(TABLES.customer).set(customerId, { ...table(TABLES.customer).get(customerId)!, billingMethod: 'MANUAL', customerType: 'BROKER' })
+        expect((await extrasOf(ids)).filter((c) => c.startsWith('FACTOR_'))).toEqual([])
+      })
+
       it('refuses the release on the same list the push read', async () => {
         const ids = await reviewable({ rep: false, customer: { reviewRequirements: ['salesRep'] } })
         await expect(ready(ids.orderId, { review: REVIEW })).rejects.toThrow('Not ready for accounting: Missing sales rep')

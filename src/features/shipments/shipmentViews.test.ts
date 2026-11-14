@@ -751,3 +751,16 @@ describe('profitByDivision', () => {
     expect(profitByDivision([], top).total).toEqual({ revenueCents: 0, profitCents: 0, count: 0 })
   })
 })
+
+describe('Factoring Info (Ryne 2026-11-14)', () => {
+  it('flags a factored load until it is invoiced or handed to the factor', async () => {
+    const { openFactorGaps, factorInfoText, factorInfoTitle } = await import('./shipmentViews')
+    const row = { id: 's1', status: 'IN_TRANSIT', customerId: 'c1', factorGaps: ['PO_MISSING', 'PICKUP_ZIP'] } as unknown as Parameters<typeof openFactorGaps>[0]
+    expect(factorInfoText(row)).toBe('Missing 2')
+    expect(factorInfoTitle(row)).toBe('Missing for factoring: PO, Pick Up ZIP')
+    expect(openFactorGaps({ ...row, invoiceId: 'inv-1' })).toEqual([])
+    expect(openFactorGaps({ ...row, factoringItemId: '123' })).toEqual([])
+    expect(openFactorGaps({ ...row, status: 'CANCELED' })).toEqual([])
+    expect(factorInfoText({ ...row, factorGaps: null })).toBe('')
+  })
+})

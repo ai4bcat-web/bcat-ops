@@ -413,6 +413,20 @@ describe('UPSERT_CUSTOMER', () => {
     expect(result.apptWorkflow).toBeNull()
   })
 
+  it('a broker we factor must carry an MC; a shipper or an unset type need not (Ryne 2026-11-14)', async () => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Put') return Promise.resolve({})
+      return Promise.resolve({})
+    }))
+    const factored = { name: 'Acme Logistics', billingMethod: 'FACTOR', noaEmail: 'noa@acme.example' }
+    await expect(handler(event('UPSERT_CUSTOMER', { ...factored, customerType: 'BROKER' }))).rejects.toThrow(/MC number/)
+    expect((await handler(event('UPSERT_CUSTOMER', { ...factored, customerType: 'BROKER', mcNumber: '123456' }))).customerType).toBe('BROKER')
+    expect((await handler(event('UPSERT_CUSTOMER', { ...factored, name: 'Acme Foods', customerType: 'SHIPPER' }))).customerType).toBe('SHIPPER')
+    expect((await handler(event('UPSERT_CUSTOMER', { ...factored, name: 'Acme Paper' }))).customerType).toBeNull()
+    await expect(handler(event('UPSERT_CUSTOMER', { name: 'Acme Steel', customerType: 'CARRIER' }))).rejects.toThrow(/customerType/)
+  })
+
   it('refuses an appointment workflow outside the schema enum', async () => {
     send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
       if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })

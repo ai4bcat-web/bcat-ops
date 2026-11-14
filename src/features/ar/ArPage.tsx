@@ -1004,7 +1004,7 @@ function queueView({
     },
     ...(ready ? [{
       key: 'factorReady', header: 'Ready to factor', group: 'Invoice', text: factorReadyText,
-      filter: 'multi', optionsOf: (row: ArQueueRow) => opt(factorReadyText(row).startsWith('Missing') ? 'Missing' : factorReadyText(row)),
+      filter: 'multi', optionsOf: (row: ArQueueRow) => opt(factorReadyText(row).startsWith('Missing') ? 'Missing factoring info' : factorReadyText(row)),
     } as Col<ArQueueRow>] : []),
     ...(ready || invoiced ? attachmentColumns(attachmentPlans) : []),
     ...(status === 'PAID' ? [
@@ -1074,7 +1074,7 @@ function queueView({
         if (r.ready) return <TmsBadge tone="green" title="Everything OTR needs is here">✓ Ready to factor</TmsBadge>
         return (
           <span className="flex items-center gap-1" title={r.missing.join('\n')}>
-            <TmsBadge tone="red">Missing</TmsBadge>
+            <TmsBadge tone="red">Missing for factoring</TmsBadge>
             <span style={{ color: 'var(--tms-badge-red)' }}>{r.missing.join('; ')}</span>
           </span>
         )

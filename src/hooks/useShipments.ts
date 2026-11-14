@@ -3,6 +3,7 @@ import { listCarriers, listCustomers, listDrivers, listQuotes, listUserProfiles 
 import type { LoadBoardSummary } from '@/lib/apiClient'
 import { loadBoardBundle, peekBoardBundle, type BoardBundle, type BoardView } from '@/lib/boardData'
 import { aggregateApStatus } from '@/lib/carrierTotals'
+import { factorGapsForLoad, orderPoNumber, routeEnds, type FactorGapCode } from '@/lib/factorReadyAtCreate'
 import { modelsAvailable } from '@/lib/modelAvailability'
 import type { BoardCarrier } from '@/lib/shipmentViewDefs'
 import type { Driver, Stop } from '@/types'
@@ -82,6 +83,11 @@ export interface ShipmentListRow extends ShipmentRecord {
   shipDate: string | null
   /** Stops across the shipment's loads, null when the backend has not sent a stop list. */
   stops: Stop[] | null
+  /**
+   * What a factor-billed load is missing for factoring (src/lib/factorReadyAtCreate), derived on every read so a fix
+   * clears it. `[]` = nothing missing or not factored; null = the stops or order are not loaded, so it cannot be judged.
+   */
+  factorGaps: FactorGapCode[] | null
   // ── R2 column catalog — everything the picker's columns read, null when unknown ──
   /** Rep and audit ids resolved to profile names; null when no profile matches. */
   salesRepName: string | null
@@ -683,6 +689,14 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         officeTeamKeys: s.salesRepId ? (teamKeysByRepId[s.salesRepId] ?? null) : null,
         shipDate: firstLoad?.pickupAppt ?? null,
         stops,
+        factorGaps: s.legacyImported === true ? [] : stops && order
+          ? factorGapsForLoad({
+            customer: customer ?? null,
+            poNumber: orderPoNumber(order.references),
+            customerRateCents: order.revenueCents ?? null,
+            ...routeEnds(stops),
+          }).map((g) => g.code)
+          : null,
         // Resolved names.
         salesRepName: nameOf(s.salesRepId),
         trackerName: nameOf(s.trackerId),

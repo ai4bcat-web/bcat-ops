@@ -112,6 +112,8 @@ import {
   type ShipmentRow,
   profitByDivision,
   invoiceStatusOfRow,
+  factorInfoText,
+  factorInfoTitle,
 } from './shipmentViews'
 import { useRowsWithInvoiceStatus } from './useBoardInvoiceStatus'
 import { loadInvoiceStatusText } from '@/lib/loadInvoiceStatus'
@@ -950,6 +952,11 @@ function BoardPane({
           ? <Link className="tms-link tms-board-link" to={`/tms/carriers/${carrierId}`} title={carrierHoverText(row)} onClick={(e) => e.stopPropagation()}>{label}</Link>
           : <span className={cn(label === 'Need to cover' && 'tms-muted')} title={carrierHoverText(row)}>{label}</span>
         return <span className="flex items-center gap-1" data-testid="carrier-cell">{name}<TrackingModeNotSetRowChip row={row} /></span>
+      }
+      if (columnKey === 'factorInfo') {
+        const text = factorInfoText(row)
+        if (!text) return null
+        return <TmsBadge tone="orange" title={factorInfoTitle(row)} data-testid="factor-info-pill">{text}</TmsBadge>
       }
       if (columnKey === 'invoiceStatus') {
         const inv = invoiceStatusOfRow(row)

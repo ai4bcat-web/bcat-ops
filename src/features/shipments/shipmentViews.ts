@@ -45,6 +45,7 @@ import { boardStatusOf, detailValuesFor, type BoardCarrier } from '@/lib/shipmen
 import { assignmentChipText } from './carrierLadder'
 import { isReleasedToInvoicing } from '@/lib/shipmentLists'
 import { loadInvoiceStatusOf, loadInvoiceStatusText, type LoadInvoiceStatus } from '@/lib/loadInvoiceStatus'
+import { factorGapSummary, type FactorGapCode } from '@/lib/factorReadyAtCreate'
 import { effectiveShipmentType, shipmentTypeLabel } from '@/lib/shipmentTypes'
 export { ALJEX_COLUMN_KEYS, boardStatusOf, matchesBoardFilters } from '@/lib/shipmentViewDefs'
 
@@ -133,6 +134,8 @@ export type ShipmentRow = ShipmentRecord & {
   /** Where the invoice stands, read by the board from the open invoices and the OTR queue (`loadInvoiceStatusOf`). */
   invoiceStatus?: LoadInvoiceStatus | null
   invoiceId?: string | null
+  /** What a factor-billed load is missing for factoring, derived by useShipments; null = not judged. */
+  factorGaps?: FactorGapCode[] | null
   // ── R2 column catalog (projected by the data layer; every one null when unknown) ──
   /** Rep and audit ids resolved to profile names; null when no profile matches. */
   salesRepName?: string | null
@@ -305,6 +308,28 @@ export const RELEASED_LABEL = 'RELEASED'
 export function displayStatusOf(row: ShipmentRow): BoardStatusKey | 'CANCELED' | typeof RELEASED_LABEL {
   const status = boardStatusOf(row)
   return status !== 'VOIDED' && status !== 'CANCELED' && isReleasedToInvoicing(row) ? RELEASED_LABEL : status
+}
+
+/**
+ * What a factored load still needs before it can be factored (Ryne 2026-11-14), while that still matters: not void or
+ * canceled, and not yet invoiced or handed to the factor. Empty otherwise.
+ */
+export function openFactorGaps(row: ShipmentRow): FactorGapCode[] {
+  if (!row.factorGaps || row.factorGaps.length === 0) return []
+  if (row.voidedAt || row.deletedAt || row.status === 'CANCELED') return []
+  if (row.invoiceId || row.factoringItemId) return []
+  return row.factorGaps
+}
+
+/** "Missing 3" for the board cell; empty when nothing is missing. */
+export function factorInfoText(row: ShipmentRow): string {
+  const gaps = openFactorGaps(row)
+  return gaps.length > 0 ? `Missing ${gaps.length}` : ''
+}
+
+/** The cell's tooltip: "Missing for factoring: PO, Pick Up ZIP". */
+export function factorInfoTitle(row: ShipmentRow): string {
+  return factorGapSummary(openFactorGaps(row))
 }
 
 /** The row's invoice status: the board's live read when it has one, the order's cached AR fields otherwise. */
@@ -976,6 +1001,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'paidAt', label: 'Paid At', group: 'Order', value: (r) => formatBoardDateTime(r.paidAt), width: 140 },
   { key: 'arBalance', label: 'AR Balance', group: 'Order', value: (r) => formatCentsOrEmpty(r.arBalanceCents), width: 120 },
   { key: 'invoiceStatus', label: 'Invoice Status', group: 'Order', value: (r) => loadInvoiceStatusText(invoiceStatusOfRow(r), formatBoardDate), width: 150 },
+  { key: 'factorInfo', label: 'Factoring Info', group: 'Order', value: (r) => factorInfoTitle(r), width: 110 },
   { key: 'factoringItem', label: 'Factoring Item', group: 'Order', value: (r) => r.factoringItemId ?? '', width: 140 },
   {
     key: 'docsRequired',

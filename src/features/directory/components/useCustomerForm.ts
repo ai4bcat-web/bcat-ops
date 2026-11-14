@@ -14,6 +14,7 @@ import type {
   CheckCallPlan,
 } from '@/types/tms'
 import { parseEmailList, validateBillingFields, type BillingMethod } from '@/lib/billingMethod'
+import { customerMcRequiredError } from '@/lib/factorReadyAtCreate'
 import {
   DEFAULT_NEW_CUSTOMER_CREDIT_LIMIT_CENTS,
   DEFAULT_NEW_CUSTOMER_DIVISION,
@@ -405,7 +406,13 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
   const missing = useMemo(() => missingSummary(problems), [problems])
 
   const errors = useMemo(() => {
-    const base = validateCustomerForm(value)
+    const base: Record<string, string> = { ...validateCustomerForm(value) }
+    // Ryne 2026-11-14: a broker we factor must carry an MC, on create and on every edit (the server refuses the same).
+    const mcError = customerMcRequiredError({
+      billingMethod: value.billingMethod || null, factored: initial?.factored ?? null,
+      customerType: value.customerType || null, mcNumber: value.mcNumber,
+    })
+    if (mcError) base.mcNumber = mcError
     if (isNew) {
       const out = { ...base }
       for (const p of problems) out[p.field] = p.message
