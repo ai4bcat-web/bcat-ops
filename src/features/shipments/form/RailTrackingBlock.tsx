@@ -6,13 +6,21 @@ import { memo, useEffect, useMemo, useState } from 'react'
 import { ExternalLink, MapPin } from 'lucide-react'
 import { TmsBadge, TmsButton } from '@/features/tms/kit'
 import { FleetMiniMap } from '@/features/dashboard/FleetMiniMap'
-import { listCheckCallsByLoad, listTrackingLinksByShipment, listTruckLocations, type TruckLocation } from '@/lib/apiClient'
-import { formatDateTime } from '@/lib/date'
+import { listCheckCallsByLoad, listTimeClockByDriver, listTrackingLinksByShipment, listTruckLocations, type TruckLocation } from '@/lib/apiClient'
+import { chicagoDateStr, formatDateTime } from '@/lib/date'
 import { useAppStore } from '@/store/useAppStore'
 import type { LoadCheckCallRecord, ShipmentBundle, TrackingLinkRecord } from '@/types/tms'
-import { agoText, freshnessOf, mapsUrl, railTracking, type LinkState, type TrackingCase } from './railTracking'
+import { agoText, freshnessOf, mapsUrl, railTracking, type LinkState, type Punch, type TrackingCase } from './railTracking'
 
 const REFRESH_MS = 60_000
+const DAY_MS = 86_400_000
+
+/** Work days whose punches belong to this load: the day before its first appointment through today, at most a week. */
+function punchDays(firstAppt: string | null, now: Date): { from: string; to: string } {
+  const earliest = now.getTime() - 7 * DAY_MS
+  const start = firstAppt && !Number.isNaN(Date.parse(firstAppt)) ? Math.max(Date.parse(firstAppt) - DAY_MS, earliest) : now.getTime() - 2 * DAY_MS
+  return { from: chicagoDateStr(new Date(start)), to: chicagoDateStr(now) }
+}
 
 const KIND_LABEL: Record<TrackingCase, string> = {
   IVAN: 'Ivan driver · ELD',
@@ -37,11 +45,15 @@ function RailTrackingBlockImpl({ bundle, onSendTrackingLink }: { bundle: Shipmen
   const load = bundle?.loads[0] ?? null
   const loadId = load?.id ?? null
   const shipmentId = bundle?.shipment.id ?? null
-  const ownFleet = !!bundle?.loadCarriers.some((c) => c.status === 'ACTIVE' && c.kind === 'OWN_ASSET')
+  const ownLeg = bundle?.loadCarriers.find((c) => c.status === 'ACTIVE' && c.kind === 'OWN_ASSET') ?? null
+  const ownFleet = !!ownLeg
+  const ownDriverId = ownLeg?.driverId ?? null
+  const firstAppt = ((load?.stops ?? []) as { appt?: string | null }[]).find((s) => s.appt)?.appt ?? null
 
   const [truckLocations, setTruckLocations] = useState<TruckLocation[]>([])
   const [checkCalls, setCheckCalls] = useState<LoadCheckCallRecord[]>([])
   const [trackingLinks, setTrackingLinks] = useState<TrackingLinkRecord[]>([])
+  const [punches, setPunches] = useState<Punch[]>([])
   const [now, setNow] = useState(() => new Date())
 
   useEffect(() => {
@@ -51,17 +63,21 @@ function RailTrackingBlockImpl({ bundle, onSendTrackingLink }: { bundle: Shipmen
       if (document.visibilityState !== 'visible') return
       setNow(new Date())
       if (ownFleet) listTruckLocations().then((rows) => { if (alive) setTruckLocations(rows) }).catch(() => undefined)
+      if (ownDriverId) {
+        const { from, to } = punchDays(firstAppt, new Date())
+        listTimeClockByDriver(ownDriverId, from, to).then((rows) => { if (alive) setPunches(rows) }).catch(() => undefined)
+      }
       listCheckCallsByLoad(loadId).then((rows) => { if (alive) setCheckCalls(rows) }).catch(() => undefined)
       listTrackingLinksByShipment(shipmentId).then((rows) => { if (alive) setTrackingLinks(rows) }).catch(() => undefined)
     }
     tick()
     const timer = window.setInterval(tick, REFRESH_MS)
     return () => { alive = false; window.clearInterval(timer) }
-  }, [loadId, shipmentId, ownFleet])
+  }, [loadId, shipmentId, ownFleet, ownDriverId, firstAppt])
 
   const t = useMemo(() => railTracking({
-    load, loadCarriers: bundle?.loadCarriers ?? [], drivers, equipment, truckLocations, checkCalls, trackingLinks, now,
-  }), [load, bundle?.loadCarriers, drivers, equipment, truckLocations, checkCalls, trackingLinks, now])
+    load, loadCarriers: bundle?.loadCarriers ?? [], drivers, equipment, truckLocations, checkCalls, trackingLinks, punches, now,
+  }), [load, bundle?.loadCarriers, drivers, equipment, truckLocations, checkCalls, trackingLinks, punches, now])
 
   if (!bundle) return null
 

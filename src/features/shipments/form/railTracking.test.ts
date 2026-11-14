@@ -48,6 +48,13 @@ describe('railTracking: which case applies', () => {
     expect(t.checkIns.map((c) => c.label)).toEqual(['Departed pickup', 'On site at pickup'])
   })
 
+  it('Ivan driver check-ins include time-clock punches; owner operators never show them', () => {
+    const punches = [{ kind: 'WORK', clockInAt: ago(15), clockOutAt: null }] as RailTrackingInput['punches']
+    expect(railTracking(input({ punches })).checkIns[0]).toEqual({ at: ago(15), label: 'Clocked in (time clock)', place: null })
+    const oo = railTracking(input({ punches, drivers: [{ id: 'd-1', name: 'Oscar', fleetGroup: 'OWNER_OPERATOR', type: 'driver' }] as RailTrackingInput['drivers'] }))
+    expect(oo.checkIns.map((c) => c.label)).not.toContain('Clocked in (time clock)')
+  })
+
   it('own-fleet owner operator = OWNER_OP with the ELD fix', () => {
     const t = railTracking(input({ drivers: [{ id: 'd-1', name: 'Oscar', fleetGroup: 'OWNER_OPERATOR', type: 'driver' }] as RailTrackingInput['drivers'] }))
     expect(t.kind).toBe('OWNER_OP')
@@ -125,5 +132,12 @@ describe('checkInsOf', () => {
       { at: ago(10), type: 'NOTE', source: 'MANUAL' },
     ] as unknown as LoadCheckCallRecord[]
     expect(checkInsOf(stops, calls)).toEqual([{ at: ago(20), label: 'Location update', place: 'Joliet, IL' }])
+  })
+  it('a punch counts both ends; PTO and holiday rows are not punches', () => {
+    const punches = [
+      { kind: 'WORK', clockInAt: ago(300), clockOutAt: ago(30) },
+      { kind: 'PTO', clockInAt: null, clockOutAt: null },
+    ] as never
+    expect(checkInsOf([], [], 5, punches).map((c) => c.label)).toEqual(['Clocked out (time clock)', 'Clocked in (time clock)'])
   })
 })
