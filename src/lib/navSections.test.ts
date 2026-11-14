@@ -99,10 +99,12 @@ describe('buildNavSections', () => {
       ['Payroll', ['Box Truck Settlements', 'Owner Operator Settlements', 'Employee Hours']],
     ])
     // Calendar carries Driver info, Appts, Time off and Ivan driver app in that order; Profiles holds Customers, Carriers, Locations and Drivers.
-    expect(kids('Calendar')).toEqual(['Driver info', 'Appts', 'Time off', 'Ivan driver app'])
+    expect(kids('Calendar')).toEqual(['Driver info', 'Appts', 'Time off', 'Ivan driver app', 'Amazon disputes'])
     expect(kids('Fleet manager')).not.toContain('Ivan driver app')
     expect(kids('Profiles')).toEqual(['Customers', 'Carriers', 'Locations', 'Drivers', 'Assets'])
     expect(kids('Fleet manager').slice(0, 5)).toEqual(['Fleet manager dashboard', 'Maintenance', 'Invoices', 'Asset documents', 'Fuel'])
+    // Amazon disputes moved to Calendar; Expenses and Insurance to Company (Ryne 2026-11-14).
+    for (const gone of ['Amazon disputes', 'Expenses', 'Insurance']) expect(kids('Fleet manager')).not.toContain(gone)
     expect(kids('Accounting')).toEqual(['Accounts Receivable', 'Accounts Payable', 'Vendors'])
     expect(kids('Settings')).toEqual([
       'General & automation', 'Company', 'Divisions & ownership', 'Users & roles', 'Integrations', 'AI agents',
@@ -117,7 +119,7 @@ describe('buildNavSections', () => {
     expect(sections.map((s) => s.key)).toEqual(['CAR_SHIPPING', 'COMPANY'])
     expect(businesses.map((b) => b.key)).toEqual(['BROKERAGE', 'CAR_SHIPPING'])
     expect(labels(sections[1].items)).toEqual([
-      'Financial operations', 'Finances', 'Profit Review', 'Weekly Cash Check-in', 'Reddit Queue',
+      'Financial operations', 'Finances', 'Profit Review', 'Weekly Cash Check-in', 'Expenses', 'Insurance', 'Reddit Queue',
     ])
     // The header reads as a business name, not as a code: `CAR SHIPPING [Best Care Auto Transport]`.
     expect(sections[0].name).toBe('CAR SHIPPING')
@@ -206,6 +208,26 @@ describe('buildNavSections', () => {
       expect(all.filter((i) => lifecycle.test(i.to))).toEqual([])
       expect(all.filter((i) => i.badgeKey && lifecycleBadges.includes(i.badgeKey))).toEqual([])
     }
+  })
+
+  it('shows Expenses and Insurance only under Company, and only on their own grants', () => {
+    const fleetManager = buildNavSections({
+      divisions: FOUR,
+      hasPageAccess: grants('fleetManagerDashboard', 'maintenance', 'fuel', 'invoices', 'timeOff', 'truckDocs', 'trucks'),
+    })
+    const everything = [...fleetManager.pinned.flatMap((i) => [i, ...(i.children ?? [])]), ...fleetManager.sections.flatMap((s) => s.items)]
+    expect(everything.map((i) => i.label)).not.toContain('Expenses')
+    expect(everything.map((i) => i.label)).not.toContain('Insurance')
+    const finance = buildNavSections({ divisions: FOUR, hasPageAccess: grants('finances', 'insurance') })
+    expect(finance.pinned).toEqual([])
+    expect(finance.sections.map((s) => s.key)).toEqual(['COMPANY'])
+    expect(labels(finance.sections[0].items)).toEqual(['Financial operations', 'Finances', 'Profit Review', 'Expenses', 'Insurance'])
+  })
+
+  it('lists Amazon disputes under Calendar for someone who can open Calendar', () => {
+    const { pinned } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('calendar', 'disputes') })
+    expect(labels(pinned.find((i) => i.label === 'Calendar')?.children)).toContain('Amazon disputes')
+    expect(labels(pinned)).not.toContain('Fleet manager')
   })
 
   it('shows a loadReview-only grant no sidebar row: Review is a lifecycle tab', () => {

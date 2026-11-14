@@ -68,9 +68,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/invoices',    label: 'Invoices',        icon: Receipt,  pageKey: 'invoices', section: 'ASSETS' },
   { to: '/truck-docs',  label: 'Asset Documents', icon: FileText, pageKey: 'truckDocs',  section: 'ASSETS', badgeKey: 'truckDocs' },
   { to: '/fuel',        label: 'Fuel',            icon: Fuel,     pageKey: 'fuel', section: 'ASSETS' },
-  { to: '/expenses',    label: 'Expenses',        icon: WalletCards, pageKey: 'finances', section: 'ASSETS' },
   { to: '/trucks',      label: 'Fleet',           icon: Truck,    pageKey: 'trucks', section: 'ASSETS' },
-  { to: '/insurance',   label: 'Insurance',       icon: Umbrella, pageKey: 'insurance', section: 'ASSETS' },
 
   // Brokerage — the permission rows behind the `/tms/*` pages.
   { to: '/shipments', label: 'Shipments', icon: Package,        pageKey: 'loads', section: 'BROKERAGE' },
@@ -119,6 +117,9 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/finances',  label: 'Finances',  icon: LineChart, pageKey: 'finances', section: 'COMPANY' },
   { to: '/finances/review', label: 'Profit Review', icon: ClipboardList, pageKey: 'finances', section: 'COMPANY' },
   { to: '/finance/cash-checkin', label: 'Weekly Cash Check-in', icon: Wallet, pageKey: 'cashCheckIn', section: 'COMPANY' },
+  // Truck costs and the fleet's insurance are company money, not fleet-manager pages (Ryne 2026-11-14).
+  { to: '/expenses',    label: 'Expenses',        icon: WalletCards, pageKey: 'finances', section: 'COMPANY' },
+  { to: '/insurance',   label: 'Insurance',       icon: Umbrella, pageKey: 'insurance', section: 'COMPANY' },
   { to: '/compliance', label: 'Compliance', icon: ShieldCheck, pageKey: 'compliance', section: 'BROKERAGE', badgeKey: 'review' },
   { to: '/reddit-queue', label: 'Reddit Queue', icon: MessageSquare, pageKey: 'redditQueue', section: 'COMPANY' },
   // Settings-group pages (permission rows only; the sidebar renders them under Settings).

@@ -116,13 +116,15 @@ const PAYROLL_CHILDREN: NavChildDef[] = [
   { to: '/hours', label: 'Employee Hours', pageKey: 'hours' },
 ]
 
-/** Under Calendar, in this order (Ryne 2026-11-09). */
+/** Under Calendar, in this order (Ryne 2026-11-09; Amazon disputes added 2026-11-14). */
 const CALENDAR_CHILDREN: NavChildDef[] = [
   { to: '/driver-info', label: 'Driver info', pageKey: 'dispatch' },
   { to: '/appts', label: 'Appts', pageKey: 'appts', badgeKey: 'appts' },
   { to: '/time-off', label: 'Time off', pageKey: 'timeOff', badgeKey: 'timeOff' },
   // Moved up from Fleet manager so the driver sign-in invites are next to the people they are for (Ryne 2026-11-12).
   { to: '/ivan-driver-app', label: 'Ivan driver app', pageKey: 'ivanDriverApp' },
+  // Moved from Fleet manager (Ryne 2026-11-14).
+  { to: '/disputes', label: 'Amazon disputes', pageKey: 'disputes' },
 ]
 
 /** Customers, Carriers and Locations: one Profiles section. Carriers opens the Carrier list; Find & Invite is its other tab. */
@@ -147,9 +149,6 @@ const FLEET_MANAGER_CHILDREN: NavChildDef[] = [
   { to: '/truck-docs', label: 'Asset documents', pageKey: 'truckDocs', badgeKey: 'truckDocs' },
   { to: '/fuel', label: 'Fuel', pageKey: 'fuel' },
   { to: '/files', label: 'Files', pageKey: 'files' },
-  { to: '/disputes', label: 'Amazon disputes', pageKey: 'disputes' },
-  { to: '/expenses', label: 'Expenses', pageKey: 'finances' },
-  { to: '/insurance', label: 'Insurance', pageKey: 'insurance' },
 ]
 
 const SETTINGS_CHILDREN: NavChildDef[] = [
@@ -377,7 +376,7 @@ export function buildNavSections({
 }): NavSectionsResult {
   // Null means "the divisions have not loaded (or the table is not deployed yet)". The
   // seeds are the same four the Lambda writes, so the rail looks right either way.
-  // The COMPANY section (Finances, Financial operations, Profit Review, Reddit Queue) is the company itself, not a
+  // The COMPANY section (Finances, Financial operations, Profit Review, Expenses, Insurance, Reddit Queue) is the company itself, not a
   // business a user can retire: it must show whether or not an OwnershipDivision row for it exists or is active.
   const loaded: DivisionLike[] = divisions ?? SEED_DIVISIONS
   const company = loaded.find((d) => d.code === COMPANY_DIVISION)
