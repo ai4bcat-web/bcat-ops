@@ -22,12 +22,15 @@ import type { FactoringItem } from '@/types'
 import type { CustomerRecord, InvoiceAdjustment, InvoiceRecord, ShipmentRecord, TmsSettings } from '@/types/tms'
 import { centsFromInput, inputFromCents } from './money'
 import { InvoicePacketFrame } from './InvoicePacketFrame'
+import { useCustomerPaymentFacts } from '@/hooks/useCustomerPaymentFacts'
+import { PAYMENT_METHOD_LABEL, settlementOf } from '@/lib/daysToPay'
+import { formatDay } from '../arViews'
 import { INVOICE_FROM_ADDRESS, isFactoredInvoice, manualRecipients } from '../sendReview'
 import { AttachmentInfo, AttachmentRow, AttachmentsSection, InvoiceEnvelope, MessageSection } from './InvoiceEmailSections'
 
 interface Draft { kind: 'CREDIT' | 'DEBIT'; description: string; amount: string; reason: string }
 
-export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, canEdit, canVoid = false, onClose, onSaved, onSend, onFactor, onPayment, onVoid }: {
+export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, canEdit, canVoid = false, onClose, onSaved, onSend, onFactor, onPayment, onMarkPaid, onVoid }: {
   invoice: InvoiceRecord
   customer: CustomerRecord | undefined
   shipment: ShipmentRecord | undefined
@@ -40,9 +43,14 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
   canVoid?: boolean
   onFactor?: (invoice: InvoiceRecord) => void
   onPayment?: (invoice: InvoiceRecord) => void
+  /** Paid date, ACH or check, check # — the same dialog as the Invoiced tab's batch. */
+  onMarkPaid?: (invoice: InvoiceRecord) => void
   onVoid?: (invoice: InvoiceRecord) => void
 }) {
   const [current, setCurrent] = useState(invoice)
+  const paymentFacts = useCustomerPaymentFacts([invoice.customerId])
+  const paymentLines = paymentFacts.linesByInvoice.get(invoice.id) ?? []
+  const settled = settlementOf(current, paymentLines)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [settings, setSettings] = useState<TmsSettings | null>(null)
   const [drafts, setDrafts] = useState<Draft[]>(() => (invoice.adjustments ?? []).map((a) => ({
@@ -144,6 +152,9 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
           {canEdit && onFactor && !factored && !sent && current.status !== 'VOID' && current.status !== 'PAID' && (
             <TmsButton aria-label="Send to factor instead" disabled={saving} onClick={() => onFactor(current)}>Send to factor</TmsButton>
           )}
+          {onMarkPaid && sent && !factored && current.status !== 'VOID' && current.status !== 'PAID' && current.balanceCents > 0 && (
+            <TmsButton variant="primary" aria-label="Mark paid" disabled={saving} onClick={() => onMarkPaid(current)}>Mark paid</TmsButton>
+          )}
           {onPayment && sent && current.status !== 'VOID' && current.status !== 'PAID' && (
             <TmsButton variant="ghost" aria-label="Receive payment" disabled={saving} onClick={() => onPayment(current)}>Receive payment</TmsButton>
           )}
@@ -154,8 +165,23 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
         <div className="flex flex-wrap gap-2">
           <TmsBadge tone={factored ? 'purple' : 'blue'}>{factored ? 'OTR' : 'Manual'}</TmsBadge>
           <TmsBadge tone={sent ? 'green' : 'orange'}>{sent ? 'Sent' : 'Draft — not sent'}</TmsBadge>
+          {current.status === 'PAID' && (
+            <TmsBadge tone="green" data-testid="invoice-paid-badge">
+              Paid {formatDay(settled.paidOn)}{settled.method ? ` · ${PAYMENT_METHOD_LABEL[settled.method] ?? settled.method}` : ''}{settled.reference ? ` #${settled.reference}` : ''}{settled.daysToPay != null ? ` · ${settled.daysToPay} days to pay` : ''}
+            </TmsBadge>
+          )}
+          {current.status === 'PARTIAL' && <TmsBadge tone="orange">Partially paid · {formatCents(current.balanceCents)} open</TmsBadge>}
           {locked && <TmsBadge tone="gray">{current.paidCents > 0 ? 'Payment applied: use a credit memo' : factoringItem?.otrInvoiceId ? 'With OTR: edit from factoring' : 'Locked'}</TmsBadge>}
         </div>
+        {paymentLines.length > 0 && (
+          <ul className="text-sm" data-testid="invoice-payment-history" style={{ display: 'grid', gap: 2, margin: 0, paddingLeft: 16 }}>
+            {paymentLines.map((l) => (
+              <li key={`${l.paymentId}:${l.receivedOn}`}>
+                {formatDay(l.receivedOn)} · {l.method ? PAYMENT_METHOD_LABEL[l.method] ?? l.method : 'Write-off'}{l.reference ? ` #${l.reference}` : ''} · {formatCents(l.amountCents)}
+              </li>
+            ))}
+          </ul>
+        )}
 
         {factored ? (
           <section aria-label="OTR submission">

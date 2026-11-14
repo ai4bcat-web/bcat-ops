@@ -326,7 +326,7 @@ describe('the AR board', () => {
     await setup()
     fireEvent.click(screen.getByRole('tab', { name: /^Invoiced/ }))
     await settle()
-    expect(screen.getByText('Short paid $500.00 open')).toBeTruthy()
+    expect(screen.getByText('Partially paid · $500.00 open')).toBeTruthy()
     openSet.splice(0, openSet.length, invoice())
   })
 })

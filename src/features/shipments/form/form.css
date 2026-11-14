@@ -867,13 +867,13 @@
 .tms-shell .tms-ship-next { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: var(--tms-radius-pill); background: var(--tms-primary-tint); color: var(--tms-primary-ink); font-size: 12px; font-weight: 600; white-space: nowrap; }
 
 /* Typed date + 24-hour time (DateTime24Input) and the Appt / FCFS switch on a stop. */
-.tms-shell .ship-dt24 { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.tms-shell .ship-dt24-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.tms-shell .ship-dt24-date { flex: 1 1 110px; min-width: 0; font-variant-numeric: tabular-nums; }
-.tms-shell .ship-dt24-time { flex: 0 0 72px; width: 72px; font-variant-numeric: tabular-nums; text-align: center; }
-.tms-shell .ship-dt24-dash { color: var(--tms-muted); }
-.tms-shell .ship-dt24 input[aria-invalid='true'] { border-color: var(--tms-destructive); }
-.tms-shell .ship-dt24-problem { font-size: 11px; color: var(--tms-destructive); }
+.tms-shell .ship-dt24, .tms-portal .ship-dt24 { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tms-shell .ship-dt24-row, .tms-portal .ship-dt24-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tms-shell .ship-dt24-date, .tms-portal .ship-dt24-date { flex: 1 1 110px; min-width: 0; font-variant-numeric: tabular-nums; }
+.tms-shell .ship-dt24-time, .tms-portal .ship-dt24-time { flex: 0 0 72px; width: 72px; font-variant-numeric: tabular-nums; text-align: center; }
+.tms-shell .ship-dt24-dash, .tms-portal .ship-dt24-dash { color: var(--tms-muted); }
+.tms-shell .ship-dt24 input[aria-invalid='true'], .tms-portal .ship-dt24 input[aria-invalid='true'] { border-color: var(--tms-destructive); }
+.tms-shell .ship-dt24-problem, .tms-portal .ship-dt24-problem { font-size: 11px; color: var(--tms-destructive); }
 .tms-shell .ship-appt-kind { display: inline-flex; border: 1px solid var(--tms-border); border-radius: 6px; overflow: hidden; }
 .tms-shell .ship-appt-kind button {
   border: 0; background: transparent; color: var(--tms-text-2); font: inherit; font-size: 11px; font-weight: 600;
@@ -882,24 +882,26 @@
 .tms-shell .ship-appt-kind button[aria-pressed='true'] { background: var(--tms-primary); color: var(--tms-on-primary); }
 .tms-shell .ship-appt-kind button:disabled { cursor: default; opacity: 0.6; }
 .tms-shell .ship-appt-kind button:focus-visible { outline: 2px solid var(--tms-primary); outline-offset: -2px; }
-.tms-shell .ship-dt24-datebox { position: relative; flex: 1 1 110px; min-width: 0; display: flex; }
-.tms-shell .ship-dt24-datebox .ship-dt24-date { flex: 1 1 auto; padding-right: 30px; }
-.tms-shell .ship-dt24-calbtn { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--tms-muted); cursor: pointer; }
-.tms-shell .ship-dt24-calbtn:hover:not(:disabled) { background: var(--tms-primary-tint); color: var(--tms-primary-ink); }
-.tms-shell .ship-dt24-calbtn:focus-visible { outline: 2px solid var(--tms-primary); outline-offset: 1px; }
-.tms-shell .ship-dt24-pop { z-index: 60; padding: 10px; border: 1px solid var(--tms-border); border-radius: 10px; background: var(--tms-card); box-shadow: var(--tms-shadow); }
-.tms-shell .ship-cal { width: 238px; }
-.tms-shell .ship-cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-.tms-shell .ship-cal-title { font-size: 13px; font-weight: 600; color: var(--tms-text); }
-.tms-shell .ship-cal-nav { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 1px solid var(--tms-border); border-radius: 6px; background: var(--tms-card); color: var(--tms-text-2); cursor: pointer; }
-.tms-shell .ship-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
-.tms-shell .ship-cal-dow { font-size: 10px; font-weight: 600; text-align: center; color: var(--tms-muted); padding: 2px 0; }
-.tms-shell .ship-cal-day { height: 30px; border: 0; border-radius: 6px; background: transparent; color: var(--tms-text); font-size: 12px; font-variant-numeric: tabular-nums; cursor: pointer; }
-.tms-shell .ship-cal-day:hover { background: var(--tms-primary-tint); }
-.tms-shell .ship-cal-day[data-outside='true'] { color: var(--tms-muted); opacity: 0.6; }
-.tms-shell .ship-cal-day[data-today='true'] { box-shadow: inset 0 0 0 1px var(--tms-primary); font-weight: 600; }
-.tms-shell .ship-cal-day[aria-selected='true'] { background: var(--tms-primary); color: var(--tms-on-primary); font-weight: 600; }
-.tms-shell .ship-cal-day:focus-visible { outline: 2px solid var(--tms-primary); outline-offset: 1px; }
+.tms-shell .ship-dt24-datebox, .tms-portal .ship-dt24-datebox { position: relative; flex: 1 1 110px; min-width: 0; display: flex; }
+.tms-shell .ship-dt24-datebox .ship-dt24-date, .tms-portal .ship-dt24-datebox .ship-dt24-date { flex: 1 1 auto; padding-right: 30px; }
+.tms-shell .ship-dt24-calbtn, .tms-portal .ship-dt24-calbtn { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--tms-muted); cursor: pointer; }
+.tms-shell .ship-dt24-calbtn:hover:not(:disabled), .tms-portal .ship-dt24-calbtn:hover:not(:disabled) { background: var(--tms-primary-tint); color: var(--tms-primary-ink); }
+.tms-shell .ship-dt24-calbtn:focus-visible, .tms-portal .ship-dt24-calbtn:focus-visible { outline: 2px solid var(--tms-primary); outline-offset: 1px; }
+.tms-shell .ship-dt24-pop, .tms-portal .ship-dt24-pop { z-index: 60; padding: 10px; border: 1px solid var(--tms-border); border-radius: 10px; background: var(--tms-card); box-shadow: var(--tms-shadow); }
+/* Portaled out of a dialog (DateUsInput): above the dialog, same card look. */
+.tms-portal.ship-dt24-pop { z-index: 70; padding: 10px; border: 1px solid var(--tms-border); border-radius: 10px; background: var(--tms-card); box-shadow: var(--tms-shadow); }
+.tms-shell .ship-cal, .tms-portal .ship-cal { width: 238px; }
+.tms-shell .ship-cal-head, .tms-portal .ship-cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.tms-shell .ship-cal-title, .tms-portal .ship-cal-title { font-size: 13px; font-weight: 600; color: var(--tms-text); }
+.tms-shell .ship-cal-nav, .tms-portal .ship-cal-nav { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 1px solid var(--tms-border); border-radius: 6px; background: var(--tms-card); color: var(--tms-text-2); cursor: pointer; }
+.tms-shell .ship-cal-grid, .tms-portal .ship-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.tms-shell .ship-cal-dow, .tms-portal .ship-cal-dow { font-size: 10px; font-weight: 600; text-align: center; color: var(--tms-muted); padding: 2px 0; }
+.tms-shell .ship-cal-day, .tms-portal .ship-cal-day { height: 30px; border: 0; border-radius: 6px; background: transparent; color: var(--tms-text); font-size: 12px; font-variant-numeric: tabular-nums; cursor: pointer; }
+.tms-shell .ship-cal-day:hover, .tms-portal .ship-cal-day:hover { background: var(--tms-primary-tint); }
+.tms-shell .ship-cal-day[data-outside='true'], .tms-portal .ship-cal-day[data-outside='true'] { color: var(--tms-muted); opacity: 0.6; }
+.tms-shell .ship-cal-day[data-today='true'], .tms-portal .ship-cal-day[data-today='true'] { box-shadow: inset 0 0 0 1px var(--tms-primary); font-weight: 600; }
+.tms-shell .ship-cal-day[aria-selected='true'], .tms-portal .ship-cal-day[aria-selected='true'] { background: var(--tms-primary); color: var(--tms-on-primary); font-weight: 600; }
+.tms-shell .ship-cal-day:focus-visible, .tms-portal .ship-cal-day:focus-visible { outline: 2px solid var(--tms-primary); outline-offset: 1px; }
 
 /* Rates: the LH rate box is where the rate goes; the Total LH beside it is calculated, shown as plain text. */
 .tms-input.tms-rate-entry:not(:disabled) {

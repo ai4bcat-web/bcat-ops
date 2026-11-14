@@ -161,11 +161,14 @@ export async function ledgerWrites(
   caller: Caller,
   now: string,
   direction: 'APPLY' | 'REVERSE',
-  options: { skipOrderUpdates?: boolean } = {},
+  options: { skipOrderUpdates?: boolean; paidAt?: string } = {},
 ): Promise<{ writes: TransactWriteItem[]; invoiceIds: string[] }> {
   const writes: TransactWriteItem[] = []
   const invoiceIds: string[] = []
   const skipOrderUpdates = options.skipOrderUpdates ?? false
+  // A receipt settles the invoice on the day the money came in, not the day it was keyed:
+  // days-to-pay and the Paid tab read this date.
+  const paidAt = options.paidAt ?? now
 
   for (const planned of plan.documents) {
     const prior = before[planned.id]
@@ -181,7 +184,7 @@ export async function ledgerWrites(
           writtenOffCents: planned.offsetCents,
           balanceCents: planned.balanceCents,
           status: invoiceStatusAfter(prior.totalCents, planned.paidCents, planned.offsetCents),
-          ...(settled ? { paidAt: now } : {}),
+          ...(settled ? { paidAt } : {}),
           ...(settled ? {} : { arOpen: 'OPEN' }),
           updatedAt: now,
           updatedBy: caller.email,
@@ -215,7 +218,7 @@ export async function ledgerWrites(
             arStatus: settled ? 'PAID' : 'UNPAID',
             arBalanceCents: planned.balanceCents,
             arStatusChangedAt: now,
-            ...(settled ? { paidAt: now } : {}),
+            ...(settled ? { paidAt } : {}),
             updatedAt: now,
             updatedBy: caller.email,
             version: (numberOrNull(order?.version) ?? 1) + 1,
@@ -311,7 +314,7 @@ export async function recordPayment(input: Row, caller: Caller): Promise<PostedR
   const unappliedCents = plan.unappliedCents - overageAcceptedCents
 
   const now = nowIso()
-  const { writes, invoiceIds } = await ledgerWrites(plan, before, caller, now, 'APPLY')
+  const { writes, invoiceIds } = await ledgerWrites(plan, before, caller, now, 'APPLY', { paidAt: receivedAt })
   writes.unshift(
     putTx(AR_PAYMENT_TABLE_NAME, {
       id,
