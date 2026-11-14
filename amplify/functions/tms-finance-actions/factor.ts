@@ -56,6 +56,7 @@ import {
   writeAudit,
   type Row,
 } from './store'
+import { stopsList } from '../../../src/lib/stopPlace'
 
 /**
  * The factor's remit-to name from org settings, when one is configured.
@@ -154,7 +155,7 @@ export async function sendToFactor(input: Row, caller: Caller): Promise<Row> {
   const stops: Stop[] = []
   for (const row of loads) {
     if (row.orderId != null && row.orderId !== invoice.orderId) continue
-    for (const stop of row.stops ?? []) stops.push(stop)
+    for (const stop of stopsList<Stop>(row.stops)) stops.push(stop)
   }
 
   const now = nowIso()
@@ -276,7 +277,7 @@ export async function previewFactor(input: Row): Promise<Row> {
   const stops: Stop[] = []
   for (const row of loads) {
     if (row.orderId != null && row.orderId !== invoice.orderId) continue
-    for (const stop of row.stops ?? []) stops.push(stop)
+    for (const stop of stopsList<Stop>(row.stops)) stops.push(stop)
   }
   const queueRow = factoringRowFor({ invoice, order, load, stops, customer, caller: 'preview', now: nowIso() })
   return {
@@ -339,7 +340,7 @@ async function factorReadyFor(orderId: string, factorRemitToName: string | null)
   const stops: Stop[] = []
   for (const row of loads) {
     if (row.orderId != null && row.orderId !== orderId) continue
-    for (const stop of row.stops ?? []) stops.push(stop)
+    for (const stop of stopsList<Stop>(row.stops)) stops.push(stop)
   }
 
   const missing: string[] = []

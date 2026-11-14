@@ -85,3 +85,16 @@ export function stopPlace(stop: StopPlaceStop | null | undefined, location?: Sto
     country: text(a?.country) ?? text(location?.country),
   }
 }
+
+/**
+ * A load's `stops` as a list. It is AWSJSON: a list once AppSync parsed it, but the Aljex import stored it as a
+ * JSON string (sometimes double-encoded), and iterating that string reads characters, not stops — every stop
+ * reader on a raw row goes through this. Garbage reads as no stops.
+ */
+export function stopsList<T = Record<string, unknown>>(v: unknown): T[] {
+  let x = v
+  for (let i = 0; i < 4 && typeof x === 'string'; i++) {
+    try { x = JSON.parse(x) } catch { return [] }
+  }
+  return Array.isArray(x) ? (x.filter((s) => !!s && typeof s === 'object') as T[]) : []
+}

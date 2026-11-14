@@ -1,5 +1,6 @@
 // Relative: reached from a Lambda bundle, where the '@/' alias does not resolve.
 import type { Load, Stop, StopType, ApptType } from '../types'
+import { stopsList } from './stopPlace'
 
 // ── Multi-stop normalization layer ──────────────────────────────────────────────
 //
@@ -12,8 +13,10 @@ import type { Load, Stop, StopType, ApptType } from '../types'
 
 /** Canonical accessor: real stops if present, else 2 stops synthesized from legacy fields. */
 export function getStops(load: Load): Stop[] {
-  if (Array.isArray(load.stops) && load.stops.length > 0) {
-    return [...load.stops].sort((a, b) => a.sequence - b.sequence)
+  // A raw row's stops may be a JSON string (the Aljex import stored them so); read the list either way.
+  const listed = stopsList<Stop>(load.stops)
+  if (listed.length > 0) {
+    return [...listed].sort((a, b) => a.sequence - b.sequence)
   }
   // Legacy load (no stops yet) → synthesize pickup + delivery. Deterministic ids so
   // drag keys and audit diffs stay stable for un-migrated loads.

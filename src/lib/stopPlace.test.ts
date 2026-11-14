@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parsePlaceText, stopPlace, zip5 } from './stopPlace'
+import { parsePlaceText, stopPlace, stopsList, zip5 } from './stopPlace'
 
 describe('stopPlace', () => {
   it("reads 20039's pickup the way the editor shows it: the stop's own address, no Location", () => {
@@ -24,5 +24,19 @@ describe('stopPlace', () => {
     expect(zip5('79928-5900')).toBe('79928')
     expect(zip5('799285900')).toBe('79928')
     expect(zip5('N/A')).toBeNull()
+  })
+})
+
+describe('stopsList', () => {
+  const stops = [{ id: 'pu', type: 'pickup', sequence: 0, address: { city: 'BURLINGTON', state: 'WI', zip: '53105' } }]
+  it('reads a list, a JSON string, and a double-encoded string the same (Aljex-imported rows)', () => {
+    expect(stopsList(stops)).toEqual(stops)
+    expect(stopsList(JSON.stringify(stops))).toEqual(stops)
+    expect(stopsList(JSON.stringify(JSON.stringify(stops)))).toEqual(stops)
+  })
+  it('reads garbage as no stops', () => {
+    expect(stopsList('not json')).toEqual([])
+    expect(stopsList(null)).toEqual([])
+    expect(stopsList({})).toEqual([])
   })
 })

@@ -114,7 +114,7 @@ import {
 import { notifyRateconSubmitted, notifyPodAdded,
   notifyMiscAdded, RATECON_SUBJECT_PREFIX, type SubmissionNotice, type ThreadRefs } from './notify'
 import { shipmentDocPresence, type ShipmentDocLike, type ShipmentDocPresence } from '../../../src/lib/shipmentDocPresence'
-import { stopPlace } from '../../../src/lib/stopPlace'
+import { stopPlace, stopsList } from '../../../src/lib/stopPlace'
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}))
 const s3 = new S3Client({})
@@ -917,7 +917,7 @@ function factoringFieldsFor(
   locations: Map<string, LocationFactoringRow>,
   podPresent: boolean,
 ): FactoringFields {
-  const stops = load.stops ?? []
+  const stops = stopsList<StopFactoringRow>(load.stops)
   const origin = placeFor(load.originCity, stops.find((s) => s.type === 'pickup'), locations)
   const destination = placeFor(load.destinationCity, stops.find((s) => s.type === 'delivery'), locations)
   const customer = load.customerId ? customers.get(load.customerId) : undefined
@@ -960,7 +960,7 @@ async function resolveFactoringFields(loadIds: string[]): Promise<Map<string, Fa
     if (!load) continue
     loads.set(id, load)
     if (load.customerId) customerIds.add(load.customerId)
-    for (const stop of load.stops ?? []) if (stop.locationId) locationIds.add(stop.locationId)
+    for (const stop of stopsList<StopFactoringRow>(load.stops)) if (stop.locationId) locationIds.add(stop.locationId)
   }
 
   const customers = new Map<string, CustomerFactoringRow>()
