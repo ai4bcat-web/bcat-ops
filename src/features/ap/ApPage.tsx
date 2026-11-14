@@ -29,7 +29,7 @@ import { useOpenBills } from '@/hooks/useOpenBills'
 import { exportOutstandingPayables } from '@/lib/opsExports'
 import {
   getShipmentDocumentUrl, getTmsSettings, graphqlErrorText, listBillsByMonth, listCarrierPaymentInfo, reverseApPayment,
-  selectBillsForPayment, unapproveBill, unselectBills, voidBill, type CarrierPaymentInfo,
+  selectBillsForPayment, unapproveBill, unselectBills, voidBill, type CarrierPaymentInfo, type FinanceReviewShipment,
 } from '@/lib/apiClient'
 import {
   AGING_BUCKETS, AGING_BUCKET_LABEL, apAgingCsv, type AgingPartySummary,
@@ -132,6 +132,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   // Moving a load to billing creates its bill in Expected, so the page opens there.
   const [tab, setTab] = useState<ApTabKey>('expected')
   const needsReview = useNeedsReview()
+  const reviewByShipment = useMemo(() => new Map(needsReview.rows.map((row) => [row.id, row])), [needsReview.rows])
   const inboxStatus = useApInboxStatus()
   const [chip, setChip] = useState<InboxChip>('NEEDS_REVIEW')
   const [historySince] = useState(() => new Date(Date.now() - HISTORY_DAYS * 86_400_000).toISOString())
@@ -476,6 +477,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     : tab === 'expected' ? reviewView({
       banner: queueBanner,
       bills: expectedBills,
+      review: reviewByShipment,
       facts,
       onOpen: openDrawer,
       rows: reviewRows,
@@ -1034,10 +1036,12 @@ function awaitingView({ banner, rows, shared, busy, onRecord }: {
 /* ── In review ───────────────────────────────────────────────────────────── */
 
 function reviewView({
-  banner, bills, facts, onOpen, rows, shared, carriersById, settings, isAdmin, busy, infos, onInfo, onApprove, onDates, onCharges, onVoid,
+  banner, bills, review, facts, onOpen, rows, shared, carriersById, settings, isAdmin, busy, infos, onInfo, onApprove, onDates, onCharges, onVoid,
 }: {
   banner: ReactNode
   bills: CarrierBillRecord[]
+  /** Needs review flags by shipment id: shown on the bill so AP sees what to fix (Ryne 2026-11-13). */
+  review: Map<string, FinanceReviewShipment>
   facts: BillFactsIndex
   onOpen: (bill: CarrierBillRecord) => void
   rows: Map<string, ApWorklistRow>
@@ -1054,6 +1058,11 @@ function reviewView({
   onVoid: (bill: CarrierBillRecord) => void
 }): ListView {
   const pendingDates = (bill: CarrierBillRecord) => bill.datesPending === true
+  const flagOf = (bill: CarrierBillRecord) => review.get(bill.shipmentId)
+  const flagText = (bill: CarrierBillRecord) => {
+    const flag = flagOf(bill)
+    return flag ? [flag.financeReviewReason, flag.financeReviewApNote].map((t) => t?.trim()).filter(Boolean).join(' · ') || 'Needs review' : ''
+  }
   const gatesOf = (bill: CarrierBillRecord) => billGates({
     bill,
     row: rows.get(bill.loadCarrierId),
@@ -1065,15 +1074,25 @@ function reviewView({
     {
       key: 'bill',
       header: 'BILL',
-      text: (bill) => `${bill.billNumber ?? bill.id}${pendingDates(bill) ? ' · Needs invoice date' : ''}`,
+      text: (bill) => `${bill.billNumber ?? bill.id}${pendingDates(bill) ? ' · Needs invoice date' : ''}${flagOf(bill) ? ' · Needs review' : ''}`,
       extraPx: 40,
       render: (bill) => (
         <>
           <Link to={`/tms/invoicing/payable/bills/${bill.id}`}>{bill.billNumber ?? bill.id}</Link>
           <VerifyPaymentBadge bill={bill} />
           {pendingDates(bill) && <> <TmsBadge tone="orange">Needs invoice date</TmsBadge></>}
+          {flagOf(bill) && <> <TmsBadge tone="red" title={flagText(bill)}>Needs review</TmsBadge></>}
         </>
       ),
+    },
+    {
+      key: 'review',
+      header: 'NEEDS REVIEW',
+      text: flagText,
+      extraPx: 60,
+      render: (bill) => flagOf(bill)
+        ? <span className="text-xs" style={{ color: 'var(--tms-badge-red)' }} data-testid={`bill-review-${bill.id}`}>{flagText(bill)}</span>
+        : <span className="tms-muted">—</span>,
     },
     ...loadColumns(facts, onOpen),
     facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
@@ -1137,6 +1156,7 @@ function reviewView({
     kpis: [
       { label: 'Expected', value: bills.length },
       { label: 'Need invoice date', value: bills.filter(pendingDates).length, tone: 'warn' as const },
+      { label: 'Needs review', value: bills.filter((bill) => !!flagOf(bill)).length, tone: 'bad' as const },
       { label: 'Carrier pay', value: formatCents(sumCents(bills, (bill) => bill.grossCents)) },
       { label: 'Net', value: formatCents(sumCents(bills, (bill) => bill.netCents)) },
       { label: 'With variance', value: bills.filter((bill) => bill.varianceCents !== 0).length, tone: 'bad' },

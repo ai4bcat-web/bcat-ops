@@ -70,7 +70,7 @@ import {
   saveCommissionSettings,
   submitPayPeriod,
 } from './commissions'
-import { clearFinanceReview } from './financeReview'
+import { clearFinanceReview, setDeliveredDate } from './financeReview'
 import { accountingAccessMessage, hasAccountingPage } from '../../../src/lib/accountingAccess'
 import {
   ADMIN_GROUP,
@@ -83,6 +83,7 @@ import {
 
 type Action =
   | 'CLEAR_FINANCE_REVIEW'
+  | 'SET_DELIVERED_DATE'
   | 'PREVIEW_INVOICE'
   | 'GENERATE_INVOICE'
   | 'BATCH_GENERATE'
@@ -211,7 +212,7 @@ interface AppSyncEvent {
  */
 function accountingPagesFor(action: Action): readonly string[] {
   if (action === 'RELEASE_TO_BILLING') return ['loadReview', 'invoicing']
-  if (action === 'CLEAR_FINANCE_REVIEW') return ['invoicing', 'carrierPay']
+  if (action === 'CLEAR_FINANCE_REVIEW' || action === 'SET_DELIVERED_DATE') return ['invoicing', 'carrierPay']
   if (action === 'SEND_TO_FACTOR' || action === 'SYNC_FACTORING_CHANGE' || action === 'SETTLE_FACTORED_INVOICES') return ['invoicing', 'factoring']
   if (COMMISSION_ACTIONS[action]) return ['commissions']
   if (AP_ACTIONS[action]) return ['carrierPay']
@@ -251,6 +252,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
   switch (action) {
     case 'CLEAR_FINANCE_REVIEW':
       return clearFinanceReview(input, caller)
+    case 'SET_DELIVERED_DATE':
+      return setDeliveredDate(input, caller)
     case 'PREVIEW_INVOICE':
       return previewInvoice(input, caller)
     case 'GENERATE_INVOICE':

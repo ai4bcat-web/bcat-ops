@@ -4,8 +4,10 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
 const financeAction = vi.fn()
+const setDeliveredDate = vi.fn()
 vi.mock('@/lib/apiClient', () => ({
   financeAction: (...a: unknown[]) => financeAction(...a),
+  setDeliveredDate: (...a: unknown[]) => setDeliveredDate(...a),
   listFinanceReviewShipments: vi.fn(async () => []),
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
@@ -37,6 +39,18 @@ describe('NeedsReviewList', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Mark reviewed' }))
     await waitFor(() => expect(onCleared).toHaveBeenCalled())
     expect(financeAction).toHaveBeenCalledWith('CLEAR_FINANCE_REVIEW', { shipmentId: 'shp-1' })
+  })
+
+  it('adds a missing delivered date through SET_DELIVERED_DATE and refreshes', async () => {
+    setDeliveredDate.mockResolvedValue({ shipmentId: 'shp-1', deliveredAt: '2026-10-13T17:00:00.000Z', reviewCleared: true, reviewReason: null, redatedBills: 1 })
+    const onCleared = vi.fn()
+    render(<MemoryRouter><NeedsReviewList side="AP" rows={[{ ...rows[1], financeReviewReason: 'Missing delivered date', deliveredAt: null }]} error={null} onCleared={onCleared} /></MemoryRouter>)
+    expect(screen.getByText('Missing')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit delivered date for PRO 13823' }))
+    fireEvent.change(screen.getByLabelText('Delivered date for PRO 13823'), { target: { value: '2026-10-13' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onCleared).toHaveBeenCalled())
+    expect(setDeliveredDate).toHaveBeenCalledWith({ shipmentId: 'shp-1', deliveredDate: '2026-10-13' })
   })
 
   it('lists the oldest flag first', () => {
