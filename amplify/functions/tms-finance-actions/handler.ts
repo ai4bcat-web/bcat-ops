@@ -29,7 +29,7 @@ import {
   voidInvoice,
 } from './invoices'
 import { createCredit, recordPayment, reversePayment, writeOffInvoice } from './payments'
-import { previewFactor, sendToFactor } from './factor'
+import { previewFactor, previewFactorReady, sendToFactor } from './factor'
 import { releaseToBilling, sendInvoice, syncFactoringChange } from './release'
 import {
   approveBill,
@@ -97,6 +97,7 @@ type Action =
   | 'WRITE_OFF'
   | 'REVERSE_PAYMENT'
   | 'PREVIEW_FACTOR'
+  | 'PREVIEW_FACTOR_READY'
   | 'SEND_TO_FACTOR'
   | 'SAVE_AR_SETTINGS'
   | 'PREVIEW_BILL'
@@ -298,6 +299,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return syncFactoringChange(input, caller)
     case 'PREVIEW_FACTOR':
       return previewFactor(input)
+    case 'PREVIEW_FACTOR_READY':
+      return previewFactorReady(input)
     case 'SEND_TO_FACTOR':
       return sendToFactor(input, caller)
     case 'SAVE_AR_SETTINGS':

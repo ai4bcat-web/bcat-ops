@@ -76,28 +76,32 @@ async function setup(items: FactoringItem[], email = 'ryne@bcatcorp.com', groups
   authMock.mockReturnValue({ user: { email, groups } })
   // Let the mount-time settings read land inside act, before the test acts on the page.
   await act(async () => { render(<FactoringPage />) })
+  // Need to factor is no longer a tab (those loads are factored from Ready to invoice); its rows are under All.
+  if (items.some((i) => i.status === 'NEED_TO_FACTOR')) fireEvent.click(screen.getByRole('tab', { name: /^All/ }))
   return { refresh, removeItem }
 }
 
 beforeEach(() => vi.clearAllMocks())
 
 describe('filters', () => {
-  it('lists them in work order with Need to factor first', async () => {
+  it('lists them in work order, with no Need to factor tab (those loads are factored from Ready to invoice)', async () => {
     await setup([item()])
     const labels = screen.getAllByRole('tab')
       .map((b) => b.textContent?.replace(/\d+$/, '').trim())
       .filter((t) => ['Need to factor', 'Pending with OTR', 'Invoice manually', 'All', 'Factored', 'Invoiced manually'].includes(t ?? ''))
-    expect(labels).toEqual(['Need to factor', 'Pending with OTR', 'Invoice manually', 'All', 'Factored', 'Invoiced manually'])
+    expect(labels).toEqual(['Pending with OTR', 'Invoice manually', 'All', 'Factored', 'Invoiced manually'])
+    expect(screen.getByTestId('factor-moved-note')).toHaveTextContent(/Ready to invoice \(1 now\)/)
   })
 
-  it('opens on Need to factor, not All', async () => {
-    // An empty queue there is the only state worth celebrating, so it is the landing view.
-    await setup([
-      item({ id: 'a', proNumber: 'A1', status: 'NEED_TO_FACTOR' }),
-      item({ id: 'b', proNumber: 'B2', status: 'FACTORED' }),
-    ])
-    expect(screen.getByText('A1')).toBeInTheDocument()
-    expect(screen.queryByText('B2')).not.toBeInTheDocument()
+  it('opens on Pending with OTR', async () => {
+    hookMock.mockReturnValue({
+      items: [item({ id: 'a', proNumber: 'A1', status: 'NEED_TO_FACTOR' }), item({ id: 'b', proNumber: 'B2', status: 'PENDING_WITH_OTR' })],
+      loading: false, error: null, pendingIds: new Set<string>(), refresh: vi.fn(), updateStatus: vi.fn(), removeItem: vi.fn(),
+    })
+    authMock.mockReturnValue({ user: { email: 'ryne@bcatcorp.com', groups: [] } })
+    await act(async () => { render(<FactoringPage />) })
+    expect(screen.getByText('B2')).toBeInTheDocument()
+    expect(screen.queryByText('A1')).not.toBeInTheDocument()
   })
 
   it('switches to another status when asked', async () => {
@@ -418,6 +422,7 @@ describe('invoicing by hand', () => {
       item({ id: 'a', proNumber: 'A1', status: 'NEED_TO_FACTOR' }),
       item({ id: 'b', proNumber: 'B2', status: 'MANUAL_INVOICE', manualReason: 'NO_BUY', brokerCheckResult: 'NO_BUY', brokerMcChecked: '592002' }),
     ])
+    fireEvent.click(screen.getByRole('tab', { name: /^Factored/ }))
     expect(screen.queryByText('B2')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: /^Invoice manually/ }))
     expect(screen.getByText('B2')).toBeInTheDocument()

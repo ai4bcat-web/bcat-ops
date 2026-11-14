@@ -558,6 +558,8 @@ function seedCustomer(extra: Row = {}): Row {
     name: 'BATORY FOODS',
     status: 'ACTIVE',
     active: true,
+    // A strict save asks for a billing method (src/lib/factorReadyAtCreate); MANUAL needs no MC.
+    billingMethod: 'MANUAL',
     creditLimitCents: 10_000_00,
     defaultCharges: [{ code: 'LINEHAUL', amountCents: 250_000 }],
     pricingDefaults: { mode: 'MARGIN', defaultBps: 2000 },
@@ -576,6 +578,7 @@ const PICKUP = {
   city: 'CHICAGO, IL',
   appt: '2026-03-02T13:00:00.000Z',
   sequence: 0,
+  address: { zip: '60601' },
 }
 const DELIVERY = {
   id: 'stp-de',
@@ -584,7 +587,10 @@ const DELIVERY = {
   city: 'KANSAS CITY, MO',
   appt: '2026-03-03T13:00:00.000Z',
   sequence: 1,
+  address: { zip: '64101' },
 }
+
+const TEST_PO_REF = { code: 'PO', label: 'PO', value: 'PO-TEST-1', level: 'ORDER', stopId: null, visibility: 'CUSTOMER' }
 
 /** Create a draft and save the standard one-pickup/one-delivery order onto it. */
 async function createDraft(identity: unknown = DISPATCHER): Promise<{ shipmentId: string; loadId: string; orderId: string }> {
@@ -593,6 +599,9 @@ async function createDraft(identity: unknown = DISPATCHER): Promise<{ shipmentId
     orders: Row[]
     loads: Row[]
   }
+  // The customer's PO, which a strict save needs to be factor-ready (src/lib/factorReadyAtCreate).
+  const orderId = String(bundle.orders[0].id)
+  table(TABLES.order).set(orderId, { ...table(TABLES.order).get(orderId)!, references: [TEST_PO_REF] })
   return {
     shipmentId: String(bundle.shipment.id),
     orderId: String(bundle.orders[0].id),
@@ -605,7 +614,7 @@ async function saveForm(shipmentId: string, overrides: Row = {}): Promise<Row> {
   return call('SAVE_ORDER_FORM', {
     shipmentId,
     expectedUpdatedAt: shipment.updatedAt,
-    order: { equipmentType: "53' VAN" },
+    order: { equipmentType: "53' VAN", references: [TEST_PO_REF] },
     stops: [PICKUP, DELIVERY],
     ...overrides,
   })
@@ -1049,14 +1058,14 @@ describe('SAVE_ORDER_FORM', () => {
 
   it('allows a draft to be saved with only a pickup', async () => {
     const { shipmentId } = await createDraft()
-    const bundle = (await saveForm(shipmentId, { stops: [PICKUP] })) as { shipment: Row; loads: Row[] }
+    const bundle = (await saveForm(shipmentId, { stops: [PICKUP], draftSave: true })) as { shipment: Row; loads: Row[] }
     expect(bundle.shipment.status).toBe('DRAFT')
     expect(JSON.parse(bundle.loads[0].stops as string)).toHaveLength(1)
   })
 
   it('refuses to submit an order with no delivery', async () => {
     const { shipmentId } = await createDraft()
-    await saveForm(shipmentId, { stops: [PICKUP] })
+    await saveForm(shipmentId, { stops: [PICKUP], draftSave: true })
     await expect(
       call('SUBMIT_ORDER', {
         shipmentId,
@@ -1096,7 +1105,7 @@ describe('SAVE_ORDER_FORM', () => {
   it('refuses an order missing a reference the customer requires', async () => {
     seedCustomer({ requiredReferences: [{ code: 'PO', level: 'ORDER', display: true, countOnNewOrder: 1 }] })
     const { shipmentId } = await createDraft()
-    await expect(saveForm(shipmentId)).rejects.toThrow(/requires 1 PO reference/)
+    await expect(saveForm(shipmentId, { order: { equipmentType: "53' VAN", references: [] } })).rejects.toThrow(/requires 1 PO reference/)
   })
 
   it('refuses a stale expectedUpdatedAt', async () => {
@@ -1136,7 +1145,10 @@ describe('SAVE_ORDER_FORM', () => {
     const bundle = (await call('CREATE_SHIPMENT', { customerName: 'ACME FOODS' })) as { shipment: Row }
     const shipmentId = String(bundle.shipment.id)
 
-    const saved = (await saveForm(shipmentId)) as { shipment: Row; loads: Row[] }
+    // No customer record, so no default rate: the form's own linehaul is what it bills.
+    const saved = (await saveForm(shipmentId, {
+      charges: [{ side: 'CUSTOMER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: 150_000, sortOrder: 0 }],
+    })) as { shipment: Row; loads: Row[] }
 
     expect(saved.shipment.pickupAppt).toBe(PICKUP.appt)
     expect(saved.shipment.destinationCity).toBe('KANSAS CITY, MO')
@@ -7447,8 +7459,14 @@ describe('carrier offers', () => {
 })
 
 describe('lane rate samples', () => {
-  async function delivered(): Promise<{ shipmentId: string; loadId: string }> {
+  async function delivered(o: { stripZips?: boolean } = {}): Promise<{ shipmentId: string; loadId: string }> {
     const ids = await sourcingLoad()
+    if (o.stripZips) {
+      // Loads built before the factor-ready rule carry no ZIPs; new ones always do.
+      const load = table(TABLES.load).get(ids.loadId)!
+      const stops = (JSON.parse(String(load.stops)) as Row[]).map(({ address: _address, ...stop }) => stop)
+      table(TABLES.load).set(ids.loadId, { ...load, stops: JSON.stringify(stops) })
+    }
     seedBookableCarrier()
     await call('BOOK_CARRIER', {
       loadId: ids.loadId,
@@ -7497,7 +7515,7 @@ describe('lane rate samples', () => {
     // build one from. The attribute comes off the item — a NULL there is refused by
     // DynamoDB, and this module's catch-all would swallow the refusal, leaving the
     // lane with no history at all.
-    const { loadId } = await delivered()
+    const { loadId } = await delivered({ stripZips: true })
 
     const sample = table(TABLES.laneSample).get(`lrs:${loadId}`)!
     expect(sample.laneKey).toBe('CHICAGO|IL>KANSAS CITY|MO')

@@ -18,6 +18,7 @@ import { LABEL, SECTION_TITLE } from './labels'
 import { MAX } from './constants'
 import { carrierLinehaulLine, financialPreview, firstPickupIndex, lastDeliveryIndex } from './mapping'
 import { isShipmentTypeKey } from '@/lib/shipmentTypes'
+import { factorGapsAtCreate, type FactorGapCode } from '@/lib/factorReadyAtCreate'
 import { carrierSlotsOf, parseInteger, type CarrierSlot, type FormStop, type ShipmentFormValues } from './model'
 import type { FormIssue, SectionKey } from './sectionProps'
 
@@ -28,6 +29,11 @@ export interface ValidateOpts {
   mode: 'create' | 'edit'
   customer: CustomerRecord | null
   settings: TmsSettings | null
+  /**
+   * A shipment already past draft. The factor-ready fields (src/lib/factorReadyAtCreate) block a new
+   * load's Create and Submit; on a load built before the rule they are warnings, so it can still be edited.
+   */
+  existingLoad?: boolean
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -55,6 +61,19 @@ const REQUIRED_KEY_TARGET: Record<string, { section: SectionKey; fieldKey: strin
   pickupNumber: { section: 'pickup', fieldKey: 'f-pickup-refNo' },
   deliveryNumber: { section: 'consignee', fieldKey: 'f-consignee-refNo' },
   bolNumber: { section: 'more', fieldKey: LABEL.more.references.testId },
+}
+
+/** Where each factor-ready gap points in the form. The PO has its own rule, so it has no target here. */
+const FACTOR_GAP_TARGET: Partial<Record<FactorGapCode, { section: SectionKey; fieldKey: string; label: string }>> = {
+  BILLING_METHOD: { section: 'customer', fieldKey: LABEL.customer.name.testId, label: 'Customer billing method' },
+  CUSTOMER_MC: { section: 'customer', fieldKey: LABEL.customer.name.testId, label: 'Customer MC #' },
+  RATE_MISSING: { section: 'rates', fieldKey: LABEL.rates.customerLhRate.testId, label: LABEL.rates.customerLhRate.text },
+  PICKUP_CITY: { section: 'pickup', fieldKey: 'f-pickup-city', label: 'Pick Up city' },
+  PICKUP_STATE: { section: 'pickup', fieldKey: 'f-pickup-state', label: 'Pick Up state' },
+  PICKUP_ZIP: { section: 'pickup', fieldKey: 'f-pickup-zip', label: 'Pick Up ZIP' },
+  DELIVERY_CITY: { section: 'consignee', fieldKey: 'f-consignee-city', label: 'Consignee city' },
+  DELIVERY_STATE: { section: 'consignee', fieldKey: 'f-consignee-state', label: 'Consignee state' },
+  DELIVERY_ZIP: { section: 'consignee', fieldKey: 'f-consignee-zip', label: 'Consignee ZIP' },
 }
 
 /** The form seen as the Built / Intake gate sees a shipment, so `missingRequiredFields` can judge it. */
@@ -236,6 +255,27 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
   // Every shipment needs its customer ref (PO) before Create, whatever the customer's own settings say. A draft save skips it.
   if (strictRed && empty(values.customer.refNo) && !issues.some((i) => i.id === 'customer:ref:po')) {
     push('customer', 'ref:po', LABEL.customer.refNo.testId, LABEL.customer.refNo.text, 'Enter the customer ref (PO / reference number).')
+  }
+
+  // Factor-ready at booking (Ryne 2026-11-14): everything OTR needs that is known now, so the load can be
+  // factored the day it reaches Ready to invoice. The PO is the rule above; the rest is added here.
+  if (strictRed) {
+    const severity: 'error' | 'warn' = o.existingLoad ? 'warn' : 'error'
+    const pick = fp >= 0 ? values.stops[fp] : null
+    const drop = ld >= 0 ? values.stops[ld] : null
+    const gaps = factorGapsAtCreate({
+      customer: typed ? null : o.customer,
+      poNumber: values.customer.refNo,
+      customerRateCents: financialPreview(values, o.customer, null).customerTotalCents,
+      pickup: pick ? { city: pick.city, state: pick.state, zip: pick.zip } : null,
+      delivery: drop ? { city: drop.city, state: drop.state, zip: drop.zip } : null,
+    })
+    const taken = new Set(issues.filter((i) => i.severity === 'error').map((i) => `${i.section}:${i.fieldKey}`))
+    for (const gap of gaps) {
+      const t = FACTOR_GAP_TARGET[gap.code]
+      if (!t || taken.has(`${t.section}:${t.fieldKey}`)) continue
+      push(t.section, `factor:${gap.code}`, t.fieldKey, t.label, gap.message, severity)
+    }
   }
 
   // Truckload only for Submit.

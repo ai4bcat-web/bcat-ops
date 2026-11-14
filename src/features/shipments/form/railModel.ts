@@ -28,6 +28,8 @@ export interface RequiredOpts {
   customer?: CustomerRecord | null
   settings?: TmsSettings | null
   level?: ValidationLevel
+  /** Past draft: factor-ready fields warn rather than block (ValidateOpts.existingLoad). */
+  existingLoad?: boolean
 }
 
 interface FixedRow {
@@ -68,7 +70,7 @@ export function cardOfSection(section: string): RailRow['card'] {
 export function requiredRows(values: ShipmentFormValues, mode: 'create' | 'edit', opts: RequiredOpts = {}): RailRow[] {
   const level: ValidationLevel = opts.level ?? 'create'
   const blocking = blockingIssues(validateForm(values, {
-    level, mode, customer: opts.customer ?? null, settings: opts.settings ?? null,
+    level, mode, customer: opts.customer ?? null, settings: opts.settings ?? null, existingLoad: opts.existingLoad,
   }))
   const byId = new Map(blocking.map((i) => [i.id, i]))
   const truckload = (TRUCKLOAD_MODES as string[]).includes(values.mode)
@@ -80,9 +82,18 @@ export function requiredRows(values: ShipmentFormValues, mode: 'create' | 'edit'
     const hit = f.ids.map((id) => byId.get(id)).find(Boolean)
     rows.push({ key: f.key, label: f.label, done: !hit, fieldKey: hit?.fieldKey ?? f.fieldKey, card: f.card, message: hit?.message ?? '' })
   }
+  // Everything OTR needs to factor the load is one row, pointing at the first thing missing.
+  const factorGaps = blocking.filter((i) => i.id.includes(':factor:') && !covered.has(i.id))
   for (const i of blocking) {
-    if (covered.has(i.id)) continue
+    if (covered.has(i.id) || i.id.includes(':factor:')) continue
     rows.push({ key: i.id, label: i.label, done: false, fieldKey: i.fieldKey, card: cardOfSection(i.section), message: i.message })
+  }
+  if (factorGaps.length > 0) {
+    const first = factorGaps[0]
+    rows.push({
+      key: 'factorReady', label: `Ready to factor (${factorGaps.length} missing)`, done: false, fieldKey: first.fieldKey,
+      card: cardOfSection(first.section), message: factorGaps.map((i) => i.message).join(' '),
+    })
   }
   return rows
 }

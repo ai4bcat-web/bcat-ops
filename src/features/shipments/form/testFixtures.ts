@@ -55,6 +55,8 @@ export function filledValues(): ShipmentFormValues {
 
 export const CUSTOMER: CustomerRecord = {
   id: 'cus-1', name: 'ZZ Customer', createdAt: '', updatedAt: '', status: 'ACTIVE',
+  // Factor-billed with an MC, so a filled form is factor-ready at booking (src/lib/factorReadyAtCreate).
+  billingMethod: 'FACTOR', mcNumber: '123456',
   contacts: [{ id: 'ct-1', name: 'Pat', email: 'pat@example.invalid', types: ['PRIMARY'], notifications: ['DELIVERED'], active: true }],
   billToParties: [{ id: 'bt-1', name: 'ZZ Bill', isDefault: true }],
 } as CustomerRecord
