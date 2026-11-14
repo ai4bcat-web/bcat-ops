@@ -22,9 +22,9 @@ const props = {
 }
 
 describe('CalendarToolbar on a phone', () => {
-  it('offers List, and keeps the filter chips behind a Filters button that counts the active ones', () => {
+  it('offers the List view (labelled Unassigned), and keeps the filter chips behind a Filters button that counts the active ones', () => {
     render(<MemoryRouter><CalendarToolbar {...props} phone /></MemoryRouter>)
-    expect(screen.getByRole('button', { name: 'List' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Unassigned' })).toBeTruthy()
     const toggle = screen.getByRole('button', { name: /Filters \(1\)/ })
     const chips = document.getElementById('calendar-filters')!
     expect(chips.style.display).toBe('none')
@@ -35,7 +35,8 @@ describe('CalendarToolbar on a phone', () => {
 
   it('keeps the desktop bar as it was: no List, no Filters button, chips inline', () => {
     render(<MemoryRouter><CalendarToolbar {...props} currentView="day" /></MemoryRouter>)
-    expect(screen.queryByRole('button', { name: 'List' })).toBeNull()
+    // Only the Unassigned filter chip; the List view (labelled Unassigned on a phone) is not offered.
+    expect(screen.getAllByRole('button', { name: 'Unassigned' })).toHaveLength(1)
     expect(screen.queryByRole('button', { name: /^Filters/ })).toBeNull()
     expect(document.getElementById('calendar-filters')!.style.display).toBe('flex')
     expect(screen.getByRole('button', { name: 'New Shipment' }).textContent).toContain('New Shipment')
