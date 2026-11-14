@@ -5,7 +5,7 @@ import { customerInvoiceEmailState, invoiceEmailLabels, remitEmailLabels, type I
 
 export function InvoiceEmailBadge({ customer }: { customer: InvoiceEmailFields }) {
   const state = customerInvoiceEmailState(customer)
-  return <TmsBadge tone={state === 'FACTORED_QUEUE_ONLY' ? 'red' : state === 'OK' ? 'green' : 'orange'}>{invoiceEmailLabels[state]}</TmsBadge>
+  return <TmsBadge tone={state === 'FACTORED_QUEUE_ONLY' ? 'gray' : state === 'OK' ? 'green' : 'orange'}>{invoiceEmailLabels[state]}</TmsBadge>
 }
 
 export function RemitEmailBadge({ state, suggestion }: { state: EmailState; suggestion?: string | null }) {

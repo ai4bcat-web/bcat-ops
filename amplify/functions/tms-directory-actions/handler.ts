@@ -624,6 +624,19 @@ function validateCustomerContacts(value: unknown, billToIds: Set<string>): Recor
   })
 }
 
+/**
+ * Payment terms are required on every customer (Ryne 2026-11-14): AR due dates come from them.
+ * A blank value keeps what the customer already has; a new customer with none gets Net 30.
+ * An edit never invents a value on its own, so it cannot trip the reason-required rule for terms.
+ */
+export const DEFAULT_PAYMENT_TERMS_DAYS = 30
+export function resolvePaymentTermsDays(value: unknown, existing: unknown, isCreate: boolean): number | null {
+  const requested = value === '' ? null : optionalInteger(value, { min: 0 })
+  if (requested != null) return requested
+  if (typeof existing === 'number' && Number.isInteger(existing) && existing >= 0) return existing
+  return isCreate ? DEFAULT_PAYMENT_TERMS_DAYS : null
+}
+
 function validateBillToParties(value: unknown): { items: Record<string, unknown>[]; defaultId: string | null; ids: Set<string> } {
   const items = assertArrayOf(value, 'billToParties', 100, (item, i) => {
     const b = assertRecord(item, i, 'billToParties')
@@ -1329,7 +1342,7 @@ async function upsertCustomer(
     billingContactName: optionalString(input.billingContactName, 255),
     billingPhone: optionalString(input.billingPhone, 50),
     billingAddress: optionalJsonObject(input.billingAddress),
-    paymentTermsDays: optionalInteger(input.paymentTermsDays, { min: 0 }),
+    paymentTermsDays: resolvePaymentTermsDays(input.paymentTermsDays, existing?.paymentTermsDays, isCreate),
     creditLimitCents: validateAwsIntegerCents(
       input.creditLimitCents === undefined && enforceNewRules ? DEFAULT_NEW_CUSTOMER_CREDIT_LIMIT_CENTS : input.creditLimitCents,
       'creditLimitCents',

@@ -184,7 +184,7 @@ function emptyCustomerForm(initial?: CustomerRecord | null): CustomerFormValue {
     billingAddressState: initial?.billingAddress?.state ?? '',
     billingAddressZip: initial?.billingAddress?.zip ?? '',
     billingAddressCountry: initial?.billingAddress?.country ?? '',
-    paymentTermsDays: initial?.paymentTermsDays != null ? String(initial.paymentTermsDays) : '',
+    paymentTermsDays: initial?.paymentTermsDays != null ? String(initial.paymentTermsDays) : isNew ? '30' : '',
     creditLimitCents: isNew ? DEFAULT_NEW_CUSTOMER_CREDIT_LIMIT_CENTS : initial?.creditLimitCents ?? null,
     creditHoldFlag: initial?.creditHoldFlag ?? false,
     requiredDocs: initial?.requiredDocsForInvoice ?? [],
@@ -259,7 +259,7 @@ function parseOptionalBps(raw: number | null): number | null {
 function validateCustomerForm(v: CustomerFormValue): Record<string, string> {
   const errors: Record<string, string> = {}
   if (!v.name.trim()) errors.name = 'Name is required'
-  if (v.paymentTermsDays.trim() && (Number.isNaN(Number(v.paymentTermsDays)) || Number(v.paymentTermsDays) < 0)) {
+  if (v.paymentTermsDays.trim() && (!Number.isInteger(Number(v.paymentTermsDays)) || Number(v.paymentTermsDays) < 0)) {
     errors.paymentTermsDays = 'Enter a whole number of days'
   }
   const warnBps = v.creditUsageWarningBps
@@ -413,6 +413,9 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
       customerType: value.customerType || null, mcNumber: value.mcNumber,
     })
     if (mcError) base.mcNumber = mcError
+    // Payment terms are required (Ryne 2026-11-14): a new customer must have them and a saved one
+    // cannot be cleared. An old record that never had terms still edits; the server leaves it as is.
+    if (!value.paymentTermsDays.trim() && (isNew || initial?.paymentTermsDays != null)) base.paymentTermsDays = 'Payment terms are required'
     if (isNew) {
       const out = { ...base }
       for (const p of problems) out[p.field] = p.message

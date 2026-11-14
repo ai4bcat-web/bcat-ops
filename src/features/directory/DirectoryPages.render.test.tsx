@@ -185,13 +185,13 @@ describe('DirectoryPages', () => {
       fireEvent.click(screen.getByLabelText('Include factored'))
       expect(screen.getByRole('button', { name: 'Missing invoice e-mail (3)' })).toBeTruthy()
       expect(screen.getByText('Active Co')).toBeTruthy()
-      fireEvent.click(screen.getByRole('button', { name: 'Factored, missing invoice e-mail (1)' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Factored, no invoice e-mail (not required) (1)' }))
       expect(screen.queryByText('Lead Co')).toBeNull()
       // A factored customer with no invoice address is flagged like any other.
-      expect(within(screen.getByText('Active Co').closest('tr') as HTMLElement).getByText('Missing invoice e-mail — needed for factored billing')).toBeTruthy()
+      expect(within(screen.getByText('Active Co').closest('tr') as HTMLElement).getByText('This customer factors · Missing invoice e-mail (not required)')).toBeTruthy()
       fireEvent.click(screen.getByText('Active Co'))
       const detail = await screen.findByRole('dialog', { name: 'Customer profile' })
-      expect(within(detail).getByText('Missing invoice e-mail — needed for factored billing')).toBeTruthy()
+      expect(within(detail).getByText('This customer factors · Missing invoice e-mail (not required)')).toBeTruthy()
     } finally {
       customers.forEach((c, i) => Object.assign(c, previous[i]))
     }
@@ -592,12 +592,33 @@ describe('DirectoryPages', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(saveCustomer).toHaveBeenCalledTimes(1))
     expect(saveCustomer.mock.calls[0][1]).not.toHaveProperty('trackingMode')
+    // A successful save closes the profile (Ryne 2026-11-14); open it again for the second save.
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).toBeNull())
+    fireEvent.click(screen.getByText('Legacy Active'))
+    fireEvent.click(await screen.findByText('Settings'))
 
     fireEvent.click(screen.getByRole('radio', { name: 'Manual' }))
     fireEvent.click(screen.getByRole('radio', { name: 'SMS to driver' }))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(saveCustomer).toHaveBeenCalledTimes(2))
     expect(saveCustomer.mock.calls[1][1]).toEqual(expect.objectContaining({ trackingMode: 'MANUAL', trackingMethod: 'SMS' }))
+  })
+
+  it('names what stopped a profile save instead of doing nothing (Ryne 2026-11-14)', async () => {
+    saveCustomer.mockClear()
+    saveCustomer.mockRejectedValueOnce(new Error('Give a reason for this change: payment method, terms, factoring and billing/invoice e-mails need one'))
+    renderCustomers()
+    await waitFor(() => expect(screen.getByText('Legacy Active')).toBeTruthy())
+    fireEvent.click(screen.getByText('Legacy Active'))
+    fireEvent.click(await screen.findByText('Settings'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect((await screen.findByTestId('customer-save-problem')).textContent).toMatch(/Give a reason for this change/)
+    // Still open, so the user can fix it.
+    expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(saveCustomer).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.queryByTestId('customer-save-problem')).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).toBeNull())
   })
 
   it('saves the username of a rep picked from the directory', async () => {

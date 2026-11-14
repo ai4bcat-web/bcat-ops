@@ -12,7 +12,7 @@ const BILLING_METHOD_OPTIONS: { value: BillingMethod | ''; label: string }[] = [
 
 /**
  * Step AW stage D: how this customer is billed. Shared by the add form and the profile so the two
- * cannot drift. A FACTOR customer shows the single factor record read-only and never an AP e-mail.
+ * cannot drift. A FACTOR customer shows the single factor record read-only; its invoice e-mail is optional.
  */
 export function BillingMethodFields({
   value,
@@ -40,23 +40,26 @@ export function BillingMethodFields({
           />
         </TmsField>
       </div>
-      {!isFactor && (
-        <TmsField
-          label="AP e-mails (invoices go here)"
-          hint="The first address is the main one. Every address listed here receives the invoice."
-          error={errors.apEmail ?? errors.apEmailsExtra}
-        >
-          <EmailListField
-            initial={[value.apEmail, ...parseEmailList(value.apEmailsExtraText)]}
-            label="AP e-mail"
-            placeholder="ap@customer.com"
-            onChange={(rows) => {
-              set('apEmail', rows[0] ?? '')
-              set('apEmailsExtraText', rows.slice(1).join('\n'))
-            }}
-          />
-        </TmsField>
-      )}
+      {/* Ryne 2026-11-14: the invoice e-mail lives here for every method; a factored customer does not need one. */}
+      <TmsField
+        label={isFactor ? 'Invoice e-mail (not required)' : 'AP e-mails (invoices go here)'}
+        hint={isFactor
+          ? 'Not required: this customer factors. Invoices go to the factor, not this address. Used for aging statements and manual invoices if the method changes.'
+          : value.billingMethod === 'MANUAL'
+            ? 'Required for manual billing. The first address is the main one; every address listed here receives the invoice and the aging statement.'
+            : 'The first address is the main one. Every address listed here receives the invoice.'}
+        error={errors.apEmail ?? errors.apEmailsExtra}
+      >
+        <EmailListField
+          initial={[value.apEmail, ...parseEmailList(value.apEmailsExtraText)]}
+          label="AP e-mail"
+          placeholder="ap@customer.com"
+          onChange={(rows) => {
+            set('apEmail', rows[0] ?? '')
+            set('apEmailsExtraText', rows.slice(1).join('\n'))
+          }}
+        />
+      </TmsField>
       {isFactor && (
         <div style={{ fontSize: 13 }} data-testid="factor-remit">
           Invoices go to the factor, never to the customer.{' '}
