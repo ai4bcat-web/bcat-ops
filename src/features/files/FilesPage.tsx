@@ -298,6 +298,7 @@ export function FilesPage() {
 
   return (
     <TmsScrollPage
+      className="tms-tablet-cards"
       title="Files"
       subtitle="Every document and detail on file for each driver and truck — view, download or upload what's missing. Shares one store with Compliance, Onboarding and Asset Documents, so nothing is uploaded twice."
       stickyHead

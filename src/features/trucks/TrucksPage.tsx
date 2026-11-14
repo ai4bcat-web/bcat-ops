@@ -1220,6 +1220,7 @@ export function TrucksPage() {
 
   return (
     <TmsScrollPage
+      className="tms-tablet-cards"
       title="Fleet"
       subtitle="Equipment, compliance & maintenance"
       stickyHead

@@ -101,3 +101,58 @@ export function watchPhoneTables(root: HTMLElement): () => void {
     if (frame && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frame)
   }
 }
+
+/**
+ * iPad form of the fleet manager pages (Ryne 2026-11-14: "almost always viewed on an iPad. Use cards if needed"). Between phone width and
+ * TABLET_MAX_WIDTH a plain table inside `.tms-tablet-cards` becomes cards only when its columns do not fit the space it sits in: a narrow
+ * table that fits stays a table. `data-natural-width` keeps the table's own width from before it stacked, so turning the iPad back to a
+ * width that fits brings the table back. responsive.css draws the cards.
+ */
+export function tabletStackTable(table: HTMLTableElement): boolean {
+  const host = table.parentElement
+  if (!host || optedOut(table) || columnLabels(table).filter(Boolean).length < MIN_COLUMNS) return false
+  const room = host.clientWidth
+  if (table.dataset.tabletStack === 'on') {
+    if (Number(table.dataset.naturalWidth) > room + 1) return true
+    delete table.dataset.tabletStack
+    delete table.dataset.naturalWidth
+    return false
+  }
+  const natural = Math.ceil(table.getBoundingClientRect().width)
+  if (natural <= room + 1) return false
+  labelTable(table)
+  table.dataset.naturalWidth = String(natural)
+  table.dataset.tabletStack = 'on'
+  return true
+}
+
+/** Stack every overflowing table on the fleet pages under `root`; returns how many are cards. */
+export function tabletStackTables(root: ParentNode): number {
+  let stacked = 0
+  for (const table of Array.from(root.querySelectorAll<HTMLTableElement>('.tms-tablet-cards table'))) {
+    if (tabletStackTable(table)) stacked += 1
+  }
+  return stacked
+}
+
+/** While the screen is iPad-width, keep the fleet pages' wide tables as cards as rows arrive and as the iPad turns. */
+export function watchTabletTables(root: HTMLElement): () => void {
+  let frame = 0
+  const run = () => {
+    frame = 0
+    tabletStackTables(root)
+  }
+  const schedule = () => {
+    if (frame) return
+    frame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(run) : (setTimeout(run, 0) as unknown as number)
+  }
+  run()
+  const observer = new MutationObserver(schedule)
+  observer.observe(root, { childList: true, subtree: true })
+  window.addEventListener('resize', schedule)
+  return () => {
+    observer.disconnect()
+    window.removeEventListener('resize', schedule)
+    if (frame && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frame)
+  }
+}

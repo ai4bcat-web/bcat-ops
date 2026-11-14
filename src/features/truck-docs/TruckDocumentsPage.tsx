@@ -182,6 +182,7 @@ export function TruckDocumentsPage() {
 
   return (
     <TmsScrollPage
+      className="tms-tablet-cards"
       title="Asset Documents"
       subtitle="Insurance, IFTA, registration, DOT inspection and truck photos. Change an expiration date right in its cell; click a row to open its file and upload. Same records as the Files page — upload once and it shows in both."
       stickyHead

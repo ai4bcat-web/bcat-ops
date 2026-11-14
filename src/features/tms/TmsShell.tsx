@@ -25,8 +25,8 @@ import { personName } from '@/lib/roles'
 import { SWITCHES_ON_HINT, pathIsDormant } from '@/lib/dormantPages'
 import { useTmsCompany } from './tmsCompany'
 import { useTmsTheme } from './tmsTheme'
-import { usePhoneWidth } from './grid/denseCardLayout'
-import { watchPhoneTables } from './phoneTables'
+import { TABLET_MAX_WIDTH, useMaxWidth, usePhoneWidth } from './grid/denseCardLayout'
+import { watchPhoneTables, watchTabletTables } from './phoneTables'
 import './theme.css'
 import './shell.css'
 
@@ -534,6 +534,12 @@ export function TmsShell({
     if (!phone || typeof MutationObserver === 'undefined') return undefined
     return watchPhoneTables(document.body)
   }, [phone])
+  // iPads: the fleet pages' wide tables become cards (phoneTables.ts `watchTabletTables` + responsive.css).
+  const tablet = useMaxWidth(TABLET_MAX_WIDTH) && !phone
+  useEffect(() => {
+    if (!tablet || typeof MutationObserver === 'undefined') return undefined
+    return watchTabletTables(document.body)
+  }, [tablet])
 
   const handleQuery = useCallback(
     (value: string) => {

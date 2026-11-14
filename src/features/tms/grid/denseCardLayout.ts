@@ -16,18 +16,29 @@ export interface DenseCardLayout {
   detailCount?: number
 }
 
-/** True at phone width. Guarded: tests and old browsers without matchMedia get the table. */
-export function usePhoneWidth(): boolean {
-  const query = `(max-width: ${PHONE_MAX_WIDTH}px)`
+/**
+ * Widest iPad in landscape (11" Pro / Air: 1194px). The fleet manager pages are read on an iPad (Ryne 2026-11-14), so their wide lists
+ * draw as cards up to here; a desktop window is wider and keeps the table.
+ */
+export const TABLET_MAX_WIDTH = 1194
+
+/** True while the window is at most `maxWidth` wide. Guarded: tests and old browsers without matchMedia get false. */
+export function useMaxWidth(maxWidth: number): boolean {
+  const query = `(max-width: ${maxWidth}px)`
   const supported = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-  const [phone, setPhone] = useState(() => supported && window.matchMedia(query).matches)
+  const [matches, setMatches] = useState(() => supported && window.matchMedia(query).matches)
   useEffect(() => {
     if (!supported) return undefined
     const mql = window.matchMedia(query)
-    const onChange = () => setPhone(mql.matches)
+    const onChange = () => setMatches(mql.matches)
     onChange()
     mql.addEventListener('change', onChange)
     return () => mql.removeEventListener('change', onChange)
   }, [query, supported])
-  return phone
+  return matches
+}
+
+/** True at phone width. Guarded: tests and old browsers without matchMedia get the table. */
+export function usePhoneWidth(): boolean {
+  return useMaxWidth(PHONE_MAX_WIDTH)
 }

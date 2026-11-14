@@ -373,3 +373,100 @@
   .tms-portal[data-phone-sheet='side'] .px-8,
   .tms-portal[data-phone-sheet='side'] .px-6 { padding-left: 14px; padding-right: 14px; }
 }
+
+/* ── Page toolbars never widen the page ───────────────────────────────────────────────────────────────
+   A TmsScrollPage toolbar holding a tab strip that scrolls sideways (Invoices: Invoices / Review Queue / Archived / Maintenance History)
+   took the strip's full width as its minimum and pushed the whole page wider than an iPad or phone. Its children may shrink; the strip
+   then scrolls inside itself. */
+@media (max-width: 1194px) {
+  .tms-shell .tms-scroll-toolbar > * { min-width: 0; max-width: 100%; }
+}
+
+/* ── Fleet manager pages on an iPad (Ryne 2026-11-14) ─────────────────────────────────────────────────
+   Between phone width and the widest iPad, a table on a `.tms-tablet-cards` page whose columns do not fit is marked
+   data-tablet-stack="on" (phoneTables.ts) and each row draws as a card of label / value pairs, as many pairs to a line as fit. A table that
+   fits keeps its columns. Desktop (wider than 1194px) never matches. */
+@media (min-width: 641px) and (max-width: 1194px) {
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] {
+    display: block; width: 100% !important; min-width: 0 !important; max-width: 100%; border-collapse: separate;
+  }
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > thead,
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > colgroup { display: none; }
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tbody,
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tfoot {
+    display: flex; flex-direction: column; gap: 8px; width: 100%; padding: 8px; box-sizing: border-box;
+  }
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tbody > tr,
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tfoot > tr {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px 16px; align-items: start;
+    padding: 12px 14px; height: auto !important;
+    background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius-card);
+  }
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tfoot > tr { font-weight: 600; background: var(--tms-surface-subtle); }
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tbody > tr > td,
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tbody > tr > th,
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tfoot > tr > td,
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tfoot > tr > th {
+    display: block; width: auto !important; min-width: 0 !important; max-width: none !important; height: auto !important;
+    padding: 0 !important; border: 0 !important; text-align: left !important; position: static !important; background: transparent !important;
+    white-space: normal !important; overflow: visible !important; text-overflow: clip !important; overflow-wrap: anywhere;
+  }
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tbody > tr > [data-label]::before,
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tfoot > tr > [data-label]::before {
+    content: attr(data-label); display: block; margin-bottom: 2px;
+    font-size: 11px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; color: var(--tms-muted);
+  }
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tbody > tr > td:first-child,
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tbody > tr > th:first-child { grid-column: 1 / -1; font-weight: 600; font-size: 14px; }
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tbody > tr > td:not([data-label]),
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tbody > tr > td[colspan],
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tbody > tr > th:not([data-label]),
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tbody > tr > th[colspan],
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tfoot > tr > td:not([data-label]),
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tfoot > tr > td[colspan],
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tfoot > tr > th:not([data-label]),
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tfoot > tr > th[colspan] { grid-column: 1 / -1; }
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] .tabular-nums,
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] [style*='tabular-nums'] { white-space: nowrap; }
+  /* The row's controls (Assign to truck, Download PDF) get the card's full width and wrap instead of squeezing. */
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tbody > tr > td:last-child:has(button),
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tbody > tr > td:last-child:has(select) { grid-column: 1 / -1; }
+  .tms-shell .tms-tablet-cards table[data-tablet-stack='on'] > tbody > tr > td [style*='display: flex'] { flex-wrap: wrap; }
+  /* The cards make the list long: the page scrolls, not a short box inside it. */
+  .tms-shell .tms-tablet-cards div:has(> table[data-tablet-stack='on']),
+  .tms-shell .tms-tablet-cards .tms-table-wrap:has(> table[data-tablet-stack='on']),
+  .tms-shell .tms-tablet-cards .tms-card-body:has(> table[data-tablet-stack='on']) { overflow-x: visible !important; max-height: none !important; }
+  /* A toolbar with one block (Invoices: totals, KPI tiles, tabs) spans the page so its tiles use the width. */
+  .tms-shell .tms-tablet-cards .tms-scroll-toolbar > :only-child { flex: 1 1 100%; }
+  /* DenseGrid cards (Maintenance) have room for more than two details to a line. */
+  .tms-shell .tms-tablet-cards .tms-dg-card-details { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+}
+/* iPad portrait: five KPI tiles go three to a line instead of two (kit.css drops every stat row to two columns at 900px). */
+@media (min-width: 641px) and (max-width: 900px) {
+  .tms-shell .tms-tablet-cards .tms-stat-row.tms-stat-row-3,
+  .tms-shell .tms-tablet-cards .tms-stat-row.tms-stat-row-5 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+/* Touch screens on the fleet pages: 44px tap targets on buttons, selects and text fields. */
+@media (pointer: coarse) and (max-width: 1194px) {
+  .tms-shell .tms-tablet-cards .tms-btn,
+  .tms-shell .tms-tablet-cards select,
+  .tms-shell .tms-tablet-cards input:not([type='checkbox']):not([type='radio']):not([type='file']) { min-height: 44px; }
+  .tms-shell .tms-tablet-cards .tms-scroll-toolbar button,
+  .tms-shell .tms-tablet-cards .tms-dense-bar button,
+  .tms-shell .tms-tablet-cards .tms-dg-card-actions button,
+  .tms-shell .tms-tablet-cards [role='tab'] { min-height: 44px; }
+  .tms-shell .tms-tablet-cards input[type='checkbox'] { width: 22px; height: 22px; }
+}
+
+/* iPad landscape: the section tabs (Fleet manager dashboard / Maintenance / Invoices ...) squeezed beside the search box and wrapped into
+   three rows. They take their own line under it instead, as on a phone. */
+@media (min-width: 901px) and (max-width: 1194px) {
+  .tms-shell .tms-topbar:has(.tms-lifecycle) { flex-wrap: wrap; row-gap: 6px; padding-block: 6px; }
+  .tms-shell .tms-topbar .tms-lifecycle { order: 10; flex: 1 1 100%; min-width: 0; }
+  .tms-shell .tms-topbar .tms-lifecycle-list {
+    flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .tms-shell .tms-topbar .tms-lifecycle-list::-webkit-scrollbar { display: none; }
+}

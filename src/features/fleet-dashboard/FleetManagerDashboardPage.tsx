@@ -131,6 +131,7 @@ export function FleetManagerDashboardPage() {
 
   return (
     <TmsScrollPage
+      className="tms-tablet-cards"
       title="Fleet Manager Dashboard"
       subtitle="Fleet health, maintenance & driver availability at a glance"
     >

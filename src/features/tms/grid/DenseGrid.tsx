@@ -40,7 +40,7 @@ import {
 } from './denseGridModel'
 import { DenseFilterPopover } from './DenseFilterPopover'
 import { DenseCards } from './DenseCards'
-import { usePhoneWidth, type DenseCardLayout } from './denseCardLayout'
+import { PHONE_MAX_WIDTH, useMaxWidth, type DenseCardLayout } from './denseCardLayout'
 import './dense-grid.css'
 
 /** Rows mounted above and below the viewport. */
@@ -99,6 +99,8 @@ export interface DenseGridProps<T> {
   testId?: string
   /** Below 640px the rows draw as cards: which columns go on top. Omitted: the first column is the title. `false` keeps the table. */
   cardLayout?: DenseCardLayout | false
+  /** Widest screen that gets the cards. Default phone width (640px); the fleet pages pass TABLET_MAX_WIDTH so an iPad gets them too. */
+  cardsBelow?: number
 }
 
 type Item<T> = { kind: 'row'; row: T } | { kind: 'group'; key: string; rows: T[] }
@@ -152,8 +154,9 @@ export function DenseGrid<T>({
   uppercase = false,
   rowHeights,
   cardLayout,
+  cardsBelow = PHONE_MAX_WIDTH,
 }: DenseGridProps<T>) {
-  const phone = usePhoneWidth()
+  const phone = useMaxWidth(cardsBelow)
   const rowHeight = rowHeights?.[density] ?? ROW_HEIGHT[density]
   const scrollRef = useRef<HTMLDivElement>(null)
   const [topRow, setTopRow] = useState(0)

@@ -1,4 +1,5 @@
 import { DenseTable } from '@/features/tms/grid/DenseTable'
+import { TABLET_MAX_WIDTH } from '@/features/tms/grid/denseCardLayout'
 import { useState } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import { TmsButton } from '@/features/tms/kit/TmsButton'
@@ -193,6 +194,7 @@ export function MaintenancePage() {
 
   return (
     <TmsScrollPage
+      className="tms-tablet-cards"
       title="Maintenance"
       subtitle="Fleet maintenance tasks"
       stickyHead
@@ -279,6 +281,8 @@ export function MaintenancePage() {
           aria-label={isCompletedTab ? 'Completed tasks' : 'Maintenance tasks'}
           rows={visibleTasks}
           rowKey={(t) => t.id}
+          cardsBelow={TABLET_MAX_WIDTH}
+          cardLayout={{ title: 'title', party: 'equipment', pills: ['status', 'priority'], detailCount: 10 }}
           toneOf={(t) => (t.status !== 'complete' && isOverdue(t.dueDate) ? 'red' : '')}
           empty={(
             <TmsEmptyState
