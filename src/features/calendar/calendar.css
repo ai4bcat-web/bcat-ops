@@ -165,3 +165,18 @@
 .fc-theme-standard td,
 .fc-theme-standard th { border-color: var(--tms-border); }
 .fc-theme-standard .fc-scrollgrid { border-color: var(--tms-border); }
+
+/* ── Week / Month on a phone (Ryne 2026-11-14: make the calendar fit on mobile) ─────────────────────────
+   A day column is the width of the screen less a sliver of the next one, and a swipe lands on a whole day. The Unscheduled column
+   never pins to the left edge here (at 252px it would cover two thirds of the screen); it scrolls away like a day. Desktop is untouched. */
+@media (max-width: 640px) {
+  .cal-grid-scroll { scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+  .cal-grid-scroll .cal-grid-col { width: calc(100vw - 48px) !important; scroll-snap-align: start; }
+  .cal-grid-scroll .cal-grid-unscheduled { position: static !important; }
+}
+/* Cards on a phone: a row that runs out of room (an FCFS window beside its status chip) wraps onto a second line, and a long route,
+   customer or note wraps instead of ending in "…". The full detail is still a tap away. */
+@media (max-width: 640px) {
+  .cal-grid-card > div[style*='display: flex'] { flex-wrap: wrap; row-gap: 2px; }
+  .cal-grid-card [style*='text-overflow: ellipsis'] { white-space: normal !important; overflow-wrap: anywhere; }
+}

@@ -283,7 +283,7 @@ function LoadCard({
   return (
     <div
       draggable
-      className="group/card"
+      className="group/card cal-grid-card"
       style={{
         marginBottom: 4,
         border: '2px solid var(--tms-text)',
@@ -609,6 +609,7 @@ function DayColumn({
 
   return (
     <div
+      className="cal-grid-col"
       style={{ width: DAY_COL_W, flexShrink: 0, borderRight: '1px solid var(--tms-border)', display: 'flex', flexDirection: 'column',
         outline: isDropTarget ? '2px solid var(--tms-primary)' : undefined,
         outlineOffset: -2,
@@ -732,6 +733,7 @@ function UnscheduledColumn({
   const isDropTarget = dropTargetDay === ORPHAN_KEY
   return (
     <div
+      className="cal-grid-col cal-grid-unscheduled"
       style={{ width: DAY_COL_W, flexShrink: 0, position: 'sticky', left: 0, zIndex: 20,
         borderRight: '2px solid var(--tms-border)', display: 'flex', flexDirection: 'column',
         background: isDropTarget ? 'var(--tms-badge-orange-tint)' : 'var(--tms-bg)',
@@ -997,7 +999,7 @@ export function GridCalendarView({ loads: allLoads, drivers, startDate, viewMode
   }, [entriesByDay, entryByKey])
 
   return (
-    <div style={{ height: '100%', overflow: 'auto' }}>
+    <div className="cal-grid-scroll" style={{ height: '100%', overflow: 'auto' }}>
       <div style={{ display: 'flex', minHeight: '100%', alignItems: 'flex-start' }}>
         <UnscheduledColumn
           entries={unscheduledEntries}
