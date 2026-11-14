@@ -9,7 +9,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { useOwnerOperatorPay, type OwnerOperatorPayRow } from '@/hooks/useOwnerOperatorPay'
-import { OWNER_OP_FIRST_PERIOD, ratePerMile, totalRatePerMile } from '@/lib/ownerOperatorTrips'
+import { OWNER_OP_FIRST_PERIOD, ratePerMile, settlementDateLabel, totalRatePerMile, type SettlementDate } from '@/lib/ownerOperatorTrips'
 import type { OwnerOpTrip } from '@/lib/ownerOperatorTrips'
 import { tripPayAmount, FACTORING_FEE_LABEL } from '@/lib/driverPay'
 import { mileageDeductionLine } from '@/lib/mileageDeduction'
@@ -251,12 +251,28 @@ function csvDoc(trip: OwnerOpTrip, kind: 'POD' | 'Rate confirmation') {
   return trip.readiness?.missingDocuments.includes(kind) ? 'NEED' : 'Yes'
 }
 
+/** A pickup/delivery date from the shipment; "appt" when it is the appointment, not what happened. */
+function StopDate({ d }: { d: SettlementDate | undefined }) {
+  const label = settlementDateLabel(d)
+  if (!label) return <span style={{ color: 'var(--tms-muted)' }}>—</span>
+  return (
+    <span title={d?.actual ? 'Actual' : 'Appointment — not recorded as happened yet'}>
+      {label}{!d?.actual && <span style={{ color: 'var(--tms-muted)', fontSize: 10.5, marginLeft: 4 }}>appt</span>}
+    </span>
+  )
+}
+
+function csvDate(d: SettlementDate | undefined): string {
+  const label = settlementDateLabel(d)
+  return label && !d?.actual ? `${label} (appt)` : label
+}
+
 function statementCsv(row: OwnerOperatorPayRow, periodStart: string): string {
   const q = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
   const L: string[] = []
   L.push(q(`${row.driver.name} — owner operator pay period ${weekLabelLong(periodStart)}`)); L.push('')
   L.push([
-    'PRO #', 'PO #', 'Customer', 'Broker MC', 'Invoice amount', 'Invoice date',
+    'PRO #', 'PO #', 'Customer', 'Pickup date', 'Delivery date', 'Broker MC', 'Invoice amount', 'Invoice date',
     'Origin city', 'Origin state', 'Origin ZIP', 'Dest city', 'Dest state', 'Dest ZIP',
     'POD', 'Rate confirmation', 'Miles', 'Rate/mi', 'Freight', 'Driver Amount', 'On this check',
   ].map(q).join(','))
@@ -264,7 +280,7 @@ function statementCsv(row: OwnerOperatorPayRow, periodStart: string): string {
   for (const t of row.trips) {
     L.push([
       csvField(t, 'InvoiceNo'), csvField(t, 'PoNumber'),
-      t.customer, csvField(t, 'BrokerMC'),
+      t.customer, csvDate(t.dates?.pickup), csvDate(t.dates?.delivery), csvField(t, 'BrokerMC'),
       csvField(t, 'InvoiceAmount'), csvField(t, 'InvoiceDate'),
       csvField(t, 'FromCity'), csvField(t, 'FromState'), csvField(t, 'FromZip'),
       csvField(t, 'ToCity'), csvField(t, 'ToState'), csvField(t, 'ToZip'),
@@ -277,7 +293,7 @@ function statementCsv(row: OwnerOperatorPayRow, periodStart: string): string {
     ].map(q).join(','))
   }
   const rpm = totalRatePerMile(row.trips)
-  L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Totals'), q(rpm.miles || ''), q(rpm.rate ?? ''), q(row.statement.gross)].join(','))
+  L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Totals'), q(rpm.miles || ''), q(rpm.rate ?? ''), q(row.statement.gross)].join(','))
   L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Driver share'), q(row.statement.driverAmount)].join(','))
   if (row.heldFreight > 0) {
     L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Held for POD (not paid)'), q(row.heldFreight)].join(','))
@@ -625,6 +641,8 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
             <th style={{ ...TH, textAlign: 'left' }}>PO #</th>
             <th style={{ ...TH, textAlign: 'left' }}>Customer</th>
             <th style={{ ...TH, textAlign: 'left' }}>Route</th>
+            <th style={{ ...TH, textAlign: 'left' }}>Pickup date</th>
+            <th style={{ ...TH, textAlign: 'left' }}>Delivery date</th>
             <th style={TH}>Broker MC</th>
             <th style={TH}>Invoice amount</th>
             <th style={TH}>Invoice date</th>
@@ -643,7 +661,7 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
             <th style={TH}>Driver Amount</th>
           </tr></thead>
           <tbody>
-            {trips.length === 0 && <tr><td colSpan={20} style={{ ...TD, textAlign: 'center', color: 'var(--tms-muted)', padding: 18 }}>No brokerage loads delivered this week.</td></tr>}
+            {trips.length === 0 && <tr><td colSpan={22} style={{ ...TD, textAlign: 'center', color: 'var(--tms-muted)', padding: 18 }}>No brokerage loads delivered this week.</td></tr>}
             {trips.map((t) => {
               const dup = row.duplicateTripIds.has(t.id)
               const held = heldReasonById.get(t.id)
@@ -662,6 +680,8 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
                 </td>
                 <td style={{ ...TD, textAlign: 'left', color: 'var(--tms-text-2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.customer || '—'}</td>
                 <td style={{ ...TD, textAlign: 'left', color: 'var(--tms-text-2)' }}>{t.origin || '—'} → {t.destination || '—'}</td>
+                <td style={{ ...TD, textAlign: 'left' }}><StopDate d={t.dates?.pickup} /></td>
+                <td style={{ ...TD, textAlign: 'left' }}><StopDate d={t.dates?.delivery} /></td>
                 <td style={TD}><OtrCell trip={t} field="BrokerMC" /></td>
                 <td style={TD}><OtrCell trip={t} field="InvoiceAmount" /></td>
                 <td style={TD}><OtrCell trip={t} field="InvoiceDate" /></td>
@@ -688,7 +708,7 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
             )})}
             {trips.length > 0 && (
               <tr style={{ borderBottom: '1px solid var(--tms-border)', background: 'var(--tms-bg)', fontWeight: 700 }}>
-                <td style={{ ...TD, textAlign: 'left' }} colSpan={16}>
+                <td style={{ ...TD, textAlign: 'left' }} colSpan={18}>
                   Freight total / driver share ({pct(setting.payPercent)})
                   {row.heldFreight > 0 && (
                     <span style={{ ...MISSING, fontWeight: 600, marginLeft: 8 }}>

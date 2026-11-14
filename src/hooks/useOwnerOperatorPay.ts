@@ -26,6 +26,7 @@ import { listPods } from '@/lib/podsClient'
 import { listDriverSubmissions } from '@/lib/driverSubmissionsClient'
 import { buildPodIndex, podUploadedAt, type PodIndex, type PodSubmissionLike } from '@/lib/podPresence'
 import { shipmentDocPresence } from '@/lib/shipmentDocPresence'
+import { getStops } from '@/lib/stops'
 import { splitPayableTrips, type PayHoldReason } from '@/lib/payHold'
 import type { ManualOverrides } from '@/lib/otrInvoice'
 import { useFuelTransactions } from './useFuelTransactions'
@@ -43,7 +44,7 @@ import {
 } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 import { matchedFuelForCard, sumFuel, effectiveFuelCard } from '@/lib/driverFuel'
-import { ownerOpTripsFor, ownerOpWeekAtOrAfterFirst, type OwnerOpTrip, isOwnerOperatorGroup } from '@/lib/ownerOperatorTrips'
+import { ownerOpTripsFor, ownerOpWeekAtOrAfterFirst, type OwnerOpTrip, isOwnerOperatorGroup, settlementStopDates } from '@/lib/ownerOperatorTrips'
 import { otrSettlementReadiness } from '@/lib/otrSettlementFields'
 import { duplicateTripIds as dupIdsForWeek } from '@/lib/tripDedup'
 import type { Driver } from '@/types'
@@ -324,6 +325,7 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
             ...trip,
             // When the POD landed, so the column can say more than "present".
             podUploadedAt: podUploadedAt(podIndex, load),
+            dates: settlementStopDates(getStops(load), (load as { deliveredAt?: string | null }).deliveredAt),
             readiness: otrSettlementReadiness({
               load,
               customersById,

@@ -69,6 +69,39 @@ export interface OwnerOpTrip {
    * A tick alone says a POD exists; this says whether it came in time to invoice on.
    */
   podUploadedAt?: string | null
+  /** Pickup and delivery dates from the shipment (`settlementStopDates`), attached by the hook. */
+  dates?: SettlementStopDates
+}
+
+/** A date on a settlement row, and whether it happened (`actual`) or is only the appointment. */
+export interface SettlementDate { at: string | null; actual: boolean }
+export interface SettlementStopDates { pickup: SettlementDate; delivery: SettlementDate }
+
+interface DatedStop { type?: string; sequence?: number; appt?: string | null; arrivedAt?: string | null; departedAt?: string | null }
+
+/**
+ * Pickup: the first pickup's actual departure (else arrival), otherwise its appointment.
+ * Delivery: the load's delivered time, else the last delivery's actual arrival (else departure),
+ * otherwise its appointment. ISO strings; `actual` false means it is the appointment.
+ */
+export function settlementStopDates(stops: readonly DatedStop[], deliveredAt?: string | null): SettlementStopDates {
+  const sorted = [...stops].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+  const pu = sorted.find((s) => s.type === 'pickup')
+  const de = [...sorted].reverse().find((s) => s.type === 'delivery')
+  const puActual = pu?.departedAt || pu?.arrivedAt || null
+  const deActual = deliveredAt || de?.arrivedAt || de?.departedAt || null
+  return {
+    pickup: puActual ? { at: puActual, actual: true } : { at: pu?.appt || null, actual: false },
+    delivery: deActual ? { at: deActual, actual: true } : { at: de?.appt || null, actual: false },
+  }
+}
+
+/** "11/12" in Central time, or "" — the office reads dates the way the dispatch board does. */
+export function settlementDateLabel(d: SettlementDate | undefined): string {
+  if (!d?.at) return ''
+  const t = new Date(d.at)
+  if (Number.isNaN(t.getTime())) return ''
+  return t.toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: '2-digit', day: '2-digit' })
 }
 
 /** If the requested period is before the first owner-operator week, clamp to it. */
