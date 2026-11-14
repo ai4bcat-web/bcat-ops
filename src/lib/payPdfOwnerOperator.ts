@@ -9,7 +9,7 @@ import autoTable from 'jspdf-autotable'
 import type { OwnerOperatorPayRow } from '@/hooks/useOwnerOperatorPay'
 import { tripPayAmount, FACTORING_FEE_LABEL } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
-import { ratePerMile } from '@/lib/ownerOperatorTrips'
+import { ratePerMile, totalRatePerMile } from '@/lib/ownerOperatorTrips'
 import { PAY_HOLD_LABEL } from '@/lib/payHold'
 import { weekLabelLong } from '@/features/driver-pay/week'
 import { loadImage, COMPANY_NAME } from '@/lib/payPdf'
@@ -119,6 +119,8 @@ export async function buildOwnerOperatorStatementPdf(row: OwnerOperatorPayRow, p
     [{ content: `Driver share (${pct(setting.payPercent)})`, colSpan: 7 }, money(statement.driverAmount)],
   ]
   if (row.heldFreight > 0) foot.push([{ content: 'Held for POD — not on this check', colSpan: 7 }, money(row.heldFreight)])
+  const weekRpm = totalRatePerMile(trips)
+  if (weekRpm.rate != null) foot.push([{ content: `Rate per mile (${weekRpm.miles.toLocaleString()} mi on loads with miles)`, colSpan: 7 }, `${money(weekRpm.rate)}/mi`])
   autoTable(doc, {
     startY: y + 40,
     head: [['PRO #', 'Customer', 'Route', 'Miles', 'Freight', 'Rate/mi', 'On this check', 'Amount']],

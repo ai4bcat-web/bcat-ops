@@ -114,6 +114,7 @@ import {
 } from '../../../src/lib/ownerOperatorTrips'
 import { notifyRateconSubmitted, notifyPodAdded,
   notifyMiscAdded, RATECON_SUBJECT_PREFIX, type SubmissionNotice, type ThreadRefs } from './notify'
+import { shipmentDocPresence, type ShipmentDocLike, type ShipmentDocPresence } from '../../../src/lib/shipmentDocPresence'
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}))
 const s3 = new S3Client({})
@@ -1007,8 +1008,39 @@ async function resolveFactoringFields(loadIds: string[]): Promise<Map<string, Fa
     }
   }
 
+  // The shipment page's Documents count too: a POD or rate con filed on the shipment is on
+  // file for the driver's settlement, the same as the office's settlement reads it.
+  const shipmentDocs = new Map<string, ShipmentDocPresence>()
+  if (SHIPMENT_DOCUMENT_TABLE_NAME) {
+    const byShipment = new Map<string, string[]>()
+    for (const [id, load] of loads) {
+      const sid = (load.shipmentId ?? '').trim()
+      if (sid) byShipment.set(sid, [...(byShipment.get(sid) ?? []), id])
+    }
+    for (const [shipmentId, ids] of byShipment) {
+      try {
+        const res = await ddb.send(new QueryCommand({
+          TableName: SHIPMENT_DOCUMENT_TABLE_NAME,
+          IndexName: 'shipmentDocumentsByShipmentIdAndUploadedAt',
+          KeyConditionExpression: 'shipmentId = :s',
+          ExpressionAttributeValues: { ':s': shipmentId },
+        }))
+        for (const id of ids) shipmentDocs.set(id, shipmentDocPresence(res.Items as ShipmentDocLike[] | undefined, id))
+      } catch (err) {
+        console.error('[driver-app-api] could not read shipment documents for factoring', shipmentId, err)
+      }
+    }
+  }
+
   for (const [id, load] of loads) {
-    out.set(id, { ...factoringFieldsFor(load, customers, locations, podsByLoad.has(id)), podKnown })
+    const docs = shipmentDocs.get(id)
+    const fields = factoringFieldsFor(load, customers, locations, podsByLoad.has(id) || docs?.pod === true)
+    if (docs?.ratecon && !fields.rateconPresent) {
+      const next = { ...fields, rateconPresent: true }
+      out.set(id, { ...next, blocked: isFactoringBlocked(next), podKnown })
+    } else {
+      out.set(id, { ...fields, podKnown })
+    }
   }
   return out
 }

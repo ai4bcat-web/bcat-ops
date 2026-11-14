@@ -5073,7 +5073,7 @@ export interface AttachDriverDocInput {
   shipmentId: string
   loadId: string
   submissionDocId: string
-  type: 'POD' | 'PHOTO' | 'OTHER'
+  type: 'POD' | 'RATE_CON' | 'PHOTO' | 'OTHER'
 }
 export async function attachDriverDoc(input: AttachDriverDocInput): Promise<DocumentResult> {
   return shipmentAction<DocumentResult>('ATTACH_DRIVER_DOC', input)

@@ -226,7 +226,8 @@ function clean(v: unknown): string | undefined {
 export function normalizeZip(zip: string | null | undefined): string | undefined {
   const v = clean(zip)
   if (!v) return undefined
-  const m = v.match(/\b(\d{5})(?:-\d{4})?\b/)
+  // ZIP+4 with or without its dash: 799285900 is El Paso's 79928-5900 as a Location stores it.
+  const m = v.match(/\b(\d{5})(?:-?\d{4})?\b/)
   return m ? m[1] : undefined
 }
 

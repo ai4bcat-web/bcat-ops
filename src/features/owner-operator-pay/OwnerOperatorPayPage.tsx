@@ -9,7 +9,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { useOwnerOperatorPay, type OwnerOperatorPayRow } from '@/hooks/useOwnerOperatorPay'
-import { OWNER_OP_FIRST_PERIOD, ratePerMile } from '@/lib/ownerOperatorTrips'
+import { OWNER_OP_FIRST_PERIOD, ratePerMile, totalRatePerMile } from '@/lib/ownerOperatorTrips'
 import type { OwnerOpTrip } from '@/lib/ownerOperatorTrips'
 import { tripPayAmount, FACTORING_FEE_LABEL } from '@/lib/driverPay'
 import { mileageDeductionLine } from '@/lib/mileageDeduction'
@@ -276,7 +276,8 @@ function statementCsv(row: OwnerOperatorPayRow, periodStart: string): string {
       heldReasonById.has(t.id) ? `Held — ${PAY_HOLD_LABEL[heldReasonById.get(t.id)!]}` : 'Yes',
     ].map(q).join(','))
   }
-  L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Freight total'), q(row.statement.gross)].join(','))
+  const rpm = totalRatePerMile(row.trips)
+  L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Totals'), q(rpm.miles || ''), q(rpm.rate ?? ''), q(row.statement.gross)].join(','))
   L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Driver share'), q(row.statement.driverAmount)].join(','))
   if (row.heldFreight > 0) {
     L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Held for POD (not paid)'), q(row.heldFreight)].join(','))
@@ -560,6 +561,7 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
   const { driver, setting, statement, oneOffs } = row
   const navigate = useNavigate()
   const trips = row.trips
+  const weekRpm = totalRatePerMile(trips)
   // Held loads stay in the table, in delivery order, so the week reads as one list.
   const heldReasonById = new Map(row.heldTrips.map((h) => [h.trip.id, h.reason]))
 
@@ -674,7 +676,7 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
                     invoice on, which is the thing somebody chasing paperwork needs. */}
                 <td style={{ ...TD, whiteSpace: 'nowrap', color: 'var(--tms-muted)' }}>{podSentLabel(t)}</td>
                 <td style={TD}><OtrDoc trip={t} kind="Rate confirmation" driver={driver} staffEmail={staffEmail} onUploaded={onRefresh} /></td>
-                <td style={TD}>{t.miles != null ? t.miles.toLocaleString('en-US') : '—'}</td>
+                <td style={TD}>{t.miles != null ? t.miles.toLocaleString('en-US') : <span style={MISSING} title="No miles on the shipment — rate per mile cannot be worked out">No miles</span>}</td>
                 <td style={TD}>{ratePerMile(t.freightAmount, t.miles) != null ? `${money(ratePerMile(t.freightAmount, t.miles)!)}/mi` : '—'}</td>
                 <td style={TD}>{money(t.freightAmount)}</td>
                 <td style={{ ...TD, fontWeight: 600 }}>
@@ -686,7 +688,7 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
             )})}
             {trips.length > 0 && (
               <tr style={{ borderBottom: '1px solid var(--tms-border)', background: 'var(--tms-bg)', fontWeight: 700 }}>
-                <td style={{ ...TD, textAlign: 'left' }} colSpan={19}>
+                <td style={{ ...TD, textAlign: 'left' }} colSpan={16}>
                   Freight total / driver share ({pct(setting.payPercent)})
                   {row.heldFreight > 0 && (
                     <span style={{ ...MISSING, fontWeight: 600, marginLeft: 8 }}>
@@ -694,6 +696,8 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
                     </span>
                   )}
                 </td>
+                <td style={TD} title="Miles on the loads that have miles">{weekRpm.miles > 0 ? weekRpm.miles.toLocaleString('en-US') : '—'}</td>
+                <td style={TD} title="Freight ÷ miles, over the loads that have miles">{weekRpm.rate != null ? `${money(weekRpm.rate)}/mi` : '—'}</td>
                 <td style={TD}>{money(statement.gross)}</td>
                 <td style={TD}>{money(statement.driverAmount)}</td>
               </tr>
