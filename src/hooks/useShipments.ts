@@ -3,6 +3,7 @@ import { listCarriers, listCustomers, listDrivers, listQuotes, listUserProfiles 
 import type { LoadBoardSummary } from '@/lib/apiClient'
 import { loadBoardBundle, peekBoardBundle, type BoardBundle, type BoardView } from '@/lib/boardData'
 import { aggregateApStatus } from '@/lib/carrierTotals'
+import { customerRefOf } from '@/lib/customerRef'
 import { factorGapsForLoad, factoringPoNumber, routeEnds, type FactorGapCode } from '@/lib/factorReadyAtCreate'
 import { modelsAvailable } from '@/lib/modelAvailability'
 import type { BoardCarrier } from '@/lib/shipmentViewDefs'
@@ -390,7 +391,10 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
     // the customer calls the load by, which is why it sits beside the PRO.
     const referenceByShipment: Record<string, string> = {}
     const equipmentTypeByShipment: Record<string, string> = {}
+    // The Customer Ref (customerRef.ts) reads the order's references first, then the load's tmsId.
+    const referencesByShipment: Record<string, OrderRecord['references']> = {}
     for (const o of orders) {
+      referencesByShipment[o.shipmentId] ??= o.references
       if (o.arStatus) arByShipment[o.shipmentId] = o.arStatus
       if (o.customerRepId) repByShipment[o.shipmentId] = o.customerRepId
       const reference = o.references?.find((r) => (r.value ?? '').trim() !== '')
@@ -666,7 +670,7 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         openIncidentCount: tracking?.openIncidentCount ?? null,
         trackingProvider: tracking?.trackingProvider ?? null,
         stopCount: tracking?.stopCount ?? null,
-        reference: referenceByShipment[s.id] ?? null,
+        reference: referenceByShipment[s.id] ?? customerRefOf(null, firstLoad?.tmsId),
         carrierName: active?.carrierName ?? null,
         driverName: active?.driverName ?? null,
         driverId: active?.driverId ?? null,
@@ -679,7 +683,7 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         marginBps,
         equipmentType: firstLoad?.equipmentType ?? equipmentTypeByShipment[s.id] ?? null,
         commodity: shipmentLoads.map((l) => l.commodity).find(Boolean) ?? null,
-        customerReference: referenceByShipment[s.id] ?? null,
+        customerReference: customerRefOf(referencesByShipment[s.id], firstLoad?.tmsId),
         pickupName: pickupStop?.name ?? firstLoad?.originName ?? null,
         consigneeName: deliveryStop?.name ?? lastLoad?.destinationName ?? null,
         fromState: stateFromCity(pickupStop?.city) ?? stateFromCity(firstLoad?.originCity) ?? null,

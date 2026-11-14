@@ -6,6 +6,7 @@
  * Pure and import-light: the finance Lambda bundles this file by relative path.
  */
 import { invoiceBrandingFor } from './invoiceBranding'
+import { customerRefOf } from './customerRef'
 
 interface ReferenceLike {
   code: string
@@ -14,18 +15,9 @@ interface ReferenceLike {
   visibility?: string | null
 }
 
-/** The order's PO number, if it has one the customer may see. */
+/** The PO the invoice states: the customer-visible PO reference, else the Customer Ref reference (see customerRef.ts). */
 export function invoicePoNumber(references: readonly ReferenceLike[] | null | undefined): string | null {
-  for (const ref of references ?? []) {
-    if (ref.level === 'STOP') continue
-    if (ref.visibility === 'INTERNAL' || ref.visibility === 'CARRIER') continue
-    const code = ref.code.trim().toUpperCase()
-    if (code === 'PO' || code === 'PO_NUMBER' || code === 'CUSTOMER_PO') {
-      const value = ref.value.trim()
-      if (value) return value
-    }
-  }
-  return null
+  return customerRefOf(references)
 }
 
 /** The company the invoice comes from, as the subject names it. */

@@ -41,6 +41,7 @@ import {
 } from '../../../src/lib/invoiceBuild'
 import { buildInvoicePdf } from '../../../src/lib/invoicePdf'
 import { invoiceAttachmentName, invoiceCompanyName, invoicePoNumber } from '../../../src/lib/invoiceIdentity'
+import { customerRefOf } from '../../../src/lib/customerRef'
 import {
   renderInvoiceEmail,
 } from '../../../src/lib/shipmentNotices'
@@ -284,6 +285,17 @@ function customerReferences(order: OrderRecord): OrderReference[] {
   })
 }
 
+/**
+ * The Customer Ref belongs on the bill even when only the load carries it (a backfilled shipment, 14934): it is
+ * added as a CUSTOMER_REF reference when the order has neither a PO nor a Customer Ref reference.
+ */
+function withCustomerRef(refs: OrderReference[], loads: Array<{ tmsId?: string | null }>): OrderReference[] {
+  if (customerRefOf(refs)) return refs
+  const fromLoad = customerRefOf(null, loads.map((l) => l.tmsId).find((v) => customerRefOf(null, v)) ?? null)
+  if (!fromLoad) return refs
+  return [...refs, { code: 'CUSTOMER_REF', label: 'Customer ref', value: fromLoad, level: 'ORDER', visibility: 'ALL' } as OrderReference]
+}
+
 interface Snapshot {
   invoice: InvoiceRecord
   context: OrderContext
@@ -345,7 +357,7 @@ function buildSnapshot(
     termsText: settings.invoiceTerms?.trim() || `Net ${termsDays}`,
     invoiceMonth: args.invoiceDate.slice(0, 7),
     lines,
-    references: customerReferences(order),
+    references: withCustomerRef(customerReferences(order), context.loads as unknown as Array<{ tmsId?: string | null }>),
     subtotalCents,
     totalCents: subtotalCents,
     paidCents: 0,

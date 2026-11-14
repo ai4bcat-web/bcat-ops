@@ -452,6 +452,10 @@ export function buildSearchKey(shipment: Row, orders: Row[], loads: Row[]): stri
     }
   }
   for (const load of loads) {
+    // The Customer Ref and pickup # as the load carries them (customerRef.ts): a backfilled shipment (14934) has them nowhere else.
+    for (const v of [load.tmsId, load.pickupNumber]) {
+      if (typeof v === 'string' && v.trim() && v.trim().toUpperCase() !== 'N/A' && !parts.includes(v.trim())) parts.push(v.trim())
+    }
     for (const stop of readStops(load)) {
       const refs = Array.isArray(stop.refs) ? (stop.refs as Row[]) : []
       for (const ref of refs) {

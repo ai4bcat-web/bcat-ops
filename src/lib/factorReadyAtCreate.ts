@@ -18,6 +18,7 @@
 import { isFactorBilled, mcRequiredForFactoring, type CustomerType, type FactorBillingCustomer } from './factorBilling'
 import { ordered, placeOf } from './factorHandoff'
 import type { Stop } from '../types'
+import { customerRefOf } from './customerRef'
 
 export type FactorGapCode =
   | 'PO_MISSING'
@@ -113,8 +114,7 @@ export function factoringPoNumber(
   references: Parameters<typeof orderPoNumber>[0],
   customerRef: string | null | undefined,
 ): string | null {
-  const fallback = text(customerRef)
-  return orderPoNumber(references) ?? (fallback && fallback.toUpperCase() !== 'N/A' ? fallback : null)
+  return customerRefOf(references, customerRef)
 }
 
 /** First pick up and last delivery, read the way the factoring queue row reads them. */
