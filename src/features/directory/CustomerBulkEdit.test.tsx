@@ -18,10 +18,13 @@ describe('CustomerBulkEdit', () => {
     expect((screen.getByTestId('customer-bulk-apply') as HTMLButtonElement).disabled).toBe(true)
     fireEvent.change(screen.getByLabelText('Bulk billing method'), { target: { value: 'FACTOR' } })
     fireEvent.change(screen.getByLabelText('Bulk payment terms (days)'), { target: { value: '30' } })
+    // Method and terms changes need a reason.
+    expect((screen.getByTestId('customer-bulk-apply') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('customer-bulk-reason'), { target: { value: 'New contract' } })
     fireEvent.click(screen.getByTestId('customer-bulk-apply'))
     await waitFor(() => expect(onDone).toHaveBeenCalled())
     expect(save).toHaveBeenCalledTimes(2)
-    expect(save).toHaveBeenCalledWith(customers[0], { billingMethod: 'FACTOR', paymentTermsDays: 30 })
+    expect(save).toHaveBeenCalledWith(customers[0], { billingMethod: 'FACTOR', paymentTermsDays: 30 }, 'New contract')
   })
   it('renders nothing with no selection', () => {
     const { container } = render(<CustomerBulkEdit customers={[]} divisions={divisions} staff={staff} save={vi.fn()} onDone={vi.fn()} onClear={vi.fn()} />)

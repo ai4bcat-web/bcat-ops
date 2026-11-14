@@ -977,9 +977,8 @@ describe('UPSERT_CUSTOMER', () => {
         name: 'Acme', billingMethod: 'MANUAL', apEmail: ' AP@Acme.com ', invoiceCopyEmails: ['A@x.com', 'a@x.com', 'b@x.com'],
       }))
       expect(result).toMatchObject({ billingMethod: 'MANUAL', apEmail: 'ap@acme.com', invoiceCopyEmails: ['invoices@bcatcorp.com', 'a@x.com', 'b@x.com'] })
-      const rows = audits(cmds)
+      const rows = audits(cmds).filter((r) => r.action.S === 'BILLING_METHOD_SET')
       expect(rows).toHaveLength(1)
-      expect(rows[0].action.S).toBe('BILLING_METHOD_SET')
       expect(JSON.parse(rows[0].changes.S)).toMatchObject({ before: { billingMethod: null }, after: { billingMethod: 'MANUAL', apEmail: 'ap@acme.com' } })
     })
 
@@ -1103,15 +1102,49 @@ describe('UPSERT_CUSTOMER', () => {
       const cmds = run(flagged())
       await handler(event('UPSERT_CUSTOMER', { id: 'c-1', expectedUpdatedAt: '2025-01-02', name: 'Acme', mcNumber: '1' }))
       expect(updateValues(cmds)).toMatchObject({ ':billingMethod': { S: 'MANUAL' }, ':billingNeedsReview': { S: 'internal billing address: real AP e-mail needed' } })
-      expect(audits(cmds)).toHaveLength(0)
+      expect(audits(cmds).filter((r) => r.action.S === 'BILLING_METHOD_SET')).toHaveLength(0)
 
       const fix = run(flagged())
       await handler(event('UPSERT_CUSTOMER', {
         id: 'c-1', expectedUpdatedAt: '2025-01-02', name: 'Acme', apEmail: 'ap@acme.com',
-        billingNeedsReview: 'internal billing address: real AP e-mail needed',
+        billingNeedsReview: 'internal billing address: real AP e-mail needed', changeReason: 'Real AP e-mail from the customer',
       }))
       expect(updateValues(fix)).toMatchObject({ ':apEmail': { S: 'ap@acme.com' }, ':billingNeedsReview': { NULL: true } })
-      expect(audits(fix)).toHaveLength(1)
+      expect(audits(fix).filter((r) => r.action.S === 'BILLING_METHOD_SET')).toHaveLength(1)
+    })
+
+    it('refuses a terms change with no reason, and records field-level history with the reason', async () => {
+      const base = { id: 'c-2', name: 'Terms Co', normalizedName: 'terms co', active: true, status: 'ACTIVE', billingMethod: 'FACTOR', paymentTermsDays: 30, createdAt: '2020-01-01', updatedAt: '2025-01-02' }
+      const existing = makeDynamoItem(base)
+      const saved = makeDynamoItem({ ...base, paymentTermsDays: 45, contactName: 'Pat', updatedAt: '2025-01-03' })
+      const cmds: MockCommand[] = []
+      send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+        cmds.push(cmd)
+        if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+        if (cmd.__type === 'Scan') return Promise.resolve({ Items: [existing], LastEvaluatedKey: undefined })
+        if (cmd.__type === 'Update') return Promise.resolve({ Attributes: saved })
+        return Promise.resolve({})
+      }))
+      const input = { id: 'c-2', expectedUpdatedAt: '2025-01-02', name: 'Terms Co', paymentTermsDays: 45, contactName: 'Pat' }
+      await expect(handler(event('UPSERT_CUSTOMER', input))).rejects.toThrow(/Give a reason/)
+      expect(cmds.some((c) => c.__type === 'Update')).toBe(false)
+
+      await handler(event('UPSERT_CUSTOMER', { ...input, changeReason: 'Customer asked for Net 45' }))
+      const row = audits(cmds).find((r) => r.action.S === 'CUSTOMER_UPDATED')
+      expect(row?.entityType.S).toBe('CUSTOMER')
+      const changes = JSON.parse(row!.changes.S)
+      expect(changes).toMatchObject({ kind: 'customer-change', reason: 'Customer asked for Net 45', source: 'Customer profile' })
+      expect(changes.fields).toEqual([
+        { field: 'contactName', before: null, after: 'Pat' },
+        { field: 'paymentTermsDays', before: 30, after: 45 },
+      ])
+    })
+
+    it('needs no reason for an ordinary field and writes nothing when nothing changed', async () => {
+      const base = { id: 'c-3', name: 'Plain Co', normalizedName: 'plain co', active: true, status: 'ACTIVE', createdAt: '2020-01-01', updatedAt: '2025-01-02' }
+      const cmds = run(makeDynamoItem(base))
+      await handler(event('UPSERT_CUSTOMER', { id: 'c-3', expectedUpdatedAt: '2025-01-02', name: 'Plain Co' }))
+      expect(audits(cmds).filter((r) => r.action.S === 'CUSTOMER_UPDATED')).toHaveLength(0)
     })
   })
 })

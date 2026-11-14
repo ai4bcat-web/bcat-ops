@@ -50,6 +50,7 @@ import {
   type OtrInvoicePayload,
 } from '../_shared/otrClient'
 import { asciiProbePdf, highByteProbePdf, jpegProbe } from '../_shared/asciiProbePdf'
+import { auditCustomerChange } from '../_shared/customerAudit'
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true },
@@ -953,6 +954,14 @@ const moveStore: MoveStore = {
   now: nowIso,
 }
 
+/** Customer History (src/lib/customerAudit.ts): what OTR changed on a broker record, and why. */
+function auditCustomer(user: string, before: Row | null, after: Row, reason: string): Promise<unknown> {
+  return auditCustomerChange(
+    (entityType, entityId, action, changes) => moveStore.audit(entityType, entityId, action, user, changes),
+    { customerId: String(after.id), before, after, source: 'Factoring queue (OTR)', reason },
+  )
+}
+
 /** The page groups that may create customers (UPSERT_CUSTOMER's own gate), plus the accounting pages. */
 function mayCreateCustomers(groups: readonly string[], email: string): boolean {
   if (hasAccountingPage(groups, email, 'factoring')) return true
@@ -1142,7 +1151,9 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: Re
               },
             }),
           )
-          if (rename) customer = { ...customer, name: otrName, mcNameVerified: true }
+          const before = customer
+          customer = { ...customer, mcNumber: mc, ...(otrName ? { mcNameVerified: true } : {}), ...(rename ? { name: otrName } : {}) }
+          await auditCustomer(actor, before, customer, rename ? `Broker MC ${mc} entered; OTR names this broker ${otrName}` : `Broker MC ${mc} entered on the factoring queue`)
         } else {
           const name = otrName ?? String(load?.customer ?? '').trim()
           if (!name) return fail('OTR did not name this broker and the row has no load to take a name from')
@@ -1159,6 +1170,7 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: Re
             updatedAt: nowIso(),
           }
           await ddb.send(new PutCommand({ TableName: CUSTOMER_TABLE, Item: customer }))
+          await auditCustomer(actor, null, customer, `Created from the factoring queue for broker MC ${mc}`)
         }
 
         /*
@@ -1310,6 +1322,7 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: Re
                 },
               }),
             )
+            await auditCustomer(actor, customer, { ...customer, name: brokerName, mcNameVerified: true }, `OTR broker check names MC ${mc} as ${brokerName}`)
           }
         }
 

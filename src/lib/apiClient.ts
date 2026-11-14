@@ -1634,11 +1634,17 @@ export async function createCustomer(input: Omit<CustomerRecord, 'id' | 'created
   return rememberCustomerPolicy(await directoryAction<CustomerRecord>('UPSERT_CUSTOMER', input))
 }
 /** `expectedUpdatedAt` = the record the caller last saw; the server refuses stale writes. */
-export async function updateCustomer(id: string, patch: Partial<Omit<CustomerRecord, 'id' | 'createdAt' | 'updatedAt'>>, expectedUpdatedAt: string): Promise<CustomerRecord> {
+/**
+ * A customer edit. `changeReason` is recorded on the customer's History and is required by the
+ * server when payment method, terms, factoring or a billing/invoice e-mail changes;
+ * `changeSource` names where the edit was made (defaults to "Customer profile").
+ */
+export type CustomerPatch = Partial<Omit<CustomerRecord, 'id' | 'createdAt' | 'updatedAt'>> & { changeReason?: string; changeSource?: string }
+export async function updateCustomer(id: string, patch: CustomerPatch, expectedUpdatedAt: string): Promise<CustomerRecord> {
   return rememberCustomerPolicy(await directoryAction<CustomerRecord>('UPSERT_CUSTOMER', { id, expectedUpdatedAt, ...patch }))
 }
-export async function archiveCustomer(id: string, expectedUpdatedAt: string): Promise<CustomerRecord> {
-  return rememberCustomerPolicy(await directoryAction<CustomerRecord>('ARCHIVE_CUSTOMER', { id, expectedUpdatedAt }))
+export async function archiveCustomer(id: string, expectedUpdatedAt: string, changeReason?: string): Promise<CustomerRecord> {
+  return rememberCustomerPolicy(await directoryAction<CustomerRecord>('ARCHIVE_CUSTOMER', { id, expectedUpdatedAt, ...(changeReason ? { changeReason } : {}) }))
 }
 // Admin customer removal (tms-directory-actions/customerDelete.ts): owner/ADMIN only, enforced server-side.
 export interface CustomerLinkCount { key: string; label: string; count: number; blocking: boolean }

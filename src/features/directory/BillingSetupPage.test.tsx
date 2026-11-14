@@ -70,6 +70,7 @@ describe('BillingSetupPage', () => {
     await waitFor(() => expect(h.saveCustomer).toHaveBeenCalledTimes(1))
     expect(h.saveCustomer.mock.calls[0][1]).toEqual({
       billingMethod: 'MANUAL', apEmail: 'new@eps.example', invoiceCopyEmails: ['cc@eps.example'], billingNeedsReview: null,
+      changeSource: 'Billing setup page', changeReason: 'Billing method set on the Billing setup review',
     })
   })
 
