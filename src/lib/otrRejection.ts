@@ -80,3 +80,12 @@ export function otrRejectionReason(item: Parameters<typeof otrRejection>[0]): st
   if (error && !OWN_FAILURE.test(error)) return `OTR refused it: ${error}`
   return null
 }
+
+/**
+ * The OTR rejected tab on the Factoring page (Ryne 2026-11-14: the manual tab is renamed OTR rejected):
+ * every row OTR turned down, plus rows already parked to go out by hand (status MANUAL_INVOICE),
+ * so nothing that still has to be invoiced by hand drops out of view.
+ */
+export function inOtrRejectedTab(item: Parameters<typeof otrRejection>[0]): boolean {
+  return isOtrRejected(item) || item.status === 'MANUAL_INVOICE'
+}
