@@ -14,7 +14,8 @@ export function CustomerBulkEdit({ customers, divisions, staff, save, onDone, on
   customers: readonly CustomerRecord[]
   divisions: readonly Division[]
   staff: readonly UserProfileRecord[]
-  save: (current: CustomerRecord, patch: Patch) => Promise<unknown>
+  /** `reason` is recorded on each customer's History; required when method or terms change. */
+  save: (current: CustomerRecord, patch: Patch, reason?: string) => Promise<unknown>
   onDone: () => void
   onClear: () => void
 }) {
@@ -22,6 +23,7 @@ export function CustomerBulkEdit({ customers, divisions, staff, save, onDone, on
   const [terms, setTerms] = useState('')
   const [division, setDivision] = useState('')
   const [rep, setRep] = useState('')
+  const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   if (customers.length === 0) return null
 
@@ -32,17 +34,18 @@ export function CustomerBulkEdit({ customers, divisions, staff, save, onDone, on
     ...(rep ? { defaultSalesRepId: rep } : {}),
   }
   const changes = Object.keys(patch).length
+  const reasonMissing = (patch.billingMethod !== undefined || patch.paymentTermsDays !== undefined) && reason.trim() === ''
 
   const apply = async () => {
     setBusy(true)
     const failed: string[] = []
     for (const c of customers) {
-      try { await save(c, patch) } catch (e) { failed.push(`${c.name} (${e instanceof Error ? e.message : 'refused'})`) }
+      try { await save(c, patch, reason.trim() || undefined) } catch (e) { failed.push(`${c.name} (${e instanceof Error ? e.message : 'refused'})`) }
     }
     setBusy(false)
     if (failed.length === 0) toast.success(`${customers.length} customer${customers.length === 1 ? '' : 's'} updated`)
     else toast.error(`${customers.length - failed.length} updated, ${failed.length} refused: ${failed.slice(0, 3).join('; ')}`)
-    setMethod(''); setTerms(''); setDivision(''); setRep('')
+    setMethod(''); setTerms(''); setDivision(''); setRep(''); setReason('')
     onDone()
   }
 
@@ -63,7 +66,16 @@ export function CustomerBulkEdit({ customers, divisions, staff, save, onDone, on
         <option value="">Default sales rep…</option>
         {staff.map((p) => <option key={p.id} value={p.id}>{p.name ?? p.email}</option>)}
       </TmsSelect>
-      <TmsButton variant="primary" size="sm" disabled={busy || changes === 0} data-testid="customer-bulk-apply" onClick={() => void apply()}>
+      <TmsInput
+        aria-label="Bulk reason for change"
+        data-testid="customer-bulk-reason"
+        placeholder={patch.billingMethod !== undefined || patch.paymentTermsDays !== undefined ? 'Reason (required)' : 'Reason (optional)'}
+        value={reason}
+        maxLength={500}
+        onChange={(e) => setReason(e.target.value)}
+        style={{ width: 220 }}
+      />
+      <TmsButton variant="primary" size="sm" disabled={busy || changes === 0 || reasonMissing} data-testid="customer-bulk-apply" onClick={() => void apply()}>
         {busy ? 'Applying…' : `Apply to ${customers.length}`}
       </TmsButton>
       <TmsButton variant="ghost" size="sm" disabled={busy} onClick={onClear}>Clear</TmsButton>

@@ -1497,7 +1497,14 @@ async function getBookableCustomer(customerId: string, caller: Caller, via: Book
           ...Object.fromEntries(LEAD_STAGES.map((stage, i) => [`:lead${i}`, stage])),
         }),
       }))
-      await writeAudit('CUSTOMER', customerId, 'PROMOTE_PROSPECT', caller, { from, via })
+      await writeAudit('CUSTOMER', customerId, 'PROMOTE_PROSPECT', caller, {
+        from, via,
+        // The customer History shape (src/lib/customerAudit.ts).
+        kind: 'customer-change',
+        fields: [{ field: 'status', before: from, after: 'ACTIVE' }],
+        reason: 'First shipment booked',
+        source: 'New shipment',
+      })
     } catch (err) {
       // Someone moved the stage first; the re-read below decides on whatever it is now.
       if (!isConflict(err)) throw err

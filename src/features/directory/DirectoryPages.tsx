@@ -28,6 +28,7 @@ import {
 } from '@/features/tms/kit'
 import type { TmsTone } from '@/features/tms/kit'
 import { TmsTabStrip } from '@/features/tms/kit'
+import { changeNeedsReason, diffCustomer } from '@/lib/customerAudit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
 import { ClearFiltersButton, ColumnsButton, DensityToggle, DenseKpiStrip, SummaryToggle } from '@/features/tms/grid/DenseControls'
 import {
@@ -452,7 +453,7 @@ export function CustomersPage() {
             <input
               type="checkbox"
               checked={c.factored === true}
-              onChange={(e) => void dir.saveCustomer(c, { factored: e.target.checked })}
+              onChange={(e) => void dir.saveCustomer(c, { factored: e.target.checked, changeReason: `Marked ${e.target.checked ? 'factored' : 'not factored'} from the customer list`, changeSource: 'Customer list' })}
               aria-label={`${c.name} is factored`}
             />
             {c.factored ? 'Yes' : 'No'}
@@ -543,7 +544,7 @@ export function CustomersPage() {
             customers={sortedRows.filter((r) => selectedIds.has(r.record.id)).map((r) => r.record)}
             divisions={divisions}
             staff={staff}
-            save={(c, patch) => dir.saveCustomer(c, patch)}
+            save={(c, patch, reason) => dir.saveCustomer(c, { ...patch, changeSource: 'Bulk edit', ...(reason ? { changeReason: reason } : {}) })}
             onDone={() => setSelectedIds(new Set())}
             onClear={() => setSelectedIds(new Set())}
           />
@@ -661,13 +662,24 @@ function CustomerModal({ open, initial, divisions, existingCustomers = [], isAdm
   const { value, set, toRecord, errors, isNew, missing } = useCustomerForm(initial ?? null)
   const [saving, setSaving] = useState(false)
   const guard = useNewCustomerGuard({ value, isNew, existing: existingCustomers, isAdmin })
+  // An edit records why; billing changes need it (Ryne 2026-11-14).
+  const [changeReason, setChangeReason] = useState('')
+  const reasonRequired = useMemo(
+    () => !isNew && !!initial && changeNeedsReason(diffCustomer(initial as unknown as Record<string, unknown>, toRecord() as unknown as Record<string, unknown>)),
+    // toRecord reads `value`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [initial, isNew, value],
+  )
+  const reasonMissing = reasonRequired && changeReason.trim() === ''
 
   const save = async () => {
     if (Object.keys(errors).length > 0) { toast.error('Please fix the errors above'); return }
     if (guard.blocked) { toast.error('This customer already exists'); return }
+    if (reasonMissing) { toast.error('Say why the billing details are changing'); return }
     setSaving(true)
     try {
-      const record = guard.overrideReason ? { ...toRecord(), duplicateOverrideReason: guard.overrideReason } : toRecord()
+      const base = guard.overrideReason ? { ...toRecord(), duplicateOverrideReason: guard.overrideReason } : toRecord()
+      const record = !isNew && changeReason.trim() ? { ...base, changeReason: changeReason.trim(), changeSource: 'Edit customer dialog' } : base
       await onSave(record)
       onClose()
     } catch (e) { if (!guard.takeError(e)) toast.error(e instanceof Error ? e.message : String(e)) }
@@ -683,8 +695,21 @@ function CustomerModal({ open, initial, divisions, existingCustomers = [], isAdm
       footer={
         <>
           {missing && <span role="status" data-testid="customer-missing" className="tms-field-error" style={{ marginRight: 'auto' }}>{missing}</span>}
+          {!isNew && (
+            <TmsInput
+              id="customer-modal-change-reason"
+              data-testid="customer-modal-change-reason"
+              aria-label="Reason for change"
+              placeholder={reasonRequired ? 'Reason for change (required for billing changes)' : 'Reason for change (optional)'}
+              value={changeReason}
+              maxLength={500}
+              onChange={(e) => setChangeReason(e.target.value)}
+              aria-invalid={reasonMissing || undefined}
+              style={{ flex: '1 1 240px', minWidth: 0 }}
+            />
+          )}
           <TmsButton onClick={onClose}>Cancel</TmsButton>
-          <TmsButton variant="primary" onClick={save} disabled={saving || guard.blocked || (isNew && Object.keys(errors).length > 0)}>{saving ? 'Saving…' : 'Save'}</TmsButton>
+          <TmsButton variant="primary" onClick={save} disabled={saving || guard.blocked || reasonMissing || (isNew && Object.keys(errors).length > 0)}>{saving ? 'Saving…' : 'Save'}</TmsButton>
         </>
       }
     >

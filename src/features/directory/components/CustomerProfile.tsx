@@ -48,6 +48,8 @@ import { QuotingDefaultsForm } from './QuotingDefaultsForm'
 import { CreditLimitCard } from './CreditLimitCard'
 import { ReviewRequirementsField } from './ReviewRequirementsField'
 import { CustomerArTab } from './CustomerArTab'
+import { CustomerHistoryTab } from './CustomerHistoryTab'
+import { changeNeedsReason, diffCustomer } from '@/lib/customerAudit'
 import { StatusActionDialog } from './StatusActionDialog'
 import { FlowDefaultsCard } from './FlowDefaultsCard'
 import { TrackingPrefsFields } from './TrackingPrefsFields'
@@ -75,7 +77,7 @@ interface CustomerProfileProps {
   currentUser: string
   activeCustomers: CustomerRecord[]
   onClose: () => void
-  onSave: (current: CustomerRecord, next: Omit<CustomerRecord, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
+  onSave: (current: CustomerRecord, next: Omit<CustomerRecord, 'id' | 'createdAt' | 'updatedAt'> & { changeReason?: string }) => Promise<void>
   onStatusChange: (current: CustomerRecord, input: { status: CustomerStatus; reason?: string; replacementCustomerId?: string }) => Promise<void>
   /** Admins: open delete / merge / archive for this customer. */
   onRemove?: () => void
@@ -85,6 +87,7 @@ const tabs = [
   { key: 'account', label: 'Account' },
   { key: 'contacts', label: 'Contacts' },
   { key: 'activity', label: 'Activity' },
+  { key: 'history', label: 'History' },
   { key: 'documents', label: 'Documents' },
   { key: 'locations', label: 'Shipping locations' },
   { key: 'settings', label: 'Settings' },
@@ -180,11 +183,24 @@ export function CustomerProfile({
   const canActivate = isAdmin || (customer.status === 'PENDING' && isAdmin) || ['NEW', 'CONTACTED', 'QUALIFIED', 'QUOTED', 'NURTURING', 'BLOCKED', 'DORMANT'].includes(customer.status ?? '')
   const canClose = ['NEW', 'CONTACTED', 'QUALIFIED', 'QUOTED', 'NURTURING'].includes(customer.status ?? '')
 
+  // Ryne 2026-11-14: every change is recorded with why; payment method, terms, factoring and
+  // billing/invoice e-mails cannot be changed without one (the server refuses too).
+  const [changeReason, setChangeReason] = useState('')
+  const reasonRequired = useMemo(
+    () => changeNeedsReason(diffCustomer(customer as unknown as Record<string, unknown>, stripRecord(toRecord({ includeStatus: false })) as unknown as Record<string, unknown>)),
+    // toRecord reads `value`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [customer, value],
+  )
+  const reasonMissing = reasonRequired && changeReason.trim() === ''
+
   const save = async () => {
-    if (Object.keys(errors).length > 0) return
+    if (Object.keys(errors).length > 0 || reasonMissing) return
     setSaving(true)
     try {
-      await onSave(customer, stripRecord(toRecord({ includeStatus: false })))
+      const reason = changeReason.trim()
+      await onSave(customer, { ...stripRecord(toRecord({ includeStatus: false })), ...(reason ? { changeReason: reason } : {}) })
+      setChangeReason('')
     } finally {
       setSaving(false)
     }
@@ -196,7 +212,7 @@ export function CustomerProfile({
    * the footer button makes, with `aiMemory` added.
    */
   const saveAiMemory = async (aiMemory: PartyAiMemory) => {
-    await onSave(customer, { ...stripRecord(toRecord({ includeStatus: false })), aiMemory })
+    await onSave(customer, { ...stripRecord(toRecord({ includeStatus: false })), aiMemory, ...(changeReason.trim() ? { changeReason: changeReason.trim() } : {}) })
   }
 
   return (
@@ -207,8 +223,21 @@ export function CustomerProfile({
       title="Customer profile"
       footer={
         <>
+          <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+            <TmsInput
+              id="customer-change-reason"
+              data-testid="customer-change-reason"
+              aria-label="Reason for change"
+              placeholder={reasonRequired ? 'Reason for change (required for billing changes)' : 'Reason for change (optional)'}
+              value={changeReason}
+              maxLength={500}
+              onChange={(e) => setChangeReason(e.target.value)}
+              aria-invalid={reasonMissing || undefined}
+            />
+            {reasonMissing && <p className="mt-0.5 text-xs text-[color:var(--tms-badge-red)]">Say why the payment method, terms, factoring or billing e-mail is changing.</p>}
+          </div>
           <TmsButton onClick={onClose}>Cancel</TmsButton>
-          <TmsButton variant="primary" onClick={save} disabled={saving || Object.keys(errors).length > 0}>{saving ? 'Saving…' : 'Save'}</TmsButton>
+          <TmsButton variant="primary" onClick={save} disabled={saving || Object.keys(errors).length > 0 || reasonMissing}>{saving ? 'Saving…' : 'Save'}</TmsButton>
         </>
       }
     >
@@ -535,6 +564,8 @@ export function CustomerProfile({
               ))}
           </div>
         )}
+
+        {tab === 'history' && <CustomerHistoryTab customerId={customer.id} refreshKey={customer.updatedAt} />}
 
         {tab === 'quotes' && <CustomerQuotesTab customerId={customer.id} />}
 

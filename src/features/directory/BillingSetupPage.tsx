@@ -90,6 +90,8 @@ export function BillingSetupPage() {
         invoiceCopyEmails: parseEmailList(draft.copy),
         // A person saved the row, so the review flag is answered.
         billingNeedsReview: null,
+        changeSource: 'Billing setup page',
+        changeReason: 'Billing method set on the Billing setup review',
       })
       toast.success('Billing method saved')
       setEditId(null)
@@ -125,7 +127,7 @@ export function BillingSetupPage() {
       const patch = applyPatchOf(row, confirmed)
       const current = dir.customers.find((c) => c.id === row.customerId)
       if (!patch || !current) continue
-      try { await dir.saveCustomer(current, patch); ok++ } catch (e) { failed.push(`${row.customerName}: ${e instanceof Error ? e.message : String(e)}`) }
+      try { await dir.saveCustomer(current, { ...patch, changeSource: 'Billing setup CSV import', changeReason: 'Billing details from the Billing setup CSV' }); ok++ } catch (e) { failed.push(`${row.customerName}: ${e instanceof Error ? e.message : String(e)}`) }
     }
     setApplying(false)
     if (failed.length) toast.error(`${ok} applied, ${failed.length} failed. ${failed[0]}`)

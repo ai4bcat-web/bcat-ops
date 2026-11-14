@@ -107,6 +107,7 @@ import { MCP_FIND_ACTIONS, runMcpFindAction, type McpFindActionName, type McpFin
 import { parsePoints, routeMiles } from './routeMiles'
 import { deleteCustomer, mergeCustomer, previewDeleteCustomer, restoreCustomer, type DeleteDeps } from './customerDelete'
 import { validateProgressSteps } from '../../../src/lib/progressSteps'
+import { auditCustomerChange, changeNeedsReason, diffCustomer, REASON_REQUIRED_MESSAGE } from '../_shared/customerAudit'
 
 const dynamo = new DynamoDBClient({})
 const cognito = new CognitoIdentityProviderClient({})
@@ -1406,6 +1407,19 @@ async function upsertCustomer(
     updatedAt: now,
   }
 
+  // Ryne 2026-11-14: every customer change is recorded field by field, with why. A person
+  // changing payment method, terms, factoring or a billing/invoice e-mail must say why.
+  const changeReason = optionalString(rawInput.changeReason, 500)?.trim() || null
+  const changeSource = opts.imported ? 'Import' : optionalString(rawInput.changeSource, 100)?.trim() || 'Customer profile'
+  if (!isCreate && !opts.imported && !changeReason && changeNeedsReason(diffCustomer(existing, item))) {
+    throw new Error(REASON_REQUIRED_MESSAGE)
+  }
+  const auditCustomer = (before: Record<string, unknown> | null, after: Record<string, unknown>) =>
+    auditCustomerChange(
+      (entityType, entityId, auditAction, changes) => writeAudit(entityType, entityId, auditAction, caller, changes),
+      { customerId: id, before, after, source: changeSource, reason: changeReason ?? overrideReason },
+    )
+
   if (isCreate) {
     await dynamo.send(
       new PutItemCommand({
@@ -1415,6 +1429,7 @@ async function upsertCustomer(
       }),
     )
     await auditBillingChange(id, name, billing, caller)
+    await auditCustomer(null, item)
     if (duplicateOverridden && overrideReason) {
       await writeAudit('CUSTOMER', id, 'DUPLICATE_CUSTOMER_OVERRIDE', caller, {
         name,
@@ -1455,7 +1470,9 @@ async function upsertCustomer(
     )
     if (!result.Attributes) throw new Error('Customer update failed')
     await auditBillingChange(id, name, billing, caller)
-    return unmarshall(result.Attributes)
+    const saved = unmarshall(result.Attributes)
+    await auditCustomer(existing, saved)
+    return saved
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     if (msg.includes('ConditionalCheckFailed') || msg.includes('TransactionCanceled')) {
@@ -1552,7 +1569,16 @@ async function setCustomerStatus(input: Record<string, unknown>, caller: Caller)
       }),
     )
     if (!result.Attributes) throw new Error('Customer status update failed')
-    return unmarshall(result.Attributes)
+    const saved = unmarshall(result.Attributes)
+    await auditCustomerChange(
+      (entityType, entityId, auditAction, changes) => writeAudit(entityType, entityId, auditAction, caller, changes),
+      {
+        customerId: id, before: existing, after: saved, action: 'CUSTOMER_STATUS_CHANGED',
+        source: optionalString(input.changeSource, 100)?.trim() || 'Customer profile',
+        reason: reason ?? null,
+      },
+    )
+    return saved
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     if (msg.includes('ConditionalCheckFailed') || msg.includes('TransactionCanceled')) {
@@ -1587,7 +1613,12 @@ async function archiveCustomer(input: Record<string, unknown>, caller: Caller): 
       }),
     )
     if (!result.Attributes) throw new Error('Customer archive failed')
-    return unmarshall(result.Attributes)
+    const saved = unmarshall(result.Attributes)
+    await auditCustomerChange(
+      (entityType, entityId, auditAction, changes) => writeAudit(entityType, entityId, auditAction, caller, changes),
+      { customerId: id, before: existing, after: saved, action: 'CUSTOMER_ARCHIVED', source: 'Customer directory', reason: optionalString(input.changeReason, 500) ?? null },
+    )
+    return saved
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     if (msg.includes('ConditionalCheckFailed') || msg.includes('TransactionCanceled')) {
