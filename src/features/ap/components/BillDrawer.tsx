@@ -19,6 +19,7 @@ import { formatDay } from '@/features/ar/arViews'
 import type { CarrierBillRecord } from '@/types/tms'
 import { BILL_STATUS_LABEL, payToLabel, paymentInfoFor, remitEmailOf } from '../apViews'
 import { estimatedDueAt, proOf, termsLabel, type BillFactsIndex } from '../apQueue'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
 export function BillDrawer({ bill, facts, infos, onClose, onChanged, onAdjustPay, onSetDates, onPaymentInfo }: {
   bill: CarrierBillRecord
@@ -54,7 +55,7 @@ export function BillDrawer({ bill, facts, infos, onClose, onChanged, onAdjustPay
 
   const pro = proOf(bill, facts)
   const facts2: [string, ReactNode][] = [
-    ['PRO', <Link key="pro" to={`/tms/shipments/${bill.shipmentId}`}>{pro}</Link>],
+    ['PRO', <Link key="pro" to={shipmentEditorPath(bill.shipmentId)}>{pro}</Link>],
     ['PO #', fact?.po ?? '—'],
     ['Delivered', fact?.deliveredAt ? formatDay(fact.deliveredAt) : '—'],
     ['Carrier', bill.carrierName ?? '—'],

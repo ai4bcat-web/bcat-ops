@@ -9,6 +9,7 @@ import type { CrmAccountView, CrmTimelineEntry } from '@/lib/crm/types'
 import type { AddActivityInput, AddTaskInput } from '@/features/crm/useCrmAccount'
 import { dateInputToIso, isOverdue, kindLabel } from '@/features/crm/format'
 import { formatCents } from '@/lib/tmsDirectory'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
 type Composer = 'NOTE' | 'CALL' | 'TEXT' | 'TASK'
 const COMPOSER_KINDS: Composer[] = ['NOTE', 'CALL', 'TEXT', 'TASK']
@@ -31,7 +32,7 @@ function entryTitle(e: CrmTimelineEntry): string {
 function entryLink(e: CrmTimelineEntry): string | null {
   if (!e.derived) return null
   if (e.refs?.quoteId) return `/tms/rates/${encodeURIComponent(e.refs.quoteId)}`
-  if (e.refs?.shipmentId) return `/tms/shipments/${encodeURIComponent(e.refs.shipmentId)}`
+  if (e.refs?.shipmentId) return shipmentEditorPath(e.refs.shipmentId)
   return null
 }
 

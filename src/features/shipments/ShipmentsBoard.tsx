@@ -145,6 +145,7 @@ import {
   toggleSelection,
   type BatchOutcome,
 } from './batchReview'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
 const DELIVERED_ONLY_TIP = 'Counts only delivered shipments in this list.'
 
@@ -911,7 +912,7 @@ function BoardPane({
         const held = lockHeldByOther(row, email, Date.now())
         return (
           <>
-            <Link className="tms-link tms-board-link" to={`/tms/shipments/${row.id}/edit`} onClick={(e) => e.stopPropagation()}>{row.number ?? ''}</Link>
+            <Link className="tms-link tms-board-link" to={shipmentEditorPath(row.id)} onClick={(e) => e.stopPropagation()}>{row.number ?? ''}</Link>
             {held ? <Lock size={12} aria-label={`${held.by} is editing`} data-testid="board-lock-icon" style={{ marginLeft: 4, verticalAlign: 'middle' }}><title>{`${held.by} is editing this shipment`}</title></Lock> : null}
           </>
         )

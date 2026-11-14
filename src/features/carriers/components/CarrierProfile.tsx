@@ -56,6 +56,7 @@ import type {
   AiAgentKey, CarrierDocumentType, CarrierRecord, CarrierStatus, InsurancePolicy, PartyAiMemory,
   TmsSettings,
 } from '@/types/tms'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
 const TABS = [
   { key: 'profile', label: 'Profile', icon: Building2 },
@@ -452,7 +453,7 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
                       <button
                         key={row.id}
                         type="button"
-                        onClick={() => navigate(`/tms/shipments/${row.shipmentId}`)}
+                        onClick={() => navigate(shipmentEditorPath(row.shipmentId))}
                         className="tms-carrier-load-row"
                       >
                         <TmsBadge tone="gray">{row.status}</TmsBadge>

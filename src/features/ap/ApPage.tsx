@@ -90,6 +90,7 @@ import { InboxChips } from './inbox/InboxParts'
 import { inboxView } from './inbox/inboxView'
 import { useApInboxItems, useApInboxStatus } from './inbox/useApInbox'
 import { BillingGapsPanel } from '@/features/ar/components/BillingGapsPanel'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
 /** The "Shared PRO · 2 carriers" badge, or nothing when the load has one carrier. */
 function sharedProChip(shared: SharedProIndex, loadId: string): ReactNode {
@@ -973,7 +974,7 @@ function awaitingView({ banner, rows, shared, busy, onRecord }: {
       key: 'shipment',
       header: 'SHIPMENT',
       text: (row) => row.shipmentNumber ?? row.shipmentId,
-      render: (row) => <Link to={`/tms/shipments/${row.shipmentId}`}>{row.shipmentNumber ?? row.shipmentId}</Link>,
+      render: (row) => <Link to={shipmentEditorPath(row.shipmentId)}>{row.shipmentNumber ?? row.shipmentId}</Link>,
     },
     // The assignment carries the load's id, not its number; the shipment link is the readable handle.
     { key: 'load', header: 'LOAD', text: (row) => row.loadId, render: (row) => <span className="text-xs tms-muted">{row.loadId}</span> },

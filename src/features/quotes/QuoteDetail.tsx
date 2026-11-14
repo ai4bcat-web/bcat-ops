@@ -54,6 +54,7 @@ import type {
   ShipmentMode, TmsSettings, WorkflowRunRecord,
 } from '@/types/tms'
 import type { Stop, StopType } from '@/types'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
 type DetailDialog =
   | { kind: 'send' }
@@ -1013,7 +1014,7 @@ export function QuoteDetail() {
           onOpenChange={(o) => { if (!o) setDialog(null) }}
           onDone={(shipmentId) => {
             setDialog(null)
-            if (shipmentId) navigate(`/tms/shipments/${shipmentId}`)
+            if (shipmentId) navigate(shipmentEditorPath(shipmentId))
             else void refresh()
           }}
         />

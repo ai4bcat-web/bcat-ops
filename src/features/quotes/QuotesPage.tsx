@@ -44,6 +44,7 @@ import { OutcomeBadge } from './components/OutcomeBadge'
 import { SendQuoteDialog } from './components/SendQuoteDialog'
 import { DemoCustomersView } from './demo/DemoCustomersView'
 import type { QuoteRecord } from '@/types/tms'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
 /** Which dialog is open, and the one quote it is open about. */
 type QuotesDialog =
@@ -429,7 +430,7 @@ export function QuotesPage({ onRealCount }: { onRealCount?: (n: number | null) =
           return (
             <div style={ACTIONS_CELL}>
               {q.shipmentId && (
-                <Link className="tms-btn tms-btn-ghost tms-btn-sm" to={`/tms/shipments/${q.shipmentId}`} aria-label={`Shipment for ${q.id}`}>Shipment</Link>
+                <Link className="tms-btn tms-btn-ghost tms-btn-sm" to={shipmentEditorPath(q.shipmentId)} aria-label={`Shipment for ${q.id}`}>Shipment</Link>
               )}
               {state.canRestore && (
                 <TmsButton variant="ghost" size="sm" aria-label={`Restore ${q.id}`} disabled={busy} onClick={() => runRestore(q)}>
@@ -447,7 +448,7 @@ export function QuotesPage({ onRealCount }: { onRealCount?: (n: number | null) =
         header: 'SHIPMENT',
         width: 150,
         render: (q) => (q.shipmentId
-          ? <Link to={`/tms/shipments/${q.shipmentId}`}>{q.shipmentNumber ?? q.loadNumber ?? q.shipmentId}</Link>
+          ? <Link to={shipmentEditorPath(q.shipmentId)}>{q.shipmentNumber ?? q.loadNumber ?? q.shipmentId}</Link>
           : q.loadNumber ?? '—'),
       },
       {
@@ -654,7 +655,7 @@ export function QuotesPage({ onRealCount }: { onRealCount?: (n: number | null) =
           onDone={(shipmentId) => {
             setDialog(null)
             void refreshAll()
-            if (shipmentId) navigate(`/tms/shipments/${shipmentId}`)
+            if (shipmentId) navigate(shipmentEditorPath(shipmentId))
           }}
         />
       )}

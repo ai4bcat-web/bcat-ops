@@ -15,6 +15,7 @@ import { MAX_ATTEMPTS, retryable } from './runState'
 import { customerDisplayName, isCustomerUnresolved } from '../customerResolution'
 import { descriptorOf } from '../integrations/registry'
 import type { WorkflowAgentKey, WorkflowRunRecord } from '../../types/tms'
+import { shipmentEditorPath } from '../shipmentLinks'
 
 export type ExceptionKind = 'AI' | 'UNKNOWN_CUSTOMER' | 'TRACKING' | 'ACCOUNTING' | 'PARADE' | 'EDI' | 'INTEGRATION'
 
@@ -245,7 +246,7 @@ export function collectExceptions(input: ExceptionInput): ExceptionRow[] {
       party: customerDisplayName(shipment),
       integration: 'Unknown customers',
       error: 'No customer record is linked to this shipment',
-      href: `/tms/shipments/${shipment.id}`,
+      href: shipmentEditorPath(shipment.id),
       actions: defaultActionsFor('UNKNOWN_CUSTOMER'),
     })
   }
@@ -267,7 +268,7 @@ export function collectExceptions(input: ExceptionInput): ExceptionRow[] {
       party: load.carrierName ?? '—',
       integration: 'Tracking',
       error: `Check call was due ${load.nextCheckCallAt}`,
-      href: load.shipmentId ? `/tms/shipments/${load.shipmentId}` : null,
+      href: load.shipmentId ? shipmentEditorPath(load.shipmentId) : null,
       actions: defaultActionsFor('TRACKING'),
     })
   }
@@ -293,7 +294,7 @@ export function collectExceptions(input: ExceptionInput): ExceptionRow[] {
       party: link.contactName ?? load?.carrierName ?? '—',
       integration: 'Tracking',
       error: `No position ping in over ${staleAfterMin} minutes`,
-      href: link.shipmentId ? `/tms/shipments/${link.shipmentId}` : null,
+      href: link.shipmentId ? shipmentEditorPath(link.shipmentId) : null,
       actions: defaultActionsFor('TRACKING'),
     })
   }

@@ -60,6 +60,7 @@ import {
 import type {
   LaneRateSampleRecord, OrderRecord, ReportFilters, ReportGroupBy, ShipmentRecord, TmsSettings,
 } from '@/types/tms'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
 /** Numbers read down a column, so they are right-aligned and tabular. */
 const NUM: CSSProperties = { textAlign: 'right', fontVariantNumeric: 'tabular-nums' }
@@ -592,7 +593,7 @@ function ArPanel({ period, asOf, periodLabel, refreshKey }: {
               <tbody>
                 {uninvoiced.map((row) => (
                   <tr key={row.orderId}>
-                    <td><Link to={`/tms/shipments/${row.shipmentId}`}>{row.shipmentNumber}</Link></td>
+                    <td><Link to={shipmentEditorPath(row.shipmentId)}>{row.shipmentNumber}</Link></td>
                     <td>{row.customerName || row.customerId}</td>
                     <td style={NUM}>{row.daysWaiting}d</td>
                     <td style={NUM}>{formatMoneyCents(row.revenueCents)}</td>

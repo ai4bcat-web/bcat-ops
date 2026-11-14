@@ -13,6 +13,7 @@ import { FACTORING_FEE_LABEL, type DriverPayStatement } from '@/lib/driverPay'
 import type { OtrReadiness } from '@/lib/otrInvoice'
 import { DRIVER_PORTAL_URL } from '@/lib/driverPortal'
 import { useAppStore } from '@/store/useAppStore'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
 import type { Load } from '@/types'
 
 const useOwnerOperatorPayMock = vi.hoisted(() => vi.fn())
@@ -620,7 +621,9 @@ describe('OwnerOperatorPayPage', () => {
       renderWith([{ id: 'l1', shipmentId: 'shp-1' }], trip('l1'))
       const link = screen.getByTestId('settlement-pro-link')
       expect(link.tagName).toBe('A')
-      expect(link).toHaveAttribute('href', '/tms/shipments/shp-1')
+      // The same target as the shipments board's PRO link: the tabbed editor, never the read-only page.
+      expect(link).toHaveAttribute('href', shipmentEditorPath('shp-1'))
+      expect(link.getAttribute('href')).toBe('/tms/shipments/shp-1/edit')
     })
 
     it('never opens a side rail: an old load with no shipment is plain text', () => {

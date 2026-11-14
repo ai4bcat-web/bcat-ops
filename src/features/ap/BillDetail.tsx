@@ -34,6 +34,7 @@ import { SetBillDatesDialog } from './components/SetBillDatesDialog'
 import { BillInboxStrip } from './inbox/BillInboxStrip'
 import type { CarrierBillStatus } from '@/types/tms'
 import type { TmsTone } from '@/features/tms/kit'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
 type DetailDialog = { kind: 'approve' } | { kind: 'unapprove' } | { kind: 'void' } | { kind: 'dates' }
 
@@ -217,7 +218,7 @@ export function BillDetail() {
             { label: 'Carrier', value: view.carrier.name || bill.carrierId },
             {
               label: 'Shipment',
-              value: <Link to={`/tms/shipments/${view.shipmentId}`}>{view.shipmentNumber ?? view.shipmentId}</Link>,
+              value: <Link to={shipmentEditorPath(view.shipmentId)}>{view.shipmentNumber ?? view.shipmentId}</Link>,
             },
             { label: 'Load', value: view.loadNumber },
             {
