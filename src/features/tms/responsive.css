@@ -470,3 +470,85 @@
   }
   .tms-shell .tms-topbar .tms-lifecycle-list::-webkit-scrollbar { display: none; }
 }
+
+/* ── Accounting on phones: amounts stay inside their cards (Ryne 2026-11-15, "the numbers overlap the cards") ───────────────────── */
+@media (max-width: 640px) {
+  /* Stat tiles. The compact tile's 22px amount beat the clamp above on specificity, so "$145,616.79" ran past a half-width tile's border
+     (Factored, AP aging report). The tile sizes its own amount now, and an amount that still does not fit wraps inside the tile. */
+  .tms-shell .tms-stat-row, .tms-portal .tms-stat-row { min-width: 0; max-width: 100%; }
+  .tms-shell .tms-stat-row > .tms-kpi-card, .tms-portal .tms-stat-row > .tms-kpi-card { min-width: 0; container-type: inline-size; }
+  .tms-shell .tms-kpi-card > *, .tms-portal .tms-kpi-card > * { min-width: 0; max-width: 100%; }
+  .tms-shell .tms-kpi-card .tms-kpi-card-value.tms-kpi-card-value, .tms-portal .tms-kpi-card .tms-kpi-card-value.tms-kpi-card-value {
+    min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; font-size: clamp(15px, 5vw, 22px);
+  }
+  .tms-shell .tms-stat-row > .tms-kpi-card .tms-kpi-card-value.tms-kpi-card-value,
+  .tms-portal .tms-stat-row > .tms-kpi-card .tms-kpi-card-value.tms-kpi-card-value { font-size: clamp(14px, 13cqi, 22px); }
+  /* A page section laid out as a plain one-column grid (Vendors header strip) sized itself to its widest tile row and pushed the page
+     sideways at 320px; its column now takes the screen width. Grids with their own columns keep them. */
+  .tms-shell .tms-main div[style*='display: grid']:not([style*='grid-template-columns']) { grid-template-columns: minmax(0, 1fr); }
+  .tms-shell .tms-dense-page > *, .tms-shell .tms-main > * { min-width: 0; max-width: 100%; }
+
+  /* Phone cards (DenseCards). A cell's chip row (Factored: Required for OTR, Documents) or button group (AP: Add invoice date / Approve /
+     Update charges / Void) was one unbreakable line that ran over the next field or off the card. They wrap inside the card now; a chip
+     row takes the card's full width, and names, titles and "7 days overdue" wrap instead of running under the neighbouring column. */
+  .tms-shell .tms-dg-card-top { flex-wrap: wrap; }
+  .tms-shell .tms-dg-card-top > * { min-width: 0; }
+  .tms-shell .tms-dg-card-details dd { min-width: 0; max-width: 100%; }
+  .tms-shell .tms-dg-card-details dd .flex,
+  .tms-shell .tms-dg-card-details dd [style*='display: flex'] { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+  .tms-shell .tms-dg-card-details dd .text-right { text-align: left; }
+  .tms-shell .tms-dg-card-details > div:has(dd .flex),
+  .tms-shell .tms-dg-card-details > div:has(dd [style*='display: flex']) { grid-column: 1 / -1; }
+  .tms-shell .tms-dg-card-title *:not(svg):not(svg *),
+  .tms-shell .tms-dg-card-party *:not(svg):not(svg *),
+  .tms-shell .tms-dg-card-details dd *:not(svg):not(svg *) {
+    white-space: normal !important; overflow-wrap: break-word; min-width: 0; max-width: 100%;
+  }
+  .tms-shell .tms-dg-card .truncate:not(.tabular-nums),
+  .tms-shell .tms-dg-card .whitespace-nowrap:not(.tabular-nums) { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
+  .tms-shell .tms-dg-card-actions > span { display: contents; }
+  .tms-shell .tms-dg-card-actions .flex,
+  .tms-shell .tms-dg-card-actions [style*='display: flex'] { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+  .tms-shell .tms-dg-card-actions .tms-btn { min-height: 44px; }
+  /* AR invoice sheet: the "Internal" tag on a CC chip broke mid-word ("INTERN / AL"). */
+  .tms-portal .inv-email-chip-tag { white-space: nowrap; overflow-wrap: normal; flex: 0 0 auto; }
+}
+
+/* ── Settlements and Employee hours on phones ─────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  /* The pay pages' 1100px column (centered with auto margins) sized itself to its widest line and pushed the statement past the screen:
+     the check amount was cut off at the right edge and the page scrolled sideways. It takes the screen width with phone padding now. */
+  .tms-shell .tms-pay-page { width: 100%; min-width: 0; box-sizing: border-box; padding: 12px 12px 32px !important; }
+  /* Statement header: avatar and name on top, the check amount (and Shipments) on their own full-width line under it. */
+  .tms-shell .tms-pay-stmt-head { flex-wrap: wrap; }
+  .tms-shell .tms-pay-stmt-head > div:not([class]) { flex: 1 1 200px !important; overflow-wrap: anywhere; }
+  .tms-shell .tms-pay-stmt-head > .tms-pay-stmt-figure,
+  .tms-shell .tms-pay-stmt-figures { flex: 1 1 100%; }
+  .tms-shell .tms-pay-stmt-figures { justify-content: space-between; }
+  .tms-shell .tms-pay-stmt-head > .tms-pay-stmt-figure { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .tms-shell .tms-pay-stmt-head > .tms-pay-stmt-figure,
+  .tms-shell .tms-pay-stmt-figures > :first-child { text-align: left !important; }
+
+  /* Employee hours: the driver grid (eight fixed-minimum columns, ~760px) becomes one card per driver: name on top, then each figure as a
+     label / value line. The column header row is hidden; each cell carries its own label. */
+  .tms-shell .tms-hours-head { display: none !important; }
+  .tms-shell .tms-hours-row { grid-template-columns: 28px minmax(0, 1fr) !important; row-gap: 4px; padding-left: 12px !important; padding-right: 12px !important; }
+  .tms-shell .tms-hours-row > :nth-child(n+3) { grid-column: 2 / -1; display: flex; align-items: baseline; justify-content: flex-end; gap: 8px; text-align: right; }
+  .tms-shell .tms-hours-row > [data-label]::before { content: attr(data-label); margin-right: auto; color: var(--tms-muted); font-size: 12px; font-weight: 500; text-transform: none; }
+  .tms-shell .tms-hours-row > :empty { display: none; }
+  .tms-shell .tms-hours-row > [data-label] > div { padding-right: 0; }
+}
+
+/* iPads: the same pay-page column and hours grid pushed the page sideways at 768px (Owner operator 1100px, Employee hours 760px). The
+   column keeps to the screen up to iPad landscape; the hours grid is cards up to iPad portrait. */
+@media (max-width: 1194px) {
+  .tms-shell .tms-pay-page { width: 100%; min-width: 0; box-sizing: border-box; }
+  .tms-shell .tms-pay-stmt-head { flex-wrap: wrap; }
+}
+@media (min-width: 641px) and (max-width: 900px) {
+  .tms-shell .tms-hours-head { display: none !important; }
+  .tms-shell .tms-hours-row { grid-template-columns: 28px minmax(0, 1fr) !important; row-gap: 4px; }
+  .tms-shell .tms-hours-row > :nth-child(n+3) { grid-column: 2 / -1; display: flex; align-items: baseline; justify-content: flex-end; gap: 8px; text-align: right; }
+  .tms-shell .tms-hours-row > [data-label]::before { content: attr(data-label); margin-right: auto; color: var(--tms-muted); font-size: 12px; font-weight: 500; text-transform: none; }
+  .tms-shell .tms-hours-row > :empty { display: none; }
+}

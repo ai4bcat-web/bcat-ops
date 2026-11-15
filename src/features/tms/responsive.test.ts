@@ -20,3 +20,32 @@ describe('Accounting on phones', () => {
     expect(css).toMatch(/\.tms-shell \.tms-topbar \{ top: 0;/)
   })
 })
+
+describe('Accounting numbers stay inside their cards on phones', () => {
+  it('lets a stat tile size and wrap its own amount, beating the compact tile font size', () => {
+    expect(phone).toMatch(/\.tms-stat-row > \.tms-kpi-card[^{]*\{ min-width: 0; container-type: inline-size; \}/)
+    expect(phone).toMatch(/\.tms-kpi-card \.tms-kpi-card-value\.tms-kpi-card-value[^{]*\{[^}]*white-space: normal; overflow-wrap: anywhere/)
+    expect(phone).toMatch(/font-size: clamp\(14px, 13cqi, 22px\)/)
+  })
+
+  it('wraps chip rows and button groups inside phone cards', () => {
+    expect(phone).toMatch(/\.tms-dg-card-details dd \[style\*='display: flex'\] \{ flex-wrap: wrap; min-width: 0; max-width: 100%; \}/)
+    expect(phone).toMatch(/\.tms-dg-card-actions \[style\*='display: flex'\] \{ flex-wrap: wrap;/)
+  })
+
+  it('keeps settlements and hours inside the screen', () => {
+    expect(phone).toMatch(/\.tms-pay-page \{ width: 100%; min-width: 0;/)
+    expect(phone).toMatch(/\.tms-pay-stmt-head \{ flex-wrap: wrap; \}/)
+    expect(phone).toMatch(/\.tms-hours-head \{ display: none !important; \}/)
+    expect(phone).toMatch(/\.tms-hours-row > \[data-label\]::before \{ content: attr\(data-label\)/)
+  })
+
+  it('applies none of it on desktop: every rule sits in a max-width block', () => {
+    const blocks = css.split('@media').slice(1)
+    const base = css.split('@media')[0]
+    for (const hook of ['tms-pay-page', 'tms-pay-stmt-head', 'tms-hours-row', 'container-type']) {
+      expect(base).not.toContain(hook)
+      for (const block of blocks.filter((b) => b.includes(hook))) expect(block.slice(0, block.indexOf('{'))).toMatch(/max-width: (640|900|1194)px/)
+    }
+  })
+})

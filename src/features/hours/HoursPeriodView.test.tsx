@@ -43,6 +43,16 @@ describe('HoursPeriodView', () => {
     expect(screen.queryByRole('table', { name: 'Ann Lee day by day' })).toBeNull()
   })
 
+  it('labels every figure in a driver row and the totals row, so a phone shows each as a label / value line', () => {
+    view()
+    const labels = (el: Element) => Array.from(el.querySelectorAll(':scope > [data-label]')).map((c) => c.getAttribute('data-label'))
+    const a = screen.getByRole('region', { name: 'Ann Lee' }).querySelector('.tms-hours-row')!
+    expect(labels(a)).toEqual(['Worked hrs', 'PTO hrs', 'Holiday hrs', 'Total hrs', 'Rate ($/hr)', '2-week pay'])
+    const foot = screen.getByLabelText('Totals')
+    expect(foot.classList.contains('tms-hours-row')).toBe(true)
+    expect(labels(foot)).toEqual(['Worked hrs', 'PTO hrs', 'Holiday hrs', 'Total hrs', '2-week pay'])
+  })
+
   it('the summary bar and the footer carry the same totals', () => {
     view()
     const bar = screen.getByRole('group', { name: /Summary for/ })
