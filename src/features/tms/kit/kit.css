@@ -672,16 +672,53 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  /* Every tab stays on the page: a section with more tabs than fit one row wraps to a second row (Ryne 2026-11-10; Accounting hid four). */
-  flex-wrap: wrap;
-  row-gap: 4px;
+  /* One row of tabs on every page (Ryne 2026-11-15). Every tab stays reachable (2026-11-10, Accounting hid four): the strip takes
+     its own line when it does not fit beside the search box (oneRowTabs.ts), and scrolls sideways inside itself after that. */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
 }
 
-/* The top bar grows with the wrapped strip instead of clipping it. */
+.tms-shell .tms-lifecycle-list::-webkit-scrollbar {
+  display: none;
+}
+
+/* A faded edge where more tabs sit past the visible part of the row. */
+.tms-shell .tms-lifecycle[data-fade-end] .tms-lifecycle-list {
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to right, black calc(100% - 32px), transparent);
+}
+.tms-shell .tms-lifecycle[data-fade-start] .tms-lifecycle-list {
+  -webkit-mask-image: linear-gradient(to left, black calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to left, black calc(100% - 32px), transparent);
+}
+.tms-shell .tms-lifecycle[data-fade-start][data-fade-end] .tms-lifecycle-list {
+  -webkit-mask-image: linear-gradient(to right, transparent, black 32px, black calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to right, transparent, black 32px, black calc(100% - 32px), transparent);
+}
+
+/* The top bar grows with the strip's own line instead of clipping it. */
 .tms-shell .tms-topbar:has(.tms-lifecycle) {
   height: auto;
   min-height: var(--tms-topbar-h);
   padding-block: 8px;
+}
+
+/* Too many tabs to sit beside the breadcrumb, search and icons: the strip gets the top bar's second line, full width. */
+.tms-shell .tms-topbar.tms-topbar-tabs-own-row {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+.tms-shell .tms-topbar.tms-topbar-tabs-own-row .tms-lifecycle {
+  order: 10;
+  flex: 1 1 100%;
+  min-width: 0;
+}
+/* A little tighter on that line so a long section (Accounting, eight tabs) fits a 1440 desktop without scrolling. */
+.tms-shell .tms-topbar.tms-topbar-tabs-own-row .tms-lifecycle-tab {
+  padding-inline: 12px;
 }
 
 .tms-shell .tms-lifecycle-item {

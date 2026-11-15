@@ -26,6 +26,7 @@ import { SWITCHES_ON_HINT, pathIsDormant } from '@/lib/dormantPages'
 import { useTmsCompany } from './tmsCompany'
 import { useTmsTheme } from './tmsTheme'
 import { TABLET_MAX_WIDTH, useMaxWidth, usePhoneWidth } from './grid/denseCardLayout'
+import { watchOneRowTabs } from './oneRowTabs'
 import { watchPhoneTables, watchTabletTables } from './phoneTables'
 import './theme.css'
 import './shell.css'
@@ -516,9 +517,15 @@ export function TmsShell({
     return () => window.removeEventListener('keydown', onKey)
   }, [navOpen, setNavOpen])
 
-  // On a phone the tab strip is one row that scrolls sideways (responsive.css): bring the lit tab into view. A no-op on a desktop,
-  // where the strip wraps and never overflows.
+  // The tab strip is one row on every width (oneRowTabs.ts): its own line when it does not fit beside the search box, then a
+  // sideways scroll. Set up before the effect below so the lit tab is scrolled into view on the strip's final width.
   const topbarRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const topbar = topbarRef.current
+    return topbar ? watchOneRowTabs(topbar) : undefined
+  }, [activePath, activeSearch, sectionTabs?.label])
+
+  // When the row still overflows (narrow window, iPad, phone), bring the lit tab into view.
   useEffect(() => {
     const list = topbarRef.current?.querySelector<HTMLElement>('.tms-lifecycle-list')
     const tab = list?.querySelector<HTMLElement>('.tms-lifecycle-tab.tms-active')
