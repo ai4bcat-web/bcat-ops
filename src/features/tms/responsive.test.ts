@@ -79,3 +79,15 @@ describe('Nothing spills past its card on a phone', () => {
     }
   })
 })
+
+describe('responsive.css parses', () => {
+  it('closes every block it opens (a missing } failed the production build)', () => {
+    let depth = 0
+    for (const ch of css.replace(/\/\*[\s\S]*?\*\//g, '')) {
+      if (ch === '{') depth += 1
+      if (ch === '}') depth -= 1
+      expect(depth).toBeGreaterThanOrEqual(0)
+    }
+    expect(depth).toBe(0)
+  })
+})

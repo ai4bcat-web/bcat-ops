@@ -551,6 +551,8 @@
   .tms-shell .tms-hours-row > :nth-child(n+3) { grid-column: 2 / -1; display: flex; align-items: baseline; justify-content: flex-end; gap: 8px; text-align: right; }
   .tms-shell .tms-hours-row > [data-label]::before { content: attr(data-label); margin-right: auto; color: var(--tms-muted); font-size: 12px; font-weight: 500; text-transform: none; }
   .tms-shell .tms-hours-row > :empty { display: none; }
+}
+
 /* ── Nothing spills past its card on a phone (Ryne 2026-11-15: "The numbers overlap the cards ... make sure this is the case for all
    pages on mobile") ───────────────────────────────────────────────────────────────────────────────────
    Long badges ("This customer factors · Missing invoice e-mail") were one unbreakable line and ran past the edge of the Customers and
