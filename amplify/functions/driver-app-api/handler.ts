@@ -97,6 +97,7 @@ import {
 import {
   buildPaperworkLoad,
   driverIsOnPaperworkLoad,
+  matchLoadForDriverRef,
   stopOwner,
   summarize,
   type LoadTimeRow,
@@ -198,6 +199,8 @@ const EQUIPMENT_TABLE = process.env.EQUIPMENT_TABLE_NAME ?? ''
 const TRUCK_CONFIG_TABLE = process.env.TRUCK_CONFIG_TABLE_NAME ?? ''
 const TRUCK_LOCATION_TABLE = process.env.TRUCK_LOCATION_TABLE_NAME ?? ''
 const MAINTENANCE_TASK_TABLE = process.env.MAINTENANCE_TASK_TABLE_NAME ?? ''
+// Accounting → Open questions rows (Feedback): an unmatched driver POD is raised there. PutItem only.
+const FEEDBACK_TABLE = process.env.FEEDBACK_TABLE_NAME ?? ''
 const MOTIVE_API_KEY = process.env.MOTIVE_API_KEY ?? ''
 const MOTIVE_BASE = 'https://api.gomotive.com/v1'
 const TIME_CLOCK_TABLE = process.env.TIME_CLOCK_TABLE_NAME ?? ''
@@ -1627,7 +1630,7 @@ async function closeDeliveryOnPod(driver: DriverRow, driverId: string, sub: Pick
   const pro = normalizePro(sub.referenceNumber ?? null) ?? ''
   const tail = `${sub.stopLabel ? ` · ${sub.stopLabel}` : ''}${pro ? ` · PRO ${pro}` : ''}`
   try {
-    const loadId = sub.loadId || (await resolveLoadIdByPro(sub.referenceNumber ?? null))
+    const loadId = sub.loadId || (await resolveLoadIdByPro(sub.referenceNumber ?? null, driverId))
     const load = loadId ? ((await ddb.send(new GetCommand({ TableName: LOAD_TABLE_NAME, Key: { id: loadId } }))).Item as (PaperworkLoadLike & { updatedAt?: string }) | undefined) : undefined
     if (!load || !driverIsOnPaperworkLoad(load, driverId)) { await postDriverStatus(driver, `POD sent${tail}`, now); return }
     const stops = getStops(load as unknown as Load) as Stop[]
@@ -1650,35 +1653,80 @@ async function closeDeliveryOnPod(driver: DriverRow, driverId: string, sub: Pick
   }
 }
 
-async function resolveLoadIdByPro(referenceNumber: string | null): Promise<string | null> {
-  const want = normalizePro(referenceNumber)
-  if (!want || !LOAD_TABLE_NAME) return null
+async function resolveLoadIdByPro(referenceNumber: string | null, driverId: string): Promise<string | null> {
+  if (!normalizePro(referenceNumber) || !LOAD_TABLE_NAME) return null
   try {
-    const loads = await scan<{ id: string; aljexId?: string | null }>(LOAD_TABLE_NAME)
-    // The live table stores PROs padded ("14547  "), which is why this compares normalized.
-    const hits = loads.filter((l) => normalizePro(l.aljexId ?? null) === want)
-
+    // The live table stores PROs padded ("14547  "); matchLoadForDriverRef compares normalized.
+    const loads = await scan<PaperworkLoadLike>(LOAD_TABLE_NAME)
     /*
      * One match, or none. A PRO is supposed to be unique and very nearly is — one number
      * is on two loads today — but attaching a POD to the WRONG load is worse than leaving
-     * it unattached, because an unattached POD still shows against the load by PRO and
-     * someone can place it by hand. A guess would quietly paper the wrong shipment.
+     * it unattached: someone can place an unattached one by hand (it is raised as an open
+     * question), while a guess would quietly paper the wrong shipment.
      */
-    if (hits.length !== 1) {
-      if (hits.length > 1) {
-        console.warn('[driver-app-api] PRO matches more than one load; leaving the POD unattached', {
-          referenceNumber, matches: hits.map((h) => h.id),
-        })
-      }
-      return null
-    }
-    return hits[0].id
+    const hit = matchLoadForDriverRef(loads, referenceNumber, driverId)
+    if (!hit) console.warn('[driver-app-api] reference matches no single load; leaving the POD unattached', { referenceNumber, driverId })
+    else if (hit.via === 'CUSTOMER_REF') console.log('[driver-app-api] POD matched on the customer reference', { referenceNumber, loadId: hit.loadId })
+    return hit?.loadId ?? null
   } catch (err) {
     // A failed lookup costs a link, not the document. Never fail the upload over it.
     console.error('[driver-app-api] could not resolve a load for the PRO', {
       referenceNumber,
       error: err instanceof Error ? err.message : String(err),
     })
+    return null
+  }
+}
+
+/**
+ * A POD that no load could be found for is kept (it is the driver's paperwork) and raised in
+ * Accounting → Open questions, so a person attaches it instead of it sitting unseen.
+ * Chad's POD for 20031 waited a day with nothing anywhere saying it needed placing.
+ * Idempotent by id; best-effort, like everything after the upload itself.
+ */
+async function raiseUnmatchedPod(sub: Pick<DriverSubmissionRow, 'id' | 'driverName' | 'referenceNumber'>, now: string): Promise<void> {
+  if (!FEEDBACK_TABLE) return
+  const ref = (sub.referenceNumber ?? '').trim()
+  try {
+    await ddb.send(new PutCommand({
+      TableName: FEEDBACK_TABLE,
+      Item: {
+        id: `oq-pod-unmatched-${sub.id}`,
+        __typename: 'Feedback',
+        page: 'accounting-open-question',
+        status: 'NEW',
+        summary: `${sub.driverName ?? 'A driver'} sent a POD${ref ? ` for "${ref}"` : ''} that matches no load. Which load is it? Attach it from the shipment's Documents (driver uploads).`,
+        submittedBy: 'driver-app',
+        submittedByName: 'Driver app',
+        screenshotKeys: [],
+        details: JSON.stringify({ area: 'DOCS', refs: [], context: `Driver submission ${sub.id}`, bcat: ref ? `Reference typed: ${ref}` : 'No reference typed', source: 'Driver app POD upload' }),
+        createdAt: now,
+        updatedAt: now,
+      },
+      ConditionExpression: 'attribute_not_exists(id)',
+    }))
+  } catch (err) {
+    if ((err as { name?: string }).name === 'ConditionalCheckFailedException') return
+    console.error('[driver-app-api] could not raise the unmatched POD', { submissionId: sub.id, error: err instanceof Error ? err.message : String(err) })
+  }
+}
+
+/** Match an unattached submission to a load now and record the link; null when none matches. */
+async function linkSubmissionToLoad(sub: DriverSubmissionRow, driverId: string): Promise<string | null> {
+  const loadId = await resolveLoadIdByPro(sub.referenceNumber ?? null, driverId)
+  if (!loadId) return null
+  try {
+    await ddb.send(new UpdateCommand({
+      TableName: DRIVER_SUBMISSION_TABLE,
+      Key: { id: sub.id },
+      UpdateExpression: 'SET loadId = :l, #st = :s, updatedAt = :t',
+      ConditionExpression: 'attribute_not_exists(loadId) OR loadId = :null',
+      ExpressionAttributeNames: { '#st': 'status' },
+      ExpressionAttributeValues: { ':l': loadId, ':s': 'LINKED', ':t': nowIso(), ':null': null },
+    }))
+    return loadId
+  } catch (err) {
+    console.warn('[driver-app-api] could not link the submission to its load', { submissionId: sub.id, error: String(err) })
     return null
   }
 }
@@ -3905,7 +3953,7 @@ export const handler = async (event: FnUrlEvent) => {
       const { targets, pagesWithKeys } = await presignedPutTargets(driverId, submissionId, kind, pages)
 
       // Attach it to the load now, from the PRO the driver typed. See resolveLoadIdByPro.
-      const resolvedLoadId = await resolveLoadIdByPro(referenceNumber)
+      const resolvedLoadId = await resolveLoadIdByPro(referenceNumber, driverId)
 
       await ddb.send(
         new PutCommand({
@@ -3954,8 +4002,11 @@ export const handler = async (event: FnUrlEvent) => {
       const result = await completeSubmission(driverId, id, kind)
       if (kind === 'POD' && !result.error) {
         const sub = (await ddb.send(new GetCommand({ TableName: DRIVER_SUBMISSION_TABLE, Key: { id } }))).Item as DriverSubmissionRow | undefined
-        await closeDeliveryOnPod(driver, driverId, sub ?? { loadId: null, referenceNumber: null, stopLabel: null }, nowIso())
-        await fileDriverPodPages(sub?.loadId ?? null, result.docIds ?? [])
+        // Not matched when it was started (the load may have been built since): try again now, and keep the link.
+        const loadId = sub?.loadId || (sub ? await linkSubmissionToLoad(sub, driverId) : null)
+        await closeDeliveryOnPod(driver, driverId, sub ? { ...sub, loadId } : { loadId: null, referenceNumber: null, stopLabel: null }, nowIso())
+        if (loadId) await fileDriverPodPages(loadId, result.docIds ?? [])
+        else if (sub) await raiseUnmatchedPod(sub, nowIso())
       }
       return reply(200, result.error ? { ok: true, error: result.error } : { ok: true })
     }
