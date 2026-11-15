@@ -670,10 +670,10 @@ export function DisputesPage() {
   const evidenceTarget = evidenceView && (amazonDisputes.find((d) => d.id === evidenceView.id) ?? evidenceView)
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--tms-bg)' }}>
+    <div className="tms-disputes-page" style={{ height: '100%', overflowY: 'auto', background: 'var(--tms-bg)' }}>
       {/* Page header */}
       <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--tms-card)', borderBottom: '1px solid var(--tms-border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 32px 12px' }}>
+        <div className="tms-disputes-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 32px 12px' }}>
           <div>
             <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--tms-text)', margin: 0 }}>Amazon Disputes</h1>
             <p style={{ fontSize: 12.5, color: 'var(--tms-muted)', marginTop: 2 }}>
@@ -682,7 +682,7 @@ export function DisputesPage() {
               {' '}or the legacy Google Form
             </p>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div className="tms-disputes-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button
               onClick={() => void doRefresh()}
               disabled={refreshing}
@@ -719,7 +719,7 @@ export function DisputesPage() {
         </div>
 
         {/* KPI strip */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, padding: '0 32px 12px' }}>
+        <div className="tms-disputes-kpis" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, padding: '0 32px 12px' }}>
           {KPIS.map((k) => (
             <div key={k.label} style={{ position: 'relative', overflow: 'hidden', background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 10, padding: '12px 16px' }}>
               <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: k.color }} />
@@ -730,10 +730,10 @@ export function DisputesPage() {
         </div>
       </div>
 
-      <div style={{ padding: '24px 32px', maxWidth: 1360 }}>
+      <div className="tms-disputes-body" style={{ padding: '24px 32px', maxWidth: 1360 }}>
         {/* Filters */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18, flexWrap: 'wrap' }}>
-          <div style={{ position: 'relative' }}>
+          <div className="tms-disputes-search" style={{ position: 'relative' }}>
             <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--tms-muted)', pointerEvents: 'none' }} />
             <input
               type="text"
@@ -743,7 +743,7 @@ export function DisputesPage() {
               style={{ width: 280, height: 34, paddingLeft: 30, paddingRight: 10, boxSizing: 'border-box', background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 7, fontSize: 12.5, color: 'var(--tms-text)', fontFamily: 'inherit', outline: 'none' }}
             />
           </div>
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div className="tms-disputes-filters" style={{ display: 'flex', gap: 6 }}>
             {FILTERS.map((f) => {
               const active = statusF === f
               return (

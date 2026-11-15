@@ -551,4 +551,122 @@
   .tms-shell .tms-hours-row > :nth-child(n+3) { grid-column: 2 / -1; display: flex; align-items: baseline; justify-content: flex-end; gap: 8px; text-align: right; }
   .tms-shell .tms-hours-row > [data-label]::before { content: attr(data-label); margin-right: auto; color: var(--tms-muted); font-size: 12px; font-weight: 500; text-transform: none; }
   .tms-shell .tms-hours-row > :empty { display: none; }
+/* ── Nothing spills past its card on a phone (Ryne 2026-11-15: "The numbers overlap the cards ... make sure this is the case for all
+   pages on mobile") ───────────────────────────────────────────────────────────────────────────────────
+   Long badges ("This customer factors · Missing invoice e-mail") were one unbreakable line and ran past the edge of the Customers and
+   Carriers cards; they wrap now. Settings rows laid out as one flex line (Divisions, routing rules) wrap their pieces instead of running
+   the e-mail and buttons off the screen. */
+@media (max-width: 640px) {
+  .tms-shell .tms-badge, .tms-portal .tms-badge { white-space: normal; height: auto; min-height: 22px; max-width: 100%; text-align: center; overflow-wrap: anywhere; }
+}
+@media (max-width: 900px) {
+  .tms-shell .tms-division-row, .tms-shell .tms-rule-row { flex-wrap: wrap; row-gap: 6px; }
+  .tms-shell .tms-division-row > *, .tms-shell .tms-rule-row > * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  .tms-shell .tms-division-row > span[style*='display: flex'], .tms-shell .tms-rule-row > span[style*='display: flex'] { flex-wrap: wrap; margin-left: 0 !important; }
+  .tms-shell .tms-division-row .tms-btn { white-space: normal; height: auto; min-height: 36px; text-align: left; }
+}
+/* Phone cards of the shipment boards (Tracking, Active, Intake ...): a cell's chips sat on one line (status, "No POD — delivery date
+   passed · 3 d", "Tracking link not sent") and ran past the card's right edge. Inside a card every row of chips wraps and every chip may
+   break its text. */
+@media (max-width: 640px) {
+  .tms-shell .tms-dg-card-main div, .tms-shell .tms-dg-card-main span { max-width: 100%; flex-wrap: wrap; min-width: 0; }
+  .tms-shell .tms-dg-card-main button { min-width: 0; }
+  .tms-shell .tms-dg-card .tms-dg-card-amount { min-width: auto; flex-shrink: 0; }
+  .tms-shell .tms-dg-card .tms-trk-notset, .tms-shell .tms-dg-card .tms-trk-notreq { white-space: normal; height: auto; min-height: 18px; max-width: 100%; }
+}
+
+/* Amazon disputes on a phone: the title, its three buttons and four KPI tiles were laid out for a desktop (32px gutters, one header row,
+   four tiles across); "New Dispute" was cut off and the title squeezed to two words a line. Header stacks, buttons wrap under the title,
+   tiles go two across, the status filters scroll in their own row and search takes the full width. */
+@media (max-width: 640px) {
+  .tms-shell .tms-disputes-head { flex-wrap: wrap; gap: 10px; padding: 14px 12px 10px !important; }
+  .tms-shell .tms-disputes-head > * { min-width: 0; }
+  .tms-shell .tms-disputes-actions { flex-wrap: wrap; gap: 8px !important; }
+  .tms-shell .tms-disputes-actions > * { min-height: 44px; white-space: nowrap; }
+  .tms-shell .tms-disputes-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; padding: 0 12px 10px !important; }
+  .tms-shell .tms-disputes-kpis > div { min-width: 0; padding: 10px 12px !important; }
+  .tms-shell .tms-disputes-kpis [style*='font-size: 28px'] { font-size: clamp(18px, 5.6vw, 28px) !important; white-space: nowrap; }
+  .tms-shell .tms-disputes-body { padding: 12px !important; }
+  .tms-shell .tms-disputes-search { flex: 1 1 100%; }
+  .tms-shell .tms-disputes-search input { width: 100% !important; height: 44px !important; }
+  .tms-shell .tms-disputes-filters { max-width: 100%; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+  .tms-shell .tms-disputes-filters > button { flex: 0 0 auto; height: 40px !important; white-space: nowrap; }
+}
+
+/* Fleet — Current Locations (Driver info) on a phone: the seven-column truck list was 896px wide and scrolled sideways inside
+   its card with the location and load cut to "New Cane…". Each truck becomes a card: the unit across the top, then location, driver,
+   load, status, tracking and last update as label / value pairs, two to a line, nothing truncated. */
+@media (max-width: 640px) {
+  .tms-shell .tms-truckmap-list { overflow-x: visible !important; }
+  .tms-shell .tms-truckmap-head { display: none !important; }
+  .tms-shell .tms-truckmap-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important; min-width: 0 !important;
+    gap: 8px 12px !important; padding: 12px 14px !important; align-items: start !important;
+  }
+  .tms-shell .tms-truckmap-row > * { min-width: 0; text-align: left !important; white-space: normal !important; }
+  .tms-shell .tms-truckmap-row > * * { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; overflow-wrap: anywhere; }
+  .tms-shell .tms-truckmap-row > [data-label]::before {
+    content: attr(data-label); display: block; margin-bottom: 2px;
+    font-family: var(--tms-font, inherit); font-size: 11px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; color: var(--tms-muted);
+  }
+  .tms-shell .tms-truckmap-row > [data-label='Unit'] { grid-column: 1 / -1; font-size: 15px; }
+  .tms-shell .tms-truckmap-row > [data-label='Unit']::before { display: inline; margin-right: 6px; }
+  .tms-shell .tms-truckmap-row > [data-label='Tracking'] { grid-column: 1 / -1; display: flex !important; flex-wrap: wrap; gap: 6px !important; }
+  .tms-shell .tms-truckmap-row > [data-label='Tracking']::before { flex: 1 1 100%; }
+  .tms-shell .tms-truckmap-row select, .tms-shell .tms-truckmap-row button { min-height: 40px; }
+}
+/* Compliance "Expiring soon" rows are one button each (name · document, then the Expired badge). On a phone the button kept its one-line
+   height and pushed the badge past the card; the name wraps and the badge drops under it. */
+@media (max-width: 640px) {
+  .tms-shell .tms-expiring-row { height: auto; min-height: 44px; white-space: normal; flex-wrap: wrap; gap: 4px 8px; padding-block: 8px; }
+  .tms-shell .tms-expiring-row > * { min-width: 0; overflow-wrap: anywhere; }
+}
+/* Appts on a phone: each day's head (date, counts, Clear day, Export CSV) was one row, so the date broke a word a line ("Fri, / Nov /
+   13,") beside the buttons; the filter buttons and the 240px search ran off the screen. Head and toolbar wrap; search takes its own line. */
+@media (max-width: 640px) {
+  .tms-shell .tms-appts-dayhead { flex-wrap: wrap; padding: 12px !important; }
+  .tms-shell .tms-appts-dayhead > :first-child { flex: 1 1 100% !important; }
+  .tms-shell .tms-appts-dayhead > button { min-height: 40px; }
+  .tms-shell .tms-appts-daytitle { flex-wrap: wrap; row-gap: 4px; }
+  .tms-shell .tms-appts-tools { flex-wrap: wrap; width: 100%; }
+  .tms-shell .tms-appts-tools > button { min-height: 40px; }
+  .tms-shell .tms-appts-search { flex: 1 1 100%; min-width: 0 !important; }
+}
+/* Month calendars (Time off) stay a 7-day grid on a phone. The phone rule that folds inline repeat(7, ...) rows into one column turned the
+   weekday header into a vertical S / M / T list and every day into a full-width row. Smaller cells instead; a name that does not fit
+   ends in an ellipsis and opens on tap as before. */
+@media (max-width: 640px) {
+  .tms-shell .tms-month-grid { grid-template-columns: repeat(7, minmax(0, 1fr)) !important; }
+  .tms-shell .tms-month-grid > div { min-width: 0; padding: 4px 3px !important; }
+  .tms-shell .tms-month-days { grid-auto-rows: minmax(64px, auto) !important; }
+  .tms-shell .tms-timeoff-upcoming-head { flex-wrap: wrap; gap: 6px 12px; padding: 12px !important; }
+  .tms-shell .tms-timeoff-upcoming-head > * { flex-wrap: wrap; min-width: 0; }
+}
+/* Ivan driver app on a phone: the driver's name, week summary and three buttons (invite, reset password, driver view) shared one row,
+   so the name wrapped a word a line and the summary a word a line. The buttons wrap under the name. Each stop line wraps its place and
+   PRO instead of cutting them off with an ellipsis. */
+@media (max-width: 640px) {
+  .tms-shell .tms-ivanweek-head { flex-wrap: wrap; gap: 8px 10px !important; }
+  .tms-shell .tms-ivanweek-head > div:nth-child(2) { flex: 1 1 calc(100% - 60px) !important; }
+  .tms-shell .tms-ivanweek-head > button, .tms-shell .tms-ivanweek-head > * > button { min-height: 40px; }
+  .tms-shell .tms-ivanweek-day { flex-wrap: wrap; }
+  .tms-shell .tms-ivanweek-stop > span:nth-child(3) { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; overflow-wrap: anywhere; }
+}
+/* Phone table cards: a row's controls (Fuel's unit picker + Assign + Ignore, document buttons) got half a card and squeezed the buttons to
+   30px; they take the card's full width and wrap, as on the iPad cards. A cell's badge + field pair (Asset documents: Valid + the
+   expiration date) wraps instead of running the date past the card edge. */
+@media (max-width: 640px) {
+  .tms-shell table[data-phone-stack='on'] > tbody > tr > td:last-child:has(button),
+  .tms-shell table[data-phone-stack='on'] > tbody > tr > td:last-child:has(select) { grid-column: 1 / -1; }
+  .tms-shell table[data-phone-stack='on'] > tbody > tr > td [style*='display: flex'],
+  .tms-shell table[data-phone-stack='on'] > tbody > tr > td [style*='display: inline-flex'] { flex-wrap: wrap; max-width: 100%; }
+  .tms-shell table[data-phone-stack='on'] > tbody > tr > td button { flex: 0 0 auto; min-height: 40px; max-width: 100%; }
+}
+/* KPI tiles with a D / W / M period switch (Expenses, Fuel): at two tiles a line the switch did not fit beside the label and ran past the
+   tile's edge. The label wraps and the switch drops under it. */
+@media (max-width: 640px) {
+  .tms-shell .tms-kpi-card-label, .tms-portal .tms-kpi-card-label { flex-wrap: wrap; row-gap: 6px; min-width: 0; }
+  .tms-shell .tms-kpi-card-label > span, .tms-portal .tms-kpi-card-label > span { min-width: 0; overflow-wrap: anywhere; }
+  .tms-shell .tms-kpi-card-period, .tms-portal .tms-kpi-card-period { margin-left: 0; flex: 1 1 100%; }
+  .tms-shell .tms-kpi-card, .tms-portal .tms-kpi-card { min-width: 0; }
 }

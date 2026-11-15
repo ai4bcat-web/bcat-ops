@@ -228,9 +228,9 @@ export function TruckMapWidget() {
         ) : (
           <div style={{ display: 'flex', alignItems: 'stretch', flexWrap: 'wrap' }}>
           {/* The table flexes to whatever the map leaves; below its minimum width it scrolls inside the card instead of widening the page. */}
-          <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 560px', minWidth: 0, overflowX: 'auto' }}>
+          <div className="tms-truckmap-list" style={{ display: 'flex', flexDirection: 'column', flex: '1 1 560px', minWidth: 0, overflowX: 'auto' }}>
             {/* Header row: every column sorts; tap again to flip. */}
-            <div style={{ display: 'grid', gridTemplateColumns: TABLE_COLUMNS, minWidth: TABLE_MIN_WIDTH, gap: 10, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--tms-muted)', borderBottom: '1px solid var(--tms-border)' }}>
+            <div className="tms-truckmap-head" style={{ display: 'grid', gridTemplateColumns: TABLE_COLUMNS, minWidth: TABLE_MIN_WIDTH, gap: 10, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--tms-muted)', borderBottom: '1px solid var(--tms-border)' }}>
               {([
                 ['unit', 'Unit'], ['location', 'Location'], ['driver', 'Driver'], ['load', 'Load'], ['status', 'Status'], ['tracking', 'Tracking · Copy info'], ['updated', 'Updated'],
               ] as Array<[SortKey, string]>).map(([key, label]) => {
@@ -261,6 +261,7 @@ export function TruckMapWidget() {
               return (
                 <div
                   key={loc.truckId}
+                  className="tms-truckmap-row"
                   style={{
                     display: 'grid', gridTemplateColumns: TABLE_COLUMNS, minWidth: TABLE_MIN_WIDTH, gap: 10,
                     padding: '9px 20px', fontSize: 13, alignItems: 'center',
@@ -268,15 +269,15 @@ export function TruckMapWidget() {
                     opacity: stale ? 0.55 : 1,
                   }}
                 >
-                  <div style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--tms-text)' }}>
+                  <div data-label="Unit" style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--tms-text)' }}>
                     {unit}
                   </div>
-                  <div style={{ color: 'var(--tms-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={cityState(loc)}>
+                  <div data-label="Location" style={{ color: 'var(--tms-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={cityState(loc)}>
                     {cityState(loc)}
                   </div>
 
                   {/* Driver: assign dropdown if in fleet, else Add-to-fleet */}
-                  <div style={{ minWidth: 0 }}>
+                  <div data-label="Driver" style={{ minWidth: 0 }}>
                     {equip ? (
                       <select
                         value={assigned?.id ?? ''}
@@ -313,7 +314,7 @@ export function TruckMapWidget() {
                   </div>
 
                   {/* Current load: the lane and the PRO. */}
-                  <div style={{ minWidth: 0, fontSize: 12 }}>
+                  <div data-label="Load" style={{ minWidth: 0, fontSize: 12 }}>
                     {currentLoad ? (
                       <>
                         <div style={{ color: 'var(--tms-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
@@ -334,7 +335,7 @@ export function TruckMapWidget() {
                     then the ETA they are rolling toward. The ELD motion state is the fallback
                     for a driver who has reported nothing on this load.
                   */}
-                  <div style={{ minWidth: 0, fontSize: 12, whiteSpace: 'nowrap' }}>
+                  <div data-label="Status" style={{ minWidth: 0, fontSize: 12, whiteSpace: 'nowrap' }}>
                     {lastEvent ? (
                       <>
                         <div style={{ color: 'var(--tms-text)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}
@@ -356,7 +357,7 @@ export function TruckMapWidget() {
                     )}
                   </div>
                   {/* Motive share link, pasted once, copied on every call with a customer. */}
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <span data-label="Tracking" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                     <TrackingLinkCell equip={equip} unit={unit} />
                     {/* One block to paste to a broker: driver, cell, truck, VIN, trailer, tracking link. */}
                     {assigned && (
@@ -385,7 +386,7 @@ export function TruckMapWidget() {
                       </button>
                     )}
                   </span>
-                  <div style={{ textAlign: 'right', color: 'var(--tms-muted)', fontSize: 12, whiteSpace: 'nowrap' }}>
+                  <div data-label="Updated" style={{ textAlign: 'right', color: 'var(--tms-muted)', fontSize: 12, whiteSpace: 'nowrap' }}>
                     <span style={{ color: age.stale ? 'var(--tms-badge-orange)' : 'inherit', fontWeight: age.stale ? 600 : 400 }}
                           title={age.stale ? 'No fresh ELD fix — this position may be out of date' : undefined}>
                       {age.stale ? `stale · ${age.label}` : formatDistanceToNow(new Date(loc.locatedAt), { addSuffix: true })}

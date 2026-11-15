@@ -17,7 +17,7 @@ export function ExpiringQueue({ rows, onOpen, limit = 8 }: { rows: OverviewRow[]
             <li key={row.key}>
               <button
                 type="button"
-                className="tms-btn tms-btn-ghost"
+                className="tms-btn tms-btn-ghost tms-expiring-row"
                 style={{ width: '100%', justifyContent: 'space-between', textAlign: 'left' }}
                 onClick={() => onOpen(row)}
               >
