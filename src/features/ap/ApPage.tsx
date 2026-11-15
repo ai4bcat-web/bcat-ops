@@ -25,7 +25,6 @@ import { useAuth } from '@/hooks/useAuth'
 import { useApWorklist, type ApWorklistRow } from '@/hooks/useApWorklist'
 import { useCarrierAp } from '@/hooks/useCarrierAp'
 import { useCarriers } from '@/hooks/useCarriers'
-import { useOpenBills } from '@/hooks/useOpenBills'
 import { exportOutstandingPayables } from '@/lib/opsExports'
 import {
   getShipmentDocumentUrl, getTmsSettings, graphqlErrorText, listBillsByMonth, listCarrierPaymentInfo, reverseApPayment,
@@ -63,7 +62,10 @@ import { UpdateCarrierChargesDialog } from './components/UpdateCarrierChargesDia
 import { BillDrawer } from './components/BillDrawer'
 import { ApReportDialog, CashRequirementsDialog } from './components/ApReportDialogs'
 import { estimatedDueAt, isAljexBill, payablesQueue, proOf, termsLabel, type ApReportKind, type BillFactsIndex } from './apQueue'
-import { useBillFacts } from './useBillFacts'
+import { payablesSummary, useApSummaryModel } from './useApSummaryModel'
+import { tabFromUrl } from '@/features/finance/accountingLinks'
+
+const AP_TAB_KEYS: readonly ApTabKey[] = ['awaiting', 'expected', 'aging', 'selected', 'paid', 'payments', 'report', 'inbox', 'review']
 import { ApSummaryStrip } from './components/ApSummaryStrip'
 import { apCompactItems } from './apCompactItems'
 import { AccountingReportsDialog } from '@/features/finance/AccountingReportsDialog'
@@ -78,7 +80,6 @@ import {
   readOwedFilter, summarizeOwed, writeOwedFilter, type OwedFilter, type OwedOption,
 } from '@/features/ar/owedFilters'
 import { apSummary, inDivision } from './apQueue'
-import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import type { ApInboxItemRecord } from '@/lib/apInbox/types'
 import type { ApPaymentRecord, ApSettings, CarrierBillRecord, CarrierRecord } from '@/types/tms'
 import { ApInboxDigest } from './inbox/ApInboxDigest'
@@ -137,7 +138,8 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
   const { isAdmin, user } = useAuth()
   // Moving a load to billing creates its bill in Expected, so the page opens there.
-  const [tab, setTab] = useState<ApTabKey>('expected')
+  // `?tab=` opens a tab directly (the Operations Dashboard's Accounting cards link here).
+  const [tab, setTab] = useState<ApTabKey>(() => tabFromUrl(AP_TAB_KEYS, 'expected'))
   const needsReview = useNeedsReview()
   const reviewByShipment = useMemo(() => new Map(needsReview.rows.map((row) => [row.id, row])), [needsReview.rows])
   const inboxStatus = useApInboxStatus()
@@ -156,7 +158,6 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   // The review rung's assignments, for the cached facts behind each bill's blocks: the
   // bill alone cannot say whether the rate con was signed or what paperwork is missing.
   const inReview = useApWorklist('IN_REVIEW')
-  const open = useOpenBills()
   const { carriers } = useCarriers()
 
   const [filters, setFilters] = useState<ToBePaidFilters>(EMPTY_TO_BE_PAID_FILTERS)
@@ -219,22 +220,8 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
   // Ryne 2026-11-12: Payables is the bills Move to billing created, for delivered loads. The Aljex
   // bills are still owed and stay one toggle away.
-  // Bills paid in the last three months: the strip's days-to-pay and this month's quick pay.
-  const [paidRecent, setPaidRecent] = useState<CarrierBillRecord[]>([])
-  useEffect(() => {
-    let alive = true
-    Promise.all(months.map((m) => listBillsByMonth(m)))
-      .then((sets) => { if (alive) setPaidRecent(sets.flat().filter((b) => b.status === 'PAID')) })
-      .catch(() => {})
-    return () => { alive = false }
-  }, [months])
-  const factBills = useMemo(() => [...open.bills, ...paidRecent], [open.bills, paidRecent])
-  const { facts } = useBillFacts(factBills)
-  const { divisions } = useOwnershipDivisions()
-  const divisionName = useMemo(() => {
-    const byCode = new Map((divisions ?? []).map((d) => [d.code, d.name]))
-    return (code: string | null) => (code ? byCode.get(code) ?? code : 'No division')
-  }, [divisions])
+  // The open bills, paid history, facts and the summary are shared with the Operations Dashboard's Accounting cards.
+  const { open, paidRecent, facts, divisionName, totalsAll } = useApSummaryModel(asOf)
   // Carrier / rev division / due filters live in the URL (`?carrier=…&div=…&due=…`) so a filtered
   // view can be shared; the division card writes the same state.
   const [searchParams, setSearchParams] = useSearchParams()
@@ -253,33 +240,18 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const partyQueue = useMemo(() => queueAll.filter(byParty), [queueAll, byParty])
   const ownedQueue = useMemo(() => partyQueue.filter(byDivision), [partyQueue, byDivision])
   const queueBills = useMemo(() => ownedQueue.filter((b) => inDueBucket(b.dueAt, asOf, owed.due)), [ownedQueue, asOf, owed.due])
-  // The totals always count every open bill, Aljex ones included: that money is still owed. Only
-  // the lists sit behind the Aljex toggle.
-  const totalsAll = useMemo(() => payablesQueue(open.bills, facts, { includeAljex: true }), [open.bills, facts])
   const totalsParty = useMemo(() => totalsAll.filter(byParty), [totalsAll, byParty])
   const totalsOwned = useMemo(() => totalsParty.filter(byDivision), [totalsParty, byDivision])
   const totalsBills = useMemo(() => totalsOwned.filter((b) => inDueBucket(b.dueAt, asOf, owed.due)), [totalsOwned, asOf, owed.due])
   // The totals follow the carrier and division filters; the division card keeps every division's
   // share (of the selected carriers) so there is always a division to pick.
-  const summary = useMemo(() => {
-    const narrowed = apSummary({
-      expected: billsExpected(totalsOwned),
-      aging: billsAging(totalsOwned),
-      selected: billsSelected(totalsOwned),
-      paidRecent: paidRecent.filter((b) => byParty(b) && byDivision(b)),
-      facts,
-      asOf,
-    })
-    const shares = apSummary({
-      expected: billsExpected(totalsParty),
-      aging: billsAging(totalsParty),
-      selected: billsSelected(totalsParty),
-      paidRecent: [],
-      facts,
-      asOf,
-    })
-    return { ...narrowed, byDivision: shares.byDivision }
-  }, [totalsOwned, totalsParty, paidRecent, byParty, byDivision, facts, asOf])
+  const summary = useMemo(() => payablesSummary({
+    owned: totalsOwned,
+    party: totalsParty,
+    paidRecent: paidRecent.filter((b) => byParty(b) && byDivision(b)),
+    facts,
+    asOf,
+  }), [totalsOwned, totalsParty, paidRecent, byParty, byDivision, facts, asOf])
   const owedSummary = useMemo(() => summarizeOwed(totalsOwned, asOf), [totalsOwned, asOf])
   const carrierOptions: OwedOption[] = useMemo(() => partyOptions([
     ...open.bills.map((b) => ({ id: b.carrierId, name: b.carrierName })),

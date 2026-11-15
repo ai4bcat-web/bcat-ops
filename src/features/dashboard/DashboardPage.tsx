@@ -24,6 +24,7 @@ import { useLegacyDashboardKpis, type DateRangeKey } from './useLegacyDashboardK
 import { useBatoryApptCount } from './useBatoryApptCount'
 import { BrokerageSection } from './BrokerageDashboardPage'
 import { LazyWidget } from './LazyWidget'
+import { AccountingSection } from './AccountingSection'
 import { AssistantChat } from '@/features/dashboards/assistant/AssistantChat'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -554,6 +555,11 @@ export function DashboardPage() {
             )}
           </Cell>
         </div>
+
+        {/* ── Accounting: the Invoicing page's AR and AP cards, on each accounting grant only ─ */}
+        {(hasPageAccess('invoicing') || hasPageAccess('carrierPay')) && (
+          <LazyWidget enabled={kpiFinal} minHeight={560} label="accounting"><AccountingSection /></LazyWidget>
+        )}
 
         {/* ── Brokerage (BCAT Logistics): right under the top cards ─ */}
         <LazyWidget enabled={kpiFinal} minHeight={420} label="brokerage"><BrokerageSection /></LazyWidget>
