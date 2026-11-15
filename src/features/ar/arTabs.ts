@@ -6,7 +6,7 @@
  *  - Paid = invoices settled in the chosen month by paid date. With Billed: All and this month it is
  *    "Collected this month".
  *  - Aging = the same invoices as "Open AR" (any billing), counted in invoices, not customers.
- *  - Payments & credits is one customer's ledger, so it has no badge until a customer is picked.
+ *  - Payments, credits and debits live on their own page, Accounting → Payments received (Ryne 2026-11-15).
  *  - Needs review counts loads flagged for a finance check, not invoices.
  */
 import type { TmsTab } from '@/features/tms/kit'
@@ -41,8 +41,6 @@ export function arTabs(input: {
   invoiced: CountTotal
   paid: CountTotal
   aging: CountTotal
-  /** One customer's payment rows; null while no customer is picked. */
-  payments: number | null
   review: number
 }): TmsTab[] {
   const { billedBy } = input
@@ -55,8 +53,6 @@ export function arTabs(input: {
           : 'Factored through OTR and unpaid. Same as "Factored, open". Pick Billed: All to see shippers too.' },
     { key: 'paid', label: `${PAID_LABEL[billedBy](shortMonth(input.paidMonthLabel))} · ${input.paid.total}`, count: input.paid.count, testId: 'ar-tab-paid',
       title: `Invoices paid in full in ${input.paidMonthLabel}, by paid date.${billedBy === 'all' ? ' This month it is the same as "Collected this month".' : ''}` },
-    { key: 'payments', label: 'Payments & credits', count: input.payments ?? undefined, testId: 'ar-tab-payments',
-      title: 'One customer\'s payments, credits and write-offs. Pick a customer to see them.' },
     { key: 'aging', label: `Aging · ${input.aging.total} open`, count: input.aging.count, testId: 'ar-tab-aging',
       title: 'Every open invoice by age, any billing. Same as "Open AR".' },
     { key: 'review', label: 'Needs review', count: input.review, testId: 'ar-tab-review',
