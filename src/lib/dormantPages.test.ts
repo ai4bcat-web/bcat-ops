@@ -38,6 +38,7 @@ describe('page -> models table', () => {
 const LIVE_ROUTES = new Set([
   'customers', 'locations', 'vendors', 'factors',
   'open-questions', // Feedback rows: a production model
+  'payments-received', // ArPayment + LegacyAljexRow: production models
   'brokerage/*', // BrokeragePage guards each tab
   // BrokeragePage tabs
   'brokerage:', 'brokerage:users', 'brokerage:audit', 'brokerage:carrier-sales', 'brokerage:company/*', 'brokerage:*',

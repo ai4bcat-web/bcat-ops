@@ -113,7 +113,7 @@ describe('buildNavSections', () => {
     expect(kids('Fleet manager').slice(0, 5)).toEqual(['Fleet manager dashboard', 'Maintenance', 'Invoices', 'Asset documents', 'Fuel'])
     // Amazon disputes moved to Calendar; Expenses and Insurance to Company (Ryne 2026-11-14).
     for (const gone of ['Amazon disputes', 'Expenses', 'Insurance']) expect(kids('Fleet manager')).not.toContain(gone)
-    expect(kids('Accounting')).toEqual(['Accounts Receivable', 'Accounts Payable', 'Vendors', 'Open questions'])
+    expect(kids('Accounting')).toEqual(['Accounts Receivable', 'Accounts Payable', 'Payments received', 'Vendors', 'Open questions'])
     expect(kids('Settings')).toEqual([
       'General & automation', 'Company', 'Divisions & ownership', 'Users & roles', 'Integrations', 'AI agents',
       'Spot quoter & e-mail', 'Carrier Sales', 'Commissions', 'Reports', 'Audit log', 'Compliance', 'Platform health', 'Demo',
@@ -255,7 +255,8 @@ describe('buildNavSections', () => {
   it('never lets a hidden Accounting child leak, and lands the group on the first visible one', () => {
     const ar = pinnedOf('invoicing')
     expect(labels(ar)).toEqual(['Accounting'])
-    expect(labels(ar[0].children)).toEqual(['Accounts Receivable'])
+    // Payments received opens on the same grant as Accounts Receivable.
+    expect(labels(ar[0].children)).toEqual(['Accounts Receivable', 'Payments received'])
     expect(ar[0].to).toBe('/tms/invoicing')
     const ap = pinnedOf('carrierPay')
     expect(labels(ap[0].children)).toEqual(['Accounts Payable'])
@@ -415,6 +416,7 @@ describe('tmsBreadcrumb', () => {
 
   it('files the money pages under Accounting, an invoice or bill under its list', () => {
     expect(labels('/tms/invoicing')).toEqual(['Accounting', 'Accounts Receivable'])
+    expect(labels('/tms/payments-received')).toEqual(['Accounting', 'Payments received'])
     expect(labels('/tms/invoicing/invoices/INV-1')).toEqual(['Accounting', 'Accounts Receivable', 'Invoice'])
     expect(tmsBreadcrumb('/tms/invoicing/invoices/INV-1')[1].to).toBe('/tms/invoicing')
     expect(labels('/tms/invoicing/payable')).toEqual(['Accounting', 'Accounts Payable'])

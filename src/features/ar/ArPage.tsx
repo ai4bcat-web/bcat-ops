@@ -3,8 +3,8 @@
  *
  * The queue holds only shipments released to billing from Load Review, and follows each one
  * to paid in three statuses: Ready to invoice, Invoiced, Paid (`arQueue.ts` decides which).
- * Paperwork chasing lives in Load Review, not here. Payments & credits and Aging are the two
- * ledger views after the queue. Every number is integer cents formatted once, by `formatCents`.
+ * Paperwork chasing lives in Load Review, not here. Aging is the ledger view after the queue; payments,
+ * credits and debits have their own page, Accounting → Payments received. Every number is integer cents formatted once, by `formatCents`.
  *
  * On dev, SES is denied: an invoice e-mail comes back NOT_SENT with the refusal and a
  * signed download. The page reports exactly that and never claims a send that did not
@@ -43,14 +43,13 @@ import { ArDenseTable, type ArGrid } from './components/ArDenseTable'
 import { useArWorklist } from '@/hooks/useArWorklist'
 import { useShipments, type ShipmentListRow } from '@/hooks/useShipments'
 import { readyFactsOf } from './readyFacts'
-import { useCustomerAr } from '@/hooks/useCustomerAr'
 import { useOpenInvoices } from '@/hooks/useOpenInvoices'
 import { exportOutstandingReceivables } from '@/lib/opsExports'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import {
-  batchGenerateInvoices, getTmsSettings, graphqlErrorText, listInvoicesByMonth, listUserProfiles, reversePayment, voidInvoice,
+  batchGenerateInvoices, getTmsSettings, graphqlErrorText, listInvoicesByMonth, listUserProfiles, voidInvoice,
 } from '@/lib/apiClient'
 import { loadWorklistShipments } from '@/lib/worklistShipments'
 import { NeedsReviewList } from '@/features/finance/NeedsReview'
@@ -65,7 +64,7 @@ import { formatCents } from '@/lib/invoiceBuild'
 import { otrStatusLabel } from '@/lib/otrInvoiceStatus'
 import { otrRejection } from '@/lib/otrRejection'
 import {
-  AR_PAYMENT_KIND_LABEL, AR_PAYMENT_METHOD_LABEL, BATCH_GENERATE_LIMIT,
+  BATCH_GENERATE_LIMIT,
   agingChipFor, formatDay, lastMonths, lastThreeMonths, monthLabel, PAID_LOOKBACK_MONTHS,
 } from './arViews'
 import {
@@ -91,7 +90,7 @@ import type { AccountingReportKind } from '@/features/finance/accountingReports'
 import { useDeliveredNotReady } from './useDeliveredNotReady'
 import { ArInvoicedCard, ArPaidCard, ArReadyCard, ProfitCheckCard, ReviewReasonCard } from '@/features/finance/AccountingCards'
 import { arInvoicedStats, arPaidStats, arReadyStats, reviewReasonCounts } from '@/features/finance/accountingStats'
-import type { ArPaymentRecord, CustomerRecord, InvoiceRecord, ShipmentRecord, UserProfileRecord } from '@/types/tms'
+import type { CustomerRecord, InvoiceRecord, ShipmentRecord, UserProfileRecord } from '@/types/tms'
 
 /** Which dialog is open, and the one thing it is open about. Mount is the `open` flag. */
 type ArDialog =
@@ -104,7 +103,6 @@ type ArDialog =
   | { kind: 'factor'; invoiceId: string }
   | { kind: 'batchFactor'; rows: ArQueueRow[] }
   | { kind: 'void'; invoice: InvoiceRecord }
-  | { kind: 'reverse'; payment: ArPaymentRecord }
   | { kind: 'markPaid'; invoices: InvoiceRecord[] }
 
 /** One shipment the batch would not bill, and exactly what the release gate said. */
@@ -130,7 +128,7 @@ function view<T>(config: Omit<ListView, 'grid'> & { grid: ArGrid<T> }): ListView
 }
 
 /** The three queue statuses, then the two ledger views. */
-export type ArPageTab = 'ready' | 'invoiced' | 'paid' | 'payments' | 'aging' | 'review'
+export type ArPageTab = 'ready' | 'invoiced' | 'paid' | 'aging' | 'review'
 
 const QUEUE_TAB_STATUS: Record<'ready' | 'invoiced' | 'paid', ArQueueStatus> = {
   ready: 'READY',
@@ -233,9 +231,6 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const months = useMemo(() => lastThreeMonths(asOf), [asOf])
   const [month, setMonth] = useState(() => months[0])
   const [paidInvoices, setPaidInvoices] = useState<InvoiceRecord[]>([])
-
-  const [arCustomerId, setArCustomerId] = useState<string | null>(null)
-  const customerAr = useCustomerAr(arCustomerId)
 
   // Invoices issued in the picked month: the factoring queue and Needs review look PROs up in them. The Paid
   // tab itself reads `paidInMonth` (by paid date). No synchronous setState in the effect: writes live in the chain.
@@ -420,7 +415,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
   const refreshAll = () => {
     setPaymentsVersion((v) => v + 1)
-    return Promise.all([unbilled.refresh(), invoiced.refresh(), open.refresh(), customerAr.refresh(), loadMonth(), loadRecent(), refreshFactoring()])
+    return Promise.all([unbilled.refresh(), invoiced.refresh(), open.refresh(), loadMonth(), loadRecent(), refreshFactoring()])
       .then(() => undefined)
   }
 
@@ -514,17 +509,6 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       .finally(() => setBusy(false))
   }
 
-  const runReverse = (payment: ArPaymentRecord, reason: string) => {
-    setBusy(true)
-    reversePayment({ paymentId: payment.id, reason })
-      .then(() => {
-        toast.success('Payment reversed')
-        closeAndRefresh()
-      })
-      .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not reverse the payment'))
-      .finally(() => setBusy(false))
-  }
-
   const downloadAgingCsv = () => {
     saveBlob(new Blob([agingCsv(aging.byCustomer)], { type: 'text/csv' }), `ar-aging-${asOf}.csv`)
   }
@@ -537,16 +521,14 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     invoiced: { count: queue.INVOICED.length, total: queueTotal('INVOICED') },
     paid: { count: queue.PAID.length, total: queueTotal('PAID') },
     aging: { count: filteredOpen.length, total: formatCents(aging.totalCents) },
-    payments: arCustomerId ? customerAr.payments.length : null,
     review: needsReview.rows.length,
   })
 
-  const error = unbilled.error ?? invoiced.error ?? open.error ?? customerAr.error
+  const error = unbilled.error ?? invoiced.error ?? open.error
   const errorBanner = error
     ? <p style={{ color: 'var(--tms-badge-red)' }} className="text-sm">{error}</p>
     : null
 
-  const customer = customers.find((c) => c.id === arCustomerId) ?? null
   const customerById = new Map(customers.map((c) => [c.id, c]))
   // Bulk statements always preview and confirm first; nothing is mailed straight from the tick boxes.
   const runBulkStatements = () => {
@@ -613,19 +595,6 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onMarkPaid: (invs) => setDialog({ kind: 'markPaid', invoices: invs }),
       onStatement: (customerId, customerName) => setDialog({ kind: 'statement', customerId, customerName }),
       paymentFacts,
-    })
-    : tab === 'payments' ? paymentsView({
-      banner: errorBanner,
-      customers,
-      customer,
-      payments: customerAr.payments,
-      openCents: customerAr.openCents,
-      unappliedCents: customerAr.unappliedCents,
-      busy,
-      onCustomer: setArCustomerId,
-      onPayment: (customerId, customerName) => setDialog({ kind: 'payment', customerId, customerName }),
-      onCredit: (customerId, customerName) => setDialog({ kind: 'credit', customerId, customerName }),
-      onReverse: (payment) => setDialog({ kind: 'reverse', payment }),
     })
     : agingView({
       errorBanner,
@@ -819,17 +788,6 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           busy={busy}
           onClose={() => setDialog(null)}
           onConfirm={(reason) => runVoid(dialog.invoice, reason)}
-        />
-      )}
-      {dialog?.kind === 'reverse' && (
-        <ReasonDialog
-          title="Reverse payment"
-          description="A reversal posts its own row and restores every balance this receipt took. Nothing is deleted."
-          label="Why it is being reversed"
-          confirmLabel="Reverse payment"
-          busy={busy}
-          onClose={() => setDialog(null)}
-          onConfirm={(reason) => runReverse(dialog.payment, reason)}
         />
       )}
     </>
@@ -1380,97 +1338,6 @@ function queueView({
           )
         },
       },
-    },
-  })
-}
-
-/* ── Payments & credits ──────────────────────────────────────────────────── */
-
-function paymentsView({
-  banner, customers, customer, payments, openCents, unappliedCents, busy,
-  onCustomer, onPayment, onCredit, onReverse,
-}: {
-  banner: ReactNode
-  customers: CustomerRecord[]
-  customer: CustomerRecord | null
-  payments: ArPaymentRecord[]
-  openCents: number
-  unappliedCents: number
-  busy: boolean
-  onCustomer: (id: string | null) => void
-  onPayment: (customerId: string, customerName: string) => void
-  onCredit: (customerId: string, customerName: string) => void
-  onReverse: (payment: ArPaymentRecord) => void
-}): ListView {
-  const columns: Array<Col<ArPaymentRecord>> = [
-    { key: 'kind', header: 'Kind', group: 'Cash', text: (p) => AR_PAYMENT_KIND_LABEL[p.kind], filter: 'multi', optionsOf: (p) => opt(AR_PAYMENT_KIND_LABEL[p.kind]) },
-    { key: 'date', header: 'Date', group: 'Cash', text: (p) => formatDay(p.receivedAt), filter: 'date', dateOf: (p) => p.receivedAt, sortValue: (p) => p.receivedAt ?? '' },
-    { key: 'method', header: 'Method', group: 'Cash', text: (p) => (p.method ? AR_PAYMENT_METHOD_LABEL[p.method] : '—'), filter: 'multi', optionsOf: (p) => opt(p.method ? AR_PAYMENT_METHOD_LABEL[p.method] : null) },
-    { key: 'reference', header: 'Reference', group: 'Cash', text: (p) => p.reference || '—' },
-    moneyCol('amount', 'Amount', (p) => p.amountCents, 'Cash'),
-    moneyCol('applied', 'Applied', (p) => p.appliedCents, 'Cash'),
-    moneyCol('unapplied', 'Unapplied', (p) => p.unappliedCents, 'Cash'),
-    { key: 'reverse', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 100 },
-  ]
-
-  const renderCell = (p: ArPaymentRecord, key: string): ReactNode => {
-    if (key === 'reverse') {
-      return (
-        <span className="flex justify-end">
-          {p.kind !== 'REVERSAL' && !p.reversedByPaymentId && (
-            <TmsButton
-              variant="ghost"
-              size="sm"
-              aria-label={`Reverse ${AR_PAYMENT_KIND_LABEL[p.kind].toLowerCase()} of ${formatCents(p.amountCents)}`}
-              disabled={busy}
-              onClick={() => onReverse(p)}
-            >
-              Reverse
-            </TmsButton>
-          )}
-          {p.reversedByPaymentId && <span className="text-xs tms-muted">Reversed</span>}
-        </span>
-      )
-    }
-    return columns.find((c) => c.key === key)?.text(p) ?? null
-  }
-
-  const shown = customer ? payments : []
-  return view<ArPaymentRecord>({
-    actions: (
-      <>
-        <TmsSelect
-          aria-label="Choose customer"
-          value={customer?.id ?? ''}
-          onChange={(e) => onCustomer(e.target.value || null)}
-        >
-          <option value="">Choose a customer…</option>
-          {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </TmsSelect>
-        {customer && (
-          <>
-            <TmsBadge tone="gray">{formatCents(openCents)} open</TmsBadge>
-            <TmsBadge tone="gray">{formatCents(unappliedCents)} unapplied</TmsBadge>
-            <TmsButton variant="primary" aria-label="Receive payment" disabled={busy} onClick={() => onPayment(customer.id, customer.name)}>
-              Receive payment
-            </TmsButton>
-            <TmsButton aria-label="New credit" disabled={busy} onClick={() => onCredit(customer.id, customer.name)}>
-              New credit
-            </TmsButton>
-          </>
-        )}
-      </>
-    ),
-    banner,
-    grid: {
-      gridId: 'ar-payments',
-      label: 'Payments and credits',
-      columns,
-      rows: shown,
-      rowKey: (p) => p.id,
-      renderCell,
-      cardLayout: { title: 'date', amount: 'amount', pills: ['kind'] },
-      empty: customer ? `No cash has been posted for ${customer.name}.` : 'Choose a customer to see their cash rows.',
     },
   })
 }

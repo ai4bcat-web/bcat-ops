@@ -51,7 +51,6 @@ function page(billedBy: ArBilledBy) {
     invoiced: { count: invoiced.length, total: formatCents(sum(invoiced.map((r) => r.balanceCents))) },
     paid: { count: paid.length, total: formatCents(sum(paid.map((r) => r.amountCents))) },
     aging: { count: sentOpen.length, total: formatCents(aging.totalCents) },
-    payments: null,
     review: 3,
   })
   return { summary, tabs: new Map(tabs.map((t) => [t.key, t])), chips: new Map(arCompactItems(summary).map((c) => [c.key, c])) }
@@ -87,8 +86,8 @@ describe('Invoicing tabs tie to the Receivables card', () => {
     expect(summary.openCents).toBe(10_000 + 2_500 + 7_000 + 3_000)
   })
 
-  it('Payments & credits has no badge until a customer is picked', () => {
-    expect(page('all').tabs.get('payments')?.count).toBeUndefined()
+  it('has no Payments & credits tab: it is the Payments received page now', () => {
+    expect(page('all').tabs.has('payments')).toBe(false)
   })
 
   it('paidInMonthOf counts each invoice once, by paid date', () => {
