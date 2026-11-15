@@ -35,13 +35,18 @@ export interface TmsListCardProps {
 
 const pct = (share: number) => `${Math.round(share * 100)}%`
 
+/** A stable key for a rendered amount: its text when it is a plain string or number. */
+function valueKey(value: unknown): string {
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : 'node'
+}
+
 export function TmsListCard({ title, total, rows, 'aria-label': ariaLabel, testId, className }: TmsListCardProps) {
   const hasShare = rows.some((r) => r.share != null)
   return (
     <section className={`tms-list-card${hasShare ? ' tms-list-card-shares' : ''}${className ? ` ${className}` : ''}`} aria-label={ariaLabel ?? title} data-testid={testId}>
       <div className="tms-list-card-head">
         <span className="tms-list-card-title">{title}</span>
-        {total != null ? <strong className="tms-list-card-total">{total}</strong> : null}
+        {total != null ? <strong key={valueKey(total)} className="tms-list-card-total">{total}</strong> : null}
       </div>
       <ul className="tms-list-card-rows">
         {rows.map((row) => {
@@ -57,7 +62,9 @@ export function TmsListCard({ title, total, rows, 'aria-label': ariaLabel, testI
                 {row.label}
                 {row.sub ? <span className="tms-list-row-sub-text">{row.sub}</span> : null}
               </span>
-              <span className="tms-list-row-value">{row.value ?? '—'}</span>
+              {/* Keyed on the amount so a new value mounts a fresh node: iOS Safari otherwise keeps the grid column sized for the
+                  first value it saw ("$0.00" while loading) and longer amounts spill past the card. */}
+              <span key={valueKey(row.value)} className="tms-list-row-value">{row.value ?? '—'}</span>
               {hasShare ? <span className="tms-list-row-share">{row.share == null ? '' : pct(row.share)}</span> : null}
               {row.share == null ? null : (
                 <span className="tms-list-row-bar" aria-hidden="true">
