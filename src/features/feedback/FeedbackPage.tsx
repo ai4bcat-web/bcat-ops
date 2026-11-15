@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, ImageIcon, Loader2, X, ArrowUp, ArrowDown } from 'lucide-react'
+import { isOpenQuestion } from '@/features/openQuestions/openQuestions'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -287,7 +288,8 @@ export function FeedbackPage() {
 
   const load = useCallback(() => {
     listFeedback()
-      .then(setItems)
+      // Accounting open questions are Feedback rows too; they live on their own page.
+      .then((rows) => setItems(rows.filter((r) => !isOpenQuestion(r))))
       .catch(() => toast.error('Could not load feedback'))
       .finally(() => setLoading(false))
   }, [])

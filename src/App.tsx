@@ -77,6 +77,7 @@ import { InvoiceDetail } from '@/features/ar/InvoiceDetail'
 import { BillDetail } from '@/features/ap/BillDetail'
 import { HoursPage } from '@/features/hours/HoursPage'
 import { VendorApPage } from '@/features/vendor-ap/VendorApPage'
+import { OpenQuestionsPage } from '@/features/openQuestions/OpenQuestionsPage'
 import { DispatchPage } from '@/features/dispatch/DispatchPage'
 import { PodsPage } from '@/features/pods/PodsPage'
 import { RequirePage, RequireAdmin, LandingRedirect, DriversAliasRedirect } from '@/components/RequirePage'
@@ -194,6 +195,7 @@ export default function App() {
                   <Route path="customers/follow-ups" element={<Navigate to="/tms/customers" replace />} />
                   <Route path="locations" element={<RequirePage page={['locations', 'tms']}><LocationsPage /></RequirePage>} />
                   <Route path="vendors" element={<RequirePage page={['vendorAp']}><VendorApPage /></RequirePage>} />
+                  <Route path="open-questions" element={<RequireAdmin><OpenQuestionsPage /></RequireAdmin>} />
                   {/* Hidden, not removed: no nav item, but four live deep links land here. */}
                   <Route path="workflows" element={<RequirePage page="tms"><DormantPage page="workflows"><WorkflowsPage /></DormantPage></RequirePage>} />
                   <Route path="workflows/runs/:id" element={<RequirePage page="tms"><DormantPage page="workflows"><RunTracePage /></DormantPage></RequirePage>} />
