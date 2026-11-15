@@ -78,6 +78,7 @@ import { BillDetail } from '@/features/ap/BillDetail'
 import { HoursPage } from '@/features/hours/HoursPage'
 import { VendorApPage } from '@/features/vendor-ap/VendorApPage'
 import { OpenQuestionsPage } from '@/features/openQuestions/OpenQuestionsPage'
+import { PaymentsReceivedPage } from '@/features/payments/PaymentsReceivedPage'
 import { DispatchPage } from '@/features/dispatch/DispatchPage'
 import { PodsPage } from '@/features/pods/PodsPage'
 import { RequirePage, RequireAdmin, LandingRedirect, DriversAliasRedirect } from '@/components/RequirePage'
@@ -194,6 +195,9 @@ export default function App() {
                   <Route path="customers/billing-setup" element={<RequirePage page={['customers', 'tms']}><DormantPage page="billingSetup"><BillingSetupPage /></DormantPage></RequirePage>} />
                   <Route path="customers/follow-ups" element={<Navigate to="/tms/customers" replace />} />
                   <Route path="locations" element={<RequirePage page={['locations', 'tms']}><LocationsPage /></RequirePage>} />
+                  {/* Every payment received, credit and debit, all customers (Ryne 2026-11-15); was Receivable's Payments & credits tab. */}
+                  <Route path="payments-received" element={<RequirePage page={['invoicing']}><PaymentsReceivedPage /></RequirePage>} />
+                  <Route path="invoicing/payments" element={<Navigate to="/tms/payments-received" replace />} />
                   <Route path="vendors" element={<RequirePage page={['vendorAp']}><VendorApPage /></RequirePage>} />
                   <Route path="open-questions" element={<RequireAdmin><OpenQuestionsPage /></RequireAdmin>} />
                   {/* Hidden, not removed: no nav item, but four live deep links land here. */}

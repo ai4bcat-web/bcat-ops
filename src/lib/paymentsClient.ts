@@ -57,3 +57,34 @@ export function listArPaymentsInWindow(from: string, to: string): Promise<ArPaym
 export function listApPaymentsInWindow(from: string, to: string): Promise<ApPaymentLine[]> {
   return scan<ApPaymentLine>('listApPayments', AP_FIELDS, 'paidAt', from, to)
 }
+
+/** One Aljex CRED/DEBT memo kept as history (`LegacyAljexRow`); `fields` is the raw AWSJSON. */
+export interface AljexMemoLine {
+  id: string
+  pro: string
+  kind: string
+  fields: unknown
+}
+
+/**
+ * Every Aljex credit/debit memo row (≈400 of ≈5.4k legacy rows). No index by kind, so a filtered
+ * scan read to the last page, like the ledgers above.
+ */
+export async function listAljexMemoRows(): Promise<AljexMemoLine[]> {
+  const out: AljexMemoLine[] = []
+  let nextToken: string | null = null
+  do {
+    const page: { listLegacyAljexRows: { items: AljexMemoLine[]; nextToken?: string | null } } = await gql(
+      `query ($filter: ModelLegacyAljexRowFilterInput, $nextToken: String) {
+        listLegacyAljexRows(filter: $filter, limit: 1000, nextToken: $nextToken) {
+          items { id pro kind fields }
+          nextToken
+        }
+      }`,
+      { filter: { or: [{ kind: { eq: 'MEMO_CRED' } }, { kind: { eq: 'MEMO_DEBT' } }] }, nextToken },
+    )
+    out.push(...(page.listLegacyAljexRows.items ?? []))
+    nextToken = page.listLegacyAljexRows.nextToken ?? null
+  } while (nextToken)
+  return out
+}

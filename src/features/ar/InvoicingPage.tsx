@@ -7,7 +7,7 @@
  * `/tms/invoicing/payable` lands on the second tab; the route guards still decide who may
  * open which side, and a caller who may only see one side is only offered that one.
  */
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import type { TmsTab } from '@/features/tms/kit'
 import { useAuth } from '@/hooks/useAuth'
 import { ApPage } from '@/features/ap/ApPage'
@@ -16,7 +16,7 @@ import { ArPage } from './ArPage'
 
 export function InvoicingPage() {
   const navigate = useNavigate()
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
   const { hasPageAccess } = useAuth()
 
   const payable = pathname.startsWith('/tms/invoicing/payable')
@@ -33,6 +33,13 @@ export function InvoicingPage() {
     tabs,
     active: payable ? 'payable' : factored ? 'factored' : 'receivable',
     onSelect: (key: string) => navigate(key === 'payable' ? '/tms/invoicing/payable' : key === 'factored' ? '/tms/invoicing/factored' : '/tms/invoicing'),
+  }
+
+  // Receivable's old "Payments & credits" tab is the Payments received page now (Ryne 2026-11-15).
+  const query = new URLSearchParams(search)
+  if (!payable && !factored && query.get('tab') === 'payments') {
+    const customer = query.get('customer')
+    return <Navigate to={`/tms/payments-received${customer ? `?customer=${encodeURIComponent(customer)}` : ''}`} replace />
   }
 
   if (payable) return <ApPage viewTabs={viewTabs} />
