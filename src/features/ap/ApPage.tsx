@@ -252,39 +252,45 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const partyQueue = useMemo(() => queueAll.filter(byParty), [queueAll, byParty])
   const ownedQueue = useMemo(() => partyQueue.filter(byDivision), [partyQueue, byDivision])
   const queueBills = useMemo(() => ownedQueue.filter((b) => inDueBucket(b.dueAt, asOf, owed.due)), [ownedQueue, asOf, owed.due])
+  // The totals always count every open bill, Aljex ones included: that money is still owed. Only
+  // the lists sit behind the Aljex toggle.
+  const totalsAll = useMemo(() => payablesQueue(open.bills, facts, { includeAljex: true }), [open.bills, facts])
+  const totalsParty = useMemo(() => totalsAll.filter(byParty), [totalsAll, byParty])
+  const totalsOwned = useMemo(() => totalsParty.filter(byDivision), [totalsParty, byDivision])
+  const totalsBills = useMemo(() => totalsOwned.filter((b) => inDueBucket(b.dueAt, asOf, owed.due)), [totalsOwned, asOf, owed.due])
   // The totals follow the carrier and division filters; the division card keeps every division's
   // share (of the selected carriers) so there is always a division to pick.
   const summary = useMemo(() => {
     const narrowed = apSummary({
-      expected: billsExpected(ownedQueue),
-      aging: billsAging(ownedQueue),
-      selected: billsSelected(ownedQueue),
+      expected: billsExpected(totalsOwned),
+      aging: billsAging(totalsOwned),
+      selected: billsSelected(totalsOwned),
       paidRecent: paidRecent.filter((b) => byParty(b) && byDivision(b)),
       facts,
       asOf,
     })
     const shares = apSummary({
-      expected: billsExpected(partyQueue),
-      aging: billsAging(partyQueue),
-      selected: billsSelected(partyQueue),
+      expected: billsExpected(totalsParty),
+      aging: billsAging(totalsParty),
+      selected: billsSelected(totalsParty),
       paidRecent: [],
       facts,
       asOf,
     })
     return { ...narrowed, byDivision: shares.byDivision }
-  }, [ownedQueue, partyQueue, paidRecent, byParty, byDivision, facts, asOf])
-  const owedSummary = useMemo(() => summarizeOwed(ownedQueue, asOf), [ownedQueue, asOf])
+  }, [totalsOwned, totalsParty, paidRecent, byParty, byDivision, facts, asOf])
+  const owedSummary = useMemo(() => summarizeOwed(totalsOwned, asOf), [totalsOwned, asOf])
   const carrierOptions: OwedOption[] = useMemo(() => partyOptions([
     ...open.bills.map((b) => ({ id: b.carrierId, name: b.carrierName })),
     ...monthBills.map((b) => ({ id: b.carrierId, name: b.carrierName })),
   ]), [open.bills, monthBills])
   const divisionOptions: OwedOption[] = useMemo(() => {
-    const all = apSummary({ expected: billsExpected(queueAll), aging: billsAging(queueAll), selected: billsSelected(queueAll), paidRecent: [], facts, asOf })
+    const all = apSummary({ expected: billsExpected(totalsAll), aging: billsAging(totalsAll), selected: billsSelected(totalsAll), paidRecent: [], facts, asOf })
     return [...all.byDivision]
       .sort((a, b) => divisionName(a.division).localeCompare(divisionName(b.division)) || (a.subdivision ? 1 : 0) - (b.subdivision ? 1 : 0)
         || divisionName(a.subdivision).localeCompare(divisionName(b.subdivision)))
       .map((slice) => ({ key: slice.key, label: divisionName(slice.subdivision ?? slice.division), sub: Boolean(slice.subdivision) }))
-  }, [queueAll, facts, asOf, divisionName])
+  }, [totalsAll, facts, asOf, divisionName])
   const carrierLabel = (id: string) => carrierOptions.find((o) => o.key === id)?.label ?? id
   const divisionLabel = (key: string) => divisionOptions.find((o) => o.key === key)?.label ?? key
   const expectedBills = useMemo(() => billsExpected(queueBills), [queueBills])
@@ -468,9 +474,9 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     </>
   )
   const onCarrier = (id: string | null) => setOwed({ ...owed, parties: id ? [id] : [] })
-  const apTabCard = tab === 'expected' ? <ApExpectedCard stats={apExpectedStats(expectedBills, reviewByShipment, asOf)} />
+  const apTabCard = tab === 'expected' ? <ApExpectedCard stats={apExpectedStats(billsExpected(totalsBills), reviewByShipment, asOf)} />
     : tab === 'aging' ? (
-      <ApAgingCard stats={apAgingStats(agingBills, asOf)} due={owed.due} onDue={(due) => setOwed({ ...owed, due })} parties={owed.parties} onParty={onCarrier} />
+      <ApAgingCard stats={apAgingStats(billsAging(totalsBills), asOf)} due={owed.due} onDue={(due) => setOwed({ ...owed, due })} parties={owed.parties} onParty={onCarrier} />
     )
     : tab === 'paid' ? <ApPaidCard stats={apPaidStats(settled, facts, apPaymentLines)} monthLabel={monthLabel(month)} />
     : tab === 'review' ? <ReviewReasonCard counts={reviewReasonCounts(needsReview.rows)} total={needsReview.rows.length} />

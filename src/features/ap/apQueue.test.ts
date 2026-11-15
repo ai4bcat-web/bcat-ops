@@ -121,5 +121,21 @@ describe('apSummary', () => {
     ])
     expect(inDivision(aging[0], facts, 'ASSETS/OWNER_OPERATOR')).toBe(true)
     expect(inDivision(selected[0], facts, 'ASSETS')).toBe(false)
+    expect(s.fromAljex).toEqual({ count: 0, cents: 0 })
+  })
+
+  it('counts bills brought over from Aljex in every total and says how much of open AP they are', () => {
+    const facts = new Map<string, BillShipmentFacts>([['s1', delivered], ['s2', delivered]])
+    const all = [
+      bill({ id: 'n', balanceCents: 10_000 }),
+      bill({ id: 'x', shipmentId: 's2', status: 'TO_BE_PAID', createdBy: 'aljex-import', recordedBy: 'aljex-import', dueAt: '2026-10-01', balanceCents: 25_000 }),
+    ]
+    // The totals are built from the queue with Aljex included, whatever the list toggle says.
+    const queue = payablesQueue(all, facts, { includeAljex: true })
+    const s = apSummary({ expected: queue.filter((b) => b.id === 'n'), aging: queue.filter((b) => b.id === 'x'), selected: [], paidRecent: [], facts, asOf: '2026-11-12' })
+    expect(s.open).toEqual({ count: 2, cents: 35_000 })
+    expect(s.fromAljex).toEqual({ count: 1, cents: 25_000 })
+    expect(s.pastDue).toEqual({ count: 1, cents: 25_000 })
+    expect(payablesQueue(all, facts, { includeAljex: false }).map((b) => b.id)).toEqual(['n'])
   })
 })
