@@ -30,6 +30,9 @@ export function ApSummaryStrip({ summary, divisionName, division, onDivision, on
         testId="ap-summary"
         rows={[
           { key: 'open', label: 'Open AP', value: formatCents(s.open.cents), sub: bills(s.open.count) },
+          ...(s.fromAljex.count > 0
+            ? [{ key: 'aljex', label: 'From Aljex', value: formatCents(s.fromAljex.cents), sub: bills(s.fromAljex.count), title: `${bills(s.fromAljex.count)} brought over from Aljex · counted in every total here` }]
+            : []),
           { key: 'expected', label: 'Expected', value: formatCents(s.expected.cents), sub: bills(s.expected.count), title: `${bills(s.expected.count)} · needs invoice date`, tone: s.expected.count ? 'warn' : 'default', onClick: () => onTab('expected') },
           { key: 'aging', label: 'Aging', value: formatCents(s.aging.cents), sub: bills(s.aging.count), onClick: () => onTab('aging') },
           { key: 'selected', label: 'Selected', value: formatCents(s.selected.cents), sub: bills(s.selected.count), title: `${bills(s.selected.count)} · next payment run`, onClick: () => onTab('selected') },

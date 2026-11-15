@@ -315,6 +315,8 @@ export interface ApDivisionSlice {
 
 export interface ApSummary {
   open: ApMoney
+  /** The part of `open` brought over from Aljex (counted in the totals even while the lists hide it). */
+  fromAljex: ApMoney
   expected: ApMoney
   aging: ApMoney
   selected: ApMoney
@@ -413,6 +415,7 @@ export function apSummary(input: {
 
   return {
     open: money(open),
+    fromAljex: money(open.filter(isAljexBill)),
     expected: money(expected),
     aging: money(aging),
     selected: money(selected),
