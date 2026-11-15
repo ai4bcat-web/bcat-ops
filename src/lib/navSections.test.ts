@@ -80,6 +80,14 @@ describe('buildNavSections', () => {
     expect(profiles({ isAdmin: true })).toEqual(expect.arrayContaining(['Drivers', 'Assets']))
   })
 
+  it('Accounting > Open questions is for the owner and ADMINs only, whatever accounting pages someone holds', () => {
+    const accounting = (opts: { isOwner?: boolean; isAdmin?: boolean }) =>
+      buildNavSections({ divisions: FOUR, hasPageAccess: () => true, ...opts }).pinned.find((i) => i.label === 'Accounting')?.children?.map((c) => c.label) ?? []
+    expect(accounting({})).not.toContain('Open questions')
+    expect(accounting({ isAdmin: true })).toContain('Open questions')
+    expect(accounting({ isOwner: true })).toContain('Open questions')
+  })
+
   it('offers a Factoring entry (the Factored view) only to someone with Factoring but not Invoicing', () => {
     const accounting = (keys: string[]) =>
       buildNavSections({ divisions: FOUR, hasPageAccess: (k: string) => keys.includes(k) }).pinned.find((i) => i.label === 'Accounting')?.children?.map((c) => [c.label, c.to]) ?? []
@@ -105,7 +113,7 @@ describe('buildNavSections', () => {
     expect(kids('Fleet manager').slice(0, 5)).toEqual(['Fleet manager dashboard', 'Maintenance', 'Invoices', 'Asset documents', 'Fuel'])
     // Amazon disputes moved to Calendar; Expenses and Insurance to Company (Ryne 2026-11-14).
     for (const gone of ['Amazon disputes', 'Expenses', 'Insurance']) expect(kids('Fleet manager')).not.toContain(gone)
-    expect(kids('Accounting')).toEqual(['Accounts Receivable', 'Accounts Payable', 'Vendors'])
+    expect(kids('Accounting')).toEqual(['Accounts Receivable', 'Accounts Payable', 'Vendors', 'Open questions'])
     expect(kids('Settings')).toEqual([
       'General & automation', 'Company', 'Divisions & ownership', 'Users & roles', 'Integrations', 'AI agents',
       'Spot quoter & e-mail', 'Carrier Sales', 'Commissions', 'Reports', 'Audit log', 'Compliance', 'Platform health', 'Demo',

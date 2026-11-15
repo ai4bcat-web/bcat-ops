@@ -37,6 +37,7 @@ describe('page -> models table', () => {
 /** The routes that open a page on production models alone (or delegate to a component that guards itself). */
 const LIVE_ROUTES = new Set([
   'customers', 'locations', 'vendors', 'factors',
+  'open-questions', // Feedback rows: a production model
   'brokerage/*', // BrokeragePage guards each tab
   // BrokeragePage tabs
   'brokerage:', 'brokerage:users', 'brokerage:audit', 'brokerage:carrier-sales', 'brokerage:company/*', 'brokerage:*',

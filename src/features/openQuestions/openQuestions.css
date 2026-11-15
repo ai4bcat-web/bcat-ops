@@ -1,0 +1,32 @@
+/* Accounting → Open questions. One card per question; the same layout on a phone, an iPad and a desktop. */
+.oq-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.oq-toolbar .tms-seg { max-width: 100%; overflow-x: auto; }
+.oq-search { flex: 1 1 200px; min-width: 0; max-width: 320px; }
+.oq-list { display: grid; gap: 12px; min-width: 0; }
+.oq-card { min-width: 0; }
+.oq-card .tms-card-head { flex-wrap: wrap; gap: 6px 12px; align-items: flex-start; }
+.oq-card .tms-card-head h3 { min-width: 0; flex: 1 1 260px; }
+.oq-title { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+.oq-tags { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.oq-body { display: grid; gap: 10px; min-width: 0; font-size: 13px; color: var(--tms-text); }
+.oq-refs { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.oq-ref { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-width: 0; overflow-wrap: anywhere; }
+.oq-pro { font-weight: 600; font-variant-numeric: tabular-nums; }
+a.oq-pro, .oq-link { color: var(--tms-primary); text-decoration: none; }
+a.oq-pro:hover, .oq-link:hover { text-decoration: underline; }
+.oq-amount { font-variant-numeric: tabular-nums; }
+.oq-compare { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0; }
+.oq-compare dt { color: var(--tms-muted); font-weight: 500; }
+.oq-compare dd { margin: 0; overflow-wrap: anywhere; }
+.oq-context { margin: 0; color: var(--tms-muted); overflow-wrap: anywhere; line-height: 1.45; }
+.oq-label { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tms-muted); }
+.oq-notes p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.oq-body .tms-textarea { width: 100%; box-sizing: border-box; }
+.oq-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.oq-source { font-size: 11px; }
+@media (max-width: 640px) {
+  .oq-search { max-width: none; flex-basis: 100%; }
+  .oq-compare { grid-template-columns: minmax(0, 1fr); }
+  .oq-compare dd { margin-bottom: 4px; }
+  .oq-actions .tms-btn { flex: 1 1 auto; min-height: 44px; }
+}
