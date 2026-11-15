@@ -83,7 +83,8 @@ export function TmsKpiCard({
           </span>
         ) : null}
       </div>
-      <strong className={`tms-kpi-card-value${valueTone === 'default' ? '' : ` tms-kpi-value-${valueTone}`}`}>{value ?? '—'}</strong>
+      {/* Keyed on the amount so iOS Safari re-measures it when the value changes (see TmsListCard). */}
+      <strong key={typeof value === 'string' || typeof value === 'number' ? String(value) : 'node'} className={`tms-kpi-card-value${valueTone === 'default' ? '' : ` tms-kpi-value-${valueTone}`}`}>{value ?? '—'}</strong>
       {showDelta ? (
         <div className="tms-kpi-card-foot">
           <span className={`tms-delta tms-delta-${tone}`}>

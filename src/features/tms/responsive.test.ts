@@ -91,3 +91,10 @@ describe('responsive.css parses', () => {
     expect(depth).toBe(0)
   })
 })
+
+describe('iOS Safari: nothing pans the page sideways', () => {
+  it('clips sideways overflow at the document root on tablets and phones only', () => {
+    const root = readFileSync(new URL('../../index.css', import.meta.url), 'utf8')
+    expect(root).toMatch(/@media \(max-width: 1100px\) \{\s*html \{ overflow-x: clip; \}\s*\}/)
+  })
+})

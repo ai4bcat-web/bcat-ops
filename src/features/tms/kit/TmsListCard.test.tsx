@@ -4,6 +4,16 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { TmsHeadBand, TmsListCard } from './TmsListCard'
 
 describe('TmsListCard', () => {
+  it('mounts a fresh amount node when the value changes, so iOS Safari re-measures the column', () => {
+    const rows = (v: string) => [{ key: 'a', label: 'Open AP', value: v }]
+    const { rerender } = render(<TmsListCard title="Payables" total="$0.00" rows={rows('$0.00')} />)
+    const before = screen.getByText('$0.00', { selector: '.tms-list-row-value' })
+    rerender(<TmsListCard title="Payables" total="$24,182.21" rows={rows('$24,182.21')} />)
+    const after = screen.getByText('$24,182.21', { selector: '.tms-list-row-value' })
+    expect(after).not.toBe(before)
+    expect(before.isConnected).toBe(false)
+  })
+
   it('renders label, sub-text and value rows; a clickable row is a button', () => {
     const onClick = vi.fn()
     render(<TmsListCard title="Payables" rows={[
