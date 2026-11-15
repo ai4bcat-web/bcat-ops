@@ -32,6 +32,16 @@ import { otrStatusMeta, localStatusFor } from '../../../src/lib/otrInvoiceStatus
 
 type Row = Record<string, unknown>
 
+/**
+ * A row OTR has Approved (its last word) that our queue still shows as waiting or short a
+ * document. Only Approved is repaired: Dead and Duplicate are terminal but are not money, so
+ * they stay where the office can see them.
+ */
+export function needsFactoredRepair(row: Row): boolean {
+  if (otrStatusMeta(row.otrStatus as string | undefined)?.code !== 3) return false
+  return row.status === 'PENDING_WITH_OTR' || row.status === 'NEED_TO_FACTOR'
+}
+
 export const handler = async () => {
   const client = new OtrClient({
     baseUrl: process.env.OTR_BASE_URL || OTR_STAGING_BASE,
@@ -71,14 +81,33 @@ export const handler = async () => {
     const invoiceId = String(row.otrInvoiceId)
     // Approved, Dead and Duplicate are OTR's last words on an invoice. Asking again costs
     // a paid API call to be told the same thing.
-    if (otrStatusMeta(row.otrStatus as string | undefined)?.terminal) continue
+    if (otrStatusMeta(row.otrStatus as string | undefined)?.terminal) {
+      // A finished row is not asked about again, but its own status still has to agree with
+      // OTR's last word: four Approved rows sat in Pending with OTR because the skip came first.
+      if (needsFactoredRepair(row)) {
+        const t = new Date().toISOString()
+        await ddb.send(
+          new UpdateCommand({
+            TableName: FACTORING_TABLE,
+            Key: { id },
+            UpdateExpression: 'SET #st = :f, factoredAt = if_not_exists(factoredAt, :t), updatedAt = :t',
+            ConditionExpression: '#st = :was',
+            ExpressionAttributeNames: { '#st': 'status' },
+            ExpressionAttributeValues: { ':f': 'FACTORED', ':t': t, ':was': row.status },
+          }),
+        ).then(() => { changed++; console.log('[otr-status-sync] repaired', { pro: row.proNumber, invoiceId }) })
+          .catch((e) => console.error('[otr-status-sync] repair failed', { pro: row.proNumber, error: String(e) }))
+      }
+      continue
+    }
     // Taken out of the queue by hand: OTR's board no longer decides where the row lives.
     if (row.status === 'MANUAL_INVOICE' || row.status === 'INVOICED_MANUALLY') continue
     try {
       const d = await client.getInvoice(invoiceId)
       // Nothing moved — skip the write so updatedAt stays meaningful.
       if (d.status && d.status === row.otrStatus) continue
-      const docsShort = String(row.status ?? '') === 'NEED_TO_FACTOR'
+      // Approved by OTR is factored, documents or not: a short row stays red only while OTR has not bought it.
+      const docsShort = String(row.status ?? '') === 'NEED_TO_FACTOR' && localStatusFor(d.status) !== 'FACTORED'
 
       await ddb.send(
         new UpdateCommand({

@@ -25,7 +25,7 @@ export function InvoicingPage() {
   // Accounting pages open only on their own grant (src/lib/accountingAccess.ts), so each view does too.
   const tabs: TmsTab[] = [
     ...(hasPageAccess('invoicing') ? [{ key: 'receivable', label: 'Receivable' }] : []),
-    ...(hasPageAccess('factoring') ? [{ key: 'factored', label: 'Factored' }] : []),
+    ...(hasPageAccess('factoring') ? [{ key: 'factored', label: 'Factoring' }] : []),
     ...(hasPageAccess('carrierPay') ? [{ key: 'payable', label: 'Payable' }] : []),
   ]
 

@@ -2,7 +2,7 @@
  * The Invoicing status tabs' labels and badges (Ryne 2026-11-15: every badge must tie to a number on
  * the cards). One set of definitions, shared with the Receivables card:
  *  - Invoiced = sent, unpaid invoices. With Billed: All it is "Open AR"; Manually invoiced is
- *    "Pending with shippers"; Factored is "Pending with OTR". The label says which.
+ *    "Pending with shippers"; Factoring is "Factored, open". The label says which.
  *  - Paid = invoices settled in the chosen month by paid date. With Billed: All and this month it is
  *    "Collected this month".
  *  - Aging = the same invoices as "Open AR" (any billing), counted in invoices, not customers.
@@ -52,7 +52,7 @@ export function arTabs(input: {
     { key: 'invoiced', label: `${INVOICED_LABEL[billedBy]} · ${input.invoiced.total} open`, count: input.invoiced.count, testId: 'ar-tab-invoiced',
       title: billedBy === 'all' ? 'Sent and unpaid. Same as "Open AR".'
         : billedBy === 'manual' ? 'Sent to the customer and unpaid. Same as "Pending with shippers". Pick Billed: All to see OTR too.'
-          : 'Factored through OTR and unpaid. Same as "Pending with OTR". Pick Billed: All to see shippers too.' },
+          : 'Factored through OTR and unpaid. Same as "Factored, open". Pick Billed: All to see shippers too.' },
     { key: 'paid', label: `${PAID_LABEL[billedBy](shortMonth(input.paidMonthLabel))} · ${input.paid.total}`, count: input.paid.count, testId: 'ar-tab-paid',
       title: `Invoices paid in full in ${input.paidMonthLabel}, by paid date.${billedBy === 'all' ? ' This month it is the same as "Collected this month".' : ''}` },
     { key: 'payments', label: 'Payments & credits', count: input.payments ?? undefined, testId: 'ar-tab-payments',
@@ -69,7 +69,8 @@ export function arCompactItems(summary: ArSummary): TmsSummaryChip[] {
   const inv = (n: number) => `${n} ${n === 1 ? 'invoice' : 'invoices'}`
   return [
     { key: 'open', label: 'Open AR', value: formatCents(summary.openCents), sub: inv(summary.openCount) },
-    { key: 'otr', label: 'Pending with OTR', value: formatCents(summary.pendingOtrCents), sub: inv(summary.pendingOtrCount) },
+    { key: 'otr', label: 'Factored, open', value: formatCents(summary.pendingOtrCents), sub: inv(summary.pendingOtrCount) },
+    { key: 'otr-waiting', label: 'Waiting on OTR approval', value: formatCents(summary.factored.WAITING.cents), sub: inv(summary.factored.WAITING.count) },
     { key: 'shippers', label: 'Pending with shippers', value: formatCents(summary.pendingShippersCents), sub: inv(summary.pendingShippersCount) },
     { key: 'late', label: 'Late', value: formatCents(summary.lateCents), sub: inv(summary.lateCount), tone: summary.lateCents > 0 ? 'bad' : 'default' },
     { key: 'month', label: 'Collected this month', value: formatCents(summary.collectedMonthCents), sub: inv(summary.collectedMonthCount) },

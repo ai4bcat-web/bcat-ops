@@ -52,12 +52,15 @@ import { ResendToOtrDialog } from './ResendToOtrDialog'
 import { offersResend } from '@/lib/factoringResubmit'
 import { chicagoDateStr } from '@/lib/date'
 import { FactoringCards } from './FactoringCards'
+import { useOpenInvoices } from '@/hooks/useOpenInvoices'
+import { FACTORED_BUCKET_LABEL, isWaitingOnOtr, waitingOnOtrTotal } from '@/lib/factoredOpen'
+import { amountOf } from './factoringQueueStats'
 
 // ── Status labels ────────────────────────────────────────────────────────────
 
 const FACTORING_STATUS_LABEL: Record<FactoringItemStatus, string> = {
   NEED_TO_FACTOR:    'Need to factor',
-  PENDING_WITH_OTR:  'Pending with OTR',
+  PENDING_WITH_OTR:  'Submitted to OTR',
   MANUAL_INVOICE:    'Invoice manually',
   FACTORED:          'Factored',
   INVOICED_MANUALLY: 'Invoiced manually',
@@ -221,11 +224,14 @@ function AmountCell({ item, onEdit }: { item: FactoringItem; onEdit: () => void 
  * are called out beside the figure rather than folded into it: a total that silently
  * swallows what it could not price reads as complete and is not.
  */
-function StatusTotals({ items }: { items: FactoringItem[] }) {
+function StatusTotals({ items, openBalanceByItemId }: { items: FactoringItem[]; openBalanceByItemId: ReadonlyMap<string, number> }) {
   const totals = totalsByStatus(items)
+  // Waiting on OTR approval is the same set and money as the Receivables card's line of that name.
+  const waiting = waitingOnOtrTotal(items, openBalanceByItemId, amountOf)
+  totals.PENDING_WITH_OTR = { count: waiting.count, total: waiting.cents / 100, missingRate: 0 }
   const buckets = [
     ['NEED_TO_FACTOR', 'Need to factor'],
-    ['PENDING_WITH_OTR', 'Pending with OTR'],
+    ['PENDING_WITH_OTR', FACTORED_BUCKET_LABEL.WAITING],
     ['FACTORED', 'Factored'],
     ['ALL', 'All'],
   ] as const
@@ -487,10 +493,21 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const [settings, setSettings] = useState<TmsSettings | null>(null)
   useEffect(() => { getTmsSettings().then(setSettings).catch(() => setSettings(null)) }, [])
 
+  // Open invoice balances by queue row, so the queue's money matches the Receivables card's.
+  const openInvoices = useOpenInvoices()
+  const openBalanceByItemId = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const inv of openInvoices.invoices) {
+      if (!inv.factoringItemId || (inv.status !== 'ISSUED' && inv.status !== 'PARTIAL')) continue
+      map.set(inv.factoringItemId, (map.get(inv.factoringItemId) ?? 0) + inv.balanceCents)
+    }
+    return map
+  }, [openInvoices.invoices])
+
   const counts = useMemo(() => ({
     ALL: items.filter((i) => i.status !== 'ARCHIVED').length,
     NEED_TO_FACTOR: items.filter((i) => i.status === 'NEED_TO_FACTOR').length,
-    PENDING_WITH_OTR: items.filter((i) => i.status === 'PENDING_WITH_OTR').length,
+    PENDING_WITH_OTR: items.filter((i) => isWaitingOnOtr(i)).length,
     MANUAL_INVOICE: items.filter((i) => i.status === 'MANUAL_INVOICE').length,
     FACTORED: items.filter((i) => i.status === 'FACTORED').length,
     OTR_REJECTED: items.filter((i) => inOtrRejectedTab(i)).length,
@@ -509,7 +526,8 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         rejectedOnly ? otrRejection(item) != null
           : activeTab === 'ALL' ? item.status !== 'ARCHIVED'
             : activeTab === 'OTR_REJECTED' ? inOtrRejectedTab(item)
-              : item.status === activeTab,
+              : activeTab === 'PENDING_WITH_OTR' ? isWaitingOnOtr(item)
+                : item.status === activeTab,
       )
       .filter((item) => activeTab !== 'PENDING_WITH_OTR' || !otrFilter || otrLabelOf(item) === otrFilter)
       .filter((item) => matchesSearch(item, search))
@@ -524,7 +542,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const otrBreakdown = useMemo(() => {
     const counts = new Map<string, { count: number; attention: boolean }>()
     for (const item of items) {
-      if (item.status !== 'PENDING_WITH_OTR') continue
+      if (!isWaitingOnOtr(item)) continue
       const label = otrLabelOf(item)
       const cur = counts.get(label) ?? { count: 0, attention: otrStatusMeta(item.otrStatus)?.needsAttention ?? false }
       counts.set(label, { ...cur, count: cur.count + 1 })
@@ -879,7 +897,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
             size="sm"
             active={activeTab}
             onSelect={(key) => { setActiveTab(key as FilterKey); resetPaging() }}
-            tabs={FILTER_ORDER.map((key) => ({ key, label: key === 'ALL' ? 'All' : key === 'OTR_REJECTED' ? 'OTR rejected' : FACTORING_STATUS_LABEL[key], count: counts[key] }))}
+            tabs={FILTER_ORDER.map((key) => ({ key, label: key === 'ALL' ? 'All' : key === 'OTR_REJECTED' ? 'OTR rejected' : key === 'PENDING_WITH_OTR' ? FACTORED_BUCKET_LABEL.WAITING : FACTORING_STATUS_LABEL[key], count: counts[key] }))}
           />
           <ClearFiltersButton count={filterCount} onClear={() => { setSearch(''); setOtrFilter(null); setDense({}); resetPaging() }} />
           <span className="tms-dense-spacer" />
@@ -928,8 +946,8 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           </div>
         )}
         {/* What the queue is worth, not just how many rows are in it. */}
-        <StatusTotals items={items} />
-        <FactoringCards items={items} asOf={chicagoDateStr(new Date())} customerName={(item) => customerOf(item).name}
+        <StatusTotals items={items} openBalanceByItemId={openBalanceByItemId} />
+        <FactoringCards items={items} openBalanceByItemId={openBalanceByItemId} asOf={chicagoDateStr(new Date())} customerName={(item) => customerOf(item).name}
           onTab={(key) => { setActiveTab(key); resetPaging() }} />
         <div className="tms-dense-body">
           <DenseGrid<FactoringItem>

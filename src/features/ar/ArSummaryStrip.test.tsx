@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { ArSummaryStrip } from './ArSummaryStrip'
 import { divisionRows } from './arDivisionRows'
 import type { ArDivisionSlice, ArSummary } from './arSummary'
+import { emptyFactoredBuckets } from '@/lib/factoredOpen'
 
 const slice = (over: Partial<ArDivisionSlice>): ArDivisionSlice => ({
   key: 'BROKERAGE', label: 'BCAT Logistics', cents: 0, division: 'BROKERAGE', divisionLabel: 'BCAT Logistics', subLabel: null, count: 1, ...over,
@@ -11,6 +12,7 @@ const slice = (over: Partial<ArDivisionSlice>): ArDivisionSlice => ({
 
 const summary = (byDivision: ArDivisionSlice[]): ArSummary => ({
   pendingOtrCents: 300_00, pendingOtrCount: 2,
+  factored: { ...emptyFactoredBuckets(), WAITING: { count: 1, cents: 100_00 }, APPROVED: { count: 1, cents: 200_00 } },
   pendingShippersCents: 700_00, pendingShippersCount: 3,
   lateCents: 100_00, lateCount: 1,
   otrDaysToPay: 4.1, shipperDaysToPay: 33.8,
@@ -41,8 +43,12 @@ describe('ArSummaryStrip', () => {
   it('renders stat cards and filters by a division row', () => {
     const onDivision = vi.fn()
     render(<div className="tms-shell"><ArSummaryStrip summary={summary([slice({ cents: 1000_00 })])} division={null} onDivision={onDivision} /></div>)
-    expect(screen.getByText('Pending with OTR')).toBeTruthy()
+    expect(screen.getByText('Factored, open')).toBeTruthy()
     expect(screen.getByText('2 invoices')).toBeTruthy()
+    expect(screen.getByText('Waiting on OTR approval')).toBeTruthy()
+    expect(screen.getByText('Approved by OTR, not marked paid')).toBeTruthy()
+    // Empty buckets are not listed.
+    expect(screen.queryByText('Manually invoiced')).toBeNull()
     expect(screen.getByText('4.1 d')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /BCAT Logistics/ }))
     expect(onDivision).toHaveBeenCalledWith('BROKERAGE')

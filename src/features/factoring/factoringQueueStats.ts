@@ -1,5 +1,5 @@
 /**
- * The Pending with OTR and OTR rejected cards on Invoicing → Factored (Ryne 2026-11-14). Pure:
+ * The Waiting on OTR approval and OTR rejected cards on Invoicing → Factoring (Ryne 2026-11-14). Pure:
  * the page passes the queue rows it already holds.
  *
  * Rejection dates: a queue row carries no "rejected at", so "the last 30 days" reads the row's
@@ -11,6 +11,7 @@
 import type { FactoringItem } from '@/types'
 import { isOtrRejected, otrRejection, otrRejectionReason } from '@/lib/otrRejection'
 import { invoiceAmountOf } from './factoringTotals'
+import { isWaitingOnOtr } from '@/lib/factoredOpen'
 
 const DAY_MS = 86_400_000
 const dayNum = (iso: string | null | undefined): number | null => {
@@ -28,9 +29,10 @@ export interface PendingOtrStats {
   oldest: { proNumber: string; days: number } | null
 }
 
-export function pendingOtrStats(items: readonly FactoringItem[], asOf: string): PendingOtrStats {
+/** Waiting on OTR approval: the same rows and money as the Receivables card's line of that name. */
+export function pendingOtrStats(items: readonly FactoringItem[], asOf: string, openBalanceByItemId: ReadonlyMap<string, number> = new Map()): PendingOtrStats {
   const today = dayNum(asOf) ?? 0
-  const pending = items.filter((i) => i.status === 'PENDING_WITH_OTR')
+  const pending = items.filter((i) => isWaitingOnOtr(i))
   const waits: number[] = []
   let oldest: PendingOtrStats['oldest'] = null
   for (const i of pending) {
@@ -42,7 +44,7 @@ export function pendingOtrStats(items: readonly FactoringItem[], asOf: string): 
   }
   return {
     count: pending.length,
-    dollars: pending.reduce((s, i) => s + amountOf(i), 0),
+    dollars: pending.reduce((s, i) => s + (openBalanceByItemId.has(i.id) ? (openBalanceByItemId.get(i.id) ?? 0) / 100 : amountOf(i)), 0),
     avgDaysWaiting: waits.length ? Math.round((waits.reduce((a, b) => a + b, 0) / waits.length) * 10) / 10 : null,
     oldest,
   }
