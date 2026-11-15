@@ -17,10 +17,11 @@ const submitPod = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const submitRatecon = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const fetchCurrentLoad = vi.hoisted(() => vi.fn().mockResolvedValue(null))
 const fetchSubmissions = vi.hoisted(() => vi.fn().mockResolvedValue([]))
+const fetchRecentLoads = vi.hoisted(() => vi.fn().mockResolvedValue([]))
 
 vi.mock('../driverApi', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
-  submitStandalonePod, submitPod, submitRatecon, fetchCurrentLoad, fetchSubmissions,
+  submitStandalonePod, submitPod, submitRatecon, fetchCurrentLoad, fetchSubmissions, fetchRecentLoads,
 }))
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 // Thumbnails build object URLs; jsdom has no implementation.

@@ -249,9 +249,9 @@ describe('sending paperwork for a load that is not listed', () => {
     render(<MemoryRouter><SettlementPage /></MemoryRouter>)
 
     await waitFor(() => expect(screen.getByText('No trips this week')).toBeTruthy())
-    expect(screen.getByRole('button', { name: /Send a POD/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Pick the load and send a POD/ })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Send a rate confirmation/ })).toBeNull()
-    expect(screen.getByText(/Paperwork for a load that is not listed/)).toBeTruthy()
+    expect(screen.getByText(/POD for a load that is not on this week/)).toBeTruthy()
   })
 
   it('offers a way through when there is no settlement data at all', async () => {
@@ -259,7 +259,7 @@ describe('sending paperwork for a load that is not listed', () => {
     render(<MemoryRouter><SettlementPage /></MemoryRouter>)
 
     await waitFor(() => expect(screen.getByText('No settlement data yet')).toBeTruthy())
-    expect(screen.getByRole('button', { name: /Send a POD anyway/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Send a POD for a load/ })).toBeTruthy()
   })
 })
 

@@ -32,6 +32,7 @@ const apiMocks = vi.hoisted(() => {
     submitPod: vi.fn(),
     fetchSubmissions: vi.fn(),
     fetchCurrentLoad: vi.fn(),
+    fetchRecentLoads: vi.fn().mockResolvedValue([]),
     attachSubmissionToLoad: vi.fn(),
     DriverApiError,
     ResumableDriverApiError,

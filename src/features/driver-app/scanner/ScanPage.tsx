@@ -21,15 +21,18 @@ import {
   attachSubmissionToLoad,
   DriverApiError,
   fetchCurrentLoad,
+  fetchRecentLoads,
   fetchSubmissions,
   ResumableDriverApiError,
   submitPod,
   submitStandalonePod,
   type PendingPage,
+  type RecentLoad,
   type SubmissionKind,
   type SubmissionSummary,
 } from '../driverApi'
 import { PagePicker } from './PagePicker'
+import { findLoadByPro, loadLabel } from './loadTarget'
 import { useDriverProgram } from '../useDriverProgram'
 import { LOAD_EXTRA_DOC_TYPES, docTypeLabel, driverAdditionalDocType } from '@/lib/loadRequiredDocs'
 
@@ -50,6 +53,13 @@ export default function ScanPage() {
   const program = useDriverProgram()
   const homePath = program === 'PAPERWORK' ? '/driver/paperwork' : '/driver/settlement'
   const homeLabel = program === 'PAPERWORK' ? 'Back to my loads' : 'Back to my settlement'
+  /*
+   * Owner operators send paperwork from the load itself — a row on their settlement, or a
+   * load picked from their own list — never by typing a number. A reference typed at a dock
+   * (a broker's load number, a BOL) is how Chad's POD for 20031 reached no load and held his
+   * pay. The Ivan paperwork app keeps its own flow unchanged: it always links from a stop.
+   */
+  const perLoad = program !== 'PAPERWORK'
 
   const initialKind: SubmissionKind | null = useMemo(() => {
     const raw = searchParams.get('kind')
@@ -85,12 +95,15 @@ export default function ScanPage() {
 
   const initialPhase: Phase = useMemo(() => {
     // An additional document opened for a known type goes to the camera; otherwise the driver says what it is first.
-    if (initialAdditional) return initialDocType ? 'capture' : 'doctype'
+    if (initialAdditional) {
+      if (!initialDocType) return 'doctype'
+      return perLoad && !initialPro && !initialLoadId ? 'select' : 'capture'
+    }
     // Photos go straight to the camera: there is nothing to choose, they are for the stop they were started from.
     if (initialKind === 'MISC') return 'capture'
     if (initialKind === 'POD') return initialSubmissionId || initialPro || initialLoadId ? 'capture' : 'select'
     return 'choose'
-  }, [initialKind, initialSubmissionId, initialPro, initialLoadId, initialAdditional, initialDocType])
+  }, [initialKind, initialSubmissionId, initialPro, initialLoadId, initialAdditional, initialDocType, perLoad])
 
   const [phase, setPhase] = useState<Phase>(initialPhase)
   const [kind, setKind] = useState<SubmissionKind | null>(initialKind)
@@ -108,6 +121,14 @@ export default function ScanPage() {
   const [sentUnattached, setSentUnattached] = useState(false)
   const [note, setNote] = useState('')
   const [resumeFromId, setResumeFromId] = useState<string | null>(null)
+  /** Owner-operator app: the load picked from the driver's list, or found for a PRO-only link. */
+  const [pickedLoadId, setPickedLoadId] = useState<string | null>(null)
+  const [pickedLane, setPickedLane] = useState<string | null>(null)
+  const [recentLoads, setRecentLoads] = useState<RecentLoad[] | null>(null)
+  const [recentError, setRecentError] = useState<string | null>(null)
+  const [recentKey, setRecentKey] = useState(0)
+  /** The load the document is linked to: the link's own, else the one picked. */
+  const loadIdForSend = initialLoadId ?? pickedLoadId
 
   const [submissions, setSubmissions] = useState<SubmissionSummary[] | null>(null)
   const [loadingSubmissions, setLoadingSubmissions] = useState(initialPhase === 'select')
@@ -158,14 +179,48 @@ export default function ScanPage() {
         const pro = (load?.proNumber ?? '').trim()
         if (!pro) return
         setCurrentPro(pro)
-        // A PRO in the URL came from the load the driver tapped; never override it.
-        setReferenceNumber((prev) => prev || pro)
+        // A PRO in the URL came from the load the driver tapped; never override it. The
+        // owner-operator app never prefills: its load comes from the link or the picker.
+        if (!perLoad) setReferenceNumber((prev) => prev || pro)
       })
       .catch(() => {
         // No current load is normal, and a failure here must not block a POD.
       })
     return () => { cancelled = true }
-  }, [])
+  }, [perLoad])
+
+  // Owner-operator app: the driver's own loads, for the picker and to find the load a
+  // PRO-only link (a settlement row) is for, so the document is linked to it by id.
+  useEffect(() => {
+    if (!perLoad) return
+    let cancelled = false
+    fetchRecentLoads()
+      .then((loads) => {
+        if (cancelled) return
+        setRecentLoads(loads)
+        setRecentError(null)
+        if (initialPro) {
+          const hit = initialLoadId ? loads.find((l) => l.id === initialLoadId) : findLoadByPro(loads, initialPro)
+          if (hit) {
+            if (!initialLoadId) setPickedLoadId(hit.id)
+            setPickedLane(hit.lane || null)
+          }
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setRecentError(err instanceof DriverApiError ? err.message : 'Could not load your loads')
+      })
+    return () => { cancelled = true }
+  }, [perLoad, recentKey, initialPro, initialLoadId])
+
+  const pickLoad = useCallback((load: RecentLoad) => {
+    setPickedLoadId(load.id)
+    setPickedLane(load.lane || null)
+    setReferenceNumber(load.proNumber)
+    setSelectedSubmissionId(null)
+    rememberScanIntent({ kind: kind === 'POD' ? 'pod' : 'doc', pro: load.proNumber || undefined, loadId: load.id })
+    setPhase('capture')
+  }, [kind])
 
   useEffect(() => {
     if (phase !== 'select' || submissions !== null || !loadingSubmissions) {
@@ -228,8 +283,8 @@ export default function ScanPage() {
           docType: additional ? driverAdditionalDocType(docType) ?? undefined : undefined,
           resumeFromId: resumeFromId ?? undefined,
         })
-        if (initialLoadId) {
-          try { await attachSubmissionToLoad(submissionId, initialLoadId) } catch { /* the PRO is on it; the office can link it */ }
+        if (loadIdForSend) {
+          try { await attachSubmissionToLoad(submissionId, loadIdForSend) } catch { /* the PRO is on it; the office can link it */ }
         }
       } else if (selectedSubmissionId) {
         await submitPod(selectedSubmissionId, pages, { resume: !!resumeFromId })
@@ -247,15 +302,15 @@ export default function ScanPage() {
          * reached the office with its PRO typed in beats one that never left the phone
          * because a second request failed.
          */
-        if (initialLoadId) {
+        if (loadIdForSend) {
           try {
-            await attachSubmissionToLoad(submissionId, initialLoadId)
+            await attachSubmissionToLoad(submissionId, loadIdForSend)
           } catch {
             // The PRO is on the submission; the office can link it from the queue.
           }
         }
       }
-      setSentUnattached(kind === 'POD' && !selectedSubmissionId && !referenceNumber.trim() && !initialLoadId)
+      setSentUnattached(kind === 'POD' && !selectedSubmissionId && !referenceNumber.trim() && !loadIdForSend)
       setResumeFromId(null)
       // Done with it: a relaunch must not drop them back into a job they finished.
       forgetScanIntent()
@@ -273,7 +328,7 @@ export default function ScanPage() {
     } finally {
       setBusy(false)
     }
-  }, [kind, additional, docType, pages, referenceNumber, note, resumeFromId, selectedSubmissionId, initialLoadId, initialStopId, initialStopLabel])
+  }, [kind, additional, docType, pages, referenceNumber, note, resumeFromId, selectedSubmissionId, loadIdForSend, initialStopId, initialStopLabel])
 
   const reset = useCallback(() => {
     setKind(null)
@@ -282,6 +337,8 @@ export default function ScanPage() {
     setSelectedSubmissionId(null)
     setPages([])
     setReferenceNumber('')
+    setPickedLoadId(null)
+    setPickedLane(null)
     setNote('')
     setResumeFromId(null)
     setSentUnattached(false)
@@ -346,6 +403,83 @@ export default function ScanPage() {
         <Button variant="ghost" className="mt-4" onClick={() => navigate(homePath)}>
           {homeLabel}
         </Button>
+      </div>
+    )
+  }
+
+  if (phase === 'select' && perLoad) {
+    return (
+      <div className="min-h-full bg-background p-4">
+        <div className="mb-4 flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Back"
+            onClick={() => {
+              if (additional) setPhase('doctype')
+              else if (initialKind) { forgetScanIntent(); navigate(homePath) }
+              else setPhase('choose')
+            }}
+          >
+            <ArrowLeft className="h-6 w-6" />
+          </Button>
+          <h1 className="text-lg font-semibold">
+            {additional ? 'Which load is this document for?' : 'Which load is this POD for?'}
+          </h1>
+        </div>
+        <p className="mb-3 text-sm text-muted-foreground">Tap the load. It goes straight onto that load for the office.</p>
+
+        {recentLoads === null && !recentError && (
+          <div className="flex flex-col items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" aria-hidden="true" />
+            <p className="mt-3 text-sm text-muted-foreground">Loading your loads…</p>
+          </div>
+        )}
+
+        {recentError && (
+          <div className="rounded-xl border border-[color:var(--tms-badge-red)]/30 bg-[color:var(--tms-badge-red-tint)] p-4 text-[color:var(--tms-badge-red)]">
+            <p>{recentError}</p>
+            <Button
+              variant="outline"
+              className="mt-3 min-h-11"
+              onClick={() => { setRecentError(null); setRecentLoads(null); setRecentKey((k) => k + 1) }}
+            >
+              Try again
+            </Button>
+          </div>
+        )}
+
+        {recentLoads && recentLoads.length > 0 && (
+          <div className="space-y-3" data-testid="pod-load-picker">
+            {recentLoads.map((load) => (
+              <button
+                key={load.id}
+                type="button"
+                onClick={() => pickLoad(load)}
+                className="min-h-11 w-full rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-colors active:bg-muted"
+              >
+                <p className="font-mono text-xs text-muted-foreground">PRO {load.proNumber || '—'}</p>
+                <p className="font-medium text-foreground">{load.lane}</p>
+                {(load.customer || load.deliveryAppt) && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {[load.customer, load.deliveryAppt ? `Delivers ${new Date(load.deliveryAppt).toLocaleDateString()}` : null].filter(Boolean).join(' · ')}
+                  </p>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {recentLoads && (
+          <div className="mt-4 rounded-xl border border-dashed border-border p-4 text-sm">
+            <p className="font-medium text-foreground">
+              {recentLoads.length === 0 ? 'None of your loads are showing yet.' : 'Do not see the load?'}
+            </p>
+            <p className="mt-1 text-muted-foreground">
+              Ask dispatch to put the load on your list, then send the POD from it here.
+            </p>
+          </div>
+        )}
       </div>
     )
   }
@@ -461,7 +595,8 @@ export default function ScanPage() {
     const others = LOAD_EXTRA_DOC_TYPES.filter((t) => !needed.includes(t))
     const pick = (type: string) => {
       setDocType(type)
-      setPhase('capture')
+      // Owner operators pick the load next, unless they came from one.
+      setPhase(perLoad && !initialPro && !loadIdForSend ? 'select' : 'capture')
     }
     const option = (type: string, hint?: string) => (
       <button
@@ -565,15 +700,21 @@ export default function ScanPage() {
                   Change
                 </button>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="reference">Load / PRO #</Label>
-                <Input
-                  id="reference"
-                  value={referenceNumber}
-                  onChange={(e) => setReferenceNumber(e.target.value)}
-                  placeholder="So the office knows which load this is for"
-                />
-              </div>
+              {perLoad ? (
+                <div className="rounded-lg border border-border bg-muted p-3 text-sm" data-testid="send-to-load">
+                  <span className="font-medium">Load:</span> {loadLabel(referenceNumber, pickedLane)}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="reference">Load / PRO #</Label>
+                  <Input
+                    id="reference"
+                    value={referenceNumber}
+                    onChange={(e) => setReferenceNumber(e.target.value)}
+                    placeholder="So the office knows which load this is for"
+                  />
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="note">{docType === OTHER_DOC ? 'What is it?' : 'Note (optional)'}</Label>
                 <Textarea
@@ -635,15 +776,21 @@ export default function ScanPage() {
 
           {kind === 'POD' && !selectedSubmission && (
             <>
-              <div className="space-y-2">
-                <Label htmlFor="reference">Load / reference #</Label>
-                <Input
-                  id="reference"
-                  value={referenceNumber}
-                  onChange={(e) => setReferenceNumber(e.target.value)}
-                  placeholder="So dispatch knows which load this POD belongs to"
-                />
-              </div>
+              {perLoad ? (
+                <div className="rounded-lg border border-border bg-muted p-3 text-sm" data-testid="send-to-load">
+                  <span className="font-medium">Load:</span> {loadLabel(referenceNumber, pickedLane)}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="reference">Load / reference #</Label>
+                  <Input
+                    id="reference"
+                    value={referenceNumber}
+                    onChange={(e) => setReferenceNumber(e.target.value)}
+                    placeholder="So dispatch knows which load this POD belongs to"
+                  />
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label htmlFor="note">Note (optional)</Label>
@@ -702,12 +849,16 @@ export default function ScanPage() {
   }
 
   if (phase === 'success') {
+    // Owner operators see which load it went onto: the POD or document they sent from a load.
+    const sentToLoad = perLoad && !!referenceNumber.trim() && !selectedSubmissionId && (kind === 'POD' || additional)
     return (
       <div className="flex min-h-full flex-col items-center justify-center p-6 text-center">
         <CheckCircle2 className="h-16 w-16 text-[color:var(--tms-badge-green)]" aria-hidden="true" />
         <h2 className="mt-4 text-2xl font-bold">Sent!</h2>
         <p className="mt-2 max-w-xs text-muted-foreground">
-          {additional
+          {sentToLoad
+            ? `Sent to ${loadLabel(referenceNumber, pickedLane)}.`
+            : additional
             ? `The office has your ${docType && docType !== OTHER_DOC ? docTypeLabel(docType).toLowerCase() : 'document'}.`
             : kind === 'MISC'
             ? 'The office can see your photos on the load.'
