@@ -4,6 +4,8 @@ export interface TmsTab {
   count?: number
   testId?: string
   countTestId?: string
+  /** Hover text: what the tab counts. */
+  title?: string
 }
 
 export interface TmsTabsProps {

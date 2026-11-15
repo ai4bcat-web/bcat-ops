@@ -18,7 +18,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { Download, FileBarChart } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  TmsBadge, TmsButton, TmsCard, TmsField, TmsSelect, type TmsTabGroup,
+  TmsBadge, TmsButton, TmsCard, TmsField, TmsSelect, TmsSummaryChips, type TmsTabGroup,
 } from '@/features/tms/kit'
 import { ApChrome, ApDenseList, type ApColumn, type ApListConfig } from './ApDenseList'
 import { useAuth } from '@/hooks/useAuth'
@@ -65,6 +65,7 @@ import { ApReportDialog, CashRequirementsDialog } from './components/ApReportDia
 import { estimatedDueAt, isAljexBill, payablesQueue, proOf, termsLabel, type ApReportKind, type BillFactsIndex } from './apQueue'
 import { useBillFacts } from './useBillFacts'
 import { ApSummaryStrip } from './components/ApSummaryStrip'
+import { apCompactItems } from './apCompactItems'
 import { AccountingReportsDialog } from '@/features/finance/AccountingReportsDialog'
 import { useApPaymentLines } from '@/features/finance/useApPaymentLines'
 import type { AccountingReportKind } from '@/features/finance/accountingReports'
@@ -612,6 +613,8 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           title={chrome.title}
           viewTabs={chrome.viewTabs}
           quickTabs={chrome.quickTabs}
+          collapseKey="ap.payables.cards"
+          compact={<TmsSummaryChips aria-label="Payables at a glance" testId="ap-summary-compact" items={apCompactItems(summary)} />}
           filters={<OwedFilterBar partyLabel="Carrier" parties={carrierOptions} divisions={divisionOptions} filter={owed} onChange={setOwed} testId="ap-owed-filters" />}
           summary={(
             <>

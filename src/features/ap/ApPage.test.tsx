@@ -205,7 +205,11 @@ async function setup(options: { rowsByTab?: Partial<Record<string, ApWorklistRow
   return view
 }
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  // These tests read the cards; a viewer starts with them folded away (TmsHeadBand.test covers that).
+  localStorage.setItem('ap.payables.cards', 'open')
+})
 
 describe('the AP board', () => {
   it('offers every view of the money, and each one renders', async () => {

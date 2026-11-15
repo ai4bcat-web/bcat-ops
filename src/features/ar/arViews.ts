@@ -68,11 +68,22 @@ export function monthLabel(ym: string): string {
 
 /** This month first, then the two before it — the only months the Paid tab offers. */
 export function lastThreeMonths(asOf: string): string[] {
+  return lastMonths(asOf, 3)
+}
+
+/**
+ * How many invoice months the Paid tab and "Collected this week / month" read. Paid is by paid date, and an
+ * invoice is usually settled within a few months of being issued; six covers the three months the Paid tab offers.
+ */
+export const PAID_LOOKBACK_MONTHS = 6
+
+/** This month first, then the `count - 1` before it, as `YYYY-MM`. */
+export function lastMonths(asOf: string, count: number): string[] {
   const m = /^(\d{4})-(\d{2})/.exec(asOf)
   const year = m ? Number(m[1]) : new Date().getUTCFullYear()
   const month = m ? Number(m[2]) : new Date().getUTCMonth() + 1
   const out: string[] = []
-  for (let back = 0; back < 3; back += 1) {
+  for (let back = 0; back < count; back += 1) {
     const total = year * 12 + (month - 1) - back
     out.push(`${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, '0')}`)
   }

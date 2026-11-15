@@ -3,7 +3,8 @@
  * AR by division). Rows may carry muted sub-text, a tone, a share bar, and sub-rows indented under a
  * group. A row with `onClick` is a button; `active` marks it pressed (a filter toggle).
  */
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
+import { ChevronDown, ChevronUp } from 'lucide-react'
 
 export interface TmsListRow {
   key: string
@@ -89,15 +90,75 @@ export function TmsListCard({ title, total, rows, 'aria-label': ariaLabel, testI
   )
 }
 
+/** One headline number in a collapsed summary: the same label and value as a card row. */
+export interface TmsSummaryChip {
+  key: string
+  label: string
+  value: ReactNode
+  sub?: string | null
+  tone?: 'default' | 'good' | 'warn' | 'bad'
+  title?: string
+}
+
+/** A single wrapping row of headline numbers: what a page shows while its cards are collapsed. */
+export function TmsSummaryChips({ items, 'aria-label': ariaLabel, testId }: { items: TmsSummaryChip[]; 'aria-label'?: string; testId?: string }) {
+  return (
+    <ul className="tms-summary-chips" aria-label={ariaLabel} data-testid={testId}>
+      {items.map((it) => (
+        <li key={it.key} className={`tms-summary-chip${it.tone && it.tone !== 'default' ? ` tms-summary-chip-${it.tone}` : ''}`} title={it.title ?? (it.sub ? `${it.label} · ${it.sub}` : it.label)}>
+          <span className="tms-summary-chip-label">{it.label}</span>
+          <strong key={valueKey(it.value)} className="tms-summary-chip-value">{it.value ?? '—'}</strong>
+          {it.sub ? <span className="tms-summary-chip-sub">{it.sub}</span> : null}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+const readOpen = (key: string): boolean => {
+  try { return localStorage.getItem(key) === 'open' } catch { return false }
+}
+
 /**
  * The page-head band: `top` (view tabs, refresh) and `bottom` (status tabs, kept right above the
  * table) on the left, list cards right-aligned beside them. When narrow the cards sit between the two.
+ *
+ * With `collapseKey` the cards fold away (Ryne 2026-11-15: room for the list): closed by default,
+ * `compact` shows the headline numbers instead, and the choice is remembered per viewer.
  */
-export function TmsHeadBand({ top, bottom, cards, testId }: { top?: ReactNode; bottom?: ReactNode; cards?: ReactNode; testId?: string }) {
+export function TmsHeadBand({ top, bottom, cards, compact, collapseKey, testId }: {
+  top?: ReactNode
+  bottom?: ReactNode
+  cards?: ReactNode
+  compact?: ReactNode
+  collapseKey?: string
+  testId?: string
+}) {
+  const [open, setOpen] = useState(() => (collapseKey ? readOpen(collapseKey) : true))
+  const toggle = () => {
+    const next = !open
+    setOpen(next)
+    if (collapseKey) try { localStorage.setItem(collapseKey, next ? 'open' : 'closed') } catch { /* per-viewer convenience only */ }
+  }
+  const toggleBtn = collapseKey && cards ? (
+    <button type="button" className="tms-btn tms-btn-secondary tms-btn-sm tms-head-band-toggle" aria-expanded={open} data-testid={testId ? `${testId}-toggle` : 'head-band-toggle'} onClick={toggle}>
+      {open ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+      {open ? 'Hide details' : 'Show details'}
+    </button>
+  ) : null
+  const showCards = Boolean(cards) && open
   return (
-    <div className={`tms-head-band${cards ? '' : ' tms-head-band-plain'}`} data-testid={testId}>
-      <div className="tms-head-band-top">{top}</div>
-      {cards ? <div className="tms-head-band-cards">{cards}</div> : null}
+    <div className={`tms-head-band${showCards ? '' : ' tms-head-band-plain'}`} data-testid={testId}>
+      <div className="tms-head-band-top">
+        {top}
+        {toggleBtn ? (
+          <div className="tms-head-band-compact">
+            {open ? null : compact}
+            {toggleBtn}
+          </div>
+        ) : null}
+      </div>
+      {showCards ? <div className="tms-head-band-cards">{cards}</div> : null}
       <div className="tms-head-band-bottom">{bottom}</div>
     </div>
   )

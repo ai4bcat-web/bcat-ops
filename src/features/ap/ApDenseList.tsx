@@ -49,8 +49,12 @@ export interface ApListConfig<T> {
 }
 
 /** The page head and the two tab strips: kept mounted while the views under them swap. */
-export function ApChrome({ title, viewTabs, quickTabs, actions, summary, filters }: {
+export function ApChrome({ title, viewTabs, quickTabs, actions, summary, compact, collapseKey, filters }: {
   title: string
+  /** Headline numbers shown while the cards are collapsed (with `collapseKey`). */
+  compact?: React.ReactNode
+  /** Remembers per viewer whether the cards are open; closed by default. */
+  collapseKey?: string
   /** Page filters (carrier, division) under the view tabs. */
   filters?: React.ReactNode
   /** Totals cards, right-aligned beside the tabs on every tab. */
@@ -80,6 +84,8 @@ export function ApChrome({ title, viewTabs, quickTabs, actions, summary, filters
           </>
         ) : null}
         cards={summary}
+        compact={compact}
+        collapseKey={collapseKey}
         bottom={(
           <div className="tms-quick-tabs" role="tablist">
             {quickTabs.tabs.map((tab) => (
