@@ -55,7 +55,11 @@ import {
 import { repointInvoicedCustomer } from './repoint'
 import { brokerageRepRollup } from './brokerageRep'
 import { agingStatement } from './statements'
-import { settleFactoredInvoices } from './settleFactored'
+/** Auto-settling factored invoices from OTR's status is off; see the schedule branch in handler(). */
+export const SETTLE_TURNED_OFF = {
+  skipped: true,
+  reason: 'Marking factored invoices paid from OTR is turned off. Record the payment on the invoice instead.',
+} as const
 import {
   acceptCommissionCounter,
   approveCommission,
@@ -242,9 +246,12 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
 }
 
 export const handler = async (event: AppSyncEvent): Promise<Row> => {
-  // The EventBridge schedule (no AppSync arguments): mark OTR-funded invoices paid.
+  // The EventBridge schedule (no AppSync arguments) used to mark OTR-approved invoices paid.
+  // Turned off 2026-11-15: OTR "Approved" is not proof the money arrived, and Ryne is building
+  // his own rule for marking invoices paid. settleFactored.ts is kept for that work but nothing
+  // calls it; the schedule still fires and does nothing.
   if (!event.arguments && (event as unknown as { source?: string }).source === 'aws.events') {
-    return settleFactoredInvoices() as unknown as Row
+    return { ...SETTLE_TURNED_OFF } as unknown as Row
   }
   const action = event.arguments.action as Action
   // Its own door, decided by brokerageAccessOf inside the action (owner/ADMIN/page-dashboard or a sales rep), never by the AR page rule.
@@ -288,7 +295,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
     case 'SEND_INVOICE':
       return sendInvoice(input, caller)
     case 'SETTLE_FACTORED_INVOICES':
-      return settleFactoredInvoices(caller) as unknown as Promise<Row>
+      // Turned off with the schedule above; factored invoices stay open until paid by hand.
+      throw new Error(SETTLE_TURNED_OFF.reason)
     case 'REVISE_INVOICE':
       return reviseInvoice(input, caller)
     case 'AGING_STATEMENT':
