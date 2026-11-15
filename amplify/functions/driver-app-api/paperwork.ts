@@ -18,6 +18,7 @@
 import type { PaperworkLocation } from '../../../src/lib/paperworkLocation'
 import { getStops } from '../../../src/lib/stops'
 import { driverIsOnLoad } from '../../../src/lib/driverJourney'
+import { normalizePro } from '../../../src/lib/proNumber'
 import type { Load, Stop } from '../../../src/types'
 import {
   assessEld, SHORT_HAUL_AIR_MILES, WORK_REPORTING_LOCATION, type EldStatus,
@@ -256,6 +257,36 @@ export interface PodDocRow {
  */
 export function driverIsOnPaperworkLoad(load: PaperworkLoadLike, driverId: string): boolean {
   return driverIsOnLoad(load as unknown as Load, driverId)
+}
+
+/**
+ * The load a driver's typed reference points at, for filing a POD the moment it arrives.
+ *
+ * The PRO first, across every load: a PRO is (very nearly) unique, so a single match is safe.
+ * Failing that, the customer's own numbers (the TMS / load id and the pickup number), but only
+ * among this driver's loads: drivers type what is printed on the BOL, which is the shipper's or
+ * broker's number, not ours. Chad's POD for 20031 came in as "4011180493" (Schneider's load id)
+ * and sat unattached for a day because only the PRO was ever tried.
+ *
+ * One match or none, at each step: a POD on the wrong load is worse than one left for a person
+ * to place.
+ */
+export function matchLoadForDriverRef(
+  loads: readonly PaperworkLoadLike[],
+  referenceNumber: string | null,
+  driverId: string,
+): { loadId: string; via: 'PRO' | 'CUSTOMER_REF' } | null {
+  const want = normalizePro(referenceNumber)
+  if (!want) return null
+  const byPro = loads.filter((l) => normalizePro(l.aljexId ?? null) === want)
+  if (byPro.length === 1) return { loadId: byPro[0].id, via: 'PRO' }
+  if (byPro.length > 1) return null
+  const byRef = loads.filter(
+    (l) =>
+      driverIsOnPaperworkLoad(l, driverId) &&
+      [l.tmsId, l.pickupNumber].some((v) => normalizePro(v ?? null) === want),
+  )
+  return byRef.length === 1 ? { loadId: byRef[0].id, via: 'CUSTOMER_REF' } : null
 }
 
 /** PRO first, then the TMS id — the same precedence the rest of the app uses. */

@@ -1820,6 +1820,17 @@ describe('attaching a submission to its load', () => {
     expect(put.status).toBe('LINKED')
   })
 
+  it("links on the customer's load id when the driver typed that instead of our PRO (Chad, 20031)", async () => {
+    // TMS-UNIQ is the customer's number on a load this driver delivers; it is not a PRO anywhere.
+    const res = await handler(baseEvent('/submissions', 'POST', {
+      body: { kind: 'POD', referenceNumber: 'TMS-UNIQ', pages: [{ fileName: 'p.jpg', contentType: 'image/jpeg', byteSize: 10 }] },
+    }))
+    expect(res.statusCode).toBe(200)
+    const put = submissionPut()
+    expect(put.loadId).toBe('load-unique-pro')
+    expect(put.status).toBe('LINKED')
+  })
+
   it('leaves it unattached when the PRO matches nothing, rather than losing the POD', async () => {
     const res = await handler(baseEvent('/submissions', 'POST', {
       body: { kind: 'POD', referenceNumber: '00000', pages: [{ fileName: 'p.jpg', contentType: 'image/jpeg', byteSize: 10 }] },

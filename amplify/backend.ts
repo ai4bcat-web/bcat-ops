@@ -629,6 +629,11 @@ driverApiFn.addToRolePolicy(
 driverApiFn.addToRolePolicy(
   new PolicyStatement({ actions: ['dynamodb:UpdateItem', 'dynamodb:PutItem'], resources: [driverApiLocationTable.tableArn] }),
 )
+// A driver POD that matches no load is raised in Accounting → Open questions (a Feedback row): PutItem only.
+driverApiFn.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:PutItem'], resources: [stageTables['Feedback'].tableArn] }),
+)
+driverApiFn.addEnvironment('FEEDBACK_TABLE_NAME', stageTables['Feedback'].tableName)
 // A driver reports a truck problem: one new MaintenanceTask on their own unit, nothing else.
 driverApiFn.addToRolePolicy(
   new PolicyStatement({ actions: ['dynamodb:PutItem'], resources: [driverApiMaintenanceTaskTable.tableArn] }),
