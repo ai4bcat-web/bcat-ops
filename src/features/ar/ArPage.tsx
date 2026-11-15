@@ -14,6 +14,7 @@ import { InvoiceEditDrawer } from './components/InvoiceEditDrawer'
 import { billsThroughOtr, ordersNeedingInvoice, unsentLabel } from './autoInvoice'
 import { ArSummaryStrip } from './ArSummaryStrip'
 import { computeArSummary, divisionKeyOf } from './arSummary'
+import { arCompactItems, arTabs, paidInMonthOf } from './arTabs'
 import { ageInvoices } from '@/lib/arAging'
 import { OwedFilterBar } from './components/OwedFilterBar'
 import { OwedSummary } from './components/OwedSummary'
@@ -34,7 +35,7 @@ import { toast } from 'sonner'
 import { BillingGapsPanel } from './components/BillingGapsPanel'
 import { Eye, RefreshCw } from 'lucide-react'
 import {
-  TmsBadge, TmsButton, TmsCard, TmsHeadBand, TmsSelect, TmsTabStrip, TmsTabs,
+  TmsBadge, TmsButton, TmsCard, TmsHeadBand, TmsSelect, TmsSummaryChips, TmsTabStrip, TmsTabs,
   type TmsTabGroup,
 } from '@/features/tms/kit'
 import type { DenseColumn } from '@/features/tms/grid/denseGridModel'
@@ -65,7 +66,7 @@ import { otrStatusLabel } from '@/lib/otrInvoiceStatus'
 import { otrRejection } from '@/lib/otrRejection'
 import {
   AR_PAYMENT_KIND_LABEL, AR_PAYMENT_METHOD_LABEL, BATCH_GENERATE_LIMIT,
-  agingChipFor, formatDay, lastThreeMonths, monthLabel,
+  agingChipFor, formatDay, lastMonths, lastThreeMonths, monthLabel, PAID_LOOKBACK_MONTHS,
 } from './arViews'
 import {
   AR_BILLED_BY_LABEL, AR_GROUP_BY_LABEL, AR_QUEUE_STATUS_LABEL, billedByMatches, factorQueueRows, isInvoiceSent, splitOpenInvoices, buildPaidRows, buildReadyRows, groupKeyOf, groupTotals,
@@ -232,26 +233,36 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const months = useMemo(() => lastThreeMonths(asOf), [asOf])
   const [month, setMonth] = useState(() => months[0])
   const [paidInvoices, setPaidInvoices] = useState<InvoiceRecord[]>([])
-  const [paidLoading, setPaidLoading] = useState(true)
 
   const [arCustomerId, setArCustomerId] = useState<string | null>(null)
   const customerAr = useCustomerAr(arCustomerId)
 
-  // No synchronous setState in the effect (react-hooks/set-state-in-effect): every write
-  // happens in the promise chain, and the month picker owns its own spinner.
+  // Invoices issued in the picked month: the factoring queue and Needs review look PROs up in them. The Paid
+  // tab itself reads `paidInMonth` (by paid date). No synchronous setState in the effect: writes live in the chain.
   const loadMonth = useCallback(() =>
     listInvoicesByMonth(month)
       .then((rows) => setPaidInvoices(rows))
-      .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not load that month'))
-      .finally(() => setPaidLoading(false)),
+      .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not load that month')),
   [month])
   useEffect(() => { loadMonth() }, [loadMonth])
+
+  // Invoices issued over the last six months: the days-to-pay figures (90-day window), "Collected this
+  // week / month" and the Paid tab all read this one set, by paid date, so the card and the tab agree.
+  const [recentPaid, setRecentPaid] = useState<InvoiceRecord[]>([])
+  const [recentLoaded, setRecentLoaded] = useState(false)
+  const recentMonths = useMemo(() => lastMonths(asOf, PAID_LOOKBACK_MONTHS), [asOf])
+  const loadRecent = useCallback(() =>
+    Promise.all(recentMonths.map((m) => listInvoicesByMonth(m).catch(() => [] as InvoiceRecord[])))
+      .then((sets) => setRecentPaid(sets.flat()))
+      .finally(() => setRecentLoaded(true)),
+  [recentMonths])
+  useEffect(() => { void loadRecent() }, [loadRecent])
 
   // Shipments behind paid invoices are not in any worklist; read them by id for division and rep.
   const [paidShipments, setPaidShipments] = useState<ShipmentRecord[]>([])
   const paidShipmentIds = useMemo(
-    () => [...new Set(paidInvoices.filter((inv) => inv.status === 'PAID').map((inv) => inv.shipmentId))].sort().join(','),
-    [paidInvoices],
+    () => [...new Set([...paidInvoices, ...recentPaid].filter((inv) => inv.status === 'PAID').map((inv) => inv.shipmentId))].sort().join(','),
+    [paidInvoices, recentPaid],
   )
   useEffect(() => {
     let alive = true
@@ -296,10 +307,19 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     [invoiced.rows],
   )
 
+  // Auto-generated on release but not yet sent = a draft for review in Ready to invoice. Drafts are not
+  // receivables yet: the cards, the Invoiced tab and Aging all count the same sent set (`sentOpen`).
+  const split = useMemo(() => splitOpenInvoices(open.invoices, lookups, releasedByOrder, (inv) =>
+    isInvoiceSent(inv, inv.factoringItemId ? factorByItemId.get(inv.factoringItemId) : null)),
+  [open.invoices, lookups, releasedByOrder, factorByItemId])
+  const sentOpen = useMemo(() => {
+    const drafts = new Set(split.drafts.map((r) => r.invoiceId))
+    return open.invoices.filter((inv) => !drafts.has(inv.id))
+  }, [open.invoices, split.drafts])
+  // Paid = settled in the chosen month by paid date: the same rule as "Collected this month", from the same read.
+  const paidInMonth = useMemo(() => paidInMonthOf(recentPaid, month), [recentPaid, month])
+
   const queue: Record<ArQueueStatus, ArQueueRow[]> = useMemo(() => {
-    // Auto-generated on release but not yet sent = a draft for review in Ready to invoice.
-    const split = splitOpenInvoices(open.invoices, lookups, releasedByOrder, (inv) =>
-      isInvoiceSent(inv, inv.factoringItemId ? factorByItemId.get(inv.factoringItemId) : null))
     const keepAll = (rows: ArQueueRow[], due: boolean) => rows.filter((row) => billedByMatches(row, billedBy)
       && (owed.parties.length === 0 || owed.parties.includes(row.customerId ?? ''))
       && divisionMatches(divisionKeyOf(lookups.shipmentsById.get(row.shipmentId) ?? { revDivision: row.revDivision }), owed.divisions)
@@ -317,9 +337,9 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       })(),
       INVOICED: keep(split.invoiced),
       // Paid rows owe nothing, so the due bucket does not narrow them.
-      PAID: keepAll(buildPaidRows(paidInvoices, lookups), false),
+      PAID: keepAll(buildPaidRows(paidInMonth, lookups), false),
     }
-  }, [unbilled.rows, open.invoices, paidInvoices, lookups, releasedByOrder, billedBy, factorByItemId, factoringItems, owed, asOf])
+  }, [unbilled.rows, open.invoices, paidInvoices, paidInMonth, split, lookups, billedBy, factoringItems, owed, asOf])
 
   // Needs review's PRO opens the shipment's live (not void) invoice, newest first, when it has one.
   const liveInvoiceByShipment = useMemo(() => {
@@ -355,21 +375,13 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   )
   const { plans: attachmentPlans } = useInvoiceAttachmentPlans(planIds)
 
-  // Paid invoices over the last three months, for the days-to-pay figures (90-day window).
-  const [recentPaid, setRecentPaid] = useState<InvoiceRecord[]>([])
-  useEffect(() => {
-    let alive = true
-    Promise.all(months.map((m) => listInvoicesByMonth(m).catch(() => [] as InvoiceRecord[])))
-      .then((sets) => { if (alive) setRecentPaid(sets.flat()) })
-    return () => { alive = false }
-  }, [months])
   // The customer filter narrows every figure; the division filter narrows the totals card while the
   // division card keeps showing each division's share (of the selected customers) to pick from.
   const byParty = useCallback((inv: InvoiceRecord) => owed.parties.length === 0 || owed.parties.includes(inv.customerId),
     [owed.parties])
   const byDivision = useCallback((inv: InvoiceRecord) => divisionMatches(divisionKeyOf(lookups.shipmentsById.get(inv.shipmentId)), owed.divisions),
     [owed.divisions, lookups])
-  const partyOpen = useMemo(() => open.invoices.filter(byParty), [open.invoices, byParty])
+  const partyOpen = useMemo(() => sentOpen.filter(byParty), [sentOpen, byParty])
   const filteredOpen = useMemo(() => partyOpen.filter(byDivision), [partyOpen, byDivision])
   const summarize = useCallback((openInvoices: InvoiceRecord[], paid: InvoiceRecord[]) => computeArSummary({
     open: openInvoices,
@@ -379,17 +391,15 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     divisionName: lookups.divisionName,
     asOf,
   }), [factorByItemId, lookups, asOf])
-  const summaryAll = useMemo(() => summarize(open.invoices, recentPaid), [summarize, open.invoices, recentPaid])
+  const summaryAll = useMemo(() => summarize(sentOpen, recentPaid), [summarize, sentOpen, recentPaid])
   const summary = useMemo(() => ({
     ...summarize(filteredOpen, recentPaid.filter((inv) => byParty(inv) && byDivision(inv))),
     byDivision: summarize(partyOpen, []).byDivision,
   }), [summarize, filteredOpen, partyOpen, recentPaid, byParty, byDivision])
   const owedSummary = useMemo(() => summarizeOwed(filteredOpen, asOf), [filteredOpen, asOf])
   // Aging re-ages only the selected customers' / divisions' invoices.
-  const aging = useMemo(
-    () => (owed.parties.length || owed.divisions.length ? ageInvoices(filteredOpen, new Date().toISOString(), { fromInvoiceDate: true }) : open.aging),
-    [owed.parties.length, owed.divisions.length, filteredOpen, open.aging],
-  )
+  // Aging ages the same invoices the Open AR card counts (sent, any billing), narrowed by customer / division.
+  const aging = useMemo(() => ageInvoices(filteredOpen, new Date().toISOString(), { fromInvoiceDate: true }), [filteredOpen])
   const customerOptions: OwedOption[] = useMemo(() => partyOptions([
     ...open.invoices.map((inv) => ({ id: inv.customerId, name: inv.customerName })),
     ...unbilled.rows.map((row) => ({ id: row.customerId, name: row.customerName })),
@@ -410,7 +420,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
   const refreshAll = () => {
     setPaymentsVersion((v) => v + 1)
-    return Promise.all([unbilled.refresh(), invoiced.refresh(), open.refresh(), customerAr.refresh(), loadMonth(), refreshFactoring()])
+    return Promise.all([unbilled.refresh(), invoiced.refresh(), open.refresh(), customerAr.refresh(), loadMonth(), loadRecent(), refreshFactoring()])
       .then(() => undefined)
   }
 
@@ -520,14 +530,16 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   }
 
   const queueTotal = (status: ArQueueStatus) => formatCents(queue[status].reduce((sum, r) => sum + (status === 'INVOICED' ? r.balanceCents : r.amountCents), 0))
-  const tabs = [
-    { key: 'ready', label: `${AR_QUEUE_STATUS_LABEL.READY} · ${queueTotal('READY')}`, count: queue.READY.length, testId: 'ar-tab-ready' },
-    { key: 'invoiced', label: `${AR_QUEUE_STATUS_LABEL.INVOICED} · ${queueTotal('INVOICED')} open`, count: queue.INVOICED.length, testId: 'ar-tab-invoiced' },
-    { key: 'paid', label: `${AR_QUEUE_STATUS_LABEL.PAID} · ${queueTotal('PAID')}`, count: queue.PAID.length, testId: 'ar-tab-paid' },
-    { key: 'payments', label: 'Payments & credits', count: customerAr.payments.length, testId: 'ar-tab-payments' },
-    { key: 'aging', label: 'Aging', count: aging.byCustomer.length, testId: 'ar-tab-aging' },
-    { key: 'review', label: 'Needs review', count: needsReview.rows.length, testId: 'ar-tab-review' },
-  ]
+  const tabs = arTabs({
+    billedBy,
+    paidMonthLabel: monthLabel(month),
+    ready: { count: queue.READY.length, total: queueTotal('READY') },
+    invoiced: { count: queue.INVOICED.length, total: queueTotal('INVOICED') },
+    paid: { count: queue.PAID.length, total: queueTotal('PAID') },
+    aging: { count: filteredOpen.length, total: formatCents(aging.totalCents) },
+    payments: arCustomerId ? customerAr.payments.length : null,
+    review: needsReview.rows.length,
+  })
 
   const error = unbilled.error ?? invoiced.error ?? open.error ?? customerAr.error
   const errorBanner = error
@@ -587,8 +599,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       shipmentsById: lookups.shipmentsById,
       months,
       month,
-      paidLoading,
-      onMonth: (ym: string) => { setPaidLoading(true); setMonth(ym) },
+      paidLoading: !recentLoaded,
+      onMonth: (ym: string) => setMonth(ym),
       onSelect: setSelected,
       invoiceErrors: autoErrors,
       invoicesRunning: autoRunning,
@@ -628,6 +640,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     })
 
   const onParty = (id: string | null) => setOwed({ ...owed, parties: id ? [id] : [] })
+  const compactSummary = <TmsSummaryChips aria-label="Receivables at a glance" testId="ar-summary-compact" items={arCompactItems(summary)} />
   const tabCard = tab === 'ready' ? (
       <ArReadyCard stats={arReadyStats(queue.READY, factorReadiness, asOf)} deliveredNotReady={deliveredNotReady} onLoadReview={() => navigate('/tms/load-review')} />
     )
@@ -656,6 +669,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           </div>
         </div>
         <TmsHeadBand
+          collapseKey="ar.invoicing.cards"
+          compact={compactSummary}
           top={(
             <>
               {viewTabs ? <TmsTabs tabs={viewTabs.tabs} active={viewTabs.active} onSelect={viewTabs.onSelect} /> : null}
@@ -1285,7 +1300,7 @@ function queueView({
       })()}
       {status === 'PAID' && (
         <>
-          <TmsSelect aria-label="Invoice month" value={month} onChange={(e) => onMonth(e.target.value)}>
+          <TmsSelect aria-label="Paid in" value={month} onChange={(e) => onMonth(e.target.value)}>
             {months.map((ym) => <option key={ym} value={ym}>{monthLabel(ym)}</option>)}
           </TmsSelect>
           {paidLoading && <span className="text-sm tms-muted">Loading…</span>}

@@ -186,7 +186,9 @@ function notice(patch: Partial<ShipmentNoticeRecord> = {}): ShipmentNoticeRecord
   }
 }
 
-const openSet = [invoice()]
+// Sent (marked sent): an unsent invoice is a draft in Ready to invoice, not a receivable.
+const sentInvoice = () => invoice({ markedSentAt: '2026-09-20T12:00:00.000Z' })
+const openSet = [sentInvoice()]
 
 /** Let the page's mocked fetches resolve inside act, so their state updates are not reported as stray. */
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
@@ -220,6 +222,9 @@ async function setup(rowsByTab: Partial<Record<string, ArWorklistRow[]>> = {}, u
 }
 
 beforeEach(() => {
+  // These tests read the cards; a viewer starts with them folded away (TmsHeadBand.test covers that).
+  localStorage.setItem('ar.invoicing.cards', 'open')
+  openSet.splice(0, openSet.length, sentInvoice())
   vi.clearAllMocks()
   ;(apiClient.previewInvoice as Mock).mockResolvedValue({ releaseGate: { ok: true, missing: [] } })
   ;(apiClient.readyToInvoice as Mock).mockResolvedValue({ bundle: {}, releaseGate: { ok: true, missing: [] } })
@@ -354,7 +359,7 @@ describe('the AR board', () => {
     fireEvent.click(screen.getByRole('tab', { name: /^Invoiced/ }))
     await settle()
     expect(screen.getByText('Partially paid · $500.00 open')).toBeTruthy()
-    openSet.splice(0, openSet.length, invoice())
+    openSet.splice(0, openSet.length, sentInvoice())
   })
 })
 
@@ -434,11 +439,12 @@ describe('the AR dense grid', () => {
     expect(await screen.findByRole('region', { name: 'Invoice actions' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Receive payment' })).toBeTruthy()
     expect(screen.getByTestId('ar-grid-ar-queue-invoiced')).toBeTruthy()
-    openSet.splice(0, openSet.length, invoice())
+    openSet.splice(0, openSet.length, sentInvoice())
   })
 
   it('keeps an auto-generated invoice that was never sent in Ready to invoice as a draft; ticking it offers Send 1 invoice', async () => {
     authGroups.current = ['page-invoicing']
+    openSet.splice(0, openSet.length, invoice())
     await setup({})
     await settle()
     const grid = screen.getByRole('table', { name: 'Ready to invoice' })
@@ -465,6 +471,7 @@ describe('the AR dense grid', () => {
 
 describe('Ready to invoice: lane, carrier and margin (internal)', () => {
   it('shows Cust Ref #, Origin, Destination, Carrier, both rates and a red Profit when it is a loss', async () => {
+    openSet.splice(0, openSet.length, invoice())
     boardRows.current = [{
       id: 's1', originCity: 'Dallas, TX', destinationCity: 'Joliet, IL', fromState: 'TX', toState: 'IL', carriers: [],
       carrierName: 'Ace Freight', costCents: 300_000, revenueCents: 250_000, customerReference: 'FR-113188-3',

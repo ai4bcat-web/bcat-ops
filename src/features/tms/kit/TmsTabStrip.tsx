@@ -28,6 +28,7 @@ export function TmsTabStrip({ tabs, active, onSelect, 'aria-label': ariaLabel }:
               aria-selected={on}
               tabIndex={on ? 0 : -1}
               data-testid={tab.testId}
+              title={tab.title}
               className={`tms-ship-tab tms-ship-tab-board${on ? ' tms-ship-tab-on' : ''}`}
               onClick={() => onSelect(tab.key)}
               onKeyDown={(e) => {

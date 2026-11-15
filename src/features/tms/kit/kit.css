@@ -918,6 +918,25 @@
 .tms-portal .tms-head-band-cards { grid-area: cards; display: grid; grid-template-columns: repeat(2, minmax(280px, 340px)); gap: 12px; align-items: start; justify-self: end; }
 .tms-shell .tms-head-band-plain,
 .tms-portal .tms-head-band-plain { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'top' 'bottom'; }
+/* Collapsed head band: the headline numbers in one wrapping row, with Show / Hide details beside them. */
+.tms-shell .tms-head-band-compact,
+.tms-portal .tms-head-band-compact { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
+.tms-shell .tms-head-band-toggle,
+.tms-portal .tms-head-band-toggle { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.tms-shell .tms-summary-chips,
+.tms-portal .tms-summary-chips { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.tms-shell .tms-summary-chip,
+.tms-portal .tms-summary-chip { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 13px; }
+.tms-shell .tms-summary-chip-label,
+.tms-portal .tms-summary-chip-label { color: var(--tms-muted); }
+.tms-shell .tms-summary-chip-value,
+.tms-portal .tms-summary-chip-value { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tms-shell .tms-summary-chip-sub,
+.tms-portal .tms-summary-chip-sub { color: var(--tms-muted); font-size: 12px; white-space: nowrap; }
+.tms-shell .tms-summary-chip-bad .tms-summary-chip-value,
+.tms-portal .tms-summary-chip-bad .tms-summary-chip-value { color: var(--tms-badge-red); }
+.tms-shell .tms-summary-chip-warn .tms-summary-chip-value,
+.tms-portal .tms-summary-chip-warn .tms-summary-chip-value { color: var(--tms-badge-orange); }
 @media (max-width: 1180px) {
   .tms-shell .tms-head-band,
   .tms-portal .tms-head-band { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'top' 'cards' 'bottom'; grid-template-rows: auto; }
