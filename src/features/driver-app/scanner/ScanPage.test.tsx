@@ -48,6 +48,7 @@ const apiMocks = vi.hoisted(() => {
     submitPod: vi.fn(),
     fetchSubmissions: vi.fn(),
     fetchCurrentLoad: vi.fn(),
+    fetchRecentLoads: vi.fn(),
     attachSubmissionToLoad: vi.fn(),
     DriverApiError,
     ResumableDriverApiError,
@@ -82,9 +83,11 @@ function renderAt(path: string) {
 describe('ScanPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    programMock.program = 'SETTLEMENT'
     apiMocks.fetchSubmissions.mockResolvedValue([])
     // No load running is the neutral default; the prefill case has its own test.
     apiMocks.fetchCurrentLoad.mockResolvedValue(null)
+    apiMocks.fetchRecentLoads.mockResolvedValue([])
   })
 
   it('offers no rate confirmation: the office collects that one', async () => {
@@ -99,7 +102,9 @@ describe('ScanPage', () => {
     expect(screen.queryByRole('button', { name: /Rate confirmation/i })).toBeNull()
   })
 
-  it('submits a standalone POD when the load is not listed', async () => {
+  it('Ivan app: submits a standalone POD when the load is not listed', async () => {
+    // The Ivan paperwork app keeps its own POD flow; the owner-operator one is below.
+    programMock.program = 'PAPERWORK'
     apiMocks.fetchSubmissions.mockResolvedValue([
       { id: 'existing', referenceNumber: 'OLD', createdAt: '2024-01-01T00:00:00.000Z', status: 'NEW', docs: [] },
     ])
@@ -153,7 +158,9 @@ describe('ScanPage', () => {
     expect(second.resumeFromId).toBe('abc-123')
   })
 
-  it('fills the POD reference with the PRO of the load the driver is on', async () => {
+  it('Ivan app: fills the POD reference with the PRO of the load the driver is on', async () => {
+    // The Ivan paperwork app keeps its own POD flow; the owner-operator one is below.
+    programMock.program = 'PAPERWORK'
     // A reference typed from memory at a dock is how a POD ends up on the wrong load,
     // or on none — and a POD that matches no load holds the driver's own pay.
     apiMocks.fetchSubmissions.mockResolvedValue([])
@@ -177,7 +184,9 @@ describe('ScanPage', () => {
     expect(apiMocks.submitStandalonePod.mock.calls[0][0]).toMatchObject({ referenceNumber: '13364' })
   })
 
-  it('does not overwrite a reference the driver typed themselves', async () => {
+  it('Ivan app: does not overwrite a reference the driver typed themselves', async () => {
+    // The Ivan paperwork app keeps its own POD flow; the owner-operator one is below.
+    programMock.program = 'PAPERWORK'
     apiMocks.fetchSubmissions.mockResolvedValue([])
     apiMocks.fetchCurrentLoad.mockResolvedValue({ id: 'load-1', proNumber: '13364' })
 
@@ -200,13 +209,16 @@ describe('ScanPage', () => {
 describe('ScanPage — the Ivan paperwork hand-off', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    programMock.program = 'SETTLEMENT'
     apiMocks.fetchSubmissions.mockResolvedValue([])
     apiMocks.fetchCurrentLoad.mockResolvedValue(null)
     apiMocks.submitStandalonePod.mockResolvedValue('sub-1')
     apiMocks.attachSubmissionToLoad.mockResolvedValue({ submissionId: 'sub-1', loadId: 'load-9', proNumber: '14565' })
   })
 
-  it('opens straight on the camera with the PRO filled in, and links the POD to the load', async () => {
+  it('Ivan app: opens straight on the camera with the PRO filled in, and links the POD to the load', async () => {
+    // The Ivan paperwork app keeps its own POD flow; the owner-operator one is below.
+    programMock.program = 'PAPERWORK'
     renderAt('/driver/scan?kind=pod&ref=14565&loadId=load-9')
 
     // No "which load?" picker — the load came with us.
@@ -270,5 +282,82 @@ describe('ScanPage — the Ivan paperwork hand-off', () => {
     fireEvent.click(screen.getByRole('button', { name: /Send to office/i }))
     await waitFor(() => expect(apiMocks.submitStandalonePod).toHaveBeenCalledTimes(1))
     expect(apiMocks.attachSubmissionToLoad).not.toHaveBeenCalled()
+  })
+})
+
+/*
+ * The owner-operator app: a POD goes onto a load the driver picks from their own list, or
+ * the load they tapped on their settlement. There is nowhere to type a number — a broker's
+ * load number typed at a dock is how Chad's POD for 20031 reached no load.
+ */
+describe('ScanPage — owner operators send from the load', () => {
+  const loads = [
+    { id: 'lod-20031', proNumber: '20031', lane: 'El Paso, TX → Edwardsville, IL', customer: 'SCHNEIDER', deliveryAppt: '2026-11-13T18:00:00.000Z' },
+    { id: 'lod-20039', proNumber: '20039', lane: 'Odessa, TX → Midland, TX', customer: null, deliveryAppt: null },
+  ]
+  beforeEach(() => {
+    vi.clearAllMocks()
+    programMock.program = 'SETTLEMENT'
+    apiMocks.fetchSubmissions.mockResolvedValue([])
+    apiMocks.fetchCurrentLoad.mockResolvedValue({ id: 'lod-20039', proNumber: '20039' })
+    apiMocks.fetchRecentLoads.mockResolvedValue(loads)
+    apiMocks.submitStandalonePod.mockResolvedValue('sub-1')
+    apiMocks.attachSubmissionToLoad.mockResolvedValue({ submissionId: 'sub-1', loadId: 'lod-20031', proNumber: '20031' })
+  })
+
+  it('picks the load from their own list, with no number to type, and sends the POD onto it', async () => {
+    renderAt('/driver/scan')
+    fireEvent.click(screen.getByRole('button', { name: /POD/i }))
+
+    expect(await screen.findByText('Which load is this POD for?')).toBeInTheDocument()
+    expect(screen.queryByPlaceholderText(/Load number/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Send without a load number/i })).toBeNull()
+    fireEvent.click(await screen.findByRole('button', { name: /20031.*El Paso, TX → Edwardsville, IL/ }))
+
+    fireEvent.click(await screen.findByTestId('capture-done'))
+    expect(await screen.findByTestId('send-to-load')).toHaveTextContent('PRO 20031 · El Paso, TX → Edwardsville, IL')
+    expect(screen.queryByLabelText(/reference/i)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Send to office/i }))
+
+    await waitFor(() => expect(apiMocks.attachSubmissionToLoad).toHaveBeenCalledWith('sub-1', 'lod-20031'))
+    expect(apiMocks.submitStandalonePod.mock.calls[0][0].referenceNumber).toBe('20031')
+    expect(await screen.findByText('Sent to PRO 20031 · El Paso, TX → Edwardsville, IL.')).toBeInTheDocument()
+  })
+
+  it('links a POD sent from a settlement row (PRO only) to that load', async () => {
+    renderAt('/driver/scan?kind=pod&pro=20031')
+    fireEvent.click(await screen.findByTestId('capture-done'))
+    await waitFor(() => expect(screen.getByTestId('send-to-load')).toHaveTextContent('PRO 20031 · El Paso, TX → Edwardsville, IL'))
+    fireEvent.click(screen.getByRole('button', { name: /Send to office/i }))
+    await waitFor(() => expect(apiMocks.attachSubmissionToLoad).toHaveBeenCalledWith('sub-1', 'lod-20031'))
+  })
+
+  it('has no way to send a POD without a load when none are listed', async () => {
+    apiMocks.fetchRecentLoads.mockResolvedValue([])
+    renderAt('/driver/scan?kind=pod')
+    expect(await screen.findByText('None of your loads are showing yet.')).toBeInTheDocument()
+    expect(screen.getByText(/ask dispatch to put the load on your list/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Send without a load number/i })).toBeNull()
+    expect(screen.queryByTestId('capture-done')).toBeNull()
+  })
+
+  it('asks which load an additional document is for, after its type', async () => {
+    renderAt('/driver/scan')
+    fireEvent.click(screen.getByRole('button', { name: /Additional document/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /Lumper receipt/i }))
+    expect(await screen.findByText('Which load is this document for?')).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: /20039/ }))
+    fireEvent.click(await screen.findByTestId('capture-done'))
+    expect(await screen.findByTestId('send-to-load')).toHaveTextContent('PRO 20039 · Odessa, TX → Midland, TX')
+  })
+
+  it('leaves the Ivan app on its own flow: free-text picker, and no load list fetched', async () => {
+    programMock.program = 'PAPERWORK'
+    renderAt('/driver/scan')
+    fireEvent.click(screen.getByRole('button', { name: /POD/i }))
+    expect(await screen.findByText(/Choose a load for this POD/i)).toBeInTheDocument()
+    expect(await screen.findByPlaceholderText(/Load number \(optional\)/i)).toBeInTheDocument()
+    expect(screen.queryByText('Which load is this POD for?')).toBeNull()
+    expect(apiMocks.fetchRecentLoads).not.toHaveBeenCalled()
   })
 })

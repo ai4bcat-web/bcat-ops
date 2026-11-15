@@ -138,14 +138,13 @@ export function SettlementPage() {
             When your trips are processed, your weekly statements will show up here.
           </p>
         </div>
-        {/* Having no statement yet is the most likely reason a driver is holding paperwork
-            for a load nobody has built. They must not be stuck here. */}
+        {/* No statement yet: the POD still goes on a load, picked from the driver's own list. */}
         <Button
           className="h-14 w-full max-w-xs gap-2 text-base font-semibold"
           onClick={() => navigate('/driver/scan?kind=pod')}
         >
           <FilePlus2 className="h-5 w-5" />
-          Send a POD anyway
+          Send a POD for a load
         </Button>
       </div>
     )
@@ -226,11 +225,11 @@ export function SettlementPage() {
 
         <div className="rounded-xl border border-dashed border-border p-4">
           <h2 className="text-sm font-semibold text-foreground">
-            Paperwork for a load that is not listed?
+            POD for a load that is not on this week?
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Send it now and pick its load later, or let the office match it. Nothing waits on
-            the load being built first.
+            Pick the load from your list and the POD goes straight onto it. If the load is not
+            on your list, ask dispatch to add it first.
           </p>
           <div className="mt-3 flex flex-col gap-2">
             <Button
@@ -238,7 +237,7 @@ export function SettlementPage() {
               onClick={() => navigate('/driver/scan?kind=pod')}
             >
               <FilePlus2 className="h-4 w-4" />
-              Send a POD
+              Pick the load and send a POD
             </Button>
           </div>
         </div>
