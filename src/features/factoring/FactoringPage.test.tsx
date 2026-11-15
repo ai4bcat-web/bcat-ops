@@ -51,6 +51,7 @@ vi.mock('@/lib/apiClient', () => ({
   listShipmentsByNumber: vi.fn().mockResolvedValue([]),
   graphqlErrorText: (e: unknown) => String(e),
   moveToManualInvoice: vi.fn(),
+  listOpenInvoices: vi.fn().mockResolvedValue([]),
 }))
 vi.mock('@/hooks/useDirectory', () => ({ useDirectory: () => ({ customers: [], locations: [] }) }))
 
@@ -90,8 +91,8 @@ describe('filters', () => {
     await setup([item()])
     const labels = screen.getAllByRole('tab')
       .map((b) => b.textContent?.replace(/\d+$/, '').trim())
-      .filter((t) => ['Need to factor', 'Pending with OTR', 'Invoice manually', 'All', 'Factored', 'Invoiced manually'].includes(t ?? ''))
-    expect(labels).toEqual(['Pending with OTR', 'All', 'Factored'])
+      .filter((t) => ['Need to factor', 'Waiting on OTR approval', 'Invoice manually', 'All', 'Factored', 'Invoiced manually'].includes(t ?? ''))
+    expect(labels).toEqual(['Waiting on OTR approval', 'All', 'Factored'])
     expect(screen.getByRole('tab', { name: /^OTR rejected/ })).toBeInTheDocument()
     expect(screen.getByTestId('factor-moved-note')).toHaveTextContent(/Ready to invoice \(1 now\)/)
   })
@@ -161,7 +162,8 @@ describe('invoices OTR turned down', () => {
 
   it('gives an admin the override on a Dead row, labelled as one', async () => {
     await setup([item({ id: 'dead', proNumber: 'DE3', status: 'PENDING_WITH_OTR', otrStatus: 4 as never, otrInvoiceId: 'x' })], 'ryne@bcatcorp.com')
-    fireEvent.click(screen.getByRole('tab', { name: /^Pending with OTR/ }))
+    // Dead is not waiting on OTR approval: it lives under OTR rejected.
+    fireEvent.click(screen.getByRole('tab', { name: /^OTR rejected/ }))
     const btn = screen.getByRole('button', { name: 'Invoice manually for PRO DE3' })
     expect(btn.getAttribute('title')).toMatch(/Admin override/)
   })
@@ -190,7 +192,7 @@ describe('Send to OTR again', () => {
   it('says what a Dead row will do, then creates the new submission only when confirmed', async () => {
     resubmitToOtr.mockResolvedValue({ outcome: 'REPLACED', invoiceId: '999', oldInvoiceId: '25884230', documentErrors: [] })
     const { refresh } = await setup([dead()])
-    fireEvent.click(screen.getByRole('tab', { name: /^Pending with OTR/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^OTR rejected/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Send PRO DE3 to OTR again' }))
     const dialog = screen.getByRole('dialog')
     expect(dialog.textContent).toMatch(/OTR holds invoice 25884230 as Dead/)
@@ -213,7 +215,7 @@ describe('Send to OTR again', () => {
   it('shows OTR\'s refusal in the dialog and leaves the row alone', async () => {
     resubmitToOtr.mockRejectedValue(new Error('OTR gave back the same invoice (25884230) and still holds it as Dead'))
     await setup([dead()])
-    fireEvent.click(screen.getByRole('tab', { name: /^Pending with OTR/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^OTR rejected/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Send PRO DE3 to OTR again' }))
     await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Send to OTR again' })) })
     expect(within(screen.getByRole('dialog')).getByRole('alert').textContent).toMatch(/same invoice/)
@@ -225,7 +227,7 @@ describe('Customer paid', () => {
 
   it('shows the date the customer paid, with no timezone shift', async () => {
     await setup([paid()])
-    fireEvent.click(screen.getByRole('tab', { name: /^Pending with OTR/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Waiting on OTR approval/ }))
     expect(screen.getByTestId('customer-paid-14749').textContent).toMatch(/Oct 30, 2026/)
     expect(screen.getByTestId('customer-paid-14749').textContent).toMatch(/Check 2383731/)
   })
@@ -233,7 +235,7 @@ describe('Customer paid', () => {
   it('lets anyone with the Factoring page set it (page access is every action on the page)', async () => {
     setCustomerPaid.mockResolvedValue({ customerPaidOn: '2026-10-28', customerPaymentRef: null })
     const { refresh } = await setup([item({ id: '14700', proNumber: '14700', status: 'PENDING_WITH_OTR' })], 'kel@bcatcorp.com', ['page-factoring'])
-    fireEvent.click(screen.getByRole('tab', { name: /^Pending with OTR/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Waiting on OTR approval/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Set the date the customer paid PRO 14700' }))
     const dialog = screen.getByRole('dialog')
     fireEvent.change(within(dialog).getByLabelText('Customer paid on'), { target: { value: '2026-10-28' } })
@@ -244,7 +246,7 @@ describe('Customer paid', () => {
 
   it('hides the editor from someone without the Factoring page', async () => {
     await setup([paid()], 'driver@bcatcorp.com')
-    fireEvent.click(screen.getByRole('tab', { name: /^Pending with OTR/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Waiting on OTR approval/ }))
     expect(screen.getByTestId('customer-paid-14749').textContent).toMatch(/Oct 30, 2026/)
     expect(screen.queryByRole('button', { name: /the date the customer paid PRO 14749/ })).not.toBeInTheDocument()
   })
@@ -340,7 +342,7 @@ describe('what the queue is worth', () => {
     ])
     const totals = within(screen.getByRole('group', { name: /What the queue is worth/ }))
     expect(totals.getByLabelText(/^Need to factor: \$2,000\.00 across 2 invoices$/)).toBeInTheDocument()
-    expect(totals.getByLabelText(/^Pending with OTR: \$2,500\.00 across 1 invoices$/)).toBeInTheDocument()
+    expect(totals.getByLabelText(/^Waiting on OTR approval: \$2,500\.00 across 1 invoices$/)).toBeInTheDocument()
     expect(totals.getByLabelText(/^Factored: \$1,000\.00 across 1 invoices$/)).toBeInTheDocument()
     expect(totals.getByLabelText(/^All: \$5,500\.00 across 4 invoices$/)).toBeInTheDocument()
   })
@@ -358,7 +360,7 @@ describe('what the queue is worth', () => {
     // a number that changes when you click a tab.
     await setup([priced('B1', 'PENDING_WITH_OTR', 2500)])
     const totals = within(screen.getByRole('group', { name: /What the queue is worth/ }))
-    expect(totals.getByLabelText(/^Pending with OTR: \$2,500\.00 across 1 invoices$/)).toBeInTheDocument()
+    expect(totals.getByLabelText(/^Waiting on OTR approval: \$2,500\.00 across 1 invoices$/)).toBeInTheDocument()
   })
 })
 
@@ -467,7 +469,7 @@ describe('Pending with OTR shows what OTR says', () => {
 
   it("flags each row with OTR's own status and breaks the tab down by it", async () => {
     await setup([pending('14564', '6'), pending('14550', '8'), pending('14604', '1'), pending('14599', '1'), pending('14700', null)])
-    fireEvent.click(screen.getByRole('tab', { name: /Pending with OTR/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /Waiting on OTR approval/ }))
     expect(screen.getByLabelText('OTR status for PRO 14564: IssueClient')).toHaveTextContent('OTR: IssueClient ⚠')
     expect(screen.getByLabelText('OTR status for PRO 14550: IssueFollowUp')).toBeInTheDocument()
     expect(screen.getByLabelText('OTR status for PRO 14604: Pending')).toHaveTextContent('OTR: Pending')
@@ -479,7 +481,7 @@ describe('Pending with OTR shows what OTR says', () => {
 
   it('narrows the tab to one OTR status and back', async () => {
     await setup([pending('14564', '6'), pending('14604', '1'), pending('14700', null)])
-    fireEvent.click(screen.getByRole('tab', { name: /Pending with OTR/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /Waiting on OTR approval/ }))
     const group = screen.getByRole('group', { name: 'OTR status' })
     fireEvent.click(within(group).getByRole('button', { name: /IssueClient/ }))
     expect(screen.getByText('14564')).toBeInTheDocument()

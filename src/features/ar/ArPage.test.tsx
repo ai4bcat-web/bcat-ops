@@ -257,7 +257,7 @@ describe('the AR board', () => {
     const strip = within(screen.getByLabelText('Receivables totals'))
     const card = (label: string) => strip.getByText(label).closest('.tms-list-row')?.querySelector('.tms-list-row-value')?.textContent
     expect(card('Pending with shippers')).toBe('$2,500.00')
-    expect(card('Pending with OTR')).toBe('$0.00')
+    expect(card('Factored, open')).toBe('$0.00')
     expect(card('Late')).toBe('$2,500.00')
     expect(strip.getAllByText('1 invoice').length).toBeGreaterThan(0)
   })

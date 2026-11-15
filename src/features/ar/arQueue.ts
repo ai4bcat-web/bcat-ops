@@ -302,7 +302,7 @@ export type ArBilledBy = 'manual' | 'factored' | 'all'
 
 export const AR_BILLED_BY_LABEL: Record<ArBilledBy, string> = {
   manual: 'Manually invoiced',
-  factored: 'Factored',
+  factored: 'Factoring',
   all: 'All',
 }
 

@@ -420,7 +420,7 @@ describe('tmsBreadcrumb', () => {
     expect(labels('/tms/invoicing/payable')).toEqual(['Accounting', 'Accounts Payable'])
     expect(labels('/tms/invoicing/payable/bills/B-1')).toEqual(['Accounting', 'Accounts Payable', 'Bill'])
     expect(labels('/tms/vendors')).toEqual(['Accounting', 'Vendors'])
-    expect(labels('/tms/invoicing/factored')).toEqual(['Accounting', 'Accounts Receivable', 'Factored'])
+    expect(labels('/tms/invoicing/factored')).toEqual(['Accounting', 'Accounts Receivable', 'Factoring'])
   })
 
   it('names the quote pages without leaking an id', () => {

@@ -2,6 +2,7 @@
 import { TmsListCard, breakdownListRows } from '@/features/tms/kit'
 import { formatCents } from '@/lib/invoiceBuild'
 import { divisionRows } from './arDivisionRows'
+import { FACTORED_BUCKET_LABEL, FACTORED_BUCKET_ORDER, FACTORED_BUCKET_TITLE } from '@/lib/factoredOpen'
 import { PAY_WINDOW_DAYS, type ArSummary } from './arSummary'
 
 const invoices = (n: number) => `${n} ${n === 1 ? 'invoice' : 'invoices'}`
@@ -22,7 +23,11 @@ export function ArSummaryStrip({ summary, division, onDivision }: {
         testId="ar-summary"
         rows={[
           { key: 'open', label: 'Open AR', value: formatCents(summary.openCents), sub: invoices(summary.openCount) },
-          { key: 'otr', label: 'Pending with OTR', value: formatCents(summary.pendingOtrCents), sub: invoices(summary.pendingOtrCount) },
+          { key: 'otr', label: 'Factored, open', value: formatCents(summary.pendingOtrCents), sub: invoices(summary.pendingOtrCount), title: 'Every factored invoice not marked paid yet' },
+          ...FACTORED_BUCKET_ORDER.filter((b) => summary.factored[b].count > 0).map((b) => ({
+            key: `otr-${b}`, kind: 'sub' as const, label: FACTORED_BUCKET_LABEL[b], title: FACTORED_BUCKET_TITLE[b],
+            value: formatCents(summary.factored[b].cents), sub: invoices(summary.factored[b].count),
+          })),
           { key: 'shippers', label: 'Pending with shippers', value: formatCents(summary.pendingShippersCents), sub: invoices(summary.pendingShippersCount) },
           { key: 'late', label: 'Late', value: formatCents(summary.lateCents), sub: invoices(summary.lateCount), tone: summary.lateCents > 0 ? 'bad' : 'default' },
           { key: 'week', label: 'Collected this week', value: formatCents(summary.collectedWeekCents), sub: invoices(summary.collectedWeekCount), title: 'Invoices paid in full this week, by paid date' },

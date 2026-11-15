@@ -4,6 +4,7 @@
  * open AR by revenue division / sub-division. Pure: the page passes what it has read.
  */
 import { daysLate, isImportedInvoice } from '@/lib/arAging'
+import { emptyFactoredBuckets, factoredBucketOf, type FactoredBuckets } from '@/lib/factoredOpen'
 import type { FactoringItem } from '@/types'
 import type { InvoiceRecord, ShipmentRecord } from '@/types/tms'
 
@@ -24,8 +25,10 @@ export interface ArDivisionSlice {
 }
 
 export interface ArSummary {
+  /** Every open factored invoice ("Factored, open"); split by where it stands with OTR in `factored`. */
   pendingOtrCents: number
   pendingOtrCount: number
+  factored: FactoredBuckets
   pendingShippersCents: number
   pendingShippersCount: number
   lateCents: number
@@ -71,6 +74,7 @@ export function computeArSummary(input: {
   const { open, paid, factorByItemId, shipmentsById, divisionName, asOf } = input
   let pendingOtrCents = 0
   let pendingOtrCount = 0
+  const factored = emptyFactoredBuckets()
   let pendingShippersCents = 0
   let pendingShippersCount = 0
   let lateCents = 0
@@ -78,7 +82,13 @@ export function computeArSummary(input: {
   const slices = new Map<string, ArDivisionSlice>()
   for (const inv of open) {
     if (inv.status !== 'ISSUED' && inv.status !== 'PARTIAL') continue
-    if (isFactored(inv)) { pendingOtrCents += inv.balanceCents; pendingOtrCount += 1 }
+    if (isFactored(inv)) {
+      pendingOtrCents += inv.balanceCents
+      pendingOtrCount += 1
+      const bucket = factored[factoredBucketOf(inv.factoringItemId ? factorByItemId.get(inv.factoringItemId) : null)]
+      bucket.cents += inv.balanceCents
+      bucket.count += 1
+    }
     else { pendingShippersCents += inv.balanceCents; pendingShippersCount += 1 }
     if (inv.dueAt && daysLate(inv.dueAt, asOf) > 0) { lateCents += inv.balanceCents; lateCount += 1 }
     const shipment = shipmentsById.get(inv.shipmentId)
@@ -137,6 +147,7 @@ export function computeArSummary(input: {
   return {
     pendingOtrCents,
     pendingOtrCount,
+    factored,
     pendingShippersCents,
     pendingShippersCount,
     lateCents,
