@@ -748,9 +748,9 @@ function Section({ title, hint, rows, drivers, loadsById, sessionAudit, updateLo
 
   return (
     <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
-      <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+      <div className="tms-appts-dayhead" style={{ padding: '14px 18px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="tms-appts-daytitle" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>{title}</span>
             <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--tms-muted)' }}>{rows.length}</span>
             {needCount > 0 && (
@@ -1113,7 +1113,7 @@ export function ApptsPage() {
               One row per shipment — green when both appointments are booked, red when one is still open. Click the clock for its booking history.
             </p>
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div className="tms-appts-tools" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button
             onClick={() => setOnlyOpen((v) => !v)}
             aria-pressed={onlyOpen}
@@ -1146,7 +1146,7 @@ export function ApptsPage() {
               ? `Batory only${hiddenCount > 0 ? ` · ${hiddenCount} hidden` : ''}`
               : 'All customers'}
           </button>
-          <div style={{ position: 'relative', minWidth: 240 }}>
+          <div className="tms-appts-search" style={{ position: 'relative', minWidth: 240 }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--tms-muted)', pointerEvents: 'none' }} />
             <input
               value={query}

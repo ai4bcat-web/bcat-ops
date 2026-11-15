@@ -97,7 +97,7 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0, maxWidth: '100%' }}>
           {/* Fleet group switcher (AMAZON stubbed) */}
           <div style={{ display: 'flex', gap: 2, background: 'var(--tms-bg)', borderRadius: 8, padding: 2 }}>
             {/* Amazon and standard owner operators are one group; the Owner operators panel shows both, week by week. */}

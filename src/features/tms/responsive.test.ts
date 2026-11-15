@@ -49,3 +49,33 @@ describe('Accounting numbers stay inside their cards on phones', () => {
     }
   })
 })
+
+describe('Nothing spills past its card on a phone', () => {
+  it('lets long badges wrap inside their card', () => {
+    expect(phone).toMatch(/\.tms-shell \.tms-badge, \.tms-portal \.tms-badge \{ white-space: normal;/)
+  })
+
+  it('wraps the chips inside phone cards but keeps the card amount whole', () => {
+    expect(phone).toMatch(/\.tms-dg-card-main div, \.tms-shell \.tms-dg-card-main span \{ max-width: 100%; flex-wrap: wrap; min-width: 0; \}/)
+    expect(phone).toMatch(/\.tms-dg-card \.tms-dg-card-amount \{ min-width: auto; flex-shrink: 0; \}/)
+  })
+
+  it('draws each truck on Driver info as a card instead of an 896px row', () => {
+    expect(phone).toMatch(/\.tms-truckmap-head \{ display: none !important; \}/)
+    expect(phone).toMatch(/\.tms-truckmap-row \{\s*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\) !important; min-width: 0 !important;/)
+  })
+
+  it('stacks the Amazon disputes header and puts its KPI tiles two across', () => {
+    expect(phone).toMatch(/\.tms-disputes-head \{ flex-wrap: wrap;/)
+    expect(phone).toMatch(/\.tms-disputes-kpis \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\) !important;/)
+  })
+
+  it('applies none of it on desktop: every rule sits in a max-width block', () => {
+    const blocks = css.split('@media').slice(1)
+    const base = css.split('@media')[0]
+    for (const hook of ['tms-truckmap-row', 'tms-disputes-head', 'tms-appts-dayhead', 'tms-month-grid', 'tms-ivanweek-head', 'tms-expiring-row', 'tms-division-row', 'tms-kpi-card-period']) {
+      expect(base).not.toContain(hook)
+      for (const block of blocks.filter((b) => b.includes(hook))) expect(block.slice(0, block.indexOf('{'))).toMatch(/max-width: (640|900)px/)
+    }
+  })
+})

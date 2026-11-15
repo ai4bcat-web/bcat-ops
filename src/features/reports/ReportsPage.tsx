@@ -190,7 +190,7 @@ export function ReportsPage() {
     <div style={STACK}>
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 12 }}>
         <TmsBadge tone="gray">{periodLabel}</TmsBadge>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 8, minWidth: 0, maxWidth: '100%' }}>
           <TmsField label="From" htmlFor="report-from">
             <TmsSelect
               id="report-from"

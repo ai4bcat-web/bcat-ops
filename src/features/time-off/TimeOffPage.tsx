@@ -215,7 +215,7 @@ export function TimeOffPage() {
           </div>
 
           {/* Weekday header */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: '1px solid var(--tms-border)' }}>
+          <div className="tms-month-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: '1px solid var(--tms-border)' }}>
             {WEEKDAYS.map((w) => (
               <div key={w} style={{ padding: '8px 10px', fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'left' }}>
                 {isMobile ? w[0] : w}
@@ -224,7 +224,7 @@ export function TimeOffPage() {
           </div>
 
           {/* Day grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gridAutoRows: 'minmax(96px, auto)', background: 'var(--tms-border)', gap: 1 }}>
+          <div className="tms-month-grid tms-month-days" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gridAutoRows: 'minmax(96px, auto)', background: 'var(--tms-border)', gap: 1 }}>
             {cells.map((c) => {
               const entries = entriesOn(c.date)
               const isToday = c.date === today
@@ -273,7 +273,7 @@ export function TimeOffPage() {
 
         {/* ── Upcoming list ───────────────────────────────────────────────── */}
         <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
-          <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className="tms-timeoff-upcoming-head" style={{ padding: '14px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Upcoming &amp; active time off</div>
             <div style={{ fontSize: 12, color: 'var(--tms-muted)', display: 'flex', alignItems: 'center', gap: 12 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>

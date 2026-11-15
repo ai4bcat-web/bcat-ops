@@ -52,7 +52,7 @@ export function IvanDriverWeek({ driver, loads, weekStart, today, truck, now, on
 
   return (
     <section style={{ border: '1px solid var(--tms-border)', borderRadius: 12, background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--tms-border)' }}>
+      <div className="tms-ivanweek-head" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--tms-border)' }}>
         <Avatar initials={getInitials(driver.name)} size="lg" />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--tms-text)' }}>{driver.name}</div>
@@ -78,7 +78,7 @@ export function IvanDriverWeek({ driver, loads, weekStart, today, truck, now, on
         const etaForStopId = route && route.nextIndex != null && route.etaAt && route.milesToNext ? { id: route.stops[route.nextIndex].id, at: route.etaAt } : null
         return (
           <div key={date} style={{ padding: '10px 16px 12px', borderBottom: '1px solid var(--tms-border)', background: isToday ? 'var(--tms-bg)' : undefined }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+            <div className="tms-ivanweek-day" style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
               <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: isToday ? 'var(--tms-primary)' : 'var(--tms-muted)' }}>{isToday ? 'Today' : dayHeading(date)}</span>
               {isToday ? <span style={{ fontSize: 11, color: 'var(--tms-muted)' }}>{dayHeading(date)}</span> : null}
               <span style={{ fontSize: 12, color: 'var(--tms-text-2)' }} aria-label={`${driver.name} ${date}: ${schedule.done} of ${schedule.total} stops done`}>
@@ -89,7 +89,7 @@ export function IvanDriverWeek({ driver, loads, weekStart, today, truck, now, on
             <div style={{ display: 'grid', gap: 5 }}>
               <Progress done={schedule.done} total={schedule.total} color="var(--tms-badge-green)" />
               {schedule.stops.map(({ load, stop, state, apptWarning }, i) => (
-                <div key={`${load.id}:${stop.id}`} style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr auto', gap: 8, alignItems: 'center', fontSize: 12, color: state === 'DONE' ? 'var(--tms-muted)' : 'var(--tms-text)' }}>
+                <div key={`${load.id}:${stop.id}`} className="tms-ivanweek-stop" style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr auto', gap: 8, alignItems: 'center', fontSize: 12, color: state === 'DONE' ? 'var(--tms-muted)' : 'var(--tms-text)' }}>
                   <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--tms-muted)', width: 14, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
                   <StateIcon state={state} />
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: state === 'DONE' ? 'line-through' : 'none' }}>
