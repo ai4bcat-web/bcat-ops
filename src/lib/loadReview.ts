@@ -390,3 +390,85 @@ export function reviewAgeDays(row: Pick<LoadReviewRow, 'deliveredAt'>, now: numb
   if (!Number.isFinite(at)) return null
   return Math.max(0, Math.floor((now - at) / 86_400_000))
 }
+
+/**
+ * The fields Load Review checks, one column each on the review table (Ryne 2026-11-15: "show the actual values and put a
+ * check if everything is present"). Every failing reason belongs to at least one field, so a row whose fields all pass is
+ * exactly a row whose verdict is ok; `other` catches whatever no named field claims.
+ */
+export type LoadReviewFieldKey =
+  | 'customerRef' | 'pod' | 'rateCon' | 'customerRate' | 'carrierRate' | 'profit' | 'salesRep' | 'revDivision'
+  | 'delivered' | 'carrier' | 'customer' | 'stops' | 'other'
+
+export const LOAD_REVIEW_FIELDS: readonly LoadReviewFieldKey[] = [
+  'customerRef', 'pod', 'rateCon', 'customerRate', 'carrierRate', 'profit', 'salesRep', 'revDivision',
+  'delivered', 'carrier', 'customer', 'stops', 'other',
+]
+
+export const LOAD_REVIEW_FIELD_LABEL: Record<LoadReviewFieldKey, string> = {
+  customerRef: 'Customer ref (PO)',
+  pod: 'POD',
+  rateCon: 'RC',
+  customerRate: 'Customer rate',
+  carrierRate: 'Carrier rate',
+  profit: 'Profit',
+  salesRep: 'Sales rep',
+  revDivision: 'Rev division',
+  delivered: 'Delivered',
+  carrier: 'Carrier',
+  customer: 'Customer',
+  stops: 'Stops',
+  other: 'Other checks',
+}
+
+const FIELD_BY_CODE: Record<string, readonly LoadReviewFieldKey[]> = {
+  REFERENCE_NUMBER_MISSING: ['customerRef'],
+  REFERENCE_MISSING: ['customerRef'],
+  FACTOR_PO_MISSING: ['customerRef'],
+  POD_MISSING: ['pod'],
+  DOCS_UNCHECKED: ['pod', 'rateCon'],
+  NO_CUSTOMER_CHARGES: ['customerRate'],
+  FACTOR_RATE_MISSING: ['customerRate'],
+  EXPENSE_MISSING: ['carrierRate'],
+  CARRIER_RATE_MISSING: ['carrierRate'],
+  PROFIT_MISSING: ['profit'],
+  SALES_REP_MISSING: ['salesRep'],
+  REV_DIVISION_MISSING: ['revDivision'],
+  REV_DIVISION_INACTIVE: ['revDivision'],
+  NOT_DELIVERED: ['delivered'],
+  CARRIER_NOT_ASSIGNED: ['carrier'],
+  DRIVER_MISSING: ['carrier'],
+  NO_CUSTOMER: ['customer'],
+  FACTOR_CUSTOMER_MC: ['customer'],
+  FACTOR_BILLING_METHOD: ['customer'],
+  STOP_INCOMPLETE: ['stops'],
+  FACTOR_PICKUP_CITY: ['stops'],
+  FACTOR_PICKUP_STATE: ['stops'],
+  FACTOR_PICKUP_ZIP: ['stops'],
+  FACTOR_DELIVERY_CITY: ['stops'],
+  FACTOR_DELIVERY_STATE: ['stops'],
+  FACTOR_DELIVERY_ZIP: ['stops'],
+}
+
+/** Which review columns a failing reason marks NEED. A missing document goes to POD or RC by its type. */
+export function loadReviewFieldsOf(reason: Pick<LoadReviewReason, 'code' | 'message'>): readonly LoadReviewFieldKey[] {
+  if (reason.code === 'DOC_MISSING') {
+    if (/\bPOD\b/.test(reason.message)) return ['pod']
+    if (/RATE_CON|rate con/i.test(reason.message)) return ['rateCon']
+    return ['other']
+  }
+  return FIELD_BY_CODE[reason.code] ?? ['other']
+}
+
+/** The failing reasons per review column; an empty list is a pass. */
+export function loadReviewFieldReasons(verdict: LoadReviewVerdict): Record<LoadReviewFieldKey, LoadReviewReason[]> {
+  const out = Object.fromEntries(LOAD_REVIEW_FIELDS.map((key) => [key, [] as LoadReviewReason[]])) as Record<LoadReviewFieldKey, LoadReviewReason[]>
+  for (const item of failingReasons(verdict)) for (const key of loadReviewFieldsOf(item)) out[key].push(item)
+  return out
+}
+
+/** The labels of the columns that still need something, in column order: the Ready column's "NEED …" list. */
+export function loadReviewNeeds(verdict: LoadReviewVerdict): string[] {
+  const reasons = loadReviewFieldReasons(verdict)
+  return LOAD_REVIEW_FIELDS.filter((key) => reasons[key].length > 0).map((key) => LOAD_REVIEW_FIELD_LABEL[key])
+}

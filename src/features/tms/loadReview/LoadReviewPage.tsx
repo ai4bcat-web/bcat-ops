@@ -16,7 +16,8 @@ import { boardStatusOf, factorInfoText, factorInfoTitle, matchesQuery, openFacto
 import { FACTOR_INFO_OPTIONS, sentence } from '@/features/shipments/shipmentGridColumns'
 import { batchShipmentTask, listAuditLogsFor, pushReadyToLoadReview, releaseToBilling } from '@/lib/apiClient'
 import { useBillingGrant, LOAD_REVIEW_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
-import { NO_DELIVERY_TIME_TIP, failingReasons, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL, releasedWithin, reviewAgeDays, type LoadReviewVerdict } from '@/lib/loadReview'
+import { NO_DELIVERY_TIME_TIP, failingReasons, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL, LOAD_REVIEW_FIELDS, LOAD_REVIEW_FIELD_LABEL, releasedWithin, reviewAgeDays, type LoadReviewVerdict } from '@/lib/loadReview'
+import { customerRateCents, profitOf, reviewFieldCell, reviewFieldText, reviewReadyText } from './reviewFields'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
 import { useLoadReviewQueue } from './useLoadReviewQueue'
@@ -29,6 +30,14 @@ import { DetentionPill } from '@/features/shipments/components/Detention'
 
 type ReviewEntry = { row: ShipmentListRow; verdict?: LoadReviewVerdict }
 const PAGE_STEP = 50
+/** Looks ready opens on one column per checked field with its value, then Ready (Ryne 2026-11-15). */
+const READY_TAB_COLUMNS = ['shipment', ...LOAD_REVIEW_FIELDS.map((key) => `field-${key}`), 'ready']
+const fieldSort = (key: string) => (e: ReviewEntry): string | number => {
+  if (key === 'customerRate') return customerRateCents(e.row) ?? -Infinity
+  if (key === 'carrierRate') return e.row.costCents ?? -Infinity
+  if (key === 'profit') return profitOf(e.row)?.cents ?? -Infinity
+  return reviewFieldText(e.row, key as never)
+}
 export function LoadReviewPage() {
   const [params, setParams] = useSearchParams()
   const { shipments, queue, target, loading, partial, error, refresh } = useLoadReviewQueue(params.get('tab') === 'released', params.get('shipment'))
@@ -72,12 +81,19 @@ export function LoadReviewPage() {
       ...LOAD_REVIEW_CHECKS.map((key): DenseColumn<ReviewEntry> => ({ key: `check-${key}`, header: LOAD_REVIEW_CHECK_LABEL[key], group: 'Checks', text: (e) => (!e.verdict ? '' : e.verdict.checks[key].ok ? 'Pass' : 'Fix'), extraPx: 40, filter: 'multi', optionsOf: (e) => (e.verdict ? [{ value: e.verdict.checks[key].ok ? 'Pass' : 'Fix', label: e.verdict.checks[key].ok ? 'Pass' : 'Fix' }] : []), fixedOptions: [{ value: 'Pass', label: 'Pass' }, { value: 'Fix', label: 'Fix' }] })),
       { key: 'revenue', header: 'Revenue', group: 'Review', text: ({ row }) => formatCents(row.orderRevenueCents ?? row.revenueCents ?? 0), align: 'right', sortValue: ({ row }) => row.orderRevenueCents ?? row.revenueCents ?? 0 },
       { key: 'status', header: tab === 'released' ? 'Released by / at' : 'Status', group: 'Review', text: (e) => (tab === 'released' ? 'Released by someone · 2026-01-01 00:00 Open invoicing' : e.verdict?.ok ? 'Looks ready' : `${e.verdict ? failingReasons(e.verdict).length : 0} to fix`), extraPx: 30 },
+      // The checked fields with their values: NEED when the check fails, a check mark when it passes.
+      ...LOAD_REVIEW_FIELDS.map((key): DenseColumn<ReviewEntry> => {
+        const cellText = (e: ReviewEntry) => { const c = reviewFieldCell(e.row, e.verdict, key); return c.ok === false ? `${c.text ? `${c.text} ` : ''}NEED` : c.text || (c.ok ? 'OK' : '') }
+        return { key: `field-${key}`, header: LOAD_REVIEW_FIELD_LABEL[key], group: 'Checked fields', text: cellText, extraPx: 30, filter: 'multi', optionsOf: (e) => { const c = reviewFieldCell(e.row, e.verdict, key); return c.ok == null ? [] : [{ value: c.ok ? 'OK' : 'NEED', label: c.ok ? 'OK' : 'NEED' }] }, fixedOptions: [{ value: 'OK', label: 'OK' }, { value: 'NEED', label: 'NEED' }], sortValue: fieldSort(key), align: key === 'customerRate' || key === 'carrierRate' || key === 'profit' ? 'right' : undefined }
+      }),
+      { key: 'ready', header: 'Ready', group: 'Checked fields', text: (e) => reviewReadyText(e.verdict), extraPx: 30, filter: 'multi', optionsOf: (e) => (e.verdict ? [{ value: e.verdict.ok ? 'Ready' : 'NEED', label: e.verdict.ok ? 'Ready' : 'NEED' }] : []), fixedOptions: [{ value: 'Ready', label: 'Ready' }, { value: 'NEED', label: 'NEED' }] },
     ]
   }, [tab, now])
+  // Looks ready keeps its own layout so its default can be the checked fields; the other tabs keep theirs.
   const prefs = useDenseGridPrefs({
-    gridId: 'load-review',
+    gridId: tab === 'ready' ? 'load-review-ready' : 'load-review',
     email,
-    defaultColumns: denseCols.filter((c) => c.key !== 'select').map((c) => c.key),
+    defaultColumns: tab === 'ready' ? READY_TAB_COLUMNS : denseCols.filter((c) => c.key !== 'select' && !c.key.startsWith('field-') && c.key !== 'ready').map((c) => c.key),
     validKeys: denseCols.map((c) => c.key),
     defaultSort: null,
   })
@@ -206,6 +222,26 @@ export function LoadReviewPage() {
       },
     })),
     { key: 'revenue', header: 'Revenue', render: ({ row }) => formatCents(row.orderRevenueCents ?? row.revenueCents ?? 0) },
+    ...LOAD_REVIEW_FIELDS.map((key): ColumnDef<ReviewEntry> => ({
+      key: `field-${key}`,
+      header: LOAD_REVIEW_FIELD_LABEL[key],
+      render: ({ row, verdict }) => {
+        const cell = reviewFieldCell(row, verdict, key)
+        const docLink = (key === 'pod' || key === 'rateCon') && canOpen ? `/tms/shipments/${row.id}/edit#docs-${key === 'pod' ? 'POD' : 'RATE_CON'}` : null
+        if (cell.ok === false) {
+          const need = <TmsBadge tone="orange" title={cell.reasons.join('; ')}>NEED</TmsBadge>
+          return <span className="aa-field aa-field-need" data-testid={`field-${key}`} data-state="need">{cell.text && <span>{cell.text}</span>}{docLink ? <Link to={docLink} onClick={(e) => e.stopPropagation()}>{need}</Link> : need}</span>
+        }
+        const value = cell.text || (key === 'other' ? 'All passed' : '')
+        return <span className="aa-field" data-testid={`field-${key}`} data-state={cell.ok ? 'ok' : 'unknown'}>{cell.ok && <Check size={14} aria-label="Passed" className="text-[color:var(--tms-badge-green)]" />}{docLink && value ? <Link to={docLink} onClick={(e) => e.stopPropagation()}>{value}</Link> : <span>{value}</span>}</span>
+      },
+    })),
+    { key: 'ready', header: 'Ready', render: ({ verdict }) => {
+      if (!verdict) return null
+      return verdict.ok
+        ? <span className="aa-field" data-testid="field-ready" data-state="ok"><Check size={14} aria-label="Ready" className="text-[color:var(--tms-badge-green)]" /><span>Ready</span></span>
+        : <TmsBadge tone="orange" data-testid="field-ready" title={failingReasons(verdict).map((r) => r.message).join('; ')}>{reviewReadyText(verdict)}</TmsBadge>
+    } },
     { key: 'status', header: tab === 'released' ? 'Released by / at' : 'Status', render: ({ row, verdict }) => { if (tab === 'released') { const entry = audit[row.id] ?? (row.orderIds ?? []).map((id) => audit[id]).find(Boolean); return <>{entry?.user ?? 'Audit unavailable'} · {formatDateTime(entry?.at ?? row.readyToInvoiceAt)} {canOpen && <Link to={`/tms/shipments/${row.id}?tab=invoicing`}>Open invoicing</Link>}</> } return <TmsBadge tone={verdict?.ok ? 'green' : 'orange'}>{verdict?.ok ? 'Looks ready' : `${verdict ? failingReasons(verdict).length : 0} to fix`}</TmsBadge> } },
   ]
   const renderReviewCell = (entry: ReviewEntry, key: string) => columns.find((c) => c.key === key)?.render(entry) ?? null
