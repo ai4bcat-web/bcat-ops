@@ -870,7 +870,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           <TmsInput
             className="tms-dense-search"
             aria-label="Search"
-            placeholder="Search PRO, subject, or sender\u2026"
+            placeholder="Search PRO, subject, or sender…"
             value={search}
             onChange={(e) => { setSearch(e.target.value); resetPaging() }}
           />

@@ -233,7 +233,7 @@ export function DriverPayPage({ week, onWeek, viewSwitch, initialDriverId = null
       }
     >
 
-      <div style={{ padding: '20px 32px 40px', maxWidth: 1100, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="tms-pay-page" style={{ padding: '20px 32px 40px', maxWidth: 1100, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <PayrollCadenceBanner />
         {pay.loading && pay.rows.length === 0 && <div style={{ color: 'var(--tms-muted)', fontSize: 14, padding: 40, textAlign: 'center' }}>Loading…</div>}
 
@@ -483,19 +483,19 @@ function StatementCard({ row, periodStart, onAddTrip, onImport, onAddDeduction, 
   return (
     <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', overflow: 'hidden', boxShadow: 'var(--tms-shadow)', background: 'var(--tms-card)' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderBottom: '1px solid var(--tms-border)' }}>
+      <div className="tms-pay-stmt-head" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderBottom: '1px solid var(--tms-border)' }}>
         <Avatar src={driver.photoUrl} initials={getInitials(driver.name)} size="lg" style={{ background: color.avatarBg, color: 'var(--tms-on-primary)' }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--tms-text)' }}>{driver.name}</div>
           <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 1 }}>{modeLabel}{setting.email ? ` · ${setting.email}` : ''}</div>
           {row.amazonOverlap && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--tms-badge-orange)', marginTop: 2 }} data-testid="amazon-overlap-note">{AMAZON_OVERLAP_NOTE}. Set it on the driver’s profile (Pay mode by week).</div>}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-          <div style={{ textAlign: 'right' }}>
+        <div className="tms-pay-stmt-figures" style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+          <div className="tms-pay-stmt-figure" style={{ textAlign: 'right' }}>
             <div style={{ fontSize: 10.5, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Shipments</div>
             <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>{row.trips.length}</div>
           </div>
-          <div style={{ textAlign: 'right' }}>
+          <div className="tms-pay-stmt-figure" style={{ textAlign: 'right' }}>
             <div style={{ fontSize: 10.5, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Check amount</div>
             <div style={{ fontSize: 22, fontWeight: 700, color: statement.checkAmount >= 0 ? 'var(--tms-badge-green)' : 'var(--tms-badge-red)', fontVariantNumeric: 'tabular-nums' }}>{money(statement.checkAmount)}</div>
           </div>

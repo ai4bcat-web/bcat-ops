@@ -19,14 +19,14 @@ export interface DayEdit { id: string; hours: string; note: string }
 const COLS = 'grid grid-cols-[28px_minmax(150px,1.6fr)_repeat(4,minmax(70px,1fr))] items-center gap-x-3'
 const PAY_COLS = 'grid grid-cols-[28px_minmax(150px,1.6fr)_repeat(4,minmax(70px,1fr))_minmax(90px,1fr)_minmax(110px,1.2fr)] items-center gap-x-3'
 
-function Hours({ minutes, tone }: { minutes: number; tone?: 'pto' | 'holiday' | 'total' }) {
+function Hours({ minutes, tone, label }: { minutes: number; tone?: 'pto' | 'holiday' | 'total'; label: string }) {
   const chip =
     tone === 'pto' && minutes > 0 ? 'bg-[color:var(--tms-badge-blue-tint)] text-[color:var(--tms-badge-blue)]'
       : tone === 'holiday' && minutes > 0 ? 'bg-[color:var(--tms-badge-orange-tint)] text-[color:var(--tms-badge-orange)]'
         : tone === 'total' ? 'font-bold text-foreground'
           : 'text-foreground'
   return (
-    <div className="text-right">
+    <div className="text-right" data-label={label}>
       <span className={`inline-block rounded-md px-2 py-0.5 text-base tabular-nums ${chip}`}>{hm(minutes)}</span>
       <div className="pr-2 text-[11px] tabular-nums text-muted-foreground">{decimalHours(minutes)} h</div>
     </div>
@@ -269,8 +269,8 @@ export function HoursPeriodView({
         </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-background">
-        <div className={`${cols} border-b border-border px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground`}>
+      <div className="tms-hours-table rounded-xl border border-border bg-background">
+        <div className={`tms-hours-head ${cols} border-b border-border px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground`}>
           <span />
           <span>Driver</span>
           <span className="text-right">Worked hrs</span>
@@ -287,7 +287,7 @@ export function HoursPeriodView({
           const warnDays = row.period.days.filter((d) => dayWarning(d, motive[row.driverId]?.[d.date])).length
           return (
             <section key={row.driverId} className="border-b border-border last:border-0" aria-label={row.name}>
-              <div className={`${cols} px-4 py-3 ${isOpen ? 'bg-muted/30' : 'hover:bg-muted/20'}`}>
+              <div className={`tms-hours-row ${cols} px-4 py-3 ${isOpen ? 'bg-muted/30' : 'hover:bg-muted/20'}`}>
                 <button type="button" aria-expanded={isOpen} aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${row.name}`} onClick={() => toggle(row.driverId)} className="text-muted-foreground print:hidden">
                   {isOpen ? <ChevronDown className="h-5 w-5" aria-hidden="true" /> : <ChevronRight className="h-5 w-5" aria-hidden="true" />}
                 </button>
@@ -302,12 +302,12 @@ export function HoursPeriodView({
                     )}
                   </span>
                 </button>
-                <Hours minutes={row.period.workedMinutes} />
-                <Hours minutes={row.period.ptoMinutes} tone="pto" />
-                <Hours minutes={row.period.holidayMinutes} tone="holiday" />
-                <Hours minutes={row.period.totalMinutes} tone="total" />
+                <Hours minutes={row.period.workedMinutes} label="Worked hrs" />
+                <Hours minutes={row.period.ptoMinutes} tone="pto" label="PTO hrs" />
+                <Hours minutes={row.period.holidayMinutes} tone="holiday" label="Holiday hrs" />
+                <Hours minutes={row.period.totalMinutes} tone="total" label="Total hrs" />
                 {showPay && row.pay && info && (
-                  <div className="text-right">
+                  <div className="text-right" data-label="Rate ($/hr)">
                     {!ratesReady ? (
                       <span className="text-base text-muted-foreground" title="Rates are not loaded">—</span>
                     ) : row.pay.rate != null ? (
@@ -332,7 +332,7 @@ export function HoursPeriodView({
                   </div>
                 )}
                 {showPay && row.pay && (
-                  <div className="text-right">
+                  <div className="text-right" data-label="2-week pay">
                     <span className="text-lg font-bold tabular-nums text-[color:var(--tms-badge-green)]">{money(ratesReady ? row.pay.pay : null)}</span>
                     {ratesReady && (row.pay.partial || (row.pay.rate == null && info?.rate != null && row.period.totalMinutes > 0)) && (
                       <div className="text-[11px] text-[color:var(--tms-badge-orange)]">some days have no rate</div>
@@ -367,15 +367,15 @@ export function HoursPeriodView({
           )
         })}
 
-        <div className={`${cols} border-t-2 border-border bg-muted/40 px-4 py-3`} aria-label="Totals">
+        <div className={`tms-hours-row tms-hours-total ${cols} border-t-2 border-border bg-muted/40 px-4 py-3`} aria-label="Totals">
           <span />
           <span className="text-sm font-bold uppercase tracking-wide text-foreground">Total · {totals.drivers} {totals.drivers === 1 ? 'driver' : 'drivers'}</span>
-          <Hours minutes={totals.workedMinutes} />
-          <Hours minutes={totals.ptoMinutes} tone="pto" />
-          <Hours minutes={totals.holidayMinutes} tone="holiday" />
-          <Hours minutes={totals.totalMinutes} tone="total" />
+          <Hours minutes={totals.workedMinutes} label="Worked hrs" />
+          <Hours minutes={totals.ptoMinutes} tone="pto" label="PTO hrs" />
+          <Hours minutes={totals.holidayMinutes} tone="holiday" label="Holiday hrs" />
+          <Hours minutes={totals.totalMinutes} tone="total" label="Total hrs" />
           {showPay && <span />}
-          {showPay && <span className="text-right text-lg font-bold tabular-nums text-[color:var(--tms-badge-green)]">{money(totalPay)}</span>}
+          {showPay && <span className="text-right text-lg font-bold tabular-nums text-[color:var(--tms-badge-green)]" data-label="2-week pay">{money(totalPay)}</span>}
         </div>
       </div>
     </div>
