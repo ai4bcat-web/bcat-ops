@@ -28,6 +28,7 @@ vi.mock('./DieselPriceWidget', () => { return { DieselPriceWidget: () => <div da
 vi.mock('./ComplianceAlertsWidget', () => { return { ComplianceAlertsWidget: () => <div data-testid="widget-ComplianceAlertsWidget" /> } })
 vi.mock('./BrokerageDashboardPage', () => { return { BrokerageSection: () => <div data-testid="widget-BrokerageSection" /> } })
 vi.mock('./RepairInvoicesWidget', () => { return { RepairInvoicesWidget: () => <div data-testid="widget-RepairInvoicesWidget" /> } })
+vi.mock('./AccountingSection', () => { return { AccountingSection: () => <div data-testid="widget-AccountingSection" /> } })
 
 const { useAppStore } = await import('@/store/useAppStore')
 const { useLegacyDashboardKpis, usableLegacyRows } = await import('./useLegacyDashboardKpis')

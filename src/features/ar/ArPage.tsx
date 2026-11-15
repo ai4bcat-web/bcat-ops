@@ -13,7 +13,9 @@
 import { InvoiceEditDrawer } from './components/InvoiceEditDrawer'
 import { billsThroughOtr, ordersNeedingInvoice, unsentLabel } from './autoInvoice'
 import { ArSummaryStrip } from './ArSummaryStrip'
-import { computeArSummary, divisionKeyOf } from './arSummary'
+import { readyQueueRows, receivablesSummary, useArSummaryModel } from './useArSummaryModel'
+import { tabFromUrl } from '@/features/finance/accountingLinks'
+import { divisionKeyOf } from './arSummary'
 import { arCompactItems, arTabs, paidInMonthOf } from './arTabs'
 import { ageInvoices } from '@/lib/arAging'
 import { OwedFilterBar } from './components/OwedFilterBar'
@@ -40,19 +42,14 @@ import {
 } from '@/features/tms/kit'
 import type { DenseColumn } from '@/features/tms/grid/denseGridModel'
 import { ArDenseTable, type ArGrid } from './components/ArDenseTable'
-import { useArWorklist } from '@/hooks/useArWorklist'
 import { useShipments, type ShipmentListRow } from '@/hooks/useShipments'
 import { readyFactsOf } from './readyFacts'
 import { useCustomerAr } from '@/hooks/useCustomerAr'
-import { useOpenInvoices } from '@/hooks/useOpenInvoices'
 import { exportOutstandingReceivables } from '@/lib/opsExports'
 import { useDirectory } from '@/hooks/useDirectory'
-import { useFactoringItems } from '@/hooks/useFactoringItems'
-import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import {
-  batchGenerateInvoices, getTmsSettings, graphqlErrorText, listInvoicesByMonth, listUserProfiles, reversePayment, voidInvoice,
+  batchGenerateInvoices, getTmsSettings, graphqlErrorText, reversePayment, voidInvoice,
 } from '@/lib/apiClient'
-import { loadWorklistShipments } from '@/lib/worklistShipments'
 import { NeedsReviewList } from '@/features/finance/NeedsReview'
 import { useNeedsReview } from '@/features/finance/useNeedsReview'
 import {
@@ -66,11 +63,11 @@ import { otrStatusLabel } from '@/lib/otrInvoiceStatus'
 import { otrRejection } from '@/lib/otrRejection'
 import {
   AR_PAYMENT_KIND_LABEL, AR_PAYMENT_METHOD_LABEL, BATCH_GENERATE_LIMIT,
-  agingChipFor, formatDay, lastMonths, lastThreeMonths, monthLabel, PAID_LOOKBACK_MONTHS,
+  agingChipFor, formatDay, lastThreeMonths, monthLabel,
 } from './arViews'
 import {
-  AR_BILLED_BY_LABEL, AR_GROUP_BY_LABEL, AR_QUEUE_STATUS_LABEL, billedByMatches, factorQueueRows, isInvoiceSent, splitOpenInvoices, buildPaidRows, buildReadyRows, groupKeyOf, groupTotals,
-  orderByGroup, type ArBilledBy, type ArGroupBy, type ArQueueLookups, type ArQueueRow, type ArQueueStatus,
+  AR_BILLED_BY_LABEL, AR_GROUP_BY_LABEL, AR_QUEUE_STATUS_LABEL, billedByMatches, buildPaidRows, groupKeyOf, groupTotals,
+  orderByGroup, type ArBilledBy, type ArGroupBy, type ArQueueRow, type ArQueueStatus,
 } from './arQueue'
 import { CreditMemoDialog } from './components/CreditMemoDialog'
 import { ReasonDialog } from './components/ReasonDialog'
@@ -91,7 +88,7 @@ import type { AccountingReportKind } from '@/features/finance/accountingReports'
 import { useDeliveredNotReady } from './useDeliveredNotReady'
 import { ArInvoicedCard, ArPaidCard, ArReadyCard, ProfitCheckCard, ReviewReasonCard } from '@/features/finance/AccountingCards'
 import { arInvoicedStats, arPaidStats, arReadyStats, reviewReasonCounts } from '@/features/finance/accountingStats'
-import type { ArPaymentRecord, CustomerRecord, InvoiceRecord, ShipmentRecord, UserProfileRecord } from '@/types/tms'
+import type { ArPaymentRecord, CustomerRecord, InvoiceRecord, ShipmentRecord } from '@/types/tms'
 
 /** Which dialog is open, and the one thing it is open about. Mount is the `open` flag. */
 type ArDialog =
@@ -132,6 +129,8 @@ function view<T>(config: Omit<ListView, 'grid'> & { grid: ArGrid<T> }): ListView
 /** The three queue statuses, then the two ledger views. */
 export type ArPageTab = 'ready' | 'invoiced' | 'paid' | 'payments' | 'aging' | 'review'
 
+const AR_PAGE_TABS: readonly ArPageTab[] = ['ready', 'invoiced', 'paid', 'payments', 'aging', 'review']
+
 const QUEUE_TAB_STATUS: Record<'ready' | 'invoiced' | 'paid', ArQueueStatus> = {
   ready: 'READY',
   invoiced: 'INVOICED',
@@ -164,7 +163,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   // same day, so a row cannot read "Current" next to a 1–30 column it was counted in.
   const [asOf] = useState(() => chicagoDateStr(new Date()))
 
-  const [tab, setTab] = useState<ArPageTab>('ready')
+  // `?tab=` opens a status tab directly (the Operations Dashboard's Accounting cards link here).
+  const [tab, setTab] = useState<ArPageTab>(() => tabFromUrl(AR_PAGE_TABS, 'ready'))
   const needsReview = useNeedsReview()
   const [dialog, setDialog] = useState<ArDialog | null>(null)
   const [reportsOpen, setReportsOpen] = useState<AccountingReportKind | 'menu' | null>(null)
@@ -186,25 +186,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     try { localStorage.setItem(GROUP_BY_KEY, next) } catch { /* per-viewer convenience only */ }
   }
 
-  // Released to billing from Load Review = Order.arStatus UNBILLED.
-  const unbilled = useArWorklist('UNBILLED')
-  // Invoiced-but-unpaid orders: the shipments behind the open invoices, and their release dates.
-  const invoiced = useArWorklist('UNPAID')
-  const open = useOpenInvoices()
   const { customers } = useDirectory({ locations: false })
-  const { items: factoringItems, refresh: refreshFactoring } = useFactoringItems()
-  const { divisions } = useOwnershipDivisions()
-
-  const [profiles, setProfiles] = useState<UserProfileRecord[]>([])
-  useEffect(() => {
-    let alive = true
-    Promise.resolve()
-      .then(() => listUserProfiles())
-      .then((rows) => { if (alive) setProfiles(rows ?? []) })
-      .catch(() => { /* names fall back to the id */ })
-    return () => { alive = false }
-  }, [])
-
   const [selected, setSelected] = useState<string[]>([])
   // Customer / rev division / due filters live in the URL (`?customer=…&div=…&due=…`) so a
   // filtered view can be shared; the division card writes the same state.
@@ -232,90 +214,14 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
   const months = useMemo(() => lastThreeMonths(asOf), [asOf])
   const [month, setMonth] = useState(() => months[0])
-  const [paidInvoices, setPaidInvoices] = useState<InvoiceRecord[]>([])
-
   const [arCustomerId, setArCustomerId] = useState<string | null>(null)
   const customerAr = useCustomerAr(arCustomerId)
 
-  // Invoices issued in the picked month: the factoring queue and Needs review look PROs up in them. The Paid
-  // tab itself reads `paidInMonth` (by paid date). No synchronous setState in the effect: writes live in the chain.
-  const loadMonth = useCallback(() =>
-    listInvoicesByMonth(month)
-      .then((rows) => setPaidInvoices(rows))
-      .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not load that month')),
-  [month])
-  useEffect(() => { loadMonth() }, [loadMonth])
-
-  // Invoices issued over the last six months: the days-to-pay figures (90-day window), "Collected this
-  // week / month" and the Paid tab all read this one set, by paid date, so the card and the tab agree.
-  const [recentPaid, setRecentPaid] = useState<InvoiceRecord[]>([])
-  const [recentLoaded, setRecentLoaded] = useState(false)
-  const recentMonths = useMemo(() => lastMonths(asOf, PAID_LOOKBACK_MONTHS), [asOf])
-  const loadRecent = useCallback(() =>
-    Promise.all(recentMonths.map((m) => listInvoicesByMonth(m).catch(() => [] as InvoiceRecord[])))
-      .then((sets) => setRecentPaid(sets.flat()))
-      .finally(() => setRecentLoaded(true)),
-  [recentMonths])
-  useEffect(() => { void loadRecent() }, [loadRecent])
-
-  // Shipments behind paid invoices are not in any worklist; read them by id for division and rep.
-  const [paidShipments, setPaidShipments] = useState<ShipmentRecord[]>([])
-  const paidShipmentIds = useMemo(
-    () => [...new Set([...paidInvoices, ...recentPaid].filter((inv) => inv.status === 'PAID').map((inv) => inv.shipmentId))].sort().join(','),
-    [paidInvoices, recentPaid],
-  )
-  useEffect(() => {
-    let alive = true
-    const ids = paidShipmentIds.split(',').filter(Boolean)
-    Promise.resolve()
-      .then(() => (ids.length ? loadWorklistShipments(ids) : []))
-      .then((rows) => { if (alive) setPaidShipments(rows ?? []) })
-      .catch(() => { /* division and rep fall back to the invoice */ })
-    return () => { alive = false }
-  }, [paidShipmentIds])
-
-  const factorByItemId = useMemo(() => {
-    const map = new Map<string, FactoringItem>()
-    for (const item of factoringItems) map.set(item.id, item)
-    return map
-  }, [factoringItems])
-
-  const lookups: ArQueueLookups = useMemo(() => {
-    const shipmentsById = new Map<string, ShipmentRecord>()
-    for (const s of paidShipments) shipmentsById.set(s.id, s)
-    for (const r of [...unbilled.rows, ...invoiced.rows]) if (r.shipment) shipmentsById.set(r.shipmentId, r.shipment)
-    const divisionByCode = new Map((divisions ?? []).map((d) => [d.code, d.name]))
-    const profileById = new Map<string, UserProfileRecord>()
-    for (const p of profiles) {
-      if (p.id) profileById.set(p.id, p)
-      if (p.email) profileById.set(p.email, p)
-    }
-    return {
-      shipmentsById,
-      asOf,
-      divisionName: (code) => (code ? divisionByCode.get(code) ?? code : 'No division'),
-      repName: (id) => {
-        if (!id) return 'No sales rep'
-        const p = profileById.get(id)
-        return p?.name ?? p?.email ?? id
-      },
-    }
-  }, [paidShipments, unbilled.rows, invoiced.rows, divisions, profiles, asOf])
-
-  const releasedByOrder = useMemo(
-    () => new Map(invoiced.rows.map((r) => [r.orderId, r.order.readyToInvoiceAt ?? null])),
-    [invoiced.rows],
-  )
-
-  // Auto-generated on release but not yet sent = a draft for review in Ready to invoice. Drafts are not
-  // receivables yet: the cards, the Invoiced tab and Aging all count the same sent set (`sentOpen`).
-  const split = useMemo(() => splitOpenInvoices(open.invoices, lookups, releasedByOrder, (inv) =>
-    isInvoiceSent(inv, inv.factoringItemId ? factorByItemId.get(inv.factoringItemId) : null)),
-  [open.invoices, lookups, releasedByOrder, factorByItemId])
-  const sentOpen = useMemo(() => {
-    const drafts = new Set(split.drafts.map((r) => r.invoiceId))
-    return open.invoices.filter((inv) => !drafts.has(inv.id))
-  }, [open.invoices, split.drafts])
+  // The reads, the drafts split and the summary are shared with the Operations Dashboard's Accounting cards.
+  const {
+    unbilled, invoiced, open, factoringItems, refreshFactoring, paidInvoices, loadMonth,
+    recentPaid, recentLoaded, loadRecent, factorByItemId, lookups, split, sentOpen, summarize, summaryAll,
+  } = useArSummaryModel(asOf, month)
   // Paid = settled in the chosen month by paid date: the same rule as "Collected this month", from the same read.
   const paidInMonth = useMemo(() => paidInMonthOf(recentPaid, month), [recentPaid, month])
 
@@ -326,15 +232,10 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       && (!due || inDueBucket(row.dueAt, asOf, owed.due)))
     const keep = (rows: ArQueueRow[]) => keepAll(rows, true)
     return {
-      READY: (() => {
-        const ready = buildReadyRows(unbilled.rows, lookups)
-        const readyOrders = new Set(ready.map((r) => r.orderId))
-        const rows = keep([...split.drafts.filter((r) => !readyOrders.has(r.orderId)), ...ready])
-        // The loads the To factor tab held: queue rows not yet at OTR. Always listed, whatever the billed-by view.
-        // Paid invoices too: a queue row for a PRO that is already billed and paid is not new work either.
-        const invoicesById = new Map([...paidInvoices, ...open.invoices].map((inv) => [inv.id, inv]))
-        return [...rows, ...factorQueueRows(factoringItems, rows, invoicesById, lookups)]
-      })(),
+      // The loads the To factor tab held: queue rows not yet at OTR. Always listed, whatever the billed-by view.
+      READY: readyQueueRows({
+        unbilledRows: unbilled.rows, drafts: split.drafts, monthInvoices: paidInvoices, openInvoices: open.invoices, factoringItems, lookups,
+      }, keep),
       INVOICED: keep(split.invoiced),
       // Paid rows owe nothing, so the due bucket does not narrow them.
       PAID: keepAll(buildPaidRows(paidInMonth, lookups), false),
@@ -383,18 +284,10 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     [owed.divisions, lookups])
   const partyOpen = useMemo(() => sentOpen.filter(byParty), [sentOpen, byParty])
   const filteredOpen = useMemo(() => partyOpen.filter(byDivision), [partyOpen, byDivision])
-  const summarize = useCallback((openInvoices: InvoiceRecord[], paid: InvoiceRecord[]) => computeArSummary({
-    open: openInvoices,
-    paid,
-    factorByItemId,
-    shipmentsById: lookups.shipmentsById,
-    divisionName: lookups.divisionName,
-    asOf,
-  }), [factorByItemId, lookups, asOf])
-  const summaryAll = useMemo(() => summarize(sentOpen, recentPaid), [summarize, sentOpen, recentPaid])
-  const summary = useMemo(() => ({
-    ...summarize(filteredOpen, recentPaid.filter((inv) => byParty(inv) && byDivision(inv))),
-    byDivision: summarize(partyOpen, []).byDivision,
+  const summary = useMemo(() => receivablesSummary(summarize, {
+    owned: filteredOpen,
+    party: partyOpen,
+    paid: recentPaid.filter((inv) => byParty(inv) && byDivision(inv)),
   }), [summarize, filteredOpen, partyOpen, recentPaid, byParty, byDivision])
   const owedSummary = useMemo(() => summarizeOwed(filteredOpen, asOf), [filteredOpen, asOf])
   // Aging re-ages only the selected customers' / divisions' invoices.
@@ -496,10 +389,10 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   useEffect(() => {
     if (tab === 'ready' && canRelease) generateMissing(ordersNeedingInvoice(queue.READY, autoAttempted.current))
   }, [tab, canRelease, queue.READY, generateMissing])
-  const retryInvoice = (orderId: string) => {
+  const retryInvoice = useCallback((orderId: string) => {
     setAutoErrors((prev) => { const next = new Map(prev); next.delete(orderId); return next })
     generateMissing([orderId])
-  }
+  }, [generateMissing])
 
 
 
@@ -572,6 +465,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   )
 
   const current =
+    // queueView only builds columns and handlers: onRetryInvoice (which touches refs) runs on a click, never during render.
+    // eslint-disable-next-line react-hooks/refs
     tab === 'ready' || tab === 'invoiced' || tab === 'paid' ? queueView({
       status: QUEUE_TAB_STATUS[tab],
       rows: queue[QUEUE_TAB_STATUS[tab]],
