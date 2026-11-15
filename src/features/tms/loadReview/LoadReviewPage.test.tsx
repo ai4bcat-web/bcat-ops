@@ -119,6 +119,29 @@ describe('LoadReviewPage', () => {
     expect(screen.queryByRole('button', { name: /Select all looks ready/ })).toBeNull()
   })
 
+  it('Looks ready shows every checked field with its value and a Ready column (Ryne 2026-11-15)', () => {
+    window.localStorage.clear()
+    renderPage('/tms/load-review?tab=ready')
+    const headers = screen.getAllByRole('columnheader').map((h) => h.textContent ?? '')
+    for (const label of ['Customer ref (PO)', 'POD', 'RC', 'Customer rate', 'Carrier rate', 'Profit', 'Sales rep', 'Rev division', 'Ready']) {
+      expect(headers.some((h) => h.includes(label))).toBe(true)
+    }
+    expect(screen.getAllByText('PO-1').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('$1,200.00').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('$900.00').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('$300.00 (25%)').length).toBeGreaterThan(0)
+    expect(screen.getAllByTestId('field-ready').every((el) => el.getAttribute('data-state') === 'ok')).toBe(true)
+  })
+
+  it('Needs fixes marks the failing field NEED and the Ready column lists what is missing', () => {
+    window.localStorage.clear()
+    window.localStorage.setItem('tms:grid:load-review::v1', JSON.stringify({ columns: ['shipment', 'field-pod', 'ready'] }))
+    renderPage('/tms/load-review?tab=fixes')
+    const pods = screen.getAllByTestId('field-pod')
+    expect(pods.some((el) => el.getAttribute('data-state') === 'need')).toBe(true)
+    expect(screen.getAllByText(/^NEED .*POD/).length).toBeGreaterThan(0)
+  })
+
   it('clicking a column heading sorts the rows A to Z, then Z to A', () => {
     try { window.localStorage.clear() } catch { /* ignore */ }
     renderPage('/tms/load-review?tab=all')
@@ -222,7 +245,7 @@ describe('LoadReviewPage', () => {
     expect(mocks.review).toHaveBeenCalledWith({ shipmentId: 's-1' })
     expect(moveButton().disabled).toBe(true) // not until the server answers
     await waitFor(() => expect(moveButton().disabled).toBe(false))
-    expect(screen.getByText('Ready')).toBeTruthy()
+    expect(screen.getAllByText('Ready').some((el) => el.classList.contains('tms-badge'))).toBe(true)
     fireEvent.click(moveButton())
     await waitFor(() => expect(mocks.ready).toHaveBeenCalledWith({ orderId: 'o-s-1', expectedUpdatedAt: 'u1', review: { source: 'LOAD_REVIEW' } }))
     await waitFor(() => expect(mocks.release).toHaveBeenCalledWith(expect.objectContaining({ orderId: 'o-s-1' })))
@@ -232,7 +255,7 @@ describe('LoadReviewPage', () => {
     mocks.hasPageAccess.mockReturnValue(true) // can open the page, but holds neither accounting page
     mocks.groups.mockReturnValue(['page-tms'])
     renderPage('/tms/load-review?tab=ready&shipment=s-1')
-    await waitFor(() => expect(screen.getByText('Ready')).toBeTruthy())
+    await waitFor(() => expect(screen.getAllByText('Ready').some((el) => el.classList.contains('tms-badge'))).toBe(true))
     expect(moveButton().disabled).toBe(true)
     expect(screen.getAllByText(/You need access to Load review/).length).toBeGreaterThan(0)
     fireEvent.click(moveButton())
