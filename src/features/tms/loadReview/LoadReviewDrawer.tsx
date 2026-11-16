@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CheckCircle2, XCircle } from 'lucide-react'
 import { RepPicker } from '@/components/RepPicker'
@@ -23,6 +23,38 @@ import { ReviewFixPanel } from './ReviewFixPanel'
 import { FIELD_ANCHOR, anchorForReason, scrollToFix } from './reviewFix'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
+import { RailSaveContext, runPendingSaves, useRailPending, type PendingSave, type RailSaveRegistry } from './railSave'
+
+/** Sales rep, saved with the rail's Save changes. */
+function SalesRepFix({ current, shipmentId, disabled }: { current: string; shipmentId: string; disabled: boolean }) {
+  const [rep, setRep] = useState(current)
+  const dirty = rep !== current
+  const error = useRailPending('salesRep', dirty ? { label: 'Sales rep', order: 50, run: () => setSalesRep({ shipmentId, repId: rep || null }) } : null)
+  return <>
+    <RepPicker value={rep} allowUnknown disabled={disabled} placeholder="Pick a sales rep…" onChange={(repId) => setRep(repId ?? '')} />
+    {dirty && <span className="lr-unsaved" data-testid="lr-unsaved">Unsaved</span>}
+    {error && <p role="alert" className="lr-fix-error">{error}</p>}
+  </>
+}
+
+/** Revenue division and subdivision, saved with the rail's Save changes. */
+function DivisionFix({ current, currentSub, shipmentId, disabled, active }: {
+  current: string; currentSub: string; shipmentId: string; disabled: boolean
+  active: { id: string; code: string; name: string; parentId?: string | null }[]
+}) {
+  const [division, setDivision] = useState(current)
+  const [subdivision, setSubdivision] = useState(currentSub)
+  const parent = active.find((d) => d.code === division)
+  const children = active.filter((d) => d.parentId === parent?.id)
+  const dirty = Boolean(division) && (division !== current || subdivision !== currentSub)
+  const error = useRailPending('revDivision', dirty ? { label: 'Revenue division', order: 40, run: () => setRevTag({ shipmentId, divisionCode: division, subdivisionCode: subdivision || undefined }) } : null)
+  return <div className="flex flex-wrap gap-2">
+    <TmsSelect aria-label="Revenue division" value={division} disabled={disabled} onChange={(event) => { setDivision(event.target.value); setSubdivision('') }}><option value="">Select division</option>{active.filter((d) => !d.parentId).map((d) => <option key={d.id} value={d.code}>{d.name}</option>)}</TmsSelect>
+    <TmsSelect aria-label="Subdivision" value={subdivision} disabled={disabled || !children.length} onChange={(event) => setSubdivision(event.target.value)}><option value="">Whole division</option>{children.map((d) => <option key={d.id} value={d.code}>{d.name}</option>)}</TmsSelect>
+    {dirty && <span className="lr-unsaved" data-testid="lr-unsaved">Unsaved</span>}
+    {error && <p role="alert" className="lr-fix-error">{error}</p>}
+  </div>
+}
 
 export function LoadReviewDrawer({ row, focus, onClose, onRefresh, onMoved, onFailure }: {
   row: ShipmentListRow
@@ -40,8 +72,19 @@ export function LoadReviewDrawer({ row, focus, onClose, onRefresh, onMoved, onFa
   const [result, setResult] = useState<LoadReviewResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [division, setDivision] = useState(row.revDivision ?? '')
-  const [subdivision, setSubdivision] = useState(row.revSubdivision ?? '')
+  // The rail's one Save: every section with edits registers here (railSave.ts).
+  const pending = useRef(new Map<string, PendingSave>())
+  const [pendingLabels, setPendingLabels] = useState<string[]>([])
+  const [saveErrors, setSaveErrors] = useState<ReadonlyMap<string, string>>(new Map())
+  const [reloadSignal, setReloadSignal] = useState(0)
+  const [confirmClose, setConfirmClose] = useState(false)
+  const registerPending = useCallback((key: string, save: PendingSave | null) => {
+    if (save) pending.current.set(key, save)
+    else pending.current.delete(key)
+    setPendingLabels([...pending.current.values()].sort((a, b) => a.order - b.order).map((p) => p.label))
+    if (!save) setSaveErrors((errors) => { if (!errors.has(key)) return errors; const next = new Map(errors); next.delete(key); return next })
+  }, [])
+  const registry = useMemo<RailSaveRegistry>(() => ({ set: registerPending, errorOf: (key) => saveErrors.get(key) ?? null }), [registerPending, saveErrors])
   useEffect(() => {
     let live = true
     reviewLoad({ shipmentId: row.id }).then((answer) => { if (live) setResult(answer) })
@@ -60,20 +103,7 @@ export function LoadReviewDrawer({ row, focus, onClose, onRefresh, onMoved, onFa
   const reasons = failingReasons(verdict)
   const released = result != null && result.arStatus !== 'DOCS_NEEDED'
   const active = (divisions ?? []).filter((d) => d.active)
-  const parent = active.find((d) => d.code === division)
-  const children = active.filter((d) => d.parentId === parent?.id)
 
-  async function fix(action: () => Promise<unknown>) {
-    setBusy(true)
-    setError(null)
-    setResult(null)
-    try {
-      await action()
-      await onRefresh()
-      setResult(await reviewLoad({ shipmentId: row.id }))
-    } catch (err) { setError(err instanceof Error ? err.message : String(err)) }
-    finally { setBusy(false) }
-  }
   // Recording bills only changes this review: re-read it in place. A board refresh here would swap the drawer's row
   // out from under the panel and wipe its per-carrier result list.
   async function rereview() {
@@ -91,6 +121,26 @@ export function LoadReviewDrawer({ row, focus, onClose, onRefresh, onMoved, onFa
     return () => window.removeEventListener('focus', onFocus)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busy, row.id])
+  /** Saves every section with edits, then re-runs the review once. Returns true when everything saved. */
+  async function saveAll(): Promise<boolean> {
+    if (pending.current.size === 0) return true
+    setBusy(true)
+    setError(null)
+    try {
+      const failures = await runPendingSaves(new Map(pending.current))
+      setSaveErrors(failures)
+      setReloadSignal((n) => n + 1)
+      await rereview()
+      void onRefresh()
+      if (failures.size === 0) toast.success('Saved')
+      else toast.error(`${failures.size} ${failures.size === 1 ? 'section' : 'sections'} could not be saved: see the red notes in the rail.`)
+      return failures.size === 0
+    } finally { setBusy(false) }
+  }
+  function requestClose() {
+    if (pending.current.size > 0) setConfirmClose(true)
+    else onClose()
+  }
   async function move() {
     if (!result || !verdict.ok || released) return
     setBusy(true)
@@ -129,7 +179,8 @@ export function LoadReviewDrawer({ row, focus, onClose, onRefresh, onMoved, onFa
   // Same delivered-time fallback as the header (shipment stamp, load stamp, last delivery stop time).
   const age = reviewAgeDays({ deliveredAt: deliveredTimeOf(row) }, now)
   const passed = LOAD_REVIEW_CHECKS.filter((key) => verdict.checks[key].ok).length
-  return <TmsDrawer open onOpenChange={(open) => { if (!open) onClose() }} title={shipmentLink('overview', row.number)}
+  const unsaved = pendingLabels.length
+  return <RailSaveContext.Provider value={registry}><TmsDrawer open onOpenChange={(open) => { if (!open) requestClose() }} title={shipmentLink('overview', row.number)}
     description={`${row.customerName ?? '—'} · ${row.originCity ?? '—'} → ${row.destinationCity ?? '—'} · ${deliveredTimeOf(row) ? `Delivered ${formatDateTime(deliveredTimeOf(row))}` : deliveredText(row) === '—' ? 'Delivered —' : deliveredText(row)}`}
     headerExtra={<><StatusPill row={row} inReviewQueue /><DetentionPill flag={row.detentionFlag} /><TmsBadge tone={verdict.ok ? 'green' : 'orange'}>{released ? 'Already released' : verdict.ok ? result ? 'Ready' : 'Looks ready' : `${reasons.length} to fix`}</TmsBadge><span title={age == null ? NO_DELIVERY_TIME_TIP : undefined}><TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'No delivery time' : age + ' d'}</TmsBadge></span></>}
     footer={<div className="lr-footer">
@@ -138,12 +189,21 @@ export function LoadReviewDrawer({ row, focus, onClose, onRefresh, onMoved, onFa
         <ul>{reasons.map((reason, index) => <li key={`${reason.code}-${index}`}><XCircle size={14} aria-hidden className="lr-icon-bad" />{reason.message}</li>)}</ul>
       </div>}
       {!canRelease && <p role="note" className="tms-muted text-xs">{LOAD_REVIEW_GRANT_MESSAGE}</p>}
+      {confirmClose && unsaved > 0 && <div className="lr-footer-blockers" role="alertdialog" aria-label="Unsaved changes" data-testid="lr-confirm-close">
+        <p className="lr-footer-title">{`Unsaved changes: ${pendingLabels.join(', ')}.`}</p>
+        <div className="lr-footer-actions">
+          <TmsButton variant="primary" disabled={busy} onClick={() => void saveAll().then((ok) => { if (ok) { setConfirmClose(false); onClose() } })}>Save</TmsButton>
+          <TmsButton variant="ghost" disabled={busy} onClick={() => { setConfirmClose(false); onClose() }}>Discard</TmsButton>
+          <TmsButton variant="ghost" disabled={busy} onClick={() => setConfirmClose(false)}>Cancel</TmsButton>
+        </div>
+      </div>}
       <div className="lr-footer-actions">
-        <TmsButton variant="primary" disabled={busy || !result || !verdict.ok || released || !!error || !canRelease} title={canRelease ? undefined : LOAD_REVIEW_GRANT_MESSAGE} onClick={() => void move()}>Move to billing</TmsButton>
+        <TmsButton variant="primary" disabled={busy || unsaved === 0 || released} data-testid="lr-save-all" title={unsaved ? pendingLabels.join(', ') : 'Nothing to save'} onClick={() => void saveAll()}>{unsaved ? `Save changes (${unsaved})` : 'Save changes'}</TmsButton>
+        <TmsButton variant={unsaved ? 'secondary' : 'primary'} disabled={busy || !result || !verdict.ok || released || !!error || !canRelease || unsaved > 0} title={unsaved ? 'Save your changes first' : canRelease ? undefined : LOAD_REVIEW_GRANT_MESSAGE} onClick={() => void move()}>Move to billing</TmsButton>
         <span className="lr-footer-spacer" />
         {shipmentLink('overview', 'Open shipment')}
         <TmsButton variant="ghost" disabled={busy || !result} onClick={() => void rereview()}>Re-check</TmsButton>
-        <TmsButton variant="ghost" onClick={onClose}>Close</TmsButton>
+        <TmsButton variant="ghost" onClick={requestClose}>Close</TmsButton>
       </div>
     </div>}>
     <DetentionSection shipment={row} onChanged={() => { void onRefresh() }} />
@@ -155,19 +215,15 @@ export function LoadReviewDrawer({ row, focus, onClose, onRefresh, onMoved, onFa
         {verdict.checks[key].ok ? <CheckCircle2 size={13} aria-label="Passed" /> : <XCircle size={13} aria-label="Needs fixing" />}{LOAD_REVIEW_CHECK_LABEL[key]}
       </li>)}</ul>
     </div>}
-    {result && <ReviewFixPanel shipmentId={row.id} readOnly={released} busy={busy} failing={new Set(reasons.map((r) => r.code))} onSaved={changed} />}
+    {result && <ReviewFixPanel shipmentId={row.id} readOnly={released} busy={busy} reloadSignal={reloadSignal} failing={new Set(reasons.map((r) => r.code))} onSaved={changed} />}
     {LOAD_REVIEW_CHECKS.map((key) => <TmsCard key={key} className={`lr-check ${verdict.checks[key].ok ? 'lr-check-ok' : 'lr-check-bad'}`}
       title={<span id={`lr-check-${key}`} className="lr-check-title">{verdict.checks[key].ok ? <CheckCircle2 size={16} aria-label="Passed" className="lr-icon-ok" /> : <XCircle size={16} aria-label="Needs fixing" className="lr-icon-bad" />}{LOAD_REVIEW_CHECK_LABEL[key]}</span>}
       actions={<TmsBadge tone={verdict.checks[key].ok ? 'green' : 'red'}>{verdict.checks[key].ok ? 'OK' : `${verdict.checks[key].reasons.length} ${verdict.checks[key].reasons.length === 1 ? 'issue' : 'issues'}`}</TmsBadge>}>
       {key !== 'charges' && <p className="lr-check-value">{values[key]}</p>}
       {verdict.checks[key].reasons.length > 0 && <ul className="lr-reasons">{verdict.checks[key].reasons.map((reason, index) => <li key={`${reason.code}-${index}`}><XCircle size={14} aria-hidden className="lr-icon-bad" />{reason.message}</li>)}</ul>}
       {key === 'charges' && <LoadReviewCharges shipmentId={row.id} readOnly={released} disabled={busy} onChanged={changed} />}
-      {key === 'salesRep' && !released && <RepPicker value={result?.salesRepId ?? row.salesRepId ?? ''} allowUnknown disabled={busy} placeholder="Pick a sales rep…" onChange={(repId) => void fix(() => setSalesRep({ shipmentId: row.id, repId: repId || null }))} />}
-      {key === 'revDivision' && !released && <div className="flex flex-wrap gap-2">
-        <TmsSelect aria-label="Revenue division" value={division} disabled={busy} onChange={(event) => { setDivision(event.target.value); setSubdivision('') }}><option value="">Select division</option>{active.filter((d) => !d.parentId).map((d) => <option key={d.id} value={d.code}>{d.name}</option>)}</TmsSelect>
-        <TmsSelect aria-label="Subdivision" value={subdivision} disabled={busy || !children.length} onChange={(event) => setSubdivision(event.target.value)}><option value="">Whole division</option>{children.map((d) => <option key={d.id} value={d.code}>{d.name}</option>)}</TmsSelect>
-        <TmsButton disabled={busy || !division} onClick={() => void fix(() => setRevTag({ shipmentId: row.id, divisionCode: division, subdivisionCode: subdivision || undefined }))}>Set division</TmsButton>
-      </div>}
+      {key === 'salesRep' && !released && <SalesRepFix key={result?.salesRepId ?? row.salesRepId ?? ''} current={result?.salesRepId ?? row.salesRepId ?? ''} shipmentId={row.id} disabled={busy} />}
+      {key === 'revDivision' && !released && <DivisionFix key={`${result?.revDivision ?? row.revDivision ?? ''}:${row.revSubdivision ?? ''}`} current={result?.revDivision ?? row.revDivision ?? ''} currentSub={row.revSubdivision ?? ''} shipmentId={row.id} disabled={busy} active={active} />}
       {verdict.checks[key].reasons.map((reason, index) => {
         if (reason.action?.kind !== 'OPEN_TAB') return null
         const anchor = anchorForReason(reason.code, reason.action.tab)
@@ -179,5 +235,5 @@ export function LoadReviewDrawer({ row, focus, onClose, onRefresh, onMoved, onFa
     </TmsCard>)}
     {(row.carrierCount ?? 0) >= 2 && !released && <CarrierBillsPanel shipmentId={row.id} disabled={busy} canOpenAp={hasPageAccess('carrierPay') || hasPageAccess('tms')} onChanged={rereview} />}
     {verdict.warnings.map((warning) => <p key={warning}>{warning}</p>)}
-  </TmsDrawer>
+  </TmsDrawer></RailSaveContext.Provider>
 }

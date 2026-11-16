@@ -1171,11 +1171,41 @@ async function applyNewCustomerRules(input: Record<string, unknown>): Promise<Re
   return out
 }
 
+/**
+ * Fields a patch never takes from the stored row: they are worked out on every save (identity,
+ * status, timestamps), or already keep the stored value when the request leaves them out (billing
+ * e-mails and method, tracking, customer type, AI memory).
+ */
+const PATCH_COMPUTED_FIELDS = new Set([
+  'id', 'name', 'normalizedName', 'active', 'status', 'statusReason', 'statusChangedAt', 'statusChangedBy',
+  'replacementCustomerId', 'mergedIntoId', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy',
+  'billingMethod', 'apEmail', 'apEmailsExtra', 'noaEmail', 'invoiceCopyEmails', 'billingNeedsReview',
+  'customerType', 'defaultTrackerId', 'trackingAutomation', 'trackingMode', 'trackingMethod', 'driverSmsTarget', 'aiMemory',
+])
+
+/** A patch save: every field the request did not carry is put back to what is stored, so nothing is cleared by omission. */
+export function overlayStoredFields(item: Record<string, unknown>, stored: Record<string, unknown>, patchKeys: ReadonlySet<string>): void {
+  for (const key of Object.keys(item)) {
+    if (patchKeys.has(key) || PATCH_COMPUTED_FIELDS.has(key)) continue
+    item[key] = stored[key] ?? null
+  }
+}
+
 async function upsertCustomer(
   rawInput: Record<string, unknown>,
   caller: Caller,
   opts: { imported?: boolean } = {},
 ): Promise<Record<string, unknown>> {
+  // A patch (Load Review's rail) carries only the fields it changes. Every other field keeps what is
+  // stored (see the overlay after `item` is built); the name is the stored one unless the patch renames.
+  const patchKeys = rawInput.patch === true ? new Set(Object.keys(rawInput)) : null
+  let patchBase: Record<string, unknown> | null = null
+  if (patchKeys) {
+    if (typeof rawInput.id !== 'string' || !rawInput.id) throw new Error('A customer patch needs the customer id')
+    patchBase = await getById(CUSTOMER_TABLE_NAME, rawInput.id)
+    if (!patchBase) throw new Error(`Customer not found: ${rawInput.id}`)
+    if (!('name' in rawInput)) rawInput = { ...rawInput, name: patchBase.name }
+  }
   let input = rawInput
   const name = assertString(input.name, 'name')
   const normalizedName = normalizeName(name)
@@ -1429,6 +1459,8 @@ async function upsertCustomer(
     createdAt: isCreate ? now : (existing?.createdAt as string) ?? now,
     updatedAt: now,
   }
+
+  if (patchKeys && patchBase) overlayStoredFields(item, patchBase, patchKeys)
 
   // Ryne 2026-11-14: every customer change is recorded field by field, with why. A person
   // changing payment method, terms, factoring or a billing/invoice e-mail must say why.

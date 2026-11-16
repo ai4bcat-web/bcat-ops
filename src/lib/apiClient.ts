@@ -1672,6 +1672,10 @@ export type CustomerPatch = Partial<Omit<CustomerRecord, 'id' | 'createdAt' | 'u
 export async function updateCustomer(id: string, patch: CustomerPatch, expectedUpdatedAt: string): Promise<CustomerRecord> {
   return rememberCustomerPolicy(await directoryAction<CustomerRecord>('UPSERT_CUSTOMER', { id, expectedUpdatedAt, ...patch }))
 }
+/** Changes only the fields given; everything else on the customer keeps what is stored (Load Review's rail). */
+export async function patchCustomer(id: string, patch: CustomerPatch, expectedUpdatedAt: string): Promise<CustomerRecord> {
+  return rememberCustomerPolicy(await directoryAction<CustomerRecord>('UPSERT_CUSTOMER', { ...patch, id, expectedUpdatedAt, patch: true }))
+}
 export async function archiveCustomer(id: string, expectedUpdatedAt: string, changeReason?: string): Promise<CustomerRecord> {
   return rememberCustomerPolicy(await directoryAction<CustomerRecord>('ARCHIVE_CUSTOMER', { id, expectedUpdatedAt, ...(changeReason ? { changeReason } : {}) }))
 }
