@@ -136,6 +136,8 @@ export type ShipmentRow = ShipmentRecord & {
   invoiceId?: string | null
   /** What a factor-billed load is missing for factoring, derived by useShipments; null = not judged. */
   factorGaps?: FactorGapCode[] | null
+  /** The bill-to customer factors through OTR (customerFactorsForOtr). */
+  customerFactors?: boolean | null
   // ── R2 column catalog (projected by the data layer; every one null when unknown) ──
   /** Rep and audit ids resolved to profile names; null when no profile matches. */
   salesRepName?: string | null
@@ -327,15 +329,41 @@ export function openFactorGaps(row: ShipmentRow): FactorGapCode[] {
   return row.factorGaps
 }
 
-/** "Missing 3" for the board cell; empty when nothing is missing. */
-export function factorInfoText(row: ShipmentRow): string {
-  const gaps = openFactorGaps(row)
-  return gaps.length > 0 ? `Missing ${gaps.length}` : ''
+export type MissingDocCode = 'RATE_CON' | 'POD'
+export const MISSING_DOC_LABEL: Record<MissingDocCode, string> = { RATE_CON: 'Rate con', POD: 'POD' }
+
+/**
+ * The documents the MISSING chip counts (Ryne 2026-11-16): the outside rate confirmation on a factored or own-fleet
+ * (ASSETS) load, and, once it has delivered, the POD a factored load needs for OTR. Read from the same cells as the
+ * board's POD / RC columns, so the chip and the columns never disagree. Empty once invoiced or handed to the factor.
+ */
+export function openMissingDocs(row: ShipmentRow): MissingDocCode[] {
+  if (row.voidedAt || row.deletedAt || row.status === 'CANCELED') return []
+  if (row.invoiceId || row.factoringItemId || row.legacyImported === true) return []
+  const factored = row.customerFactors === true
+  const out: MissingDocCode[] = []
+  if ((factored || row.revDivision === 'ASSETS') && docCellOf(row, 'RATE_CON') === 'MISSING') out.push('RATE_CON')
+  if (factored && docCellOf(row, 'POD') === 'MISSING') out.push('POD')
+  return out
 }
 
-/** The cell's tooltip: "Missing for factoring: PO, Pick Up ZIP". */
+/** How many things the MISSING chip counts: the factoring fields plus the missing documents. */
+export function missingCountOf(row: ShipmentRow): number {
+  return openFactorGaps(row).length + openMissingDocs(row).length
+}
+
+/** "Missing 3" for the board cell; empty when nothing is missing. */
+export function factorInfoText(row: ShipmentRow): string {
+  const count = missingCountOf(row)
+  return count > 0 ? `Missing ${count}` : ''
+}
+
+/** The cell's tooltip: "Missing for factoring: PO, Pick Up ZIP · Rate con". */
 export function factorInfoTitle(row: ShipmentRow): string {
-  return factorGapSummary(openFactorGaps(row))
+  const fields = factorGapSummary(openFactorGaps(row))
+  const docs = openMissingDocs(row).map((c) => MISSING_DOC_LABEL[c])
+  if (docs.length === 0) return fields
+  return [fields, `Missing document${docs.length === 1 ? '' : 's'}: ${docs.join(', ')}`].filter(Boolean).join(' · ')
 }
 
 /** The row's invoice status: the board's live read when it has one, the order's cached AR fields otherwise. */
@@ -818,7 +846,8 @@ export function docCellOf(
     if (pod === 'NO_POD') return 'MISSING'
     return delivered ? 'MISSING' : ''
   }
-  if (row.revDivision === 'ASSETS') return 'NA'
+  // Own fleet (ASSETS) needs the customer's or broker's own rate confirmation like any other load (Ryne 2026-11-16);
+  // customers that send none (Batory, Carlyn, Bulk, Rojac) are waived by their own setting above.
   if (rateConIn(row)) return 'PRESENT'
   if (Array.isArray(row.docsMissing) && row.docsMissing.includes('RATE_CON')) return 'MISSING'
   return delivered ? 'MISSING' : ''
@@ -837,7 +866,7 @@ export function docsMissingOf(row: Pick<ShipmentRow, 'status' | 'voidedAt' | 'de
   const podOnFile = Array.isArray(row.docsPresent) && row.docsPresent.includes('POD')
   if (!podOnFile && (row.docsMissing == null || row.docsMissing.includes('POD')) && !out.includes('POD')) out.push('POD')
   // The gate's RATE_CON and the board's RC are the same document: count it once.
-  if (row.revDivision !== 'ASSETS' && !rateConIn(row) && !out.includes('RC') && !out.includes('RATE_CON')) out.push('RC')
+  if (!rateConIn(row) && !out.includes('RC') && !out.includes('RATE_CON') && !(row as { docsNotRequired?: string[] | null }).docsNotRequired?.includes('RATE_CON')) out.push('RC')
   return out
 }
 

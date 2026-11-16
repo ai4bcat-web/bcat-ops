@@ -67,6 +67,7 @@ import {
   gateLoadIds,
   generatedFilename,
   generatedKey,
+  isOwnFleetLoad,
   isPointerDocument,
   nextVersion,
   supersede,
@@ -263,6 +264,14 @@ export function customerDocGate(args: {
     scope: 'CUSTOMER',
     legacyImported: args.bundle.shipment?.legacyImported === true,
     carShipper: isCarShipperLoad(args.bundle.shipment as { revDivision?: string | null } | null),
+    // Own fleet: the customer's tender on the load counts as the outside rate confirmation (Ryne 2026-11-16).
+    ownFleet: isOwnFleetLoad(
+      args.bundle.shipment as { revDivision?: string | null } | null,
+      args.bundle.loadCarriers as unknown as { status?: string | null; kind?: string | null }[],
+    ),
+    loadRateConKeys: (args.bundle.loads as Row[])
+      .filter((load) => loadIds.includes(String(load.id)))
+      .map((load) => (typeof load.rateConfirmKey === 'string' ? load.rateConfirmKey : null)),
     // What this order's loads ask for on top of the customer's list (SET_LOAD_REQUIRED_DOCS).
     extraDocTypes: loadExtraDocTypes(
       (args.bundle.loads as Row[]).filter((load) => loadIds.includes(String(load.id))) as { requiredDocTypes?: string[] | null }[],

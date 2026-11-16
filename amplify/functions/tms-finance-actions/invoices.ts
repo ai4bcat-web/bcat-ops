@@ -54,7 +54,7 @@ import {
 import { isCarShipperLoad } from '../../../src/lib/carShipper'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { isCustomerUnresolved, unresolvedCustomerMessage } from '../../../src/lib/customerResolution'
-import { canEmailTo, evaluateDocGate, gateLoadIds } from '../../../src/lib/shipmentDocuments'
+import { canEmailTo, evaluateDocGate, gateLoadIds, isOwnFleetLoad } from '../../../src/lib/shipmentDocuments'
 import {
   assertNotSquareInvoiced,
   customerPacketIds,
@@ -245,6 +245,13 @@ function docGateFor(context: OrderContext): DocGateResult {
     scope: 'CUSTOMER',
     legacyImported: context.shipment?.legacyImported === true,
     carShipper: isCarShipperLoad(context.shipment as { revDivision?: string | null } | null),
+    ownFleet: isOwnFleetLoad(
+      context.shipment as { revDivision?: string | null } | null,
+      context.loadCarriers as unknown as { status?: string | null; kind?: string | null }[],
+    ),
+    loadRateConKeys: (context.loads as unknown as { id: string; rateConfirmKey?: string | null }[])
+      .filter((load) => context.gateLoadIds.includes(String(load.id)))
+      .map((load) => load.rateConfirmKey ?? null),
     documents: context.documents,
     order: context.order,
     loadIds: context.gateLoadIds,

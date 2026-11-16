@@ -14,14 +14,14 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { listShipmentDocuments } from '@/lib/apiClient'
-import { evaluateDocGate, gateLoadIds } from '@/lib/shipmentDocuments'
+import { evaluateDocGate, gateLoadIds, isOwnFleetLoad } from '@/lib/shipmentDocuments'
 import type { CustomerRecord, DocGateResult, ShipmentBundle, ShipmentDocumentRecord, TmsSettings } from '@/types/tms'
 
 const POLL_MS = 60_000
 
 /** What the gate needs beyond the documents themselves. The page already has all of it. */
 export interface ShipmentDocumentsContext {
-  bundle?: Pick<ShipmentBundle, 'orders' | 'loads' | 'loadCarriers'> | null
+  bundle?: Pick<ShipmentBundle, 'orders' | 'loads' | 'loadCarriers'> & { shipment?: { revDivision?: string | null } | null } | null
   customer?: Pick<CustomerRecord, 'requiredDocsForInvoice'> | null
   settings?: Pick<TmsSettings, 'defaultRequiredDocs' | 'requiredCarrierUploadTypes'> | null
   /** The shipment is imported Aljex history: its paperwork lives in the Aljex archive. */
@@ -101,6 +101,11 @@ export function useShipmentDocuments(
         scope: 'CUSTOMER',
         legacyImported,
         carShipper,
+        // Own fleet: the customer's tender on the load is the outside rate confirmation (Ryne 2026-11-16).
+        ownFleet: isOwnFleetLoad(bundle?.shipment ?? null, bundle?.loadCarriers ?? []),
+        loadRateConKeys: (bundle?.loads ?? [])
+          .filter((load) => gateLoadIds(bundle?.loads ?? [], bundle?.orders ?? [], order.id).includes(load.id))
+          .map((load) => (load as { rateConfirmKey?: string | null }).rateConfirmKey ?? null),
       })
     }
     return gates

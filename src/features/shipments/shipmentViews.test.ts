@@ -548,10 +548,13 @@ describe('docsMissingOf: a delivered shipment needs a POD and an RC', () => {
     expect(docsMissingOf(d({ status: 'IN_TRANSIT', docsMissing: [], rateConOnFile: false }))).toEqual([])
     expect(docsMissingOf(d({ status: 'IN_TRANSIT', docsMissing: ['BOL'] }))).toEqual(['BOL'])
   })
-  it('leaves out car shipping, a signed-off override, and the carrier RC on Ivan Cartage own fleet', () => {
+  it('leaves out car shipping and a signed-off override', () => {
     expect(docsMissingOf(d({ revDivision: 'CAR_SHIPPING', docsMissing: ['POD'], rateConOnFile: false }))).toEqual(['POD'])
     expect(docsMissingOf(d({ docsOverrideAt: '2026-11-10T00:00:00Z', docsMissing: null, rateConOnFile: false }))).toEqual([])
-    expect(docsMissingOf(d({ revDivision: 'ASSETS', rateConOnFile: false }))).toEqual([])
+  })
+  it('asks own fleet for the outside rate con unless the customer waives it (Ryne 2026-11-16)', () => {
+    expect(docsMissingOf(d({ revDivision: 'ASSETS', rateConOnFile: false }))).toEqual(['RC'])
+    expect(docsMissingOf({ ...d({ revDivision: 'ASSETS', rateConOnFile: false }), docsNotRequired: ['RATE_CON'] } as never)).toEqual([])
   })
 })
 

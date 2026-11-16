@@ -43,7 +43,7 @@ import { SummaryRail } from './SummaryRail'
 import { useFormActions } from './useFormActions'
 import { useShipmentForm, type RunKind } from './useShipmentForm'
 import { isFactorBilled } from '@/lib/factorBilling'
-import { blockingIssues, issueSummary, missingOnLoadIssues } from './validation'
+import { blockingIssues, issueSummary, missingDocIssues, missingOnLoadIssues } from './validation'
 import './form.css'
 import { DetentionSection } from '@/features/shipments/components/Detention'
 
@@ -283,7 +283,10 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   const summary = useMemo(() => railSummary(values, form.customer, settings), [values, form.customer, settings])
 
   // What the board's MISSING chip counts, as the form sees it: the factoring fields still marked on the load, and its PO.
-  const missingOnLoad = useMemo(() => missingOnLoadIssues(form.issues, existingLoad, isFactorBilled(form.customer)), [form.issues, existingLoad, form.customer])
+  const missingOnLoad = useMemo(
+    () => [...missingOnLoadIssues(form.issues, existingLoad, isFactorBilled(form.customer)), ...missingDocIssues(bundle, form.customer, existingLoad)],
+    [form.issues, existingLoad, form.customer, bundle],
+  )
   // Opened from the board's MISSING chip (`?missing=1`): go straight to the first missing field, once.
   const missingFocused = useRef(false)
   const firstMissing = missingOnLoad[0]?.fieldKey

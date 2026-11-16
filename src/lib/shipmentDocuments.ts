@@ -380,6 +380,10 @@ export interface PresentDocTypesInput {
   /** CARRIER scope looks at exactly one assignment, by id. */
   loadCarrierId?: string | null
   scope: DocGateScope
+  /** CUSTOMER scope on an own-fleet (ASSETS) load: the outside rate confirmation rules apply (ownFleetOutsideRateCon). */
+  ownFleet?: boolean | null
+  /** The order's loads' `rateConfirmKey`s: on an own-fleet load, an uploaded customer tender is the outside rate con. */
+  loadRateConKeys?: readonly (string | null | undefined)[] | null
 }
 
 /**
@@ -409,6 +413,13 @@ export function presentDocTypes(input: PresentDocTypesInput): ShipmentDocumentTy
     present.add(doc.type)
   }
 
+  // Own fleet (Ivan Cartage, ASSETS): the rate confirmation that matters is the customer's or broker's
+  // (Ryne 2026-11-16). A filed customer rate confirmation, or the tender on the load, is it.
+  if (input.scope !== 'CARRIER' && input.ownFleet === true) {
+    if (present.has('CUSTOMER_RATE_CON')) present.add('RATE_CON')
+    if ((input.loadRateConKeys ?? []).some(isOutsideRateConKey)) present.add('RATE_CON')
+  }
+
   // The rate confirmation lives in the carrier packet, not here. It is paperwork
   // once the carrier signed it; having sent it is not.
   const signedScope =
@@ -421,7 +432,10 @@ export function presentDocTypes(input: PresentDocTypesInput): ShipmentDocumentTy
   if (input.scope !== 'CARRIER' && outside.length >= 2) {
     present.delete('RATE_CON')
     if (outside.every((lc) => lc.rateConStatus === 'SIGNED')) present.add('RATE_CON')
-  } else if (signedScope.some((lc) => lc.rateConStatus === 'SIGNED')) present.add('RATE_CON')
+  } else if ((input.scope === 'CARRIER' ? signedScope : outside).some((lc) => lc.rateConStatus === 'SIGNED')) {
+    // Our own truck "signing" our own rate con is not paperwork from outside: only a carrier's signature counts here.
+    present.add('RATE_CON')
+  }
 
   return SHIPMENT_DOCUMENT_TYPES.filter((type) => present.has(type))
 }
@@ -465,6 +479,10 @@ export interface DocGateInput {
    * (`Load.requiredDocTypes`, see loadRequiredDocs.ts). Added as written.
    */
   extraDocTypes?: readonly string[] | null
+  /** CUSTOMER scope: an own-fleet (ASSETS) load, so the outside rate confirmation rules apply (see presentDocTypes). */
+  ownFleet?: boolean | null
+  /** CUSTOMER scope: the order's loads' `rateConfirmKey`s (the tender attached from intake or the Loads drawer). */
+  loadRateConKeys?: readonly (string | null | undefined)[] | null
   /**
    * CUSTOMER scope: a car-shipping load (isCarShipperLoad). Every other load needs the rate
    * confirmation, own-fleet ones included (the office files it), so it is added unless this is true.
@@ -511,6 +529,8 @@ export function evaluateDocGate(input: DocGateInput): DocGateResult {
     loadIds: input.loadIds ?? null,
     loadCarrierId: input.loadCarrierId ?? null,
     scope: input.scope,
+    ownFleet: input.ownFleet ?? null,
+    loadRateConKeys: input.loadRateConKeys ?? null,
   })
 
   const missing = gated.filter((type) => !present.includes(type))
@@ -541,6 +561,26 @@ export function isPointerDocument(doc: Pick<ShipmentDocumentRecord, 'source'>): 
 /** The deterministic ids that make a backfill or a stream retry idempotent. */
 export function driverDocumentId(submissionDocId: string): string {
   return `drv:${submissionDocId}`
+}
+
+/**
+ * A `Load.rateConfirmKey` that is an outside rate confirmation: one uploaded or attached from an intake e-mail
+ * (`rate-confirms/<loadId>/…`). The confirmations BCAT generates for a carrier live under `rate-confirms/carrier/`
+ * and are never the customer's.
+ */
+export function isOutsideRateConKey(key: string | null | undefined): boolean {
+  const k = typeof key === 'string' ? key.trim() : ''
+  return k.length > 0 && !k.startsWith('rate-confirms/carrier/')
+}
+
+/** Own fleet (Ivan Cartage): the ASSETS revenue division, or every live assignment is our own truck. */
+export function isOwnFleetLoad(
+  shipment: { revDivision?: string | null } | null | undefined,
+  loadCarriers: readonly { status?: string | null; kind?: string | null }[] = [],
+): boolean {
+  if (shipment?.revDivision === 'ASSETS') return true
+  const active = loadCarriers.filter((lc) => lc.status === 'ACTIVE')
+  return active.length > 0 && active.every((lc) => lc.kind === 'OWN_ASSET')
 }
 
 export function legacyRateConDocumentId(loadId: string): string {

@@ -22,6 +22,10 @@ import { factorGapsAtCreate, type FactorGapCode } from '@/lib/factorReadyAtCreat
 import { isFactorBilled } from '@/lib/factorBilling'
 import { carrierSlotsOf, parseInteger, type CarrierSlot, type FormStop, type ShipmentFormValues } from './model'
 import type { FormIssue, SectionKey } from './sectionProps'
+import { evaluateDocGate, gateLoadIds, isOwnFleetLoad } from '@/lib/shipmentDocuments'
+import { customerDocsNotRequired, customerFactorsForOtr } from '@/lib/reviewRequirements'
+import { isCarShipperLoad } from '@/lib/carShipper'
+import type { ShipmentBundle } from '@/types/tms'
 
 export type ValidationLevel = 'draft' | 'create' | 'submit'
 
@@ -304,6 +308,49 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
 export function missingOnLoadIssues(issues: readonly FormIssue[], existingLoad: boolean, factored: boolean): FormIssue[] {
   if (!existingLoad || !factored) return []
   return issues.filter((i) => i.marked || i.id === 'customer:ref:po')
+}
+
+/**
+ * The documents the board's MISSING chip counts (openMissingDocs), as the form sees them, so the rail's What's missing
+ * list names them too (Ryne 2026-11-16): the outside rate confirmation on a factored or own-fleet load, unless the
+ * customer waives it, and a factored load's POD once it has delivered. Each one focuses its upload box.
+ */
+export function missingDocIssues(
+  bundle: Pick<ShipmentBundle, 'shipment' | 'orders' | 'loads' | 'loadCarriers' | 'documents'> | null | undefined,
+  customer: (Partial<CustomerRecord> & { reviewRequirements?: string[] | null }) | null | undefined,
+  existingLoad: boolean,
+): FormIssue[] {
+  if (!existingLoad || !bundle || bundle.shipment.legacyImported === true) return []
+  if (isCarShipperLoad(bundle.shipment as { revDivision?: string | null })) return []
+  const factored = customerFactorsForOtr(customer ?? null)
+  const ownFleet = isOwnFleetLoad(bundle.shipment as { revDivision?: string | null }, bundle.loadCarriers)
+  if (!factored && !ownFleet) return []
+  const order = bundle.orders[0]
+  if (!order) return []
+  const loadIds = gateLoadIds(bundle.loads, bundle.orders, order.id)
+  const gate = evaluateDocGate({
+    order,
+    loadIds,
+    loadCarriers: bundle.loadCarriers,
+    documents: bundle.documents ?? [],
+    customer: (customer ?? null) as Pick<CustomerRecord, 'requiredDocsForInvoice'> | null,
+    settings: null,
+    scope: 'CUSTOMER',
+    ownFleet,
+    loadRateConKeys: bundle.loads.filter((l) => loadIds.includes(l.id)).map((l) => (l as { rateConfirmKey?: string | null }).rateConfirmKey ?? null),
+  })
+  const notRequired = customerDocsNotRequired(customer ?? null, null)
+  const out: FormIssue[] = []
+  const doc = (type: 'RATE_CON' | 'POD', label: string, message: string) => out.push({
+    id: `documents:${type}`, section: 'documents', fieldKey: `card-documents-slot-${type}`, label, message, severity: 'warn', marked: true,
+  })
+  if (!notRequired.includes('RATE_CON') && !gate.present.includes('RATE_CON')) {
+    doc('RATE_CON', 'Rate con', factored ? 'The customer\'s rate confirmation is missing — OTR needs it to factor the load.' : 'The customer\'s rate confirmation is missing.')
+  }
+  if (factored && bundle.shipment.status === 'DELIVERED' && !gate.present.includes('POD')) {
+    doc('POD', 'POD', 'The POD is missing — OTR needs it to factor the load.')
+  }
+  return out
 }
 
 export const blockingIssues = (issues: readonly FormIssue[]): FormIssue[] => issues.filter((i) => i.severity === 'error')

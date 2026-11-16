@@ -28,10 +28,15 @@ describe('POD / RC board cells read the same gate as the Documents boxes', () =>
     expect(docCellOf(r, 'RATE_CON')).toBe('PRESENT')
   })
 
-  it('N/A where the document is not chased: car shipping has neither, own fleet has no carrier RC', () => {
+  it('N/A where the document is not chased: car shipping has neither', () => {
     expect(docCellOf(row({ revDivision: 'CAR_SHIPPING' }), 'POD')).toBe('NA')
-    expect(docCellOf(row({ revDivision: 'ASSETS' }), 'RATE_CON')).toBe('NA')
     expect(docCellOf(row({ revDivision: 'ASSETS' }), 'POD')).toBe('MISSING')
+  })
+
+  it('own fleet needs the outside rate con (Ryne 2026-11-16), unless the customer waives it', () => {
+    expect(docCellOf(row({ revDivision: 'ASSETS' }), 'RATE_CON')).toBe('MISSING')
+    expect(docCellOf(row({ revDivision: 'ASSETS', rateConOnFile: true }), 'RATE_CON')).toBe('PRESENT')
+    expect(docCellOf(row({ revDivision: 'ASSETS', docsNotRequired: ['RATE_CON'] }), 'RATE_CON')).toBe('NA')
   })
 
   it('not delivered and the gate never ran: nothing to say yet', () => {
@@ -51,5 +56,25 @@ describe('POD / RC board cells read the same gate as the Documents boxes', () =>
     // Deleting it: the gate re-caches without POD in its present list, and a delivered load is missing one again.
     const gone = row({ docsRequired: ['RATE_CON'], docsMissing: [], docsPresent: ['RATE_CON'] })
     expect(docCellOf(gone, 'POD')).toBe('MISSING')
+  })
+})
+
+describe('MISSING chip counts the documents OTR or own fleet needs (Ryne 2026-11-16)', () => {
+  it('a factored load with no rate con counts it, and lists it', async () => {
+    const { factorInfoText, factorInfoTitle, openMissingDocs } = await import('./shipmentViews')
+    const factored = { ...(row({ docsMissing: ['RATE_CON'], docsPresent: ['POD'] }) as object), id: 's1', customerFactors: true, factorGaps: [] } as never
+    expect(openMissingDocs(factored)).toEqual(['RATE_CON'])
+    expect(factorInfoText(factored)).toBe('Missing 1')
+    expect(factorInfoTitle(factored)).toBe('Missing document: Rate con')
+  })
+  it('an own-fleet load with no outside rate con counts it; a waived customer does not', async () => {
+    const { openMissingDocs } = await import('./shipmentViews')
+    const own = { ...(row({ revDivision: 'ASSETS', docsMissing: ['RATE_CON'], docsPresent: ['POD'] }) as object), id: 's2' } as never
+    expect(openMissingDocs(own)).toEqual(['RATE_CON'])
+    expect(openMissingDocs({ ...(own as object), docsNotRequired: ['RATE_CON'] } as never)).toEqual([])
+  })
+  it('a brokerage load for a customer that does not factor is not counted', async () => {
+    const { openMissingDocs } = await import('./shipmentViews')
+    expect(openMissingDocs({ ...(row() as object), id: 's3', customerFactors: false } as never)).toEqual([])
   })
 })

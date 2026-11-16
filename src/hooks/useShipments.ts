@@ -4,7 +4,8 @@ import type { LoadBoardSummary } from '@/lib/apiClient'
 import { loadBoardBundle, peekBoardBundle, type BoardBundle, type BoardView } from '@/lib/boardData'
 import { aggregateApStatus } from '@/lib/carrierTotals'
 import { customerRefOf } from '@/lib/customerRef'
-import { customerDocsNotRequired } from '@/lib/reviewRequirements'
+import { customerDocsNotRequired, customerFactorsForOtr } from '@/lib/reviewRequirements'
+import { isOutsideRateConKey } from '@/lib/shipmentDocuments'
 import { stopPlace, type StopPlaceStop } from '@/lib/stopPlace'
 import { factorGapsForLoad, factoringPoNumber, routeEnds, type FactorGapCode } from '@/lib/factorReadyAtCreate'
 import { modelsAvailable } from '@/lib/modelAvailability'
@@ -131,6 +132,8 @@ export interface ShipmentListRow extends ShipmentRecord {
   docsPresent: string[] | null
   docsCheckedAt: string | null
   docsOverrideAt: string | null
+  /** The bill-to customer factors through OTR (customerFactorsForOtr). */
+  customerFactors: boolean
   /** POD / RC this customer does not need to invoice (customerDocsNotRequired). */
   docsNotRequired: string[]
   docsOverrideBy: string | null
@@ -782,7 +785,7 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         eldLogsReviewedBy: eldReviewed?.eldLogsReviewedBy ?? null,
         eldLogsReviewedByName: nameOf(eldReviewed?.eldLogsReviewedBy),
         readyToInvoice: shipmentLoads.length === 0 ? null : shipmentLoads.every((l) => l.readyToInvoice === true),
-        rateConOnFile: shipmentLoads.length === 0 ? null : shipmentLoads.some((l) => !!l.rateConfirmKey),
+        rateConOnFile: shipmentLoads.length === 0 ? null : shipmentLoads.some((l) => isOutsideRateConKey(l.rateConfirmKey)),
         divisionKey: shipmentLoads.map((l) => l.divisionKey).find(Boolean) ?? null,
         nextCheckCallNote: tracking?.nextCheckCallNote ?? null,
         lastCheckCallType: tracking?.lastCheckCallType ?? null,
@@ -836,6 +839,7 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         customerDot: customer?.dotNumber ?? null,
         customerFactored: customer?.factored ?? null,
         docsNotRequired: customerDocsNotRequired(customer ?? null, null),
+        customerFactors: customerFactorsForOtr(customer ?? null),
         customerPaymentTermsDays: customer?.paymentTermsDays ?? null,
         creditLimitCents: customer?.creditLimitCents ?? null,
         creditHold: customer?.creditHoldFlag ?? null,

@@ -114,6 +114,13 @@ export interface ReleaseGateInput {
   documents: ReleaseGateDocument[]
   legs: ReleaseGateLeg[]
   openIncidentCount: number
+  /**
+   * Own fleet (Ivan Cartage, ASSETS): the rate confirmation required is the customer's or broker's (Ryne 2026-11-16).
+   * A filed CUSTOMER_RATE_CON counts, and so does `ownFleetTenderOnLoad`.
+   */
+  ownFleet?: boolean
+  /** An own-fleet load carries the customer's tender on `Load.rateConfirmKey` (isOutsideRateConKey). */
+  ownFleetTenderOnLoad?: boolean
 }
 
 export interface ReleaseGateResult {
@@ -219,6 +226,7 @@ export function evaluateReleaseGate(input: ReleaseGateInput): ReleaseGateResult 
     }
     // One outside carrier: any signed rate con satisfies RATE_CON, as ever. Two or
     // more: every one must be signed, and a signed one never waives another's.
+    if (input.ownFleet === true && (present.has('CUSTOMER_RATE_CON') || input.ownFleetTenderOnLoad === true)) present.add('RATE_CON')
     const carrierLegs = legs.filter((leg) => leg.status === 'ACTIVE' && leg.kind === 'CARRIER')
     const perCarrierRateCon = carrierLegs.length >= 2
     if (!perCarrierRateCon && carrierLegs.some((leg) => leg.rateConStatus === 'SIGNED')) {

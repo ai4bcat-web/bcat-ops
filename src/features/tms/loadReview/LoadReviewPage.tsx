@@ -12,7 +12,7 @@ import { activeFilterCount, filterRows, nextSort, reorderKeys, sortDenseRows, ty
 import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import { useAuth } from '@/hooks/useAuth'
 import type { ShipmentListRow } from '@/hooks/useShipments'
-import { boardStatusOf, factorInfoText, factorInfoTitle, matchesQuery, openFactorGaps } from '@/features/shipments/shipmentViews'
+import { boardStatusOf, factorInfoText, factorInfoTitle, matchesQuery, missingCountOf } from '@/features/shipments/shipmentViews'
 import { FACTOR_INFO_OPTIONS, sentence } from '@/features/shipments/shipmentGridColumns'
 import { batchShipmentTask, listAuditLogsFor, pushReadyToLoadReview, releaseToBilling } from '@/lib/apiClient'
 import { useBillingGrant, LOAD_REVIEW_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
@@ -97,7 +97,7 @@ export function LoadReviewPage() {
       { key: 'age', header: 'In review', group: 'Review', text: ({ row }) => { const age = reviewAgeDays({ deliveredAt: deliveredTimeOf(row) }, now); return age == null ? 'No delivery time' : `${age} d` }, extraPx: 24, sortValue: ({ row }) => reviewAgeDays({ deliveredAt: deliveredTimeOf(row) }, now) ?? -1 },
       { key: 'rep', header: 'Sales rep', group: 'Review', text: ({ row }) => row.salesRepName ?? '—', filter: 'multi', optionsOf: ({ row }) => opt(row.salesRepName) },
       { key: 'division', header: 'Division', group: 'Review', text: ({ row }) => row.revDivision?.replace(/_/g, ' ') ?? '—', filter: 'multi', optionsOf: ({ row }) => opt(row.revDivision?.replace(/_/g, ' ')) },
-      { key: 'factoring', header: 'Factoring', group: 'Checks', text: ({ row }) => factorInfoText(row), extraPx: 24, filter: 'multi', optionsOf: ({ row }) => [openFactorGaps(row).length > 0 ? FACTOR_INFO_OPTIONS[0] : FACTOR_INFO_OPTIONS[1]], fixedOptions: FACTOR_INFO_OPTIONS, sortValue: ({ row }) => openFactorGaps(row).length },
+      { key: 'factoring', header: 'Factoring', group: 'Checks', text: ({ row }) => factorInfoText(row), extraPx: 24, filter: 'multi', optionsOf: ({ row }) => [missingCountOf(row) > 0 ? FACTOR_INFO_OPTIONS[0] : FACTOR_INFO_OPTIONS[1]], fixedOptions: FACTOR_INFO_OPTIONS, sortValue: ({ row }) => missingCountOf(row) },
       { key: 'checks', header: 'Checks (preliminary)', group: 'Checks', text: (e) => (!e.verdict ? '' : failedOf(e) === 0 ? `All ${LOAD_REVIEW_CHECKS.length} passed` : `${failedOf(e)} to fix`), extraPx: 24 },
       ...LOAD_REVIEW_CHECKS.map((key): DenseColumn<ReviewEntry> => ({ key: `check-${key}`, header: LOAD_REVIEW_CHECK_LABEL[key], group: 'Checks', text: (e) => (!e.verdict ? '' : e.verdict.checks[key].ok ? 'Pass' : 'Fix'), extraPx: 40, filter: 'multi', optionsOf: (e) => (e.verdict ? [{ value: e.verdict.checks[key].ok ? 'Pass' : 'Fix', label: e.verdict.checks[key].ok ? 'Pass' : 'Fix' }] : []), fixedOptions: [{ value: 'Pass', label: 'Pass' }, { value: 'Fix', label: 'Fix' }] })),
       { key: 'revenue', header: 'Revenue', group: 'Review', text: ({ row }) => formatCents(row.orderRevenueCents ?? row.revenueCents ?? 0), align: 'right', sortValue: ({ row }) => row.orderRevenueCents ?? row.revenueCents ?? 0 },

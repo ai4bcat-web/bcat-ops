@@ -10,6 +10,7 @@
 
 import { assembleOtrInvoice, type LoadSlice, type ManualOverrides, type OtrReadiness } from '@/lib/otrInvoice'
 import { loadHasPod, loadHasRatecon, type PodIndex } from '@/lib/podPresence'
+import { isOutsideRateConKey } from '@/lib/shipmentDocuments'
 import { getStops } from '@/lib/stops'
 import type { Load, Stop } from '@/types'
 import type { CustomerRecord, LocationRecord } from '@/types/tms'
@@ -90,6 +91,6 @@ export function otrSettlementReadiness(input: OtrSettlementInput): OtrReadiness 
     manual,
     submissionDate: submissionDate ?? load.deliveryAppt.slice(0, 10),
     hasPod: loadHasPod(podIndex, load),
-    hasRateConfirmation: Boolean(load.rateConfirmKey) || loadHasRatecon(podIndex, load),
+    hasRateConfirmation: isOutsideRateConKey(load.rateConfirmKey) || loadHasRatecon(podIndex, load),
   })
 }
