@@ -1,7 +1,9 @@
 /**
  * A proof of delivery is kept as a PDF (Ryne 2026-11-10: "anytime a proof of delivery comes through to a load, it should get converted to
- * PDF"). A phone photo or a screenshot arrives as a JPEG or PNG; this wraps it, upright, on one letter page. Only JPEG and PNG are touched
- * (a PDF stays as it is; other image types stay as they came and the caller keeps the original).
+ * PDF"), and so is a rate confirmation (Ryne 2026-11-16: "any pod or rate con that gets uploaded should be automatically converted to pdf
+ * if its not one. this should be the version that lives in the shipment"). A phone photo or a screenshot arrives as a JPEG or PNG; this
+ * wraps it, upright, on one letter page. TIFF, GIF and BMP are decoded with Jimp (first page) and wrapped the same way. A PDF stays as it
+ * is; HEIC and WEBP have no decoder in the Lambda, so they stay as they came and the row says it could not be converted.
  *
  * Pure bytes in, bytes out (`imageToPdf`), plus `convertStoredPodImage`, the S3 step the document writers use. Neither ever throws into the
  * caller's upload: a failed conversion returns null and the original file is filed exactly as it came.
@@ -13,10 +15,39 @@ const PAGE_LONG = 792
 const PAGE_SHORT = 612
 const MARGIN = 18
 
-export const POD_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png'] as const
+export const POD_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png'] as const
+/** Decoded with Jimp, re-encoded as a JPEG, then wrapped like a photo. */
+export const DECODED_IMAGE_TYPES = ['image/tiff', 'image/tif', 'image/gif', 'image/bmp', 'image/x-ms-bmp'] as const
+/** Image types nothing in the Lambda can read: kept as the original, flagged as not converted. */
+export const UNCONVERTIBLE_IMAGE_TYPES = ['image/heic', 'image/heif', 'image/webp', 'image/avif'] as const
 
+/** The longest side a decoded image is re-encoded at: readable on a letter page, small enough to e-mail. */
+const MAX_DECODED_SIDE = 2400
+
+const lower = (contentType: string | null | undefined) => String(contentType ?? '').toLowerCase().split(';')[0].trim()
+
+/** A file this module turns into a PDF (JPEG, PNG, TIFF, GIF, BMP). */
 export function isPodImage(contentType: string | null | undefined): boolean {
-  return (POD_IMAGE_TYPES as readonly string[]).includes(String(contentType ?? '').toLowerCase())
+  const t = lower(contentType)
+  return (POD_IMAGE_TYPES as readonly string[]).includes(t) || (DECODED_IMAGE_TYPES as readonly string[]).includes(t)
+}
+
+/** Any image that is not a PDF: what a POD or rate confirmation should not stay as. */
+export function isNonPdfImage(contentType: string | null | undefined): boolean {
+  const t = lower(contentType)
+  return t.startsWith('image/')
+}
+
+/** JPEG or PNG bytes for a decoded image type (first page of a TIFF), scaled so the long side is at most MAX_DECODED_SIDE. */
+async function decodeToJpeg(bytes: Uint8Array): Promise<Uint8Array> {
+  const { Jimp } = await import('jimp')
+  const img = await Jimp.read(Buffer.from(bytes))
+  const long = Math.max(img.width, img.height)
+  if (long > MAX_DECODED_SIDE) {
+    if (img.width >= img.height) img.resize({ w: MAX_DECODED_SIDE })
+    else img.resize({ h: MAX_DECODED_SIDE })
+  }
+  return new Uint8Array(await img.getBuffer('image/jpeg', { quality: 82 }))
 }
 
 /** The EXIF orientation of a JPEG (1 when there is none or it is not a JPEG): phones store a sideways photo with an orientation flag. */
@@ -61,6 +92,9 @@ function rotationOf(orientation: number): 0 | 90 | 180 | 270 {
 
 /** One letter page (portrait or landscape to match the picture), the picture upright and centred. */
 export async function imageToPdf(bytes: Uint8Array, contentType: string, title?: string): Promise<Uint8Array> {
+  if ((DECODED_IMAGE_TYPES as readonly string[]).includes(lower(contentType))) {
+    return imageToPdf(await decodeToJpeg(bytes), 'image/jpeg', title)
+  }
   const png = /png/i.test(contentType)
   const doc = await PDFDocument.create()
   if (title) doc.setTitle(title)
@@ -91,15 +125,25 @@ export async function imageToPdf(bytes: Uint8Array, contentType: string, title?:
 }
 
 /** `…/photo.jpg` → `…/photo.pdf`; a key with no image extension gets `.pdf` appended. Deterministic, so a retried commit finds its own file. */
+const IMAGE_EXT = /\.(jpe?g|png|tiff?|gif|bmp|heic|heif|webp|avif)$/i
+
 export function pdfKeyFor(key: string): string {
-  return /\.(jpe?g|png)$/i.test(key) ? key.replace(/\.(jpe?g|png)$/i, '.pdf') : `${key}.pdf`
+  return IMAGE_EXT.test(key) ? key.replace(IMAGE_EXT, '.pdf') : `${key}.pdf`
 }
 
 export function pdfNameFor(name: string): string {
-  return /\.(jpe?g|png)$/i.test(name) ? name.replace(/\.(jpe?g|png)$/i, '.pdf') : `${name}.pdf`
+  return IMAGE_EXT.test(name) ? name.replace(IMAGE_EXT, '.pdf') : `${name}.pdf`
 }
 
-export interface ConvertedPod { key: string; contentType: 'application/pdf'; name: string; sizeBytes: number }
+export interface ConvertedPod {
+  key: string
+  contentType: 'application/pdf'
+  name: string
+  sizeBytes: number
+  /** The image the PDF was made from; it stays in S3 for the record and is never shown or sent. */
+  originalKey: string
+  originalContentType: string
+}
 
 async function streamBytes(body: unknown): Promise<Buffer> {
   const chunks: Buffer[] = []
@@ -111,7 +155,7 @@ async function streamBytes(body: unknown): Promise<Buffer> {
 export async function convertStoredPodImage(
   s3: S3Client,
   bucket: string,
-  input: { key: string; contentType: string; name: string },
+  input: { key: string; contentType: string; name: string; destKey?: string },
 ): Promise<ConvertedPod | null> {
   if (!isPodImage(input.contentType)) return null
   try {
@@ -119,11 +163,23 @@ export async function convertStoredPodImage(
     const body = got.Body as { transformToByteArray?: () => Promise<Uint8Array> } | undefined
     const bytes = body?.transformToByteArray ? await body.transformToByteArray() : await streamBytes(got.Body)
     const pdf = await imageToPdf(bytes, input.contentType, pdfNameFor(input.name))
-    const key = pdfKeyFor(input.key)
+    const key = input.destKey ?? pdfKeyFor(input.key)
     await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: pdf, ContentType: 'application/pdf' }))
-    return { key, contentType: 'application/pdf', name: pdfNameFor(input.name), sizeBytes: pdf.length }
+    return {
+      key, contentType: 'application/pdf', name: pdfNameFor(input.name), sizeBytes: pdf.length,
+      originalKey: input.key, originalContentType: input.contentType,
+    }
   } catch (err) {
     console.warn('[podPdf] kept the original image; conversion failed:', String(err))
     return null
   }
+}
+
+/**
+ * The fields a document row takes from a conversion: the PDF is the file, the image is kept as `originalS3Key`; an image that could not be
+ * converted keeps its own key and says so (`pdfConversion: 'FAILED'`), and still counts as present.
+ */
+export function conversionFields(contentType: string, converted: ConvertedPod | null): Record<string, string> {
+  if (converted) return { originalS3Key: converted.originalKey, originalContentType: converted.originalContentType, pdfConversion: 'CONVERTED' }
+  return isNonPdfImage(contentType) ? { pdfConversion: 'FAILED' } : {}
 }

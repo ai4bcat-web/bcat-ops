@@ -2814,6 +2814,11 @@ const schema = a.schema(stageTypes({
       s3Key:         a.string().required(),
       contentType:   a.string().required(),
       sizeBytes:     a.integer().required(),
+      // A picture filed as a POD or rate confirmation is kept as the PDF made from it (s3Key); the picture stays here, never shown or sent.
+      originalS3Key:       a.string(),
+      originalContentType: a.string(),
+      // CONVERTED, or FAILED when the picture could not be turned into a PDF (it is still filed and still counts).
+      pdfConversion:       a.string(),
       pages:         a.integer(),
       source:        a.enum(['UPLOAD', 'CARRIER_PORTAL', 'GENERATED', 'DRIVER_APP', 'LEGACY']),
       // The DriverSubmissionDoc / Load id a pointer row points at.

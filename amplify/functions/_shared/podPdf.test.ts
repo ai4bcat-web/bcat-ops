@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { Jimp } from 'jimp'
 import { PDFDocument } from 'pdf-lib'
-import { exifOrientation, imageToPdf, isPodImage, pdfKeyFor, pdfNameFor } from './podPdf'
+import { GetObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3'
+import { conversionFields, convertStoredPodImage, exifOrientation, imageToPdf, isNonPdfImage, isPodImage, pdfKeyFor, pdfNameFor } from './podPdf'
 
 async function jpeg(w: number, h: number): Promise<Buffer> {
   const img = new Jimp({ width: w, height: h, color: 0x336699ff })
@@ -27,6 +28,11 @@ describe('podPdf', () => {
     expect(isPodImage('IMAGE/JPEG')).toBe(true)
     expect(isPodImage('application/pdf')).toBe(false)
     expect(isPodImage('image/webp')).toBe(false)
+    expect(isPodImage('image/tiff')).toBe(true)
+    expect(isPodImage('image/gif')).toBe(true)
+    expect(isNonPdfImage('image/heic')).toBe(true)
+    expect(pdfKeyFor('driver-docs/d1/IMG_1.HEIC')).toBe('driver-docs/d1/IMG_1.pdf')
+    expect(pdfNameFor('scan.tiff')).toBe('scan.pdf')
     expect(pdfKeyFor('shipment-docs/s1/pod-1.JPG')).toBe('shipment-docs/s1/pod-1.pdf')
     expect(pdfKeyFor('shipment-docs/s1/pod-1')).toBe('shipment-docs/s1/pod-1.pdf')
     expect(pdfNameFor('POD 20018.jpeg')).toBe('POD 20018.pdf')
@@ -63,5 +69,45 @@ describe('podPdf', () => {
     const png = await new Jimp({ width: 10, height: 10, color: 0xffffffff }).getBuffer('image/png')
     const doc = await PDFDocument.load(await imageToPdf(png, 'image/png'))
     expect(doc.getPageCount()).toBe(1)
+  })
+
+  it('decodes a TIFF and a GIF onto a letter page', async () => {
+    for (const mime of ['image/tiff', 'image/gif'] as const) {
+      const img = new Jimp({ width: 60, height: 40, color: 0x996633ff })
+      const bytes = await img.getBuffer(mime)
+      const pdf = await PDFDocument.load(await imageToPdf(bytes, mime))
+      expect(pdf.getPageCount()).toBe(1)
+      const { width, height } = pdf.getPage(0).getSize()
+      expect(width).toBeGreaterThan(height) // landscape picture, landscape page
+    }
+  })
+
+  it('stores the PDF where asked, keeps the original key, and reports the fields a row takes', async () => {
+    const photo = await jpeg(20, 30)
+    const puts: { Key?: string; ContentType?: string }[] = []
+    const s3 = { send: async (cmd: unknown) => {
+      if (cmd instanceof GetObjectCommand) return { Body: { transformToByteArray: async () => new Uint8Array(photo) } }
+      if (cmd instanceof PutObjectCommand) { puts.push(cmd.input); return {} }
+      throw new Error('unexpected')
+    } } as unknown as S3Client
+    const out = await convertStoredPodImage(s3, 'b', {
+      key: 'driver-docs/d1/image.jpg', contentType: 'image/jpeg', name: 'image.jpg', destKey: 'shipment-docs/s1/sdoc-1-image.pdf',
+    })
+    expect(out?.key).toBe('shipment-docs/s1/sdoc-1-image.pdf')
+    expect(out?.name).toBe('image.pdf')
+    expect(puts[0]).toMatchObject({ Key: 'shipment-docs/s1/sdoc-1-image.pdf', ContentType: 'application/pdf' })
+    expect(conversionFields('image/jpeg', out)).toEqual({ originalS3Key: 'driver-docs/d1/image.jpg', originalContentType: 'image/jpeg', pdfConversion: 'CONVERTED' })
+  })
+
+  it('a picture that cannot be read keeps the original and is marked FAILED; a PDF is left alone', async () => {
+    const s3 = { send: async (cmd: unknown) => {
+      if (cmd instanceof GetObjectCommand) return { Body: { transformToByteArray: async () => new Uint8Array([1, 2, 3]) } }
+      throw new Error('no put expected')
+    } } as unknown as S3Client
+    const out = await convertStoredPodImage(s3, 'b', { key: 'k.jpg', contentType: 'image/jpeg', name: 'k.jpg' })
+    expect(out).toBeNull()
+    expect(conversionFields('image/jpeg', out)).toEqual({ pdfConversion: 'FAILED' })
+    expect(conversionFields('image/heic', null)).toEqual({ pdfConversion: 'FAILED' })
+    expect(conversionFields('application/pdf', null)).toEqual({})
   })
 })

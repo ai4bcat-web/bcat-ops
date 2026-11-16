@@ -28,7 +28,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
 import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
-import { convertStoredPodImage } from '../_shared/podPdf'
+import { conversionFields, convertStoredPodImage } from '../_shared/podPdf'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { SSMClient } from '@aws-sdk/client-ssm'
 import { currentLoadForDriver, laneLabel } from '../../../src/lib/driverJourney'
@@ -1027,6 +1027,7 @@ async function uploadCommitRoute(token: string, event: FnUrlEvent) {
         s3Key: converted?.key ?? file.s3Key,
         contentType: converted?.contentType ?? file.contentType,
         sizeBytes: converted?.sizeBytes ?? file.sizeBytes,
+        ...conversionFields(file.contentType, converted),
         source: 'CARRIER_PORTAL',
         // PENDING until staff accept it: nothing a carrier sends satisfies a
         // required document on its own.

@@ -2953,6 +2953,11 @@ export interface ShipmentDocumentRecord {
   s3Key: string
   contentType: string
   sizeBytes: number
+  /** The picture a POD / rate confirmation PDF was made from; kept for the record, never shown or sent. */
+  originalS3Key?: string | null
+  originalContentType?: string | null
+  /** CONVERTED, or FAILED when a picture could not be turned into a PDF (it still counts as on file). */
+  pdfConversion?: string | null
   pages?: number | null
   source: ShipmentDocumentSource
   /** The DriverSubmissionDoc / Load id a pointer row points at. */
