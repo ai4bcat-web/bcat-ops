@@ -43,7 +43,9 @@ import { loadFromFactoringItem } from './loadFromInvoice'
 import { ManualInvoicePanel } from './ManualInvoicePanel'
 import { manualSentInfo } from '@/lib/manualInvoice'
 import { noBuyInfo } from '@/lib/noBuy'
-import { inOtrRejectedTab, isOtrRejected, mayInvoiceManually, needsManualInvoice, otrRejection, otrRejectionDetails } from '@/lib/otrRejection'
+import { inManualInvoiceTab, inOtrRejectedTab, isOtrRejected, mayInvoiceManually, needsManualInvoice, otrRejection, otrRejectionDetails } from '@/lib/otrRejection'
+import { FACTORING_REASON_LABEL, factoringReasonOf, type FactoringReasonInvoice } from '@/lib/factoringReason'
+import { FactoringWhy } from './FactoringWhy'
 import { TABLET_MAX_WIDTH } from '@/features/tms/grid/denseCardLayout'
 import { FixAndInvoiceDialog } from './FixAndInvoiceDialog'
 import { InvoiceManuallyDialog } from './InvoiceManuallyDialog'
@@ -77,7 +79,9 @@ const FACTORING_STATUS_LABEL: Record<FactoringItemStatus, string> = {
 // Need to factor is no longer a tab (Ryne 2026-11-14): those loads are batch factored from Invoicing → Ready to invoice.
 // Invoiced manually is not a tab either: those loads are invoiced, and show in Invoicing → Invoiced. OTR rejected takes its place.
 // The Invoice manually tab is folded into OTR rejected (Ryne 2026-11-14): one place for everything going out by hand.
-const FILTER_ORDER = ['PENDING_WITH_OTR', 'OTR_REJECTED', 'ALL', 'FACTORED', 'ARCHIVED'] as const
+// Rows pulled out of the queue to invoice by hand that OTR did NOT reject have their own tab, Manual invoice (Ryne 2026-11-16),
+// so OTR rejected lists only what OTR itself turned down and agrees with its card.
+const FILTER_ORDER = ['PENDING_WITH_OTR', 'OTR_REJECTED', 'MANUAL_INVOICE', 'ALL', 'FACTORED', 'ARCHIVED'] as const
 type FilterKey = (typeof FILTER_ORDER)[number]
 
 const RED = { color: 'var(--tms-badge-red)' }
@@ -321,38 +325,19 @@ function canMoveManually(item: FactoringItem, user: { email?: string | null; gro
   return mayInvoiceManually(item, user).allowed
 }
 
-/** OTR will not buy this paper. Said on the row, with OTR's reason, not only in the panel. */
+/** OTR will not buy this paper. The Why column carries OTR's reason; the badge is the at-a-glance flag. */
 function NoBuyFlag({ item }: { item: FactoringItem }) {
   const { noBuy, reason } = noBuyInfo(item)
   if (!noBuy) return null
-  return (
-    <>
-      <TmsBadge tone="pink" title={reason ?? undefined}>No buy</TmsBadge>
-      {reason && <span className="text-xs tms-muted whitespace-normal" style={{ overflowWrap: 'anywhere' }}>{reason}</span>}
-    </>
-  )
+  return <TmsBadge tone="pink" title={reason ?? undefined}>No buy</TmsBadge>
 }
 
-/** OTR turned this invoice down for a reason other than "will not buy" (that has its own flag). It stays in the queue until it is resolved with OTR. */
+/** OTR turned this invoice down for a reason other than "will not buy" (that has its own flag). It stays in the queue until it is resolved with OTR. The Why column says what OTR said. */
 function RejectedFlag({ item }: { item: FactoringItem }) {
   const rejection = otrRejection(item)
   if (!rejection || rejection.kind === 'NO_BUY') return null
   const details = otrRejectionDetails(item)
-  // Short on the row (the OTR status badge beside it already says Dead); the whole reason is the tooltip and the Fix modal.
-  const short = rejection.kind === 'DEAD' ? 'will not be funded' : rejection.reason
-  return (
-    <>
-      <TmsBadge tone="red" title={[details?.headline, ...(details?.lines ?? [])].filter(Boolean).join('\n')} data-testid="otr-rejected-flag">Needs attention</TmsBadge>
-      <span
-      className="text-xs whitespace-nowrap"
-      style={{ color: 'var(--tms-badge-red)', fontWeight: 600 }}
-      title={[details?.headline, ...(details?.lines ?? [])].filter(Boolean).join('\n')}
-      data-testid="otr-rejected-reason"
-    >
-      {short}
-      </span>
-    </>
-  )
+  return <TmsBadge tone="red" title={[details?.headline, ...(details?.lines ?? [])].filter(Boolean).join('\n')} data-testid="otr-rejected-flag">Needs attention</TmsBadge>
 }
 
 /** OTR's label for the row, or the stand-in for one OTR has not reported on. */
@@ -509,12 +494,27 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   // Open invoice balances by queue row, so the queue's money matches the Receivables card's.
   const openInvoices = useOpenInvoices()
   const openBalanceByItemId = useMemo(() => openBalanceByFactoringItem(openInvoices.invoices), [openInvoices.invoices])
+  // The open invoice behind each queue row, so the Why column can say what it bills and whether it is marked factored.
+  const invoiceByItemId = useMemo(() => {
+    const map = new Map<string, FactoringReasonInvoice>()
+    for (const inv of openInvoices.invoices) {
+      if (inv.factoringItemId && !map.has(inv.factoringItemId)) {
+        map.set(inv.factoringItemId, { id: inv.id, number: inv.number, customerName: inv.customerName, totalCents: inv.totalCents, factored: inv.factored })
+      }
+    }
+    return map
+  }, [openInvoices.invoices])
+  const reasonOf = useCallback((item: FactoringItem) => factoringReasonOf(item, {
+    customerName: customerOf(item).name,
+    invoice: invoiceByItemId.get(item.id) ?? null,
+    missingFields: (readinessOf(item)?.missingFields ?? []).map((f: OtrRequiredField) => OTR_FIELD_LABEL[f]),
+  }), [invoiceByItemId])
 
   const counts = useMemo(() => ({
     ALL: items.filter((i) => i.status !== 'ARCHIVED').length,
     NEED_TO_FACTOR: items.filter((i) => i.status === 'NEED_TO_FACTOR').length,
     PENDING_WITH_OTR: items.filter((i) => isWaitingOnOtr(i)).length,
-    MANUAL_INVOICE: items.filter((i) => i.status === 'MANUAL_INVOICE').length,
+    MANUAL_INVOICE: items.filter((i) => inManualInvoiceTab(i)).length,
     FACTORED: items.filter((i) => i.status === 'FACTORED').length,
     OTR_REJECTED: items.filter((i) => inOtrRejectedTab(i)).length,
     ARCHIVED: items.filter((i) => i.status === 'ARCHIVED').length,
@@ -532,8 +532,9 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         rejectedOnly ? otrRejection(item) != null
           : activeTab === 'ALL' ? item.status !== 'ARCHIVED'
             : activeTab === 'OTR_REJECTED' ? inOtrRejectedTab(item)
-              : activeTab === 'PENDING_WITH_OTR' ? isWaitingOnOtr(item)
-                : item.status === activeTab,
+              : activeTab === 'MANUAL_INVOICE' ? inManualInvoiceTab(item)
+                : activeTab === 'PENDING_WITH_OTR' ? isWaitingOnOtr(item)
+                  : item.status === activeTab,
       )
       .filter((item) => activeTab !== 'PENDING_WITH_OTR' || !otrFilter || otrLabelOf(item) === otrFilter)
       .filter((item) => matchesSearch(item, search))
@@ -765,6 +766,12 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       ),
     },
     {
+      key: 'why',
+      header: 'WHY',
+      width: 340,
+      render: (item: FactoringItem) => <FactoringWhy proNumber={item.proNumber} reason={reasonOf(item)} invoice={invoiceByItemId.get(item.id) ?? null} />,
+    },
+    {
       key: 'actions',
       header: 'ACTIONS',
       render: (item: FactoringItem) => (
@@ -863,10 +870,17 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       optionsOf: (i) => [{ value: i.status, label: FACTORING_STATUS_LABEL[i.status] }],
       sortValue: (i) => FACTORING_STATUS_LABEL[i.status],
     },
+    {
+      key: 'why', header: 'Why', group: 'Status', width: 340, extraPx: 60,
+      text: (i) => reasonOf(i).short,
+      filter: 'multi',
+      optionsOf: (i) => { const r = reasonOf(i); return [{ value: r.kind, label: FACTORING_REASON_LABEL[r.kind] }] },
+      sortValue: (i) => FACTORING_REASON_LABEL[reasonOf(i).kind],
+    },
     { key: 'actions', header: 'Actions', group: 'Status', text: () => '', fixed: true, filter: false, sortable: false, width: 350, stickyEnd: true },
-  ], [activeTab])
+  ], [activeTab, reasonOf])
   const prefs = useDenseGridPrefs({
-    gridId: 'factoring-queue',
+    gridId: 'factoring-queue-v2',
     email: user?.email,
     defaultColumns: denseCols.map((c) => c.key),
     validKeys: denseCols.map((c) => c.key),
@@ -904,7 +918,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
             size="sm"
             active={activeTab}
             onSelect={(key) => { setActiveTab(key as FilterKey); resetPaging() }}
-            tabs={FILTER_ORDER.map((key) => ({ key, label: key === 'ALL' ? 'All' : key === 'OTR_REJECTED' ? 'OTR rejected' : key === 'PENDING_WITH_OTR' ? FACTORED_BUCKET_LABEL.WAITING : FACTORING_STATUS_LABEL[key], count: counts[key] }))}
+            tabs={FILTER_ORDER.map((key) => ({ key, label: key === 'ALL' ? 'All' : key === 'OTR_REJECTED' ? 'OTR rejected' : key === 'MANUAL_INVOICE' ? 'Manual invoice' : key === 'PENDING_WITH_OTR' ? FACTORED_BUCKET_LABEL.WAITING : FACTORING_STATUS_LABEL[key], count: counts[key] }))}
           />
           <ClearFiltersButton count={filterCount} onClear={() => { setSearch(''); setOtrFilter(null); setDense({}); resetPaging() }} />
           <span className="tms-dense-spacer" />

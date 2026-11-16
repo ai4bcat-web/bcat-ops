@@ -170,8 +170,8 @@ describe('invoices OTR turned down', () => {
     fireEvent.click(screen.getByRole('tab', { name: /^OTR rejected/ }))
     expect(screen.queryByRole('button', { name: 'Invoice manually for PRO DE3' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Fix and invoice PRO DE3 manually' })).toBeInTheDocument()
-    expect(screen.getByTestId('otr-rejected-reason')).toHaveTextContent('will not be funded')
-    expect(screen.getByTestId('otr-rejected-reason').getAttribute('title')).toMatch(/OTR: Dead — this invoice will not be funded/)
+    expect(screen.getByTestId('factoring-why-DE3')).toHaveTextContent('OTR: Dead — this invoice will not be funded')
+    expect(screen.getByTestId('otr-rejected-flag').getAttribute('title')).toMatch(/OTR: Dead — this invoice will not be funded/)
   })
 
   it('shows no strip when OTR has turned nothing down', async () => {
@@ -548,11 +548,29 @@ describe('invoices sent by hand', () => {
 })
 
 describe('OTR rejected', () => {
-  it('also holds rows parked to go out by hand, so the old Invoice manually rows stay in view', async () => {
+  it('keeps rows pulled out of the queue by hand out of OTR rejected: they are not rejections and have their own Manual invoice tab', async () => {
     await setup([item({ id: 'mi', proNumber: 'MI7', status: 'MANUAL_INVOICE', manualReason: 'MANUAL' })])
-    expect(screen.getByRole('tab', { name: /^OTR rejected/ })).toHaveTextContent('1')
+    expect(screen.getByRole('tab', { name: /^OTR rejected/ })).toHaveTextContent('0')
+    expect(screen.getByRole('tab', { name: /^Manual invoice/ })).toHaveTextContent('1')
     fireEvent.click(screen.getByRole('tab', { name: /^OTR rejected/ }))
+    expect(screen.queryByText('MI7')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: /^Manual invoice/ }))
     expect(screen.getByText('MI7')).toBeInTheDocument()
+    expect(screen.getByTestId('factoring-why-MI7')).toHaveTextContent('Pulled from the OTR queue to invoice manually. Not rejected by OTR.')
+  })
+
+  it('says an e-mail row that never matched a customer was not rejected, and where the e-mail came from', async () => {
+    await setup([item({
+      id: 'em', proNumber: 'EM8', status: 'MANUAL_INVOICE', manualReason: 'MANUAL', fromEmail: 'bcatlogistics@aljex.descartesservices.com',
+      subject: 'Invoice for Pro # EM8 Attached from IVAN CARTAGE CO', receivedAt: '2026-11-06T16:02:22.000Z',
+    })])
+    fireEvent.click(screen.getByRole('tab', { name: /^Manual invoice/ }))
+    const why = screen.getByTestId('factoring-why-EM8')
+    expect(why).toHaveTextContent('Invoice e-mail from Aljex (Nov 6) is not matched to a customer.')
+    fireEvent.click(why)
+    const dialog = screen.getByTestId('factoring-why-dialog')
+    expect(dialog).toHaveTextContent('bcatlogistics@aljex.descartesservices.com')
+    expect(dialog).toHaveTextContent('Customer: not matched')
   })
 
   it('lists what OTR turned down, not our own auth failures, and opens the guided fix with the reason', async () => {
