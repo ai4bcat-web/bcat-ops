@@ -40,3 +40,15 @@ describe('AP e-mail waiver (Ryne 2026-11-16: AUTO SHIPPER)', () => {
     expect(customerBillingGaps({ billingMethod: 'MANUAL' })).toEqual(['CUSTOMER_AP_EMAIL'])
   })
 })
+
+describe('Load Review customer columns (Ryne 2026-11-16)', () => {
+  it('reads the invoice method and the AP email on their own', async () => {
+    const { customerInvoiceMethodText, customerApEmailText } = await import('./customerBillingReady')
+    expect(customerInvoiceMethodText({ billingMethod: 'FACTOR' })).toBe('Factor')
+    expect(customerInvoiceMethodText({ billingMethod: 'MANUAL' })).toBe('Manual invoice')
+    expect(customerInvoiceMethodText({ billingMethod: null })).toBe('')
+    expect(customerApEmailText({ apEmail: 'ap@x.com' })).toBe('ap@x.com')
+    expect(customerApEmailText({ apEmail: null }, { apEmailRequired: false })).toBe('Not required')
+    expect(customerApEmailText({ apEmail: null })).toBe('')
+  })
+})

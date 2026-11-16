@@ -26,7 +26,7 @@ export type FixAnchor = keyof typeof FIX_ANCHOR
 /** A review column (LoadReviewFieldKey) to the rail section that fixes it. */
 export const FIELD_ANCHOR: Record<string, FixAnchor> = {
   customerRef: 'ref', pod: 'documents', rateCon: 'documents', customerRate: 'charges', carrierRate: 'charges', profit: 'charges',
-  salesRep: 'salesRep', revDivision: 'revDivision', delivered: 'stops', carrier: 'driver', customer: 'customer', stops: 'stops',
+  salesRep: 'salesRep', revDivision: 'revDivision', delivered: 'stops', carrier: 'driver', customer: 'customer', invoiceMethod: 'customer', apEmail: 'customer', stops: 'stops',
 }
 
 /** A failing reason's old "open this tab" target, now the rail section that fixes it. */

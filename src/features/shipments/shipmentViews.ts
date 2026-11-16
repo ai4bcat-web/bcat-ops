@@ -143,6 +143,8 @@ export type ShipmentRow = ShipmentRecord & {
   /** What the customer is missing to be billed (customerBillingReady). */
   customerBillingGaps?: CustomerBillingGapCode[] | null
   customerBillingSummary?: string | null
+  customerInvoiceMethod?: string | null
+  customerApEmail?: string | null
   // ── R2 column catalog (projected by the data layer; every one null when unknown) ──
   /** Rep and audit ids resolved to profile names; null when no profile matches. */
   salesRepName?: string | null

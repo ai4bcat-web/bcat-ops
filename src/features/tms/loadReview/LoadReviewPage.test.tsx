@@ -127,6 +127,12 @@ describe('LoadReviewPage', () => {
     expect(screen.queryByRole('button', { name: /Select all looks ready/ })).toBeNull()
   })
 
+  it('opens on All in review when the link names no tab (Ryne 2026-11-16)', () => {
+    renderPage('/tms/load-review')
+    const strip = screen.getByRole('tablist', { name: 'Load review filters' })
+    expect(within(strip).getByRole('tab', { name: /All in review/ }).getAttribute('aria-selected')).toBe('true')
+  })
+
   it('Looks ready shows every checked field with its value and a Ready column (Ryne 2026-11-15)', () => {
     window.localStorage.clear()
     renderPage('/tms/load-review?tab=ready')
@@ -153,6 +159,22 @@ describe('LoadReviewPage', () => {
     expect(screen.getAllByText(/^1 to fix: POD$/).length).toBeGreaterThan(0)
     const reps = screen.getAllByTestId('field-salesRep')
     expect(reps.every((el) => el.getAttribute('data-state') === 'ok')).toBe(true)
+  })
+
+  it('every tab shows the same columns in the same order, with the customer split into name, invoice method and AP email (Ryne 2026-11-16)', () => {
+    const want = ['Shipment', 'Customer', 'Invoice method', 'AP email', 'Load status', 'In review', 'Customer ref (PO)', 'POD', 'RC', 'Customer rate', 'Carrier rate', 'Profit', 'Sales rep', 'Rev division', 'Delivered', 'Carrier', 'Stops', 'Other checks', 'Ready', 'What to fix']
+    for (const tab of ['all', 'fixes', 'ready', 'released']) {
+      window.localStorage.clear()
+      const view = renderPage(`/tms/load-review?tab=${tab}`)
+      const headers = screen.getAllByRole('columnheader').map((h) => (h.textContent ?? '').trim()).filter((h) => h && h !== 'Select')
+      expect(headers.filter((h) => want.includes(h)), tab).toEqual(want)
+      view.unmount()
+    }
+    window.localStorage.clear()
+    renderPage('/tms/load-review?tab=all')
+    expect(screen.getAllByTestId('field-customer').every((el) => !/·/.test(el.textContent ?? ''))).toBe(true)
+    expect(screen.getAllByTestId('field-invoiceMethod').length).toBeGreaterThan(0)
+    expect(screen.getAllByTestId('field-apEmail').length).toBeGreaterThan(0)
   })
 
   it('a passing POD the document cache has not confirmed says what the check trusted', () => {
@@ -195,8 +217,9 @@ describe('LoadReviewPage', () => {
     expect(screen.queryByText('POD before delivery')).toBeNull()
     cleanup()
     renderPage('/tms/load-review?shipment=s-8')
-    expect(await screen.findByText(/Delivered \(no time recorded\)/)).toBeTruthy()
-    expect(screen.getByTitle(/days in review can't be counted/)).toBeTruthy()
+    // The page now opens on All in review, so the row and the drawer both say it.
+    expect((await screen.findAllByText(/Delivered \(no time recorded\)/)).length).toBeGreaterThan(0)
+    expect(screen.getAllByTitle(/days in review can't be counted/).length).toBeGreaterThan(0)
     expect(screen.getAllByText('DELIVERED').length).toBeGreaterThan(0)
   })
 

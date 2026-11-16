@@ -67,7 +67,9 @@ export function reviewFieldText(row: ShipmentListRow, key: LoadReviewFieldKey): 
     case 'revDivision': return row.revDivision?.replace(/_/g, ' ') ?? ''
     case 'delivered': { const t = deliveredText(row); return t === '—' ? '' : t }
     case 'carrier': return carrierNames(row)
-    case 'customer': return [row.customerName, row.customerBillingSummary].filter(Boolean).join(' · ')
+    case 'customer': return row.customerName ?? ''
+    case 'invoiceMethod': return row.customerInvoiceMethod ?? ''
+    case 'apEmail': return row.customerApEmail ?? ''
     case 'stops': return row.originCity || row.destinationCity ? `${row.originCity ?? '—'} → ${row.destinationCity ?? '—'}` : ''
     case 'other': return ''
   }

@@ -464,11 +464,11 @@ export function reviewAgeDays(row: Pick<LoadReviewRow, 'deliveredAt'>, now: numb
  */
 export type LoadReviewFieldKey =
   | 'customerRef' | 'pod' | 'rateCon' | 'customerRate' | 'carrierRate' | 'profit' | 'salesRep' | 'revDivision'
-  | 'delivered' | 'carrier' | 'customer' | 'stops' | 'other'
+  | 'delivered' | 'carrier' | 'customer' | 'invoiceMethod' | 'apEmail' | 'stops' | 'other'
 
 export const LOAD_REVIEW_FIELDS: readonly LoadReviewFieldKey[] = [
   'customerRef', 'pod', 'rateCon', 'customerRate', 'carrierRate', 'profit', 'salesRep', 'revDivision',
-  'delivered', 'carrier', 'customer', 'stops', 'other',
+  'delivered', 'carrier', 'customer', 'invoiceMethod', 'apEmail', 'stops', 'other',
 ]
 
 export const LOAD_REVIEW_FIELD_LABEL: Record<LoadReviewFieldKey, string> = {
@@ -483,6 +483,8 @@ export const LOAD_REVIEW_FIELD_LABEL: Record<LoadReviewFieldKey, string> = {
   delivered: 'Delivered',
   carrier: 'Carrier',
   customer: 'Customer',
+  invoiceMethod: 'Invoice method',
+  apEmail: 'AP email',
   stops: 'Stops',
   other: 'Other checks',
 }
@@ -506,9 +508,10 @@ const FIELD_BY_CODE: Record<string, readonly LoadReviewFieldKey[]> = {
   DRIVER_MISSING: ['carrier'],
   NO_CUSTOMER: ['customer'],
   FACTOR_CUSTOMER_MC: ['customer'],
-  FACTOR_BILLING_METHOD: ['customer'],
-  CUSTOMER_BILLING_METHOD: ['customer'],
-  CUSTOMER_AP_EMAIL: ['customer'],
+  // Ryne 2026-11-16: name, invoice method and AP email are three columns, each with its own mark.
+  FACTOR_BILLING_METHOD: ['invoiceMethod'],
+  CUSTOMER_BILLING_METHOD: ['invoiceMethod'],
+  CUSTOMER_AP_EMAIL: ['apEmail'],
   STOP_INCOMPLETE: ['stops'],
   FACTOR_PICKUP_CITY: ['stops'],
   FACTOR_PICKUP_STATE: ['stops'],
