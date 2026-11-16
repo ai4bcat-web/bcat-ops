@@ -289,6 +289,7 @@ import { dedupeEmails, isEmailAddress } from '../../../src/lib/emailAddress'
 import { composeRateConCc } from './rateConRecipients'
 import { assertBolEmailable, bolEmailBody, bolEmailSubject, deliveryLabel, parseEmailBolInput } from './bolEmail'
 import { MAX_GENERATED_BYTES, bcatRateConDocumentId, documentKey } from '../../../src/lib/shipmentDocuments'
+import { conversionFields, convertStoredPodImage } from '../_shared/podPdf'
 import { getStops } from '../../../src/lib/stops'
 import type { Load } from '../../../src/types'
 import {
@@ -9249,10 +9250,13 @@ async function attachIntakeFiles(
     const key = documentKey(shipmentId, id, file.name, file.contentType)
     try {
       await s3.send(new CopyObjectCommand({ Bucket: BUCKET_NAME, CopySource: `${BUCKET_NAME}/${file.key}`, Key: key }))
+      // A rate confirmation that came in as a picture is filed as a PDF (Ryne 2026-11-16); the picture stays next to it.
+      const converted = await convertStoredPodImage(s3, BUCKET_NAME, { key, contentType: file.contentType, name: file.name })
       const now = nowIso()
       await transact([putItem(documentDeps.store.tables.shipmentDocument, {
         id, __typename: 'ShipmentDocument', shipmentId, ...(order?.id ? { orderId: String(order.id) } : {}), type: 'CUSTOMER_RATE_CON',
-        name: file.name.slice(0, 200), s3Key: key, contentType: file.contentType, sizeBytes: Math.max(0, Math.trunc(file.size) || 0), source: 'UPLOAD',
+        name: (converted?.name ?? file.name).slice(0, 200), s3Key: converted?.key ?? key, contentType: converted?.contentType ?? file.contentType,
+        sizeBytes: converted?.sizeBytes ?? Math.max(0, Math.trunc(file.size) || 0), ...conversionFields(file.contentType, converted), source: 'UPLOAD',
         audience: 'INTERNAL', status: 'ACTIVE', version: 1, uploadedBy: 'intake', uploadedAt: now, createdBy: caller.email, createdAt: now, updatedAt: now,
       })], 'intake document')
       attached += 1

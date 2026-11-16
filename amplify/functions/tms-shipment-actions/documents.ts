@@ -22,7 +22,7 @@ import { marshall } from '@aws-sdk/util-dynamodb'
 import { HeadObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { randomUUID } from 'crypto'
-import { convertStoredPodImage, isPodImage, pdfKeyFor } from '../_shared/podPdf'
+import { conversionFields, convertStoredPodImage, isPodImage, pdfKeyFor, pdfNameFor } from '../_shared/podPdf'
 import { LOAD_EXTRA_DOC_TYPES, loadExtraDocTypes, validateLoadRequiredDocTypes } from '../../../src/lib/loadRequiredDocs'
 
 import {
@@ -479,6 +479,7 @@ export async function commitDocument(deps: DocumentDeps, input: Row, caller: Cal
     s3Key: converted?.key ?? s3Key,
     contentType: converted?.contentType ?? contentType,
     sizeBytes: converted?.sizeBytes ?? sizeBytes,
+    ...conversionFields(contentType, converted),
     source: 'UPLOAD',
     audience,
     status: 'ACTIVE',
@@ -718,21 +719,30 @@ export async function attachDriverDoc(deps: DocumentDeps, input: Row, caller: Ca
   // Every page of a merged submission resolves to the same combined PDF, so the
   // second page must hand back the row the first one filed rather than list the one
   // file again — which is also how the backfill files a merged POD.
-  const sameFile = bundle.documents.find((doc) => doc.status === 'ACTIVE' && doc.s3Key === s3Key)
+  const sameFile = bundle.documents.find((doc) => doc.status === 'ACTIVE' && (doc.s3Key === s3Key || doc.originalS3Key === s3Key))
   if (sameFile) return { bundle, document: sameFile }
   const now = nowIso()
+  const rawName = optionalString(submissionDoc.fileName, MAX_DOCUMENT_NAME) ?? `${type.toLowerCase()}-${submissionDocId}`
+  const rawType = combined ? PDF_CONTENT_TYPE : optionalString(submissionDoc.contentType, 120) ?? PDF_CONTENT_TYPE
+  // A driver's photo is filed as the PDF made from it (Ryne 2026-11-16); the photo stays where the app put it as the original.
+  const converted = !combined && deps.bucket && isPodImage(rawType)
+    ? await convertStoredPodImage(deps.s3, deps.bucket, {
+      key: s3Key, contentType: rawType, name: rawName, destKey: documentKey(shipmentId, documentId, pdfNameFor(rawName), PDF_CONTENT_TYPE),
+    })
+    : null
   const row: Row = {
     id: documentId,
     __typename: 'ShipmentDocument',
     shipmentId,
     loadId,
     type,
-    name: optionalString(submissionDoc.fileName, MAX_DOCUMENT_NAME) ?? `${type.toLowerCase()}-${submissionDocId}`,
-    s3Key,
-    contentType: combined ? PDF_CONTENT_TYPE : optionalString(submissionDoc.contentType, 120) ?? PDF_CONTENT_TYPE,
+    name: converted?.name ?? rawName,
+    s3Key: converted?.key ?? s3Key,
+    contentType: converted?.contentType ?? rawType,
+    ...conversionFields(rawType, converted),
     // The merged PDF's length is not recorded on the submission, and a pointer row
     // is never re-uploaded, so there is nothing honest to put here but zero.
-    sizeBytes: combined ? 0 : numberOrNull(submissionDoc.byteSize) ?? 0,
+    sizeBytes: converted?.sizeBytes ?? (combined ? 0 : numberOrNull(submissionDoc.byteSize) ?? 0),
     source: 'DRIVER_APP',
     sourceRef: submissionId,
     audience: 'ALL',
@@ -915,6 +925,20 @@ export async function updateDocument(deps: DocumentDeps, input: Row, caller: Cal
   if (audience) patch.audience = audience
   if (orderId !== undefined) patch.orderId = orderId
   if (loadCarrierId !== undefined) patch.loadCarrierId = loadCarrierId
+  // A picture retyped into a POD or rate confirmation becomes the PDF made from it (Ryne 2026-11-16); the picture is kept as the original.
+  if (type && BILLED_ON_TYPES.has(type) && deps.bucket && isPodImage(String(doc.contentType ?? '')) && typeof doc.s3Key === 'string') {
+    const docName = String(patch.name ?? doc.name ?? documentId)
+    const converted = await convertStoredPodImage(deps.s3, deps.bucket, {
+      key: doc.s3Key, contentType: String(doc.contentType), name: docName,
+      destKey: documentKey(shipmentId, documentId, pdfNameFor(docName), PDF_CONTENT_TYPE),
+    })
+    if (converted) {
+      Object.assign(patch, {
+        s3Key: converted.key, contentType: converted.contentType, name: converted.name, sizeBytes: converted.sizeBytes,
+        ...conversionFields(String(doc.contentType), converted),
+      })
+    } else patch.pdfConversion = 'FAILED'
+  }
   const next = { ...doc, ...patch }
 
   // Audience alone changes nothing the gate counts, so it costs no extra writes.

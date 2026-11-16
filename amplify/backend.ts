@@ -2816,6 +2816,9 @@ shipmentActionsFn.addToRolePolicy(
   }),
 )
 backend.storage.resources.bucket.grantReadWrite(shipmentActionsFn, 'shipment-docs/*')
+// A driver's POD photo is filed on the shipment as the PDF made from it (Ryne 2026-11-16): read the photo where the app or the text left it.
+backend.storage.resources.bucket.grantRead(shipmentActionsFn, 'driver-docs/*')
+backend.storage.resources.bucket.grantRead(shipmentActionsFn, 'dispatch-media/*')
 // Intake e-mail files are copied onto the shipment when the load is linked.
 backend.storage.resources.bucket.grantRead(shipmentActionsFn, 'intake-attachments/*')
 

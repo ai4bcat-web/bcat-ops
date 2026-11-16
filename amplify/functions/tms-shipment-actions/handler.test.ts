@@ -4854,6 +4854,20 @@ describe('documents', () => {
     expect(second.bundle.documents).toHaveLength(1)
   })
 
+  it('files a driver photo POD as the PDF made from it, keeping the photo as the original', async () => {
+    const ids = await delivered()
+    seedDriverPod(ids.loadId, 'dsb-9', 'dsd-9', { combinedPodKey: null })
+    const { Jimp } = await import('jimp')
+    const photo = new Uint8Array(await new Jimp({ width: 64, height: 96, color: 0x336699ff }).getBuffer('image/jpeg'))
+    putS3Object('driver-docs/drv-1/dsb-9/pod-1.jpg', { ContentLength: photo.length, ContentType: 'image/jpeg', Bytes: photo })
+    const res = (await call('ATTACH_DRIVER_DOC', { shipmentId: ids.shipmentId, loadId: ids.loadId, submissionDocId: 'dsd-9', type: 'POD' })) as { document: Row }
+    expect(res.document).toMatchObject({
+      contentType: 'application/pdf', name: 'pod-1.pdf', originalS3Key: 'driver-docs/drv-1/dsb-9/pod-1.jpg', pdfConversion: 'CONVERTED',
+    })
+    expect(String(res.document.s3Key)).toMatch(new RegExp(`^shipment-docs/${ids.shipmentId}/`))
+    expect(String(res.document.s3Key)).toMatch(/\.pdf$/)
+  })
+
   it('refuses a POD the driver was asked to replace', async () => {
     const ids = await delivered()
     seedDriverPod(ids.loadId, 'dsb-3', 'dsd-3', { podReviewStatus: 'NEEDS_REPLACEMENT' })

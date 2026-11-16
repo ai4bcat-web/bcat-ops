@@ -176,12 +176,14 @@ function DocumentsCardImpl({ values, ctx, documentApi = liveDocumentApi }: CardP
   const slotQueued = (docType: ShipmentDocumentType) => queuedAll.map((q, index) => ({ q, index })).filter(({ q }) => q.type === docType)
   const editDisabled = disabled || !saved
   const changed = () => ctx.refreshBundle()
-  const slotOrigin = (d: { uploadedBy?: string | null; source?: string | null }): string => {
+  const slotOrigin = (d: { uploadedBy?: string | null; source?: string | null; pdfConversion?: string | null }): string => {
     const by = d.uploadedBy ?? ''
-    if (by.startsWith('link:')) return 'e-signed by the carrier'
-    if (by.toLowerCase().includes('driver')) return 'from the driver'
-    if (d.source === 'GENERATED') return 'generated'
-    return 'uploaded'
+    const base = by.startsWith('link:') ? 'e-signed by the carrier'
+      : by.toLowerCase().includes('driver') ? 'from the driver'
+        : d.source === 'GENERATED' ? 'generated'
+          : 'uploaded'
+    // A picture that could not be made into a PDF is still filed (and still counts); say so, so someone can re-upload a PDF.
+    return d.pdfConversion === 'FAILED' ? `${base} · couldn't convert to PDF` : base
   }
   const slotInputs = useRef<Record<string, HTMLInputElement | null>>({})
   // The board's Missing chip opens /edit#docs-POD (or #docs-RATE_CON): scroll that box into view and focus its upload.

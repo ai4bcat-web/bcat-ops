@@ -4883,7 +4883,7 @@ export type {
 
 const SHIPMENT_DOCUMENT_FIELDS = `
   id shipmentId orderId loadId loadCarrierId stopId
-  type name s3Key contentType sizeBytes pages source sourceRef audience
+  type name s3Key contentType sizeBytes originalS3Key originalContentType pdfConversion pages source sourceRef audience
   status version supersedesId
   reviewStatus reviewedAt reviewedBy reviewNote uploadLinkId
   voidedAt voidedBy voidReason uploadedBy uploadedAt
