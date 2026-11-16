@@ -5207,7 +5207,7 @@ describe('READY_TO_INVOICE', () => {
   it('batch releases three shipments through the same gate and preserves the refusal reason', async () => {
     const shipments: DocIds[] = []
     for (let i = 0; i < 3; i += 1) {
-      const ids = await deliveredOrder({ requiredDocsForInvoice: ['POD', 'BOL'], reviewRequirements: [] })
+      const ids = await deliveredOrder({ requiredDocsForInvoice: ['POD', 'BOL'], reviewRequirements: ['podReceived', 'rateConReceived'] })
       seedDocs(ids, i === 1 ? ['BOL', 'RATE_CON'] : ['BOL', 'POD', 'RATE_CON'])
       for (const [id, doc] of table(TABLES.shipmentDocument)) {
         if (doc.shipmentId === ids.shipmentId && id.startsWith('sdoc-')) {
@@ -5236,7 +5236,7 @@ describe('READY_TO_INVOICE', () => {
   describe('the carrier AP record', () => {
     /** A delivered load hauled by an outside carrier, rate con signed, paperwork in, no carrier bill recorded. */
     async function deliveredCarrierLoad(): Promise<DocIds> {
-      seedCustomer({ requiredDocsForInvoice: ['POD', 'BOL'], reviewRequirements: [] })
+      seedCustomer({ requiredDocsForInvoice: ['POD', 'BOL'], reviewRequirements: ['podReceived', 'rateConReceived'] })
       seedBookableCarrier('car-1')
       const ids = await createDraft()
       await saveForm(ids.shipmentId)
@@ -5520,7 +5520,7 @@ describe('READY_TO_INVOICE', () => {
       expect(result).toMatchObject({ orderId: ids.orderId, arStatus: 'DOCS_NEEDED', salesRepId: null, legacyImported: false })
       expect((result as unknown as { pendingDocReviewCount: number }).pendingDocReviewCount).toBe(0)
       expect(result.releaseGate.ok).toBe(true)
-      expect(result.extras.map((e) => e.code)).toEqual(['REV_DIVISION_MISSING', 'SALES_REP_MISSING', 'NO_CUSTOMER_CHARGES', 'PROFIT_MISSING'])
+      expect(result.extras.map((e) => e.code)).toEqual(['REV_DIVISION_MISSING', 'SALES_REP_MISSING', 'NO_CUSTOMER_CHARGES'])
       expect(JSON.stringify(table(TABLES.order).get(ids.orderId))).toBe(orderBefore)
       expect(table(TABLES.audit).size).toBe(auditsBefore)
     })
@@ -5617,7 +5617,8 @@ describe('READY_TO_INVOICE', () => {
     it('refuses a review release with no sales rep, no division or no charges, listed together', async () => {
       const ids = await reviewable({ rep: false, division: false, revenue: 0 })
       await expect(ready(ids.orderId, { review: REVIEW })).rejects.toThrow(
-        'Not ready for accounting: Missing revenue division; Missing sales rep; No customer charges; Profit not available (needs revenue and expense)',
+        // Own fleet (the fixture's OWN_ASSET load) needs no carrier rate, so profit is not asked for (Ryne 2026-11-15).
+        'Not ready for accounting: Missing revenue division; Missing sales rep; No customer charges',
       )
       expect(table(TABLES.order).get(ids.orderId)!.arStatus).toBe('DOCS_NEEDED')
       expect(releaseAudits('LOAD_REVIEW_RELEASED')).toEqual([])

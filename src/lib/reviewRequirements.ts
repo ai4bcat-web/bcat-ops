@@ -14,6 +14,7 @@ export type ReviewRequirement =
   | 'revDivision'
   | 'referenceNumber'
   | 'podReceived'
+  | 'rateConReceived'
   | 'salesRep'
   | 'revenueEntered'
   | 'expenseEntered'
@@ -24,6 +25,7 @@ export const REVIEW_REQUIREMENTS: readonly ReviewRequirement[] = [
   'revDivision',
   'referenceNumber',
   'podReceived',
+  'rateConReceived',
   'salesRep',
   'revenueEntered',
   'expenseEntered',
@@ -34,6 +36,7 @@ export const REVIEW_REQUIREMENT_LABELS: Record<ReviewRequirement, string> = {
   revDivision: 'Revenue division',
   referenceNumber: 'Reference #',
   podReceived: 'POD received',
+  rateConReceived: 'RC received',
   salesRep: 'Sales rep',
   revenueEntered: 'Revenue entered',
   expenseEntered: 'Expense entered',
@@ -47,6 +50,7 @@ export const REVIEW_REQUIREMENT_CODES: Record<ReviewRequirement, string> = {
   revDivision: 'REV_DIVISION_MISSING',
   referenceNumber: 'REFERENCE_NUMBER_MISSING',
   podReceived: 'POD_MISSING',
+  rateConReceived: 'RATE_CON_MISSING',
   salesRep: 'SALES_REP_MISSING',
   revenueEntered: 'NO_CUSTOMER_CHARGES',
   expenseEntered: 'EXPENSE_MISSING',
@@ -58,6 +62,7 @@ export const REVIEW_REQUIREMENT_MESSAGES: Record<ReviewRequirement, string> = {
   revDivision: 'Missing revenue division',
   referenceNumber: 'Missing reference #',
   podReceived: 'POD not received',
+  rateConReceived: 'RC not received',
   salesRep: 'Missing sales rep',
   revenueEntered: 'No customer charges',
   expenseEntered: 'No expense entered',
@@ -127,6 +132,9 @@ function satisfied(requirement: ReviewRequirement, facts: ReviewFacts): boolean 
     case 'salesRep': return !blank(facts.salesRepId)
     case 'referenceNumber': return !blank(facts.referenceNumber)
     case 'podReceived': return facts.podReceived === true
+    // The release gate and the document gate own the rate confirmation itself; this requirement is the per-customer
+    // switch for whether it is asked for at all (see docsNotRequiredFor), so it never fails on its own.
+    case 'rateConReceived': return true
     case 'revenueEntered': return positive(facts.revenueCents)
     case 'expenseEntered': return positive(facts.expenseCents)
     case 'profitEntered': return typeof facts.profitCents === 'number' && Number.isFinite(facts.profitCents)
@@ -159,4 +167,27 @@ export const MAX_REVIEW_BATCH = 9
 
 export function batchCapMessage(): string {
   return `A batch holds at most ${MAX_REVIEW_BATCH} shipments. Deselect one to add another.`
+}
+
+/**
+ * The documents a customer does not need to invoice (Ryne 2026-11-15: AUTO SHIPPER needs no POD or RC), read from the
+ * same per-customer Load Review list: unticking "POD received" or "RC received" drops that document from the release
+ * gate, the document gate, Load Review and the board. OTR's own document rules (otrInvoice.ts) are separate and still
+ * apply to a factored load.
+ */
+export function docsNotRequiredFor(requirements: readonly ReviewRequirement[]): ('POD' | 'RATE_CON')[] {
+  const out: ('POD' | 'RATE_CON')[] = []
+  if (!requirements.includes('podReceived')) out.push('POD')
+  if (!requirements.includes('rateConReceived')) out.push('RATE_CON')
+  return out
+}
+
+/** The same, straight from the customer row and the org settings row (either may be absent). */
+export function customerDocsNotRequired(
+  customer: { reviewRequirements?: readonly (string | null)[] | null } | null | undefined,
+  settings: { reviewRequirements?: readonly (string | null)[] | null } | null | undefined,
+): ('POD' | 'RATE_CON')[] {
+  const own = Array.isArray(customer?.reviewRequirements) ? (customer.reviewRequirements.filter((v): v is string => typeof v === 'string')) : null
+  const org = Array.isArray(settings?.reviewRequirements) ? (settings.reviewRequirements.filter((v): v is string => typeof v === 'string')) : null
+  return docsNotRequiredFor(resolveReviewRequirements(own, org))
 }

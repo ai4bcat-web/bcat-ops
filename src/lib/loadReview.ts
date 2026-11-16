@@ -112,7 +112,20 @@ export interface LoadReviewRow {
   loadReviewPushedAt?: string | null
   /** What a factor-billed load is missing for factoring (useShipments derives it); null = not judged. */
   factorGaps?: FactorGapCode[] | null
+  /** POD / RC this customer does not need to invoice (customerDocsNotRequired, from the customer row). */
+  docsNotRequired?: string[] | null
 }
+
+/**
+ * An Ivan Cartage (own fleet) load, by kind as ownAssetDriver.ts defines it: the shipment's assignment is OWN_ASSET.
+ * Ryne 2026-11-15: own-fleet loads need no carrier rate, so expense and profit are not review requirements for them.
+ */
+export function isOwnFleetReviewLoad(row: Pick<LoadReviewRow, 'assignmentType'> & { legKinds?: readonly (string | null | undefined)[] | null }): boolean {
+  return row.assignmentType === 'OWN_ASSET' || (row.legKinds ?? []).includes('OWN_ASSET')
+}
+
+/** The requirements that do not apply to an own-fleet load. */
+const OWN_FLEET_EXEMPT: readonly ReviewRequirement[] = ['expenseEntered', 'profitEntered']
 
 /**
  * A load is in Load Review only once it has been released to review (the push stamp), as in Aljex: a delivered load is not in the
@@ -171,6 +184,7 @@ const REQUIREMENT_PLACEMENT: Record<ReviewRequirement, { check: LoadReviewCheckK
   salesRep: { check: 'salesRep', action: { kind: 'SET_SALES_REP' } },
   referenceNumber: { check: 'details', action: { kind: 'OPEN_TAB', tab: 'overview' } },
   podReceived: { check: 'documents', action: { kind: 'OPEN_TAB', tab: 'documents' } },
+  rateConReceived: { check: 'documents', action: { kind: 'OPEN_TAB', tab: 'documents' } },
   revenueEntered: { check: 'charges', action: { kind: 'OPEN_TAB', tab: 'financials' } },
   expenseEntered: { check: 'charges', action: { kind: 'OPEN_TAB', tab: 'carrierPay' } },
   profitEntered: { check: 'charges', action: { kind: 'OPEN_TAB', tab: 'financials' } },
@@ -203,12 +217,13 @@ export function reviewFactsOfRow(row: LoadReviewRow): ReviewFacts {
  * cannot disagree. Imported history is exempt (it cannot be queued; belt and braces).
  */
 export function loadReviewExtras(input: {
-  shipment: { legacyImported?: boolean | null }
+  shipment: { legacyImported?: boolean | null; ownFleet?: boolean | null }
   facts: ReviewFacts
   requirements?: readonly ReviewRequirement[]
 }): LoadReviewReason[] {
   if (input.shipment.legacyImported === true) return []
-  const { failures } = evaluateReviewRequirements(input.requirements ?? DEFAULT_REVIEW_REQUIREMENTS, input.facts)
+  const list = (input.requirements ?? DEFAULT_REVIEW_REQUIREMENTS).filter((key) => input.shipment.ownFleet !== true || !OWN_FLEET_EXEMPT.includes(key))
+  const { failures } = evaluateReviewRequirements(list, input.facts)
   return failures.map((failure) => {
     const placement = REQUIREMENT_PLACEMENT[failure.requirement]
     return reason(failure.code, failure.message, placement.check, placement.action)
@@ -282,7 +297,8 @@ function gateFromRow(row: LoadReviewRow): LoadReviewReason[] {
     out.push(reason('DOCS_UNCHECKED', 'Documents not checked yet', 'documents', GATE_CODE_TAB.DOC_MISSING))
   } else {
     // A cache written before BOL became optional may still list it; it never blocks.
-    for (const type of row.docsMissing.filter((t) => !NEVER_BLOCKING_DOC_TYPES.includes(t))) {
+    // A document the customer does not need never blocks, even on a cache written before the customer said so.
+    for (const type of row.docsMissing.filter((t) => !NEVER_BLOCKING_DOC_TYPES.includes(t) && !(row.docsNotRequired ?? []).includes(t))) {
       out.push(reason('DOC_MISSING', `Missing document: ${type}`, 'documents', GATE_CODE_TAB.DOC_MISSING))
     }
   }
@@ -333,7 +349,7 @@ export function evaluateLoadReview(input: {
     // The release gate (supplied or derived from the row) already owns POD; the
     // requirement list stays the same, the sentence is not said twice.
     reasons.push(...loadReviewExtras({
-      shipment: { legacyImported: row.legacyImported },
+      shipment: { legacyImported: row.legacyImported, ownFleet: isOwnFleetReviewLoad(row) },
       facts: reviewFactsOfRow(row),
       requirements: (input.requirements ?? DEFAULT_REVIEW_REQUIREMENTS).filter((key) => key !== 'podReceived'),
     }))

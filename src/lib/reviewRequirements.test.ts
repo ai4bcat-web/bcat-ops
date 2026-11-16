@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  customerDocsNotRequired,
+  docsNotRequiredFor,
   DEFAULT_REVIEW_REQUIREMENTS,
   evaluateReviewRequirements,
   normalizeReviewRequirements,
@@ -19,7 +21,7 @@ describe('resolveReviewRequirements', () => {
     expect(resolveReviewRequirements(['salesRep'], ['revDivision'])).toEqual(['salesRep'])
     expect(resolveReviewRequirements(null, ['revDivision', 'salesRep'])).toEqual(['revDivision', 'salesRep'])
     expect(resolveReviewRequirements(undefined, undefined)).toEqual([...DEFAULT_REVIEW_REQUIREMENTS])
-    expect(DEFAULT_REVIEW_REQUIREMENTS).toHaveLength(7)
+    expect(DEFAULT_REVIEW_REQUIREMENTS).toHaveLength(8)
   })
 
   it('treats an explicit empty customer list as "nothing required", not a fallthrough', () => {
@@ -36,7 +38,15 @@ describe('evaluateReviewRequirements', () => {
     expect(evaluateReviewRequirements(DEFAULT_REVIEW_REQUIREMENTS, complete)).toEqual({ ok: true, failures: [] })
     const none = evaluateReviewRequirements(DEFAULT_REVIEW_REQUIREMENTS, {})
     expect(none.ok).toBe(false)
-    expect(none.failures.map((f) => f.requirement)).toEqual([...DEFAULT_REVIEW_REQUIREMENTS])
+    // RC received is a switch for the document gates, never a failure of its own.
+    expect(none.failures.map((f) => f.requirement)).toEqual(DEFAULT_REVIEW_REQUIREMENTS.filter((k) => k !== 'rateConReceived'))
+  })
+
+  it('unticking POD received or RC received means the customer does not need that document to invoice', () => {
+    expect(docsNotRequiredFor(DEFAULT_REVIEW_REQUIREMENTS)).toEqual([])
+    expect(docsNotRequiredFor(DEFAULT_REVIEW_REQUIREMENTS.filter((k) => k !== 'podReceived' && k !== 'rateConReceived'))).toEqual(['POD', 'RATE_CON'])
+    expect(customerDocsNotRequired(null, null)).toEqual([])
+    expect(customerDocsNotRequired({ reviewRequirements: ['salesRep', 'podReceived'] }, null)).toEqual(['RATE_CON'])
   })
 
   it('judges the same facts differently per customer list', () => {
