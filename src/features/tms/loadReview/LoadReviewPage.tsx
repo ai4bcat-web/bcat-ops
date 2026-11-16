@@ -17,6 +17,7 @@ import { FACTOR_INFO_OPTIONS, sentence } from '@/features/shipments/shipmentGrid
 import { batchShipmentTask, listAuditLogsFor, pushReadyToLoadReview, releaseToBilling } from '@/lib/apiClient'
 import { useBillingGrant, LOAD_REVIEW_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
 import { NO_DELIVERY_TIME_TIP, failingReasons, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL, LOAD_REVIEW_FIELDS, LOAD_REVIEW_FIELD_LABEL, releasedWithin, reviewAgeDays, type LoadReviewVerdict } from '@/lib/loadReview'
+import { FIX_LINE_LIMIT, fitFixItems, fixLinesOf } from './fixChips'
 import { customerRateCents, profitOf, reviewFieldCell, reviewFieldText, reviewReadyText, whatToFixItems, whatToFixText } from './reviewFields'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
@@ -40,20 +41,15 @@ const reviewRowTone = (entry: ReviewEntry): string => (entry.verdict?.ok ? 'read
 const REVIEW_TAB_COLUMNS = ['shipment', 'loadStatus', 'age', ...LOAD_REVIEW_FIELDS.map((key) => `field-${key}`), 'ready', 'whatToFix']
 /** What to fix wraps inside a fixed-width column; the rows grow to the longest list on the page so nothing is cut off. */
 const WHAT_TO_FIX_PX = 420
-const FIX_CHARS_PER_LINE = 56
 function whatToFixLines(entries: readonly ReviewEntry[]): number {
   let most = 1
   for (const { verdict } of entries) {
     if (!verdict) continue
-    let lines = 1, used = 0
-    for (const item of whatToFixItems(verdict)) {
-      const len = item.length + 3
-      if (used > 0 && used + len > FIX_CHARS_PER_LINE) { lines += 1 + Math.floor(len / FIX_CHARS_PER_LINE); used = len % FIX_CHARS_PER_LINE } else used += len
-    }
-    most = Math.max(most, lines)
+    most = Math.max(most, fixLinesOf(whatToFixItems(verdict)))
   }
   return most
 }
+
 const RELEASED_TAB_COLUMNS = ['shipment', 'customer', 'lane', 'delivered', 'rep', 'division', 'revenue', 'status', 'whatToFix']
 const fieldSort = (key: string) => (e: ReviewEntry): string | number => {
   if (key === 'customerRate') return customerRateCents(e.row) ?? -Infinity
@@ -82,7 +78,8 @@ export function LoadReviewPage() {
   const needs = queue.filter((entry) => !entry.verdict.ok)
   const ready = queue.filter((entry) => entry.verdict.ok)
   const released = shipments.filter((row) => releasedWithin(row, now))
-  const tab = params.get('tab') ?? (needs.length ? 'fixes' : 'ready')
+  // All in review is the landing tab (Ryne 2026-11-16); a tab in the link still wins.
+  const tab = params.get('tab') ?? 'all'
   const source: ReviewEntry[] = tab === 'released' ? released.map((row) => ({ row })) : tab === 'ready' ? ready : tab === 'all' ? queue : needs
   const opt = (v: string | null | undefined, label?: string | null) => (v ? [{ value: v, label: label ?? v }] : [])
   // One dense column per table column: `text` drives auto-fit width and sorting, the header filters narrow division / rep / customer.
@@ -133,7 +130,8 @@ export function LoadReviewPage() {
   // The table is the same dense grid as the Shipments board: header filters on division / rep / customer, sortable columns.
   const filtered = sortDenseRows(filterRows(searched, denseCols, dense), denseCols, prefs.sort)
   const page = filtered.slice(0, pageSize)
-  const fixLines = prefs.columns.includes('whatToFix') ? whatToFixLines(page) : 1
+  const fixLimit = FIX_LINE_LIMIT[prefs.density === 'comfortable' ? 'comfortable' : 'compact']
+  const fixLines = prefs.columns.includes('whatToFix') ? Math.min(fixLimit, whatToFixLines(page)) : 1
   const fixRowHeights = fixLines > 1 ? { compact: Math.max(30, fixLines * 20 + 8), comfortable: Math.max(40, fixLines * 20 + 12) } : undefined
   const eligible = filtered.filter((entry) => entry.verdict?.ok)
   const chosen = eligible.filter(({ row }) => selected.has(row.id)).slice(0, MAX_REVIEW_BATCH).map(({ row }) => row.id)
@@ -273,7 +271,8 @@ export function LoadReviewPage() {
       const items = verdict ? whatToFixItems(verdict) : []
       if (items.length === 0) return <span className="tms-muted" data-testid="what-to-fix">{verdict ? 'Nothing' : '—'}</span>
       const first = verdict ? LOAD_REVIEW_FIELDS.find((k) => reviewFieldCell(row, verdict, k).ok === false) : undefined
-      return <span className="aa-what-to-fix aa-fixable" data-testid="what-to-fix" title="Click to fix in the rail" onClick={(e) => { e.stopPropagation(); update({ shipment: row.id, fix: first ?? null }) }}>{items.map((text) => <span key={text} className="aa-fix-item">{text}</span>)}</span>
+      const { shown, hidden } = fitFixItems(items, fixLimit)
+      return <span className="aa-what-to-fix aa-fixable" data-testid="what-to-fix" title={`${items.join(' · ')} — click to fix in the rail`} onClick={(e) => { e.stopPropagation(); update({ shipment: row.id, fix: first ?? null }) }}>{shown.map((text) => <span key={text} className="aa-fix-item">{text}</span>)}{hidden > 0 && <span className="aa-fix-item aa-fix-more" data-testid="what-to-fix-more">+{hidden} more</span>}</span>
     } },
     { key: 'status', header: tab === 'released' ? 'Released by / at' : 'Status', render: ({ row, verdict }) => { if (tab === 'released') { const entry = audit[row.id] ?? (row.orderIds ?? []).map((id) => audit[id]).find(Boolean); return <>{entry?.user ?? 'Audit unavailable'} · {formatDateTime(entry?.at ?? row.readyToInvoiceAt)} {canOpen && <Link to={`/tms/shipments/${row.id}?tab=invoicing`}>Open invoicing</Link>}</> } return <TmsBadge tone={verdict?.ok ? 'green' : 'orange'}>{verdict?.ok ? 'Looks ready' : `${verdict ? failingReasons(verdict).length : 0} to fix`}</TmsBadge> } },
   ]
