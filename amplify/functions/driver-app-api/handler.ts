@@ -525,7 +525,7 @@ async function driverRequiredDocs(load: Load, hasPod: boolean): Promise<DriverRe
         }),
       )
       for (const doc of res.Items ?? []) {
-        if (doc.status !== 'ACTIVE' || doc.reviewStatus === 'PENDING' || doc.reviewStatus === 'REJECTED') continue
+        if (doc.status !== 'ACTIVE' || (doc.reviewStatus === 'PENDING' && doc.type !== 'POD') || doc.reviewStatus === 'REJECTED') continue
         if (doc.loadId && doc.loadId !== load.id) continue
         filed.add(String(doc.type ?? ''))
       }

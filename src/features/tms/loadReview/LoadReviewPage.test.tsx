@@ -405,7 +405,7 @@ describe('LoadReviewPage', () => {
     expect(within(dialog).getAllByTitle('Needs the Shipments grant').length).toBeGreaterThan(0)
   })
 
-  it('with the Shipments grant the drawer fixes in place (no "Fix in documents tab") and still links the review inbox', async () => {
+  it('with the Shipments grant the drawer fixes in place (no "Fix in documents tab") and has no separate review-inbox link', async () => {
     mocks.review.mockResolvedValue({
       shipmentId: 's-3', orderId: 'o-s-3', orderUpdatedAt: 'u3', arStatus: 'DOCS_NEEDED',
       releaseGate: { ok: false, missing: [{ code: 'DOC_MISSING', detail: 'POD', message: 'Missing document: POD' }] },
@@ -416,7 +416,8 @@ describe('LoadReviewPage', () => {
     const hrefs = within(screen.getByRole('dialog')).getAllByRole('link').map((a) => a.getAttribute('href'))
     // Ryne 2026-11-16: every fix is made in the rail, so no reason sends the reviewer to another tab.
     expect(hrefs).not.toContain('/tms/shipments/s-3?tab=documents')
-    expect(hrefs).toContain('/tms/tracking?assignee=all&focus=docs')
+    // No POD review step (Ryne 2026-11-16): PODs are looked at in this rail, so there is no "Review uploads" link.
+    expect(hrefs).not.toContain('/tms/tracking?assignee=all&focus=docs')
   })
 
   it('with two carriers the drawer shows both bills side by side and Move stays blocked with the sentences that name the carrier', async () => {

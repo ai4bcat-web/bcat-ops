@@ -125,7 +125,7 @@ describe('evaluateReleaseGate', () => {
     ])
   })
 
-  it('does not count a carrier-portal upload nobody has accepted yet', () => {
+  it('counts a POD with no review step, but not another carrier upload nobody has accepted', () => {
     expect(
       messages(
         input({
@@ -136,7 +136,7 @@ describe('evaluateReleaseGate', () => {
           ],
         }),
       ),
-    ).toEqual(['Missing document: POD'])
+    ).toEqual([])
   })
 
   it('does not count a refused, voided or superseded document', () => {

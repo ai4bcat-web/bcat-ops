@@ -12,7 +12,6 @@ import { releaseGateMessages } from '@/features/shipments/components/releaseGate
 import { toast } from 'sonner'
 import { useBillingGrant, LOAD_REVIEW_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
 import { reviewLoad, readyToInvoice, releaseToBilling, setSalesRep, setRevTag, type LoadReviewResult } from '@/lib/apiClient'
-import { DOCS_LANDING } from '@/features/shipments/workstations/tracking/legacyRoutes'
 import { NO_DELIVERY_TIME_TIP, evaluateLoadReview, failingReasons, reviewAgeDays, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL } from '@/lib/loadReview'
 import { CarrierBillsPanel } from './CarrierBillsPanel'
 import { deliveredText, deliveredTimeOf } from './reviewStatus'
@@ -232,7 +231,6 @@ export function LoadReviewDrawer({ row, focus, onClose, onRefresh, onMoved, onFa
         return anchor === key ? null : <p key={`${reason.code}-${index}`}><TmsButton size="sm" variant="ghost" onClick={() => scrollToFix(anchor)}>{`Fix: ${reason.message}`}</TmsButton></p>
       })}
       {key === 'documents' && <LoadReviewDocuments shipmentId={row.id} readOnly={released} disabled={busy} onChanged={changed} />}
-      {key === 'documents' && <p>{canOpen ? <Link to={DOCS_LANDING}>Review uploads</Link> : <span title="Needs the Shipments grant">Review uploads</span>}</p>}
     </TmsCard>)}
     {(row.carrierCount ?? 0) >= 2 && !released && <CarrierBillsPanel shipmentId={row.id} disabled={busy} canOpenAp={hasPageAccess('carrierPay') || hasPageAccess('tms')} onChanged={rereview} />}
     {verdict.warnings.map((warning) => <p key={warning}>{warning}</p>)}

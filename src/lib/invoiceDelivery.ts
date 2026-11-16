@@ -5,7 +5,7 @@
  * Pure and dependency-light on purpose — the finance Lambda bundles this by relative
  * import, so nothing here may touch node:, the DOM or an alias.
  */
-import { canEmailTo, isDriverDocAwaitingReview, type ShipmentDocumentRecord, type ShipmentDocumentType } from './shipmentDocuments'
+import { canEmailTo, type ShipmentDocumentRecord, type ShipmentDocumentType } from './shipmentDocuments'
 
 // ── Square-invoiced divisions ───────────────────────────────────────────────
 
@@ -115,8 +115,8 @@ export function isCustomerRateCon(
 }
 
 /** Filed, live, and not waiting on (or refused by) review — audience aside. */
-function isLiveDocument(doc: Pick<ShipmentDocumentRecord, 'status' | 'reviewStatus'>): boolean {
-  return doc.status === 'ACTIVE' && doc.reviewStatus !== 'PENDING' && doc.reviewStatus !== 'REJECTED'
+function isLiveDocument(doc: Pick<ShipmentDocumentRecord, 'status' | 'reviewStatus'> & { type?: string | null }): boolean {
+  return doc.status === 'ACTIVE' && doc.reviewStatus !== 'REJECTED' && (doc.reviewStatus !== 'PENDING' || doc.type === 'POD')
 }
 
 export interface InvoiceAttachmentScope {
@@ -129,17 +129,11 @@ export interface InvoiceAttachmentScope {
   ivan: boolean
 }
 
-/**
- * A customer may receive it (canEmailTo), or it is our own driver's POD still waiting for review. That POD is received
- * paperwork (Ryne 2026-11-16) and Move to billing accepts it, but an invoice raised another way (Fix & invoice manually on
- * an imported load, a batch generate) never passes that step: without this, 14907's invoice and its AR POD column said
- * "Missing" while the shipment showed the POD on file. A carrier-portal upload still waits for a person.
- */
 function podEmailableToCustomer(
   doc: Pick<ShipmentDocumentRecord, 'type' | 'audience' | 'status' | 'reviewStatus'> & { source?: string | null },
 ): boolean {
-  if (canEmailTo(doc, 'CUSTOMER')) return true
-  return doc.type === 'POD' && isDriverDocAwaitingReview(doc) && doc.audience !== 'INTERNAL'
+  // No POD review step: canEmailTo already lets a POD through whatever its review state.
+  return canEmailTo(doc, 'CUSTOMER')
 }
 
 function inScope(doc: Pick<ShipmentDocumentRecord, 'orderId' | 'loadId'>, scope: InvoiceAttachmentScope): boolean {

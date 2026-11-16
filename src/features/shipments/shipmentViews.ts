@@ -896,8 +896,9 @@ export function rcColumnApplies(row: Parameters<typeof rowNeedsRateCon>[0]): boo
 export type DocCellState = 'PRESENT' | 'REVIEW' | 'MISSING' | 'NA' | ''
 
 /** The cell for a document the cached gate holds: REVIEW when the only copy is a driver page awaiting review. */
-function onFileState(row: { docsPendingReview?: string[] | null }, docType: 'POD' | 'RATE_CON'): DocCellState {
-  return Array.isArray(row.docsPendingReview) && row.docsPendingReview.includes(docType) ? 'REVIEW' : 'PRESENT'
+function onFileState(_row: { docsPendingReview?: string[] | null }, _docType: 'POD' | 'RATE_CON'): DocCellState {
+  // No POD review step: on file is on file ('REVIEW' is never produced any more).
+  return 'PRESENT'
 }
 
 /**

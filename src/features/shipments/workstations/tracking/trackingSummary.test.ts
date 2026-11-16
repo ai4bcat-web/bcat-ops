@@ -40,7 +40,7 @@ describe('summaryOf', () => {
     const delivered = { load: { status: 'DELIVERED' as const } }
     expect(run(bundleOf(delivered)).pod).toBe('NEEDED')
     expect(run(bundleOf({ ...delivered, leg: { podRequestedAt: '2026-03-02T10:00:00.000Z' } })).pod).toBe('REQUESTED')
-    expect(run(bundleOf({ ...delivered, documents: [{ type: 'POD', status: 'ACTIVE', reviewStatus: 'PENDING' }] })).pod).toBe('IN_REVIEW')
+    expect(run(bundleOf({ ...delivered, documents: [{ type: 'POD', status: 'ACTIVE', reviewStatus: 'PENDING' }] })).pod).toBe('RECEIVED')
     expect(run(bundleOf({ ...delivered, documents: [{ type: 'POD', status: 'ACTIVE', reviewStatus: 'ACCEPTED' }] })).pod).toBe('RECEIVED')
     expect(run(bundleOf({ ...delivered, documents: [{ type: 'POD', status: 'ACTIVE', reviewStatus: 'REJECTED' }] })).pod).toBe('NEEDED')
   })

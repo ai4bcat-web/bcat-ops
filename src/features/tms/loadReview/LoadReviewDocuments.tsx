@@ -115,7 +115,8 @@ export function LoadReviewDocuments({ shipmentId, readOnly = false, disabled = f
   if (!bundle) return <p className="tms-muted text-sm" role="status">Loading documents…</p>
 
   const file = (doc: ShipmentDocumentRecord) => {
-    const waiting = doc.reviewStatus === 'PENDING'
+    // No POD review step: only another kind of carrier upload waits on a person.
+    const waiting = doc.reviewStatus === 'PENDING' && doc.type !== 'POD'
     const rejected = doc.reviewStatus === 'REJECTED'
     // System documents (the BCAT Rate Confirmation, generated invoices and PDFs) are not deleted from the review.
     const tender = (doc.source as string) === TENDER_SOURCE

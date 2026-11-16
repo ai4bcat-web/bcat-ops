@@ -483,7 +483,8 @@ async function shipmentDocuments(shipmentId: string): Promise<Row[]> {
 function sendableDocument(doc: Row): boolean {
   if (trim(doc.status) !== 'ACTIVE') return false
   const review = trim(doc.reviewStatus)
-  if (review === 'PENDING' || review === 'REJECTED') return false
+  // No POD review step: a POD still marked PENDING (an older row) is sent; a refused one never is.
+  if (review === 'REJECTED' || (review === 'PENDING' && trim(doc.type) !== 'POD')) return false
   return !!trim(doc.s3Key)
 }
 

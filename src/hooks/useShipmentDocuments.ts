@@ -135,7 +135,7 @@ export function useShipmentDocuments(
     documents,
     orderGates,
     carrierGates,
-    pendingCount: documents.filter((d) => d.status === 'ACTIVE' && d.reviewStatus === 'PENDING').length,
+    pendingCount: documents.filter((d) => d.status === 'ACTIVE' && d.reviewStatus === 'PENDING' && d.type !== 'POD').length,
     loading,
     error,
     refresh,

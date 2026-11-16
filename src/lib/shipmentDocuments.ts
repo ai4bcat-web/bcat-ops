@@ -375,26 +375,26 @@ export function supersede<
 }
 
 /**
- * A POD (or any page) one of our own drivers filed from the driver app, still waiting for someone to accept it.
- * It is received paperwork (Ryne 2026-11-16: "Ivan Drivers should be uploading them so they should all be in there"):
- * it counts as on file everywhere, is shown as "Driver sent · review", and Move to billing accepts it.
+ * There is no POD review step (Ryne 2026-11-16: "All pods can be reviewed in the load review page"): a POD is on file
+ * the moment it is filed, wherever it came from, and nobody has to accept it. Kept (always false) so older callers
+ * compile; nothing is "waiting on review" or "Driver sent · review" any more.
  */
 export function isDriverDocAwaitingReview(
-  doc: Pick<ShipmentDocumentRecord, 'status' | 'reviewStatus'> & { source?: string | null },
+  _doc: Pick<ShipmentDocumentRecord, 'status' | 'reviewStatus'> & { source?: string | null },
 ): boolean {
-  return doc.status === 'ACTIVE' && doc.reviewStatus === 'PENDING' && doc.source === 'DRIVER_APP'
+  return false
 }
 
 /**
- * An ACTIVE row that nobody refused and nobody is still reviewing, except our own drivers' pages (see above).
- * A carrier-portal upload still counts for nothing until a person accepts it.
+ * An ACTIVE row nobody refused. A POD counts at once (no review step); our own drivers' pages count too. Another
+ * carrier-portal upload (a carrier invoice, a lumper ticket) still waits for a person to accept it.
  */
 export function countsAsPresent(
-  doc: Pick<ShipmentDocumentRecord, 'status' | 'reviewStatus'> & { source?: string | null },
+  doc: Pick<ShipmentDocumentRecord, 'status' | 'reviewStatus'> & { source?: string | null; type?: string | null },
 ): boolean {
   if (doc.status !== 'ACTIVE') return false
   if (doc.reviewStatus === 'REJECTED') return false
-  return doc.reviewStatus !== 'PENDING' || doc.source === 'DRIVER_APP'
+  return doc.reviewStatus !== 'PENDING' || doc.source === 'DRIVER_APP' || doc.type === 'POD'
 }
 
 export type DocGateScope = 'CUSTOMER' | 'CARRIER'
@@ -441,15 +441,9 @@ function scopedDocuments(input: PresentDocTypesInput): ShipmentDocumentRecord[] 
   })
 }
 
-/**
- * The types this scope has ONLY as driver-app pages still waiting for review: on file, shown as
- * "Driver sent · review" until someone accepts one (or Move to billing does).
- */
-export function driverReviewDocTypes(input: PresentDocTypesInput): ShipmentDocumentType[] {
-  const docs = scopedDocuments(input)
-  const settled = new Set(docs.filter((d) => countsAsPresent(d) && !isDriverDocAwaitingReview(d)).map((d) => d.type))
-  const waiting = new Set(docs.filter((d) => isDriverDocAwaitingReview(d) && !settled.has(d.type)).map((d) => d.type))
-  return SHIPMENT_DOCUMENT_TYPES.filter((type) => waiting.has(type))
+/** Always empty: there is no POD review state any more (kept so the document gate's shape is unchanged). */
+export function driverReviewDocTypes(_input: PresentDocTypesInput): ShipmentDocumentType[] {
+  return []
 }
 
 export function presentDocTypes(input: PresentDocTypesInput): ShipmentDocumentType[] {
@@ -621,11 +615,12 @@ export function evaluateDocGate(input: DocGateInput): DocGateResult {
  * goes to the customer.
  */
 export function canEmailTo(
-  doc: Pick<ShipmentDocumentRecord, 'audience' | 'status' | 'reviewStatus'>,
+  doc: Pick<ShipmentDocumentRecord, 'audience' | 'status' | 'reviewStatus'> & { type?: string | null },
   recipientKind: 'CUSTOMER' | 'CARRIER',
 ): boolean {
   if (doc.status !== 'ACTIVE') return false
-  if (doc.reviewStatus === 'PENDING' || doc.reviewStatus === 'REJECTED') return false
+  if (doc.reviewStatus === 'REJECTED') return false
+  if (doc.reviewStatus === 'PENDING' && doc.type !== 'POD') return false
   if (doc.audience === 'INTERNAL') return false
   if (doc.audience === 'ALL') return true
   return doc.audience === recipientKind

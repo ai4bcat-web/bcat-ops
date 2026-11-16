@@ -1029,9 +1029,9 @@ async function uploadCommitRoute(token: string, event: FnUrlEvent) {
         sizeBytes: converted?.sizeBytes ?? file.sizeBytes,
         ...conversionFields(file.contentType, converted),
         source: 'CARRIER_PORTAL',
-        // PENDING until staff accept it: nothing a carrier sends satisfies a
-        // required document on its own.
-        reviewStatus: 'PENDING',
+        // PENDING until staff accept it: nothing a carrier sends satisfies a required document on its
+        // own, except a POD (no POD review step, Ryne 2026-11-16: PODs are looked at in Load Review).
+        ...(file.type === 'POD' ? {} : { reviewStatus: 'PENDING' }),
         status: 'ACTIVE',
         version: 1,
         audience: 'ALL',

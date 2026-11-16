@@ -98,9 +98,9 @@ describe('RC column follows the one rule (Ryne 2026-11-16)', () => {
   })
 })
 
-describe('a driver-app POD waiting for review (Ryne 2026-11-16)', () => {
-  it('shows "Driver sent · review", not NEED, and an accepted or office copy shows on file', () => {
-    expect(docCellOf(row({ docsPresent: ['POD'], docsPendingReview: ['POD'], docsMissing: ['RATE_CON'] }), 'POD')).toBe('REVIEW')
+describe('there is no POD review step (Ryne 2026-11-16)', () => {
+  it('a driver-app POD shows on file like any other; "Driver sent · review" is gone', () => {
+    expect(docCellOf(row({ docsPresent: ['POD'], docsPendingReview: ['POD'], docsMissing: ['RATE_CON'] }), 'POD')).toBe('PRESENT')
     expect(docCellOf(row({ docsPresent: ['POD'], docsPendingReview: [], docsMissing: ['RATE_CON'] }), 'POD')).toBe('PRESENT')
   })
 })

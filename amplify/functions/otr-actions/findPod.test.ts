@@ -223,15 +223,14 @@ describe('a POD on the shipment itself', () => {
     expect(await findPod('load-1', '14538')).toBeNull()
   })
 
-  it('refuses an upload nobody has reviewed, and one that was refused', async () => {
+  it('sends a POD with no review state, and refuses one that was refused', async () => {
     /*
-     * A carrier-portal upload is PENDING until a person looks at it, and REJECTED is that
-     * person saying it is not the POD. Either one reaching OTR is a document the office
-     * never accepted being used to buy an invoice.
+     * There is no POD review step (Ryne 2026-11-16): an older row still marked PENDING is sent like any other,
+     * and REJECTED is the office saying it is not the POD, which never reaches OTR.
      */
     tables[SHIP_DOC_TABLE].push(shipmentPod({ id: 'sd-pending', reviewStatus: 'PENDING' }))
     const findPod = (await loadFindPod()) as Find
-    expect(await findPod('load-1', '14538', 'shp-1')).toBeNull()
+    expect((await findPod('load-1', '14538', 'shp-1'))?.id).toBe('sd-pending')
 
     tables[SHIP_DOC_TABLE] = [shipmentPod({ id: 'sd-rejected', reviewStatus: 'REJECTED' })]
     expect(await findPod('load-1', '14538', 'shp-1')).toBeNull()

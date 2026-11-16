@@ -85,7 +85,7 @@ describe('useShipmentDocuments', () => {
     expect(result.current.carrierGates['lc-active']).toMatchObject({ ready: true, missing: [], legacy: true })
   })
 
-  it('does not let a pending upload or a bounced carrier satisfy the gate', async () => {
+  it('counts a POD with no review step, but not a bounced carrier', async () => {
     listShipmentDocuments.mockResolvedValue([
       doc({ id: 'sdoc-2', type: 'POD', loadId: 'lod-1', loadCarrierId: 'lc-active', source: 'CARRIER_PORTAL', reviewStatus: 'PENDING' }),
       doc({ id: 'sdoc-3', type: 'LUMPER_RECEIPT', loadId: 'lod-1', loadCarrierId: 'lc-bounced' }),
@@ -97,8 +97,8 @@ describe('useShipmentDocuments', () => {
     }))
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.orderGates['ord-1'].missing).toEqual(['POD', 'LUMPER_RECEIPT', 'RATE_CON'])
-    expect(result.current.pendingCount).toBe(1)
+    expect(result.current.orderGates['ord-1'].missing).toEqual(['LUMPER_RECEIPT', 'RATE_CON'])
+    expect(result.current.pendingCount).toBe(0)
   })
 
   it('keeps one order\u2019s documents out of another order\u2019s gate', async () => {
