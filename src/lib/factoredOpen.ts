@@ -56,6 +56,18 @@ export function factoredBucketOf(item: Item | null | undefined): FactoredBucket 
 
 export interface BucketTotal { count: number; cents: number }
 
+/** Open (sent or partly paid) invoice balances by factoring queue row, in cents. */
+export function openBalanceByFactoringItem(
+  invoices: readonly { factoringItemId?: string | null; status: string; balanceCents: number }[],
+): Map<string, number> {
+  const map = new Map<string, number>()
+  for (const inv of invoices) {
+    if (!inv.factoringItemId || (inv.status !== 'ISSUED' && inv.status !== 'PARTIAL')) continue
+    map.set(inv.factoringItemId, (map.get(inv.factoringItemId) ?? 0) + inv.balanceCents)
+  }
+  return map
+}
+
 export type FactoredBuckets = Record<FactoredBucket, BucketTotal>
 
 export function emptyFactoredBuckets(): FactoredBuckets {

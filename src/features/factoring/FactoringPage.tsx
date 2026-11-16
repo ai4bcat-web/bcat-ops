@@ -53,7 +53,7 @@ import { offersResend } from '@/lib/factoringResubmit'
 import { chicagoDateStr } from '@/lib/date'
 import { FactoringCards } from './FactoringCards'
 import { useOpenInvoices } from '@/hooks/useOpenInvoices'
-import { FACTORED_BUCKET_LABEL, isWaitingOnOtr, waitingOnOtrTotal } from '@/lib/factoredOpen'
+import { FACTORED_BUCKET_LABEL, isWaitingOnOtr, openBalanceByFactoringItem, waitingOnOtrTotal } from '@/lib/factoredOpen'
 import { amountOf } from './factoringQueueStats'
 
 // ── Status labels ────────────────────────────────────────────────────────────
@@ -495,14 +495,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
   // Open invoice balances by queue row, so the queue's money matches the Receivables card's.
   const openInvoices = useOpenInvoices()
-  const openBalanceByItemId = useMemo(() => {
-    const map = new Map<string, number>()
-    for (const inv of openInvoices.invoices) {
-      if (!inv.factoringItemId || (inv.status !== 'ISSUED' && inv.status !== 'PARTIAL')) continue
-      map.set(inv.factoringItemId, (map.get(inv.factoringItemId) ?? 0) + inv.balanceCents)
-    }
-    return map
-  }, [openInvoices.invoices])
+  const openBalanceByItemId = useMemo(() => openBalanceByFactoringItem(openInvoices.invoices), [openInvoices.invoices])
 
   const counts = useMemo(() => ({
     ALL: items.filter((i) => i.status !== 'ARCHIVED').length,
