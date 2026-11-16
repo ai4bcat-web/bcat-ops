@@ -154,31 +154,55 @@ function sectionOfReq(key: string): SectionKey {
 }
 
 /**
- * The editor's What's missing list when it was opened from a REQS chip: the chip's own items, so the counts match.
- * An item the form can see for itself (the PO, a factoring field, a document) is kept only while the form still
- * finds it missing, and focuses that field; the rest (sales rep, division, rate, expense, customer setup) stay listed
- * until the shipment is reopened from the board.
+ * The editor's What's missing list: EXACTLY the REQS items (the chip's count is the list's length, Ryne 2026-11-16).
+ * An item the form can point at (the PO, a factoring field, a document box) focuses that field; one it cannot (sales
+ * rep, division, rate, expense, a customer setting, a document the form does not ask for on this load) is still
+ * listed, with a plain line on how to fix it and, for customer settings, a link to the customer. Nothing is dropped:
+ * when the item is fixed, the board row the editor re-reads after every save no longer has it.
  */
-export function reqsAsIssues(reqs: readonly BoardReq[], formSees: readonly FormIssue[], allIssues: readonly FormIssue[]): FormIssue[] {
+export function reqsAsIssues(
+  reqs: readonly BoardReq[],
+  formSees: readonly FormIssue[],
+  allIssues: readonly FormIssue[],
+  customerId?: string | null,
+): FormIssue[] {
   const byLabel = (label: string) => {
     const want = label.trim().toLowerCase()
     return [...formSees, ...allIssues].find((i) => i.label.trim().toLowerCase() === want)
   }
-  const out: FormIssue[] = []
-  for (const req of reqs) {
-    const formOwned = req.key === 'po' || req.key.startsWith('doc:') || req.key.startsWith('factor:')
+  return reqs.map((req): FormIssue => {
     const match = req.key.startsWith('doc:')
       ? formSees.find((i) => i.id === `documents:${req.key.slice(4)}`)
       : req.key === 'po'
-        ? formSees.find((i) => i.id === 'customer:ref:po') ?? byLabel('PO')
+        ? formSees.find((i) => i.id === 'customer:ref:po') ?? allIssues.find((i) => i.id === 'customer:ref:po') ?? byLabel('PO')
         : byLabel(req.label)
-    if (formOwned) {
-      if (match) out.push({ ...match, label: req.label })
-      continue
-    }
-    out.push(match
-      ? { ...match, label: req.label }
-      : { id: `req:${req.key}`, section: sectionOfReq(req.key), fieldKey: '', label: req.label, message: req.label, severity: 'warn' })
+    if (match) return { ...match, label: req.label }
+    return fallbackIssue(req, customerId)
+  })
+}
+
+/** An item the form has no issue for: still listed, pointing at the closest place to fix it. */
+function fallbackIssue(req: BoardReq, customerId?: string | null): FormIssue {
+  const base = { id: `req:${req.key}`, label: req.label, message: req.label, severity: 'warn' as const }
+  if (req.key.startsWith('doc:')) {
+    const type = req.key.slice(4)
+    return { ...base, section: 'documents', fieldKey: `card-documents-slot-${type}`, hint: 'Upload it in Documents below.' }
   }
-  return out
+  if (req.key === 'po') return { ...base, section: 'customer', fieldKey: 'f-customer-refNo', hint: 'Enter the customer ref (PO) at the top.' }
+  if (req.key.startsWith('customer:')) {
+    return {
+      ...base, section: 'customer', fieldKey: '',
+      href: customerId ? `/tms/customers/${customerId}` : undefined,
+      hint: customerId ? 'Fix it on the customer profile.' : 'Link a customer first.',
+    }
+  }
+  if (req.key.startsWith('factor:')) {
+    const code = req.key.slice(7)
+    const section: SectionKey = code.startsWith('DELIVERY') ? 'consignee' : code.startsWith('PICKUP') ? 'pickup' : 'customer'
+    return { ...base, section, fieldKey: '', hint: 'OTR needs it to factor the load.' }
+  }
+  const hint = req.key === 'salesRep' || req.key === 'revDivision' ? 'Set it under Roles.'
+    : req.key === 'customerRate' || req.key === 'expense' || req.key === 'profit' ? 'Enter it under Rates.'
+      : undefined
+  return { ...base, section: sectionOfReq(req.key), fieldKey: '', hint }
 }

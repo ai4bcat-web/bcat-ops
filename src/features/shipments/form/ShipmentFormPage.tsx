@@ -292,11 +292,13 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   const linkReqs = (innerLocation.state as { boardReqs?: BoardReq[] } | null)?.boardReqs
   const reqSources = useMemo(() => ({ customers: directory.customers, orgDefault: settings?.reviewRequirements }), [directory.customers, settings])
   const ownReqs = useOwnBoardReqs(shipmentId, existingLoad, reqSources, bundle)
-  const boardReqs = ownReqs ?? linkReqs
+  // The chip's items win while the editor's own read is still empty or stale, so a click on "N NEED" never opens an
+  // empty list; the editor's own read takes over as soon as it has items (or the chip passed none).
+  const boardReqs = ownReqs && (ownReqs.length > 0 || !linkReqs || linkReqs.length === 0) ? ownReqs : (linkReqs ?? ownReqs)
   const missingOnLoad = useMemo(() => {
     const own = [...missingOnLoadIssues(form.issues, existingLoad, isFactoredLoad(form.customer, (bundle?.shipment as { revDivision?: string | null } | null | undefined)?.revDivision ?? form.values.ship.revDivision)), ...missingDocIssues(bundle, form.customer, existingLoad)]
     if (!boardReqs) return own
-    return boardReqs.length > 0 ? reqsAsIssues(boardReqs, own, form.issues) : []
+    return boardReqs.length > 0 ? reqsAsIssues(boardReqs, own, form.issues, form.customer?.id ?? null) : []
   }, [form.issues, existingLoad, form.customer, form.values.ship.revDivision, bundle, boardReqs])
   // Opened from the board's MISSING chip (`?missing=1`): go straight to the first missing field, once.
   const missingFocused = useRef(false)

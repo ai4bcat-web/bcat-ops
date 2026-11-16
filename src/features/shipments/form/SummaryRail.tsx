@@ -4,6 +4,7 @@
  * recent audit entries) and roles. The actions live in the page's bottom ActionBar. Below 1280 px the same element becomes a collapsible bottom sheet (CSS only), so
  * there is one set of controls, one set of test ids.
  */
+import { Link } from 'react-router-dom'
 import { AlertCircle, Check, ChevronUp, Circle } from 'lucide-react'
 import { memo, useMemo, useState, type ComponentType } from 'react'
 import { formatCents } from '@/lib/invoiceBuild'
@@ -70,10 +71,18 @@ function SummaryRailImpl({ common, summary, rows, attempted, Roles, RateHistory,
             <ul className="tms-rail-reqs">
               {missing.map((i) => (
                 <li key={i.id}>
-                  <button type="button" className="tms-rail-req" data-testid={`rail-missing-${i.id}`} data-done="false" data-missing="true" title={i.message} onClick={() => { if (i.fieldKey) form.focusField(i.fieldKey) }}>
-                    <AlertCircle size={12} aria-hidden="true" />
-                    <span>{i.label}</span>
-                  </button>
+                  {i.href && !i.fieldKey ? (
+                    <Link className="tms-rail-req" data-testid={`rail-missing-${i.id}`} data-done="false" data-missing="true" title={i.message} to={i.href}>
+                      <AlertCircle size={12} aria-hidden="true" />
+                      <span>{i.label}</span>
+                    </Link>
+                  ) : (
+                    <button type="button" className="tms-rail-req" data-testid={`rail-missing-${i.id}`} data-done="false" data-missing="true" title={i.message} onClick={() => { if (i.fieldKey) form.focusField(i.fieldKey) }}>
+                      <AlertCircle size={12} aria-hidden="true" />
+                      <span>{i.label}</span>
+                    </button>
+                  )}
+                  {i.hint ? <span className="tms-rail-req-hint" data-testid={`rail-missing-hint-${i.id}`}>{i.hint}</span> : null}
                 </li>
               ))}
             </ul>
