@@ -8,6 +8,7 @@ import { isRateConSent } from '@/lib/trackingAutomation'
 import { trackingEtaEstimate } from '@/lib/trackingEta'
 import type { Stop } from '@/types'
 import { pastDeliveryOf, scheduledDeliveryLateOf } from '../../boardChips'
+import { hasLeftOperations } from '@/lib/shipmentLists'
 import { boardStatusOf, type ShipmentRow } from '../../shipmentViews'
 import type { TrackingAssigneeTab, TrackingLifecycle } from './types'
 
@@ -42,11 +43,14 @@ export function podStateOf(row: ShipmentRow): PodState {
 
 /**
  * Active = still moving; pod = delivered, POD not confirmed received; closed = the rest.
- * A load leaves Tracking only once it is delivered AND its POD is on file (Ryne 2026-11-12).
+ * A load leaves Tracking once it is delivered AND its POD is on file (Ryne 2026-11-12), or once it has
+ * left operations: pushed into Load Review, released to invoicing, invoiced or factored (Ryne 2026-11-16:
+ * a load is only ever in one place).
  */
 export function lifecycleOf(row: ShipmentRow): TrackingLifecycle {
   const status = boardStatusOf(row)
   if (status === 'VOIDED' || status === 'CANCELED') return 'closed'
+  if (hasLeftOperations(row)) return 'closed'
   if (status === 'DELIVERED') return podStateOf(row) === 'RECEIVED' ? 'closed' : 'pod'
   return 'active'
 }
