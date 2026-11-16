@@ -257,7 +257,7 @@ export function shipmentStatusFromLoads(
   loads: ShipmentLoadLike[],
   current?: ShipmentStatus | null,
 ): ShipmentStatus {
-  if (current && STICKY_SHIPMENT_STATUSES.includes(current)) return current
+  if (current && STICKY_SHIPMENT_STATUSES.includes(current) && !movementOverridesSticky(loads, current)) return current
   if (loads.length === 0) return current ?? 'OPEN'
 
   let least: LoadWorkflowStatus | null = null
@@ -273,6 +273,18 @@ export function shipmentStatusFromLoads(
   if (least === 'SOURCING') return 'OPEN'
   if (least === 'INVOICING') return 'DELIVERED'
   return least
+}
+
+/**
+ * Draft and tender-pending are only sticky while nothing is moving (Ryne 2026-11-16, 20039).
+ * Once every live load is dispatched or further, the truck is the proof the shipment is real:
+ * a draft nobody submitted or a tender nobody clicked Accept on must not hide a delivered load.
+ * Hold, cancel and a rejected tender stay sticky whatever the trucks do.
+ */
+function movementOverridesSticky(loads: ShipmentLoadLike[], current: ShipmentStatus): boolean {
+  if (current !== 'DRAFT' && current !== 'TENDER_PENDING') return false
+  const live = loads.map(effectiveLoadStatus).filter((s) => s !== 'CANCELED')
+  return live.length > 0 && live.every((s) => MOVEMENT_RANK[s] >= MOVEMENT_RANK.DISPATCHED)
 }
 
 function effectiveLoadStatus(load: ShipmentLoadLike): LoadWorkflowStatus {
