@@ -7,6 +7,9 @@ import {
 import { KpiCard } from '@/components/ui/kpi-card'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { factoringTotals, type FactoringTotals } from '@/lib/factoringTotals'
+import { FACTORED_BUCKET_LABEL, openBalanceByFactoringItem, waitingOnOtrTotal } from '@/lib/factoredOpen'
+import { amountOf } from '@/features/factoring/factoringQueueStats'
+import { useOpenInvoices } from '@/hooks/useOpenInvoices'
 import type { RevenueSplit, LoadsSplit } from '@/lib/revenueByFleet'
 import { useLoads } from '@/hooks/useLoads'
 import { TZ } from '@/lib/date'
@@ -95,7 +98,7 @@ function FactoringCard({ totals, loading, onOpen }: {
   const accent = totals.needToFactor.count > 0 ? 'var(--tms-badge-red)' : 'var(--tms-primary)'
   const rows: { label: string; bucket: FactoringTotals['needToFactor']; color: string }[] = [
     { label: 'Need to factor', bucket: totals.needToFactor, color: 'var(--tms-badge-orange)' },
-    { label: 'Pending with OTR', bucket: totals.pendingWithOtr, color: 'var(--tms-badge-blue)' },
+    { label: FACTORED_BUCKET_LABEL.WAITING, bucket: totals.pendingWithOtr, color: 'var(--tms-badge-blue)' },
     { label: 'Invoice manually', bucket: totals.manualInvoice, color: 'var(--tms-badge-pink)' },
     { label: 'Factored', bucket: totals.factored, color: 'var(--tms-badge-green)' },
   ]
@@ -381,10 +384,22 @@ export function DashboardPage() {
    * row, so it has no OTR amount and the rate on the load it resolves to is the only figure
    * there is.
    */
-  const factoringTotalsValue = useMemo(
-    () => factoringTotals(factoringItems, loads),
-    [factoringItems, loads],
-  )
+  /*
+   * "Waiting on OTR approval" is the shared definition (src/lib/factoredOpen.ts): the same set and
+   * money as the factoring queue's tab and the Receivables card's line of that name.
+   */
+  const openInvoices = useOpenInvoices()
+  const factoringTotalsValue = useMemo(() => {
+    const totals = factoringTotals(factoringItems, loads)
+    const waiting = waitingOnOtrTotal(factoringItems, openBalanceByFactoringItem(openInvoices.invoices), amountOf)
+    const pendingWithOtr = { count: waiting.count, amount: waiting.cents, unvalued: 0 }
+    return {
+      ...totals,
+      pendingWithOtr,
+      outstandingAmount: totals.needToFactor.amount + pendingWithOtr.amount + totals.manualInvoice.amount,
+      outstandingCount: totals.needToFactor.count + pendingWithOtr.count + totals.manualInvoice.count,
+    }
+  }, [factoringItems, loads, openInvoices.invoices])
   const navigate = useNavigate()
   const { hasPageAccess, isAdmin } = useAuth()
   // The assistant's door is the same as the dashboards' (owner, ADMIN or the TMS page); the Lambda enforces it again.

@@ -19,6 +19,7 @@ vi.mock('@/lib/dashboardRollupClient', async (orig) => ({
 }))
 vi.mock('@/lib/apiClient', () => ({}))
 vi.mock('@/hooks/useFactoringItems', () => ({ useFactoringItems: () => ({ items: [], loading: false }) }))
+vi.mock('@/hooks/useOpenInvoices', () => ({ useOpenInvoices: () => ({ invoices: [], loading: false, error: null, refresh: vi.fn() }) }))
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ hasPageAccess: () => true }) }))
 vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: () => false }))
 vi.mock('./VendorApCard', () => ({ VendorApCard: () => null }))
