@@ -22,6 +22,7 @@ import { useBatoryApptCount } from './useBatoryApptCount'
 import { BrokerageSection } from './BrokerageDashboardPage'
 import { LazyWidget } from './LazyWidget'
 import { AccountingSection } from './AccountingSection'
+import { DeliveryToReviewCard } from './DeliveryToReviewCard'
 import { AssistantChat } from '@/features/dashboards/assistant/AssistantChat'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -441,6 +442,13 @@ export function DashboardPage() {
         {/* ── Accounts receivable (with Factoring) and Accounts payable, on each accounting grant only ─ */}
         {(hasPageAccess('invoicing') || hasPageAccess('carrierPay')) && (
           <LazyWidget enabled={kpiFinal} minHeight={340} label="accounting"><AccountingSection /></LazyWidget>
+        )}
+
+        {/* ── Delivery → Load review, week over week (Ryne 2026-11-15); anyone who works loads ─ */}
+        {(hasPageAccess('loads') || hasPageAccess('tms')) && (
+          <LazyWidget enabled={kpiFinal} minHeight={260} label="delivery-to-review">
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(280px, 360px))', gap: 12 }}><DeliveryToReviewCard /></div>
+          </LazyWidget>
         )}
 
         {/* ── Brokerage (BCAT Logistics): right under the top cards ─ */}

@@ -17,6 +17,8 @@ export interface DashboardSummaryRow {
   color: string
   title?: string
   onOpen?: () => void
+  /** Shown instead of a dollar amount (e.g. "3.2 d"). */
+  valueText?: string
 }
 
 export interface DashboardSummaryGroup {
@@ -38,7 +40,7 @@ function Row({ row }: { row: DashboardSummaryRow }) {
         {row.count != null && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--tms-muted)' }}>{row.count}</span>}
       </span>
       <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
-        {row.cents == null ? '—' : cents(row.cents)}
+        {row.valueText ?? (row.cents == null ? '—' : cents(row.cents))}
       </span>
     </>
   )
@@ -58,11 +60,13 @@ function Row({ row }: { row: DashboardSummaryRow }) {
   )
 }
 
-export function DashboardSummaryCard({ title, icon, headline, sublabel, rows, groups = [], accent = 'var(--tms-primary)', note, onOpen, testId }: {
+export function DashboardSummaryCard({ title, icon, headline, headlineText, sublabel, rows, groups = [], accent = 'var(--tms-primary)', note, onOpen, testId }: {
   title: string
   icon: ReactNode
   /** Cents; null while loading. */
   headline: number | null
+  /** Shown instead of a dollar headline (e.g. "2.4 days"). */
+  headlineText?: string
   sublabel: string
   rows: DashboardSummaryRow[]
   groups?: DashboardSummaryGroup[]
@@ -97,7 +101,7 @@ export function DashboardSummaryCard({ title, icon, headline, sublabel, rows, gr
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
           <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1.1,
             color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>
-            {headline == null ? '—' : cents(headline)}
+            {headlineText ?? (headline == null ? '—' : cents(headline))}
           </div>
         </div>
         <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginBottom: 12 }}>{sublabel}</div>
