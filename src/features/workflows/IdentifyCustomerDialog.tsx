@@ -9,11 +9,12 @@
  *
  * It lives here rather than on the shipment detail because the Errors tab raises the same
  * form over an UNKNOWN_CUSTOMER row. Both callers pass the same props and both end in
- * `onLink`, which is `SET_SHIPMENT_CUSTOMER` and nothing else: no Customer record is ever
- * created from this form.
+ * `onLink`, which is `SET_SHIPMENT_CUSTOMER`. A customer missing from the directory can be created
+ * from the picker (Ryne 2026-11-16) through the normal Directory create form, then linked.
  */
 import { useState } from 'react'
-import { TmsButton, TmsCard, TmsDialog, TmsField, TmsSelect } from '@/features/tms/kit'
+import { TmsButton, TmsCard, TmsDialog, TmsField } from '@/features/tms/kit'
+import { LinkCustomerPicker } from '@/features/shipments/components/LinkCustomerPicker'
 import { effectiveCustomerStatus } from '@/lib/customerCredit'
 import { UNRESOLVED_CUSTOMER_LABEL, unresolvedCustomerMessage } from '@/lib/customerResolution'
 import type { CustomerRecord, ShipmentRecord } from '@/types/tms'
@@ -51,14 +52,12 @@ function IdentifyCustomerForm({ shipment, customers, frozen, onLink, onDone }: I
       {!frozen && (
         <div className="mt-3 flex items-end gap-2">
           <TmsField label="Customer" error={error}>
-            <TmsSelect
-              aria-label="Customer to link"
-              value={customerId}
-              onChange={(e) => { setCustomerId(e.target.value); setError(null) }}
-            >
-              <option value="">— select —</option>
-              {shippable.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </TmsSelect>
+            <LinkCustomerPicker
+              customers={shippable}
+              value={customerId || null}
+              initialQuery={shipment.customerName ?? ''}
+              onChange={(id) => { setCustomerId(id ?? ''); setError(null) }}
+            />
           </TmsField>
           <TmsButton
             variant="primary"

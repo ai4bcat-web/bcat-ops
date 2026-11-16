@@ -1,13 +1,16 @@
 import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
-import { TmsButton, TmsDialog, TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
-import { repointInvoicedCustomer, repointShipmentCustomer, resolveRevTag, getShipmentBundle, getInvoice } from '@/lib/apiClient'
+import { TmsButton, TmsDialog, TmsField, TmsInput } from '@/features/tms/kit'
+import { repointInvoicedCustomer, repointShipmentCustomer, resolveRevTag, getShipmentBundle, getInvoice, setShipmentCustomer } from '@/lib/apiClient'
+import { isCustomerUnresolved } from '@/lib/customerResolution'
 import { planRepointCredit, type RepointCreditPlan, type RepointInvoiceInput } from '@/lib/repointCredit'
-import type { ShipmentRecord } from '@/types/tms'
+import type { CustomerRecord, ShipmentRecord } from '@/types/tms'
+import { LinkCustomerPicker } from './LinkCustomerPicker'
 
 export interface RepointCustomerDialogProps {
   shipment: Pick<ShipmentRecord, 'id' | 'number' | 'customerId' | 'customerName' | 'updatedAt'>
-  customers: { id: string; name: string }[]
+  /** Directory customers; aliases and MC feed the fuzzy search. */
+  customers: (Pick<CustomerRecord, 'id' | 'name'> & Partial<CustomerRecord>)[]
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Called with the customer the shipment now belongs to. */
@@ -54,6 +57,8 @@ export function RepointCustomerDialog({
   const [acknowledge, setAcknowledge] = useState(false)
 
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
+  // A shipment with only typed customer text is LINKED (SET_SHIPMENT_CUSTOMER, anyone who edits shipments), not re-pointed.
+  const linking = isCustomerUnresolved(shipment)
 
   const reset = () => {
     setCustomerId(shipment.customerId ?? '')
@@ -126,6 +131,20 @@ export function RepointCustomerDialog({
     }
     setBusy(true)
     setError(null)
+    if (linking) {
+      try {
+        await setShipmentCustomer({ shipmentId: shipment.id, customerId })
+        toast.success(`${shipment.number} linked`)
+        reset()
+        if (onRepointed) await onRepointed(customerId)
+        onOpenChange(false)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Link failed')
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
     try {
       await repointShipmentCustomer({
         shipmentId: shipment.id,
@@ -197,8 +216,10 @@ export function RepointCustomerDialog({
     <TmsDialog
       open={open}
       onOpenChange={(next) => { if (!next && !busy) { reset(); onOpenChange(false) } }}
-      title="Re-point customer"
-      description={`Change the customer on ${shipment.number}.`}
+      title={linking ? 'Link customer' : 'Re-point customer'}
+      description={linking
+        ? `${shipment.number} says “${shipment.customerName ?? ''}” but isn't linked to a directory customer. Pick the match, or create it.`
+        : `Change the customer on ${shipment.number}.`}
       footer={
         creditPath ? (
           <>
@@ -215,7 +236,7 @@ export function RepointCustomerDialog({
               Cancel
             </TmsButton>
             <TmsButton variant="primary" onClick={() => { void submit() }} disabled={busy}>
-              {busy ? 'Re-pointing…' : 'Re-point'}
+              {busy ? (linking ? 'Linking…' : 'Re-pointing…') : (linking ? 'Link customer' : 'Re-point')}
             </TmsButton>
           </>
         )
@@ -263,14 +284,15 @@ export function RepointCustomerDialog({
         </div>
       ) : (
         <>
-          <TmsField label="New customer" error={error && !customerId ? error : null}>
-            <TmsSelect
-              value={customerId}
-              onChange={(e) => { setCustomerId(e.target.value); setError(null) }}
-              placeholder="Choose a customer"
-              options={customers.map((c) => ({ value: c.id, label: c.name }))}
+          <TmsField label={linking ? 'Customer' : 'New customer'} error={error && !customerId ? error : null}>
+            <LinkCustomerPicker
+              customers={customers as CustomerRecord[]}
+              value={customerId || null}
+              initialQuery={linking ? (shipment.customerName ?? '') : ''}
+              onChange={(id) => { setCustomerId(id ?? ''); setError(null) }}
             />
           </TmsField>
+          {linking ? (error && customerId ? <p className="tms-field-error">{error}</p> : null) : (
           <TmsField label="Reason (optional)" error={error && customerId ? error : null}>
             <TmsInput
               value={reason}
@@ -278,6 +300,7 @@ export function RepointCustomerDialog({
               placeholder="Why is this customer being changed? (optional)"
             />
           </TmsField>
+          )}
         </>
       )}
     </TmsDialog>

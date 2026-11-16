@@ -48,6 +48,8 @@ export function CustomerPicker({ values, update, ctx, form }: CardProps) {
   const authUser = useAuthUser()
   const isAdmin = (authUser?.email ?? '').toLowerCase() === OWNER_EMAIL || (authUser?.groups ?? []).includes('ADMIN')
   const [changing, setChanging] = useState(false)
+  // Typed text with no directory link (e.g. 20007 "R&R Transport, Inc."): anyone who edits shipments may link it; re-pointing stays admin-only.
+  const unlinked = Boolean(ctx.bundle && !(ctx.bundle.shipment.customerId ?? '').trim())
   const err = (testId: string) => issueFor(ctx, 'customer', testId)
 
   const shippable = useMemo(() => {
@@ -94,12 +96,14 @@ export function CustomerPicker({ values, update, ctx, form }: CardProps) {
         <FieldGrid>
         <LField
           span={12} def={LABEL.customer.name} error={err(LABEL.customer.name.testId)}
-          hint={value.useTyped && !value.id && value.typedName ? <span className="tms-hdr-unmatched" data-testid="f-customer-unmatched" title="Extracted from the e-mail; pick or add the customer from the directory">not matched</span> : undefined}
+          hint={(value.useTyped && !value.id && value.typedName) || unlinked ? <span className="tms-hdr-unmatched" data-testid="f-customer-unmatched" title="Not linked to a directory customer yet; pick or create it">not matched</span> : undefined}
         >
           {nameLocked ? (
             <div className="ship-inline">
               <TmsInput {...ctl(LABEL.customer.name)} readOnly value={customer?.name ?? value.typedName} title={lockReason(ctx.locked, 'customer')} />
-              {ctx.bundle && isAdmin ? (
+              {ctx.bundle && unlinked ? (
+                <button type="button" className="ship-link" data-testid="f-customer-link" onClick={() => setChanging(true)}>Link customer…</button>
+              ) : ctx.bundle && isAdmin ? (
                 <button type="button" className="ship-link" data-testid="f-customer-change" onClick={() => setChanging(true)}>Change customer…</button>
               ) : ctx.bundle ? (
                 <Link className="ship-link" to={`/tms/shipments/${ctx.bundle.shipment.id}`}>Change customer…</Link>
@@ -124,7 +128,7 @@ export function CustomerPicker({ values, update, ctx, form }: CardProps) {
       {changing && ctx.bundle && (
         <RepointCustomerDialog
           shipment={ctx.bundle.shipment}
-          customers={shippable.map((c) => ({ id: c.id, name: c.name }))}
+          customers={shippable}
           open
           onOpenChange={(open) => { if (!open) setChanging(false) }}
           onRepointed={async (customerId) => {

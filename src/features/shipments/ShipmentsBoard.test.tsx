@@ -587,7 +587,7 @@ describe('ShipmentsBoard', () => {
     }
 
     const fillAndSubmit = async () => {
-      fireEvent.change(screen.getByRole('combobox', { name: /New customer/i }), { target: { value: 'cust-2' } })
+      fireEvent.change(screen.getByTestId('link-customer-picker').querySelector('input')!, { target: { value: 'Globex' } }); fireEvent.click(screen.getByText('Globex', { selector: 'span' }))
       fireEvent.change(screen.getByRole('textbox', { name: /Reason/i }), { target: { value: 'Sold to different division' } })
       await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Re-point$/i })) })
     }
@@ -656,7 +656,7 @@ describe('ShipmentsBoard', () => {
 
     await waitFor(() => expect(screen.getByRole('dialog', { name: /Re-point customer/i })).toBeTruthy())
 
-    fireEvent.change(screen.getByRole('combobox', { name: /New customer/i }), { target: { value: 'cust-2' } })
+    fireEvent.change(screen.getByTestId('link-customer-picker').querySelector('input')!, { target: { value: 'Globex' } }); fireEvent.click(screen.getByText('Globex', { selector: 'span' }))
     fireEvent.change(screen.getByRole('textbox', { name: /Reason/i }), { target: { value: 'Sold to different division' } })
     repointShipmentCustomer.mockRejectedValueOnce(new Error('This shipment was changed by someone else. Reload and try again.'))
     fireEvent.click(screen.getByRole('button', { name: /^Re-point$/i }))

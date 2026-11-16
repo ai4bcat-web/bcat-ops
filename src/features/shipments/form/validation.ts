@@ -120,12 +120,15 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
   const red = (section: SectionKey, field: string, def: { testId: string; text: string }, message: string) =>
     push(section, field, def.testId, def.text, message, strictRed ? 'error' : 'warn')
 
-  // Customer: a record or typed text — the only thing a draft needs.
+  // Customer: a draft may hold typed text; Create and Submit need a directory customer (Ryne 2026-11-16 — 20007 was built on
+  // 11/9 with only "R&R Transport, Inc." typed and never linked). A missing customer is created from the picker, not typed.
   const typed = values.customer.useTyped || !values.customer.id
   if (typed ? empty(values.customer.typedName) : empty(values.customer.id)) {
     push('customer', 'name', LABEL.customer.name.testId, LABEL.customer.name.text, 'Pick a customer, or record the name you typed.')
-  } else if (submit && typed) {
-    push('customer', 'name', LABEL.customer.name.testId, LABEL.customer.name.text, 'Submit needs a customer from the directory; link the typed name first.')
+  } else if (strictRed && typed) {
+    push('customer', 'name', LABEL.customer.name.testId, LABEL.customer.name.text,
+      submit ? 'Submit needs a customer from the directory; link the typed name first.'
+        : 'Link the customer from the directory (or create it from the picker) before creating the shipment.', 'error')
   }
 
   const truckload = isTruckload(values)

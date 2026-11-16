@@ -123,10 +123,21 @@ describe('CustomerPicker — typed name, lock', () => {
   it('locks the name after create and points at the detail page to change it', () => {
     set(customers, {
       mode: 'edit', locked: { fields: { customer: 'Locked: customer is fixed once created' }, stops: {}, voided: false },
-      bundle: { shipment: { id: 'sh-9' } }, customer: ACME,
+      bundle: { shipment: { id: 'sh-9', customerId: ACME.id } }, customer: ACME,
     })
     expect((screen.getByTestId('f-customer-name') as HTMLInputElement).readOnly).toBe(true)
     expect(screen.getByText('Change customer…').getAttribute('href')).toBe('/tms/shipments/sh-9')
+  })
+
+  it('a created shipment with only typed customer text offers "Link customer…" to anyone, and marks it not matched', () => {
+    authGroups = []
+    set(customers, {
+      mode: 'edit', locked: { fields: { customer: 'Locked: customer is fixed once created' }, stops: {}, voided: false },
+      bundle: { shipment: { id: 'sh-7', number: '20007', customerId: null, customerName: 'R&R Transport, Inc.', updatedAt: 't' } }, customer: null,
+    })
+    expect(screen.getByTestId('f-customer-unmatched')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('f-customer-link'))
+    expect(screen.getByText('Link customer', { selector: 'h2' })).toBeTruthy()
   })
 
   it('an owner/ADMIN changes the customer right there: the link becomes a button that opens the change dialog', () => {

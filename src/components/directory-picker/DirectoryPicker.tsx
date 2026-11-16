@@ -14,6 +14,10 @@ export interface DirectoryPickerProps {
   initialQuery?: string
   onChange: (id: string | null, record?: CustomerRecord | LocationRecord | null) => void
   onCreateNew?: (initial: { name?: string; city?: string }) => void
+  /** Shown when nothing matches (default: "No matches. Use + to create."). */
+  noMatchHint?: string
+  /** When set (with onCreateNew), the list ends with a clickable "create" row labelled by this. */
+  createLabel?: (query: string) => string
 }
 
 export function DirectoryPicker({
@@ -25,6 +29,8 @@ export function DirectoryPicker({
   initialQuery = '',
   onChange,
   onCreateNew,
+  noMatchHint,
+  createLabel,
 }: DirectoryPickerProps) {
   const [query, setQuery] = useState(initialQuery)
   const [open, setOpen] = useState(false)
@@ -83,8 +89,8 @@ export function DirectoryPicker({
         <div className="absolute z-50 left-0 right-0 mt-1 max-h-64 overflow-auto rounded-md border bg-popover text-popover-foreground shadow-md">
           {query.trim().length === 0 ? (
             <div className="px-3 py-2 text-sm text-muted-foreground">Type to search the directory</div>
-          ) : activeMatches.length === 0 ? (
-            <div className="px-3 py-2 text-sm text-muted-foreground">No matches. Use + to create.</div>
+          ) : activeMatches.length === 0 && !(onCreateNew && createLabel) ? (
+            <div className="px-3 py-2 text-sm text-muted-foreground">{noMatchHint ?? 'No matches. Use + to create.'}</div>
           ) : (
             <ul>
               {activeMatches.map((m) => {
@@ -113,6 +119,17 @@ export function DirectoryPicker({
                   </li>
                 )
               })}
+              {onCreateNew && createLabel && (
+                <li>
+                  <button
+                    type="button" data-testid="directory-picker-create"
+                    className="w-full px-3 py-2 text-left text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+                    onClick={() => { setOpen(false); onCreateNew({ name: query.trim() }) }}
+                  >
+                    + {createLabel(query.trim())}
+                  </button>
+                </li>
+              )}
             </ul>
           )}
         </div>
