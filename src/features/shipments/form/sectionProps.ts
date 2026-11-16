@@ -26,6 +26,10 @@ export interface FormIssue {
   message: string
   /** `error` blocks the action it was computed for; `warn` never blocks. */
   severity: 'error' | 'warn'
+  /** Where to fix an item the form has no field for (a customer setting): a link instead of a focus. */
+  href?: string
+  /** One plain line under the label saying how to fix it (items the form cannot point at). */
+  hint?: string
   /**
    * A `warn` the field still shows as required: a factored load past draft missing what OTR needs (Ryne 2026-11-14).
    * It never blocks a save; it blocks the push into Load Review, server-side.

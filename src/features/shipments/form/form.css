@@ -916,3 +916,12 @@
   font-weight: 600;
   color: var(--tms-text-2);
 }
+
+/* A What's missing item the form cannot point at: one line on how to fix it (Ryne 2026-11-16). */
+.tms-shell .tms-rail-req-hint {
+  display: block;
+  margin: 2px 0 4px 8px;
+  font-size: 11px;
+  color: var(--tms-muted);
+}
+.tms-shell a.tms-rail-req { text-decoration: none; }

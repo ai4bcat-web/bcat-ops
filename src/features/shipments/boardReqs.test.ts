@@ -60,9 +60,45 @@ describe('REQS in the editor rail', () => {
     expect(out.find((i) => i.id === 'req:salesRep')?.section).toBe('roles')
   })
 
-  it('drops a form-owned item once the form no longer finds it missing', () => {
+  it('never drops an item: one the form cannot see is still listed, pointing at where to fix it', () => {
     const reqs = boardReqsOf(row({ reference: null, customerFactors: true, factorGaps: ['PO_MISSING'] }), SRC, NOW)
-    expect(reqsAsIssues(reqs, [], [])).toEqual([])
+    const out = reqsAsIssues(reqs, [], [])
+    expect(out).toHaveLength(reqs.length)
+    expect(out[0]).toMatchObject({ label: 'PO / reference #', section: 'customer', fieldKey: 'f-customer-refNo' })
+  })
+})
+
+describe('the chip count is the rail list (Ryne 2026-11-16: "14904 says need 1 but nothing displays")', () => {
+  // 14904: THE ROYAL GROUP, brokerage, not factored, delivered, no POD on file. The board counts the POD (the customer's
+  // Load Review list asks for it); the editor's own document check only asks on factored / asset loads, so it found
+  // nothing and the rail used to drop the item.
+  const fixtures: Array<[string, Partial<ShipmentRow>]> = [
+    ['14904: brokerage, manual customer, delivered, no POD', { docsPresent: [], docsMissing: [], docsRequired: [] }],
+    ['brokerage, FACTOR customer, no POD', { customerFactors: true, docsPresent: [], docsMissing: ['POD'] }],
+    ['customer missing AP e-mail and billing method', { customerBillingGaps: ['CUSTOMER_AP_EMAIL', 'CUSTOMER_BILLING_METHOD'] }],
+    ['no rep, no division, no rate', { salesRepId: null, revDivision: null, revenueCents: 0 }],
+    ['factored, missing ZIPs', { customerFactors: true, factorGaps: ['PICKUP_ZIP', 'DELIVERY_ZIP'] }],
+  ]
+  for (const [name, over] of fixtures) {
+    it(name, () => {
+      const reqs = boardReqsOf(row(over), SRC, NOW)
+      expect(reqs.length).toBeGreaterThan(0)
+      const rail = reqsAsIssues(reqs, [], [], 'cus-1')
+      expect(rail).toHaveLength(reqs.length)
+      expect(rail.map((i) => i.label)).toEqual(reqs.map((r) => r.label))
+      for (const i of rail) expect(Boolean(i.fieldKey) || Boolean(i.href) || Boolean(i.hint)).toBe(true)
+    })
+  }
+
+  it('14904: the POD item points at the Documents upload box', () => {
+    const reqs = boardReqsOf(row({ docsPresent: [], docsMissing: [], docsRequired: [] }), SRC, NOW)
+    expect(reqs.map((r) => r.key)).toEqual(['doc:POD'])
+    expect(reqsAsIssues(reqs, [], [], 'cus-1')[0]).toMatchObject({ section: 'documents', fieldKey: 'card-documents-slot-POD' })
+  })
+
+  it('a customer setting links to the customer profile', () => {
+    const reqs = boardReqsOf(row({ customerBillingGaps: ['CUSTOMER_AP_EMAIL'] }), SRC, NOW)
+    expect(reqsAsIssues(reqs, [], [], 'cus-1')[0]).toMatchObject({ href: '/tms/customers/cus-1', fieldKey: '' })
   })
 })
 
