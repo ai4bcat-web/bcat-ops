@@ -29,6 +29,7 @@ import { formatDay, lastMonths, PAID_LOOKBACK_MONTHS } from '@/features/ar/arVie
 import { useDirectory } from '@/hooks/useDirectory'
 import { useOpenInvoices } from '@/hooks/useOpenInvoices'
 import { OutstandingView } from './OutstandingView'
+import { CustomerSearch } from './CustomerSearch'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { graphqlErrorText, listArPayments, listInvoicesByMonth, listShipmentsByNumber, reversePayment } from '@/lib/apiClient'
 import { listAljexMemoRows } from '@/lib/paymentsClient'
@@ -86,15 +87,28 @@ export function PaymentsReceivedPage() {
     }, { replace: true })
   }
   const open = useOpenInvoices()
+  const [outQuery, setOutQuery] = useState(() => searchParams.get('q') ?? '')
+  const changeOutQuery = (text: string) => {
+    setOutQuery(text)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (text.trim()) next.set('q', text)
+      else next.delete('q')
+      return next
+    }, { replace: true })
+  }
   const [showReversed, setShowReversed] = useState(false)
-  const [filter, setFilter] = useState<ReceivedFilter>(() => ({
+  const [baseFilter, setFilter] = useState<ReceivedFilter>(() => ({
     ...(initialPeriod?.range ?? monthBounds(asOf)),
-    customers: searchParams.get('customer') ? [searchParams.get('customer')!] : [],
+    customers: [],
     types: [],
     methods: [],
     divisions: [],
     unappliedOnly: false,
   }))
+  // The picked customer lives in the URL (`?customer=`), so a link, a reload and the search box all agree.
+  const urlCustomer = searchParams.get('customer')
+  const filter = useMemo<ReceivedFilter>(() => ({ ...baseFilter, customers: urlCustomer ? [urlCustomer] : [] }), [baseFilter, urlCustomer])
 
   const { customers } = useDirectory({ locations: false })
   const { divisions } = useOwnershipDivisions()
@@ -119,6 +133,12 @@ export function PaymentsReceivedPage() {
   useEffect(() => { void load() }, [load])
 
   const customerById = useMemo(() => new Map(customers.map((c) => [c.id, c])), [customers])
+  // Who has money outstanding, so the customer search lists them first.
+  const openByCustomer = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const inv of open.invoices) if (inv.status === 'ISSUED' || inv.status === 'PARTIAL') m.set(inv.customerId, (m.get(inv.customerId) ?? 0) + (inv.balanceCents ?? 0))
+    return m
+  }, [open.invoices])
   const customerIdByKey = useMemo(() => {
     const m = new Map<string, string>()
     for (const c of customers) if (c.name && !m.has(nameKey(c.name))) m.set(nameKey(c.name), c.id)
@@ -211,15 +231,9 @@ export function PaymentsReceivedPage() {
     return [...keys].sort().map((k) => ({ value: k, label: k === 'NONE' ? 'No division' : divisionName(k) }))
   }, [shipmentsByPro, filter.divisions, divisionName])
   const methodOptions = useMemo(() => [...new Set(rows.map((r) => r.method ?? NO_METHOD))].filter((m) => m !== NO_METHOD).sort(), [rows])
-  const customerOptions = useMemo(() => {
-    const seen = new Map<string, string>()
-    for (const r of rows) if (r.customerId && !seen.has(r.customerId)) seen.set(r.customerId, customerById.get(r.customerId)?.name ?? r.customerName)
-    return [...seen].sort((a, b) => a[1].localeCompare(b[1]))
-  }, [rows, customerById])
   const oneCustomer = filter.customers.length === 1 ? filter.customers[0] : null
 
   const setCustomer = (id: string | null) => {
-    setFilter((f) => ({ ...f, customers: id ? [id] : [] }))
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
       if (id) next.set('customer', id)
@@ -347,6 +361,12 @@ export function PaymentsReceivedPage() {
 
         <div className="pr-toolbar" data-testid="payments-received-filters">
           <TmsSegmentedTabs aria-label="Show" size="sm" active={view} onSelect={(k) => setView(k as PageView)} tabs={VIEW_TABS} />
+          <CustomerSearch customers={customers} openByCustomer={openByCustomer} selectedId={oneCustomer}
+            selectedName={oneCustomer ? customerById.get(oneCustomer)?.name : undefined} onSelect={setCustomer} />
+          {view === 'outstanding' && (
+            <TmsInput type="search" aria-label="Search invoice, PRO or PO" placeholder="Invoice #, PRO or PO" value={outQuery}
+              onChange={(e) => changeOutQuery(e.target.value)} />
+          )}
           {view !== 'outstanding' && (<>
           <TmsSelect aria-label="Dates" value={preset} onChange={(e) => choosePreset(e.target.value as PresetKey)}>
             {(Object.keys(PRESET_LABEL) as PresetKey[]).map((k) => <option key={k} value={k}>{PRESET_LABEL[k]}</option>)}
@@ -357,10 +377,6 @@ export function PaymentsReceivedPage() {
               <TmsInput type="date" aria-label="To" value={filter.to} onChange={(e) => setFilter((f) => ({ ...f, to: e.target.value }))} />
             </>
           )}
-          <TmsSelect aria-label="Customer" value={oneCustomer ?? ''} onChange={(e) => setCustomer(e.target.value || null)}>
-            <option value="">All customers</option>
-            {customerOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-          </TmsSelect>
           <TmsSelect aria-label="Method" value={filter.methods[0] ?? ''} onChange={(e) => setFilter((f) => ({ ...f, methods: e.target.value ? [e.target.value] : [] }))}>
             <option value="">All methods</option>
             {methodOptions.map((m) => <option key={m} value={m}>{m}</option>)}
@@ -384,6 +400,7 @@ export function PaymentsReceivedPage() {
 
         {view === 'outstanding' ? (
           <OutstandingView invoices={open.invoices} customers={customerById} loading={open.loading} asOf={asOf}
+            customerId={oneCustomer} query={outQuery}
             onReceived={() => { void load(); void open.refresh() }} />
         ) : (
         <ArDenseTable<ReceivedRow>

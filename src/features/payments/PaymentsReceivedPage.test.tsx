@@ -37,6 +37,10 @@ vi.mock('@/hooks/useOpenInvoices', () => ({
         invoiceDate: '2026-10-01', dueAt: '2026-10-31', totalCents: 50_000, paidCents: 0, balanceCents: 50_000 },
       { id: '14201', number: '14201', shipmentNumber: '14201', customerId: 'c1', customerName: 'TANAGER LOGISTICS', status: 'ISSUED',
         invoiceDate: '2026-10-02', dueAt: '2026-11-01', totalCents: 30_000, paidCents: 0, balanceCents: 30_000, factored: true },
+      { id: '15000', number: '15000', shipmentNumber: '15000', customerId: 'c2', customerName: 'BETA FREIGHT', status: 'ISSUED',
+        invoiceDate: '2026-10-03', dueAt: '2026-11-02', totalCents: 20_000, paidCents: 0, balanceCents: 20_000 },
+      { id: '15001', number: '15001', shipmentNumber: '15001', customerId: 'c2', customerName: 'BETA FREIGHT', status: 'ISSUED',
+        invoiceDate: '2026-09-20', dueAt: '2026-10-20', totalCents: 10_000, paidCents: 0, balanceCents: 10_000 },
     ],
     loading: false, refresh: async () => {},
   }),
@@ -44,7 +48,7 @@ vi.mock('@/hooks/useOpenInvoices', () => ({
 vi.mock('@/hooks/useCustomerPaymentFacts', () => ({
   useCustomerPaymentFacts: () => ({ linesByInvoice: new Map(), daysToPayByCustomer: new Map([['c1', { averageDays: 41.6, count: 12 }]]), loading: false }),
 }))
-vi.mock('@/hooks/useDirectory', () => ({ useDirectory: () => ({ customers: [{ id: 'c1', name: 'TANAGER LOGISTICS' }] }) }))
+vi.mock('@/hooks/useDirectory', () => ({ useDirectory: () => ({ customers: [{ id: 'c1', name: 'TANAGER LOGISTICS' }, { id: 'c2', name: 'BETA FREIGHT' }] }) }))
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({ useOwnershipDivisions: () => ({ divisions: [] }) }))
 vi.mock('@/hooks/useCustomerAr', () => ({ useCustomerAr: () => ({ openCents: 0, unappliedCents: 0, refresh: async () => {} }) }))
 vi.mock('@/features/ar/components/ReceivePaymentDialog', () => ({
@@ -60,8 +64,8 @@ describe('Payments Received page', () => {
     const out = await screen.findByTestId('payments-outstanding')
     const manual = within(out).getByTestId('outstanding-section-manual')
     const factored = within(out).getByTestId('outstanding-section-factored')
-    expect(within(manual).getByText('TANAGER LOGISTICS')).toBeTruthy()
-    expect(within(manual).getByTestId('outstanding-days-to-pay').textContent).toBe('No terms · pays in 42 days avg')
+    expect(within(manual).getAllByText('TANAGER LOGISTICS').length).toBeGreaterThan(0)
+    expect(within(manual).getAllByTestId('outstanding-days-to-pay').map((e) => e.textContent)).toContain('No terms · pays in 42 days avg')
     fireEvent.click(within(manual).getAllByLabelText('Select 14200')[0])
     expect(within(manual).getByTestId('receive-bar')).toBeTruthy()
     expect((within(manual).getAllByLabelText('Amount paid on 14200')[0] as HTMLInputElement).value).toBe('500.00')
@@ -85,5 +89,59 @@ describe('Payments Received page', () => {
   it('opens Record payment from the link other screens use, with the customer and invoices picked', async () => {
     render(<MemoryRouter initialEntries={['/tms/payments-received?record=1&customer=c1&invoice=14096&invoice=14097']}><PaymentsReceivedPage /></MemoryRouter>)
     expect(await screen.findByText('Record payment for c1: 14096,14097')).toBeTruthy()
+  })
+
+  it('works on one customer: ?customer= shows only theirs, in both sections, with a chip and the customer bar', async () => {
+    render(<MemoryRouter initialEntries={['/tms/payments-received?customer=c2']}><PaymentsReceivedPage /></MemoryRouter>)
+    const out = await screen.findByTestId('payments-outstanding')
+    expect(within(out).queryByText('TANAGER LOGISTICS')).toBeNull()
+    expect(within(out).getAllByText('BETA FREIGHT').length).toBeGreaterThan(0)
+    expect(screen.getByTestId('customer-search-selected').textContent).toContain('BETA FREIGHT')
+    expect(within(screen.getByTestId('one-customer-bar')).getByText(/2 open invoices · \$300\.00 open/)).toBeTruthy()
+  })
+
+  it('searching a customer and picking one narrows Outstanding; the × brings everyone back', async () => {
+    render(<MemoryRouter><PaymentsReceivedPage /></MemoryRouter>)
+    const out = await screen.findByTestId('payments-outstanding')
+    expect(within(out).getAllByText('TANAGER LOGISTICS').length).toBeGreaterThan(0)
+    const box = screen.getByRole('combobox', { name: 'Search customers' })
+    fireEvent.change(box, { target: { value: 'beta' } })
+    fireEvent.click(await screen.findByText('BETA FREIGHT', { selector: 'span' }))
+    await waitFor(() => expect(within(out).queryByText('TANAGER LOGISTICS')).toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'Show all customers' }))
+    await waitFor(() => expect(within(out).getAllByText('TANAGER LOGISTICS').length).toBeGreaterThan(0))
+  })
+
+  it('searches invoice #, PRO and PO inside Outstanding', async () => {
+    render(<MemoryRouter><PaymentsReceivedPage /></MemoryRouter>)
+    const out = await screen.findByTestId('payments-outstanding')
+    fireEvent.change(screen.getByLabelText('Search invoice, PRO or PO'), { target: { value: '15001' } })
+    await waitFor(() => expect(within(out).queryByLabelText('Select 14200')).toBeNull())
+    expect(within(out).getAllByLabelText('Select 15001').length).toBeGreaterThan(0)
+    fireEvent.change(screen.getByLabelText('Search invoice, PRO or PO'), { target: { value: 'nothing-like-it' } })
+    expect(await screen.findByTestId('outstanding-no-match')).toBeTruthy()
+  })
+
+  it('Select all open ticks every open invoice for the customer; a check is applied oldest first', async () => {
+    render(<MemoryRouter initialEntries={['/tms/payments-received?customer=c2']}><PaymentsReceivedPage /></MemoryRouter>)
+    const out = await screen.findByTestId('payments-outstanding')
+    fireEvent.click(within(out).getByTestId('select-all-customer'))
+    expect((within(out).getAllByLabelText('Amount paid on 15000')[0] as HTMLInputElement).value).toBe('200.00')
+    expect((within(out).getAllByLabelText('Amount paid on 15001')[0] as HTMLInputElement).value).toBe('100.00')
+    fireEvent.click(within(out).getByTestId('select-all-customer'))
+    expect(within(out).queryByTestId('receive-bar')).toBeNull()
+    fireEvent.change(within(out).getByLabelText('Check amount'), { target: { value: '150' } })
+    fireEvent.click(within(out).getByTestId('apply-oldest-first'))
+    // 15001 is the older invoice: it takes its full $100, 15000 gets the other $50.
+    expect((within(out).getAllByLabelText('Amount paid on 15001')[0] as HTMLInputElement).value).toBe('100.00')
+    expect((within(out).getAllByLabelText('Amount paid on 15000')[0] as HTMLInputElement).value).toBe('50.00')
+    expect(within(out).getByTestId('receive-bar')).toBeTruthy()
+  })
+
+  it('asks for the check amount before applying oldest first', async () => {
+    render(<MemoryRouter initialEntries={['/tms/payments-received?customer=c2']}><PaymentsReceivedPage /></MemoryRouter>)
+    const out = await screen.findByTestId('payments-outstanding')
+    fireEvent.click(within(out).getByTestId('apply-oldest-first'))
+    expect(within(out).getByRole('alert').textContent).toBe('Enter the check amount first.')
   })
 })

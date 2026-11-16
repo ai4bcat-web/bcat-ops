@@ -18,6 +18,7 @@ import type { TmsTone } from '@/features/tms/kit'
 import { AGING_BUCKET_LABEL, agingBucket, type AgingBucket } from '@/lib/arAging'
 import { formatCents } from '@/lib/invoiceBuild'
 import { CreditMemoDialog } from '@/features/ar/components/CreditMemoDialog'
+import { customerPaymentsPath } from '@/features/payments/links'
 import type { ArPaymentRecord, InvoiceRecord } from '@/types/tms'
 
 /** Late money gets a loud chip; everything inside terms is quiet. */
@@ -78,6 +79,7 @@ export function CustomerArTab({
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           {/* Payments are recorded only on Payments Received (Ryne 2026-11-15). */}
           <span className="text-sm tms-muted" data-testid="payments-recorded-note">Payments are recorded in Payments Received.</span>
+          <Link className="text-sm" to={customerPaymentsPath(customerId)} data-testid="open-in-payments-received">Open in Payments Received</Link>
           <TmsButton size="sm" onClick={() => setDialog('credit')}>
             <Plus size={14} />New credit
           </TmsButton>

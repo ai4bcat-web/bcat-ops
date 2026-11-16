@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { InvoiceRecord } from '@/types/tms'
-import { factorFeeCents, factorFeeReason, groupOutstanding, planReceive, prefillCents, recordPaymentInput, type ReceiveDraft } from './outstanding'
+import { allocateOldestFirst, factorFeeCents, factorFeeReason, filterOutstanding, groupOutstanding, planReceive, prefillCents, recordPaymentInput, type ReceiveDraft } from './outstanding'
 
 const inv = (id: string, p: Partial<InvoiceRecord>): InvoiceRecord => ({
   id, number: id, shipmentNumber: id, customerId: 'c1', customerName: 'ACME', status: 'ISSUED', invoiceDate: '2026-10-01', dueAt: '2026-10-31',
@@ -89,5 +89,64 @@ describe('planReceive', () => {
     expect(planReceive(draft({ A: '' })).ok).toBe(false)
     expect(planReceive(draft({ A: '10' }, { reference: ' ' })).errors).toContain('Enter the check number.')
     expect(planReceive(draft({ A: '10' }, { reference: '', method: 'ACH' })).ok).toBe(true)
+  })
+})
+
+
+describe('filterOutstanding (work on one customer)', () => {
+  const sections = () => groupOutstanding([
+    inv('1', { invoiceDate: '2026-10-09', references: [{ code: 'PO', value: 'PO-777', visibility: 'CUSTOMER' }] as never }),
+    inv('2', { customerId: 'c2', invoiceDate: '2026-10-05' }),
+    inv('F', { factored: true, customerId: 'c2' }),
+    inv('G', { factored: true }),
+  ], nameOf, '2026-11-16')
+
+  it('shows only that customer, in both sections, with totals recomputed', () => {
+    const only = filterOutstanding(sections(), { customerId: 'c2' })
+    expect(only.map((s) => s.key)).toEqual(['manual', 'factored'])
+    expect(only[0].groups.map((g) => g.customerId)).toEqual(['c2'])
+    expect(only[0]).toMatchObject({ count: 1, openCents: 10_000 })
+    expect(only[1].groups.map((g) => g.rows.map((r) => r.invoiceId))).toEqual([['F']])
+  })
+
+  it('drops a section that has nothing left', () => {
+    const only = filterOutstanding(sections(), { customerId: 'c1' })
+    expect(only.map((s) => `${s.key}:${s.count}`)).toEqual(['manual:1', 'factored:1'])
+    expect(filterOutstanding(sections(), { customerId: 'nobody' })).toEqual([])
+  })
+
+  it('searches invoice #, PRO and PO, ignoring case', () => {
+    expect(filterOutstanding(sections(), { query: 'po-777' }).flatMap((s) => s.groups.flatMap((g) => g.rows.map((r) => r.invoiceId)))).toEqual(['1'])
+    expect(filterOutstanding(sections(), { query: 'f' }).flatMap((s) => s.groups.flatMap((g) => g.rows.map((r) => r.invoiceId)))).toEqual(['F'])
+    expect(filterOutstanding(sections(), { customerId: 'c1', query: 'zzz' })).toEqual([])
+  })
+
+  it('returns everything when nothing is asked', () => {
+    expect(filterOutstanding(sections(), {})).toHaveLength(2)
+    expect(filterOutstanding(sections(), { customerId: null, query: '  ' })).toHaveLength(2)
+  })
+})
+
+describe('allocateOldestFirst (a check spent on the oldest invoices first)', () => {
+  const rows = () => groupOutstanding([
+    inv('A', { invoiceDate: '2026-09-01', balanceCents: 30_000, totalCents: 30_000 }),
+    inv('B', { invoiceDate: '2026-10-01', balanceCents: 20_000, totalCents: 20_000 }),
+    inv('C', { invoiceDate: '2026-08-01', balanceCents: 10_000, totalCents: 10_000 }),
+  ], nameOf, '2026-11-16')[0].groups[0].rows
+
+  it('fills the oldest in full and gives the last one what is left', () => {
+    const a = allocateOldestFirst(rows(), 25_000, 200)
+    expect([...a]).toEqual([['C', 10_000], ['A', 15_000]])
+  })
+
+  it('pays everything when the check covers it, and stops there', () => {
+    expect([...allocateOldestFirst(rows(), 999_999, 200)].map(([id]) => id)).toEqual(['C', 'A', 'B'])
+    expect(allocateOldestFirst(rows(), 0, 200).size).toBe(0)
+  })
+
+  it('spends a factored invoice at its balance less the OTR fee', () => {
+    const f = groupOutstanding([inv('F', { factored: true, balanceCents: 100_00, totalCents: 100_00 })], nameOf, '2026-11-16')[0].groups[0].rows
+    expect([...allocateOldestFirst(f, 98_00, 200)]).toEqual([['F', 98_00]])
+    expect([...allocateOldestFirst(f, 50_00, 200)]).toEqual([['F', 50_00]])
   })
 })

@@ -24,7 +24,8 @@ import { termsVsActualText } from '@/lib/daysToPay'
 import { formatCents } from '@/lib/invoiceBuild'
 import type { ArPaymentMethod, CustomerRecord, InvoiceRecord } from '@/types/tms'
 import {
-  DEFAULT_FACTOR_FEE_BPS, factorFeeReason, groupOutstanding, planReceive, prefillCents, recordPaymentInput,
+  DEFAULT_FACTOR_FEE_BPS, allocateOldestFirst, factorFeeReason, filterOutstanding, groupOutstanding, parseDollars, planReceive, prefillCents,
+  recordPaymentInput,
   type OutstandingGroup, type OutstandingRow, type OutstandingSection, type ReceiveDraft, type ReceivePlan,
 } from './outstanding'
 
@@ -37,12 +38,16 @@ const invoicePath = (id: string) => `/tms/invoicing/invoices/${encodeURIComponen
 const dollars = (cents: number) => (cents / 100).toFixed(2)
 const typedCents = (text: string | undefined) => Math.max(0, Math.round(Number((text ?? '').replace(/[$,\s]/g, '')) * 100) || 0)
 
-export function OutstandingView({ invoices, customers, loading, asOf, onReceived }: {
+export function OutstandingView({ invoices, customers, loading, asOf, onReceived, customerId = null, query = '' }: {
   invoices: InvoiceRecord[]
   customers: Map<string, CustomerRecord>
   loading: boolean
   asOf: string
   onReceived: () => void
+  /** Work on one customer: only their invoices, in both sections (Ryne 2026-11-16). */
+  customerId?: string | null
+  /** A typed search over invoice #, PRO and PO. */
+  query?: string
 }) {
   const [feeBps, setFeeBps] = useState(DEFAULT_FACTOR_FEE_BPS)
   useEffect(() => {
@@ -55,6 +60,13 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
     () => groupOutstanding(invoices, (id, fallback) => customers.get(id)?.name ?? fallback, asOf),
     [invoices, customers, asOf],
   )
+  const visible = useMemo(() => filterOutstanding(sections, { customerId, query }), [sections, customerId, query])
+  // The customer's own open money, whatever is typed in the search.
+  const oneCustomer = useMemo(() => {
+    if (!customerId) return null
+    const mine = filterOutstanding(sections, { customerId })
+    return { openCents: mine.reduce((n, sec) => n + sec.openCents, 0), count: mine.reduce((n, sec) => n + sec.count, 0) }
+  }, [sections, customerId])
   const manualCustomerIds = useMemo(
     () => sections.filter((s) => s.key === 'manual').flatMap((s) => s.groups.map((g) => g.customerId)),
     [sections],
@@ -63,11 +75,35 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
   const facts = useCustomerPaymentFacts(manualCustomerIds, factsVersion)
 
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
-  const [ticked, setTicked] = useState<Record<string, string>>({})
+  const [tickedAll, setTicked] = useState<Record<string, string>>({})
   const [forms, setForms] = useState<Record<string, BarForm>>({})
   const [confirm, setConfirm] = useState<{ barKey: string; title: string; draft: ReceiveDraft; plan: ReceivePlan } | null>(null)
   const [posting, setPosting] = useState(false)
   const [errors, setErrors] = useState<Record<string, string[]>>({})
+
+  // A customer or search change can hide invoices that were ticked: they count as unticked, so no bar can post them.
+  const ticked = useMemo(() => {
+    const shown = new Set(visible.flatMap((sec) => sec.groups.flatMap((g) => g.rows.map((r) => r.invoiceId))))
+    return Object.fromEntries(Object.entries(tickedAll).filter(([id]) => shown.has(id)))
+  }, [visible, tickedAll])
+
+  const [checkAmount, setCheckAmount] = useState('')
+  const [applyError, setApplyError] = useState<string | null>(null)
+  const customerRows = useMemo(() => visible.flatMap((sec) => sec.groups.flatMap((g) => g.rows)), [visible])
+  const manualRows = useMemo(() => visible.filter((sec) => sec.key === 'manual').flatMap((sec) => sec.groups.flatMap((g) => g.rows)), [visible])
+  const allCustomerTicked = customerRows.length > 0 && customerRows.every((r) => r.invoiceId in ticked)
+  const applyOldestFirst = () => {
+    const cents = parseDollars(checkAmount)
+    if (cents == null || cents <= 0) { setApplyError('Enter the check amount first.'); return }
+    setApplyError(null)
+    const plan = allocateOldestFirst(manualRows, cents, feeBps)
+    setTicked((t) => {
+      const next = { ...t }
+      for (const r of manualRows) delete next[r.invoiceId]
+      for (const [id, c] of plan) next[id] = dollars(c)
+      return next
+    })
+  }
 
   const formOf = (barKey: string, factored: boolean): BarForm =>
     forms[barKey] ?? { reference: '', receivedAt: asOf, method: factored ? 'FACTOR' : 'CHECK' }
@@ -138,6 +174,7 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
   }
 
   if (sections.length === 0) return <p className="tms-muted text-sm" style={{ padding: 16 }}>{loading ? 'Loading…' : 'Nothing is outstanding.'}</p>
+  const filteredOut = visible.length === 0
 
   const receiveBar = (barKey: string, title: string, rows: OutstandingRow[], factored: boolean) => {
     const picked = pickedIn(rows)
@@ -285,9 +322,34 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
     )
   }
 
+  const customerName = customerId ? customers.get(customerId)?.name ?? visible[0]?.groups[0]?.label ?? 'Customer' : ''
+  const oneDays = customerId ? facts.daysToPayByCustomer.get(customerId) : undefined
+
   return (
     <div className="pr-out" data-testid="payments-outstanding">
-      {sections.map(sectionBlock)}
+      {customerId && oneCustomer && (
+        <div className="pr-one" data-testid="one-customer-bar">
+          <strong className="pr-one-name">{customerName}</strong>
+          <span className="tms-muted text-sm">{oneCustomer.count} open invoice{oneCustomer.count === 1 ? '' : 's'} · {formatCents(oneCustomer.openCents)} open</span>
+          <span className="pr-out-d2p text-sm" data-testid="one-customer-days-to-pay">{termsVsActualText(customers.get(customerId)?.paymentTermsDays, oneDays)}</span>
+          <div className="pr-one-actions">
+            <TmsButton size="sm" onClick={() => tick(customerRows, !allCustomerTicked)} disabled={customerRows.length === 0} data-testid="select-all-customer">
+              {allCustomerTicked ? 'Clear selection' : `Select all open (${customerRows.length})`}
+            </TmsButton>
+            {manualRows.length > 0 && (
+              <>
+                <TmsInput inputMode="decimal" aria-label="Check amount" placeholder="Check amount" value={checkAmount}
+                  onChange={(e) => { setCheckAmount(e.target.value); setApplyError(null) }} />
+                <TmsButton size="sm" onClick={applyOldestFirst} data-testid="apply-oldest-first">Apply oldest first</TmsButton>
+              </>
+            )}
+          </div>
+          {applyError && <p className="pr-out-errors" role="alert">{applyError}</p>}
+        </div>
+      )}
+      {filteredOut
+        ? <p className="tms-muted text-sm" style={{ padding: 16 }} data-testid="outstanding-no-match">No open invoices match{customerId ? ` for ${customerName}` : ''}{query.trim() ? ` “${query.trim()}”` : ''}.</p>
+        : visible.map(sectionBlock)}
 
       {confirm && (
         <TmsDialog
