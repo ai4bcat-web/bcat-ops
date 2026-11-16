@@ -9,7 +9,7 @@ import { LADDER_FILTER_OPTIONS, assignmentChipText } from './carrierLadder'
 import { boardStatusOf } from '@/lib/shipmentViewDefs'
 import { pastDeliveryOf, pastDueDaysOf } from './boardChips'
 import { BOARD_COLUMNS, displayStatusOf, carrierSortKey, invoiceStatusOfRow, rowShipmentType, type ShipmentRow } from './shipmentViews'
-import { boardReqsOfRow, boardReqsText } from './boardReqs'
+import { boardReqsOfRow, boardReqsText, readyForReviewOf } from './boardReqs'
 import type { IntroducedColumn } from './teamColumnLayout'
 import { LOAD_INVOICE_STATUS_LABEL, LOAD_INVOICE_STATUS_ORDER } from '@/lib/loadInvoiceStatus'
 import { SHIPMENT_TYPES, shipmentTypeLabel } from '@/lib/shipmentTypes'
@@ -77,9 +77,13 @@ export function pastDeliveryOnly(filter: { values?: string[]; exclude?: boolean 
   return Boolean(filter && !filter.exclude && filter.values?.includes(PAST_DELIVERY_FILTER_VALUE))
 }
 const PAST_DELIVERY_OPTION: DenseOption = { value: PAST_DELIVERY_FILTER_VALUE, label: 'Past delivery date' }
+/** "Ready for review" rides in the Status filter the same way: the push's own test (boardReqs.ts readyForReviewOf). */
+export const READY_FOR_REVIEW_FILTER_VALUE = 'READY FOR REVIEW'
+const READY_FOR_REVIEW_OPTION: DenseOption = { value: READY_FOR_REVIEW_FILTER_VALUE, label: 'Ready for review' }
 
 export const STATUS_OPTIONS: DenseOption[] = [
   PAST_DELIVERY_OPTION,
+  READY_FOR_REVIEW_OPTION,
   ...BOARD_STATUS_ORDER.map((s) => ({ value: s, label: sentence(s) })),
 ]
 
@@ -119,6 +123,7 @@ export const SHIPMENT_GRID_COLUMNS: DenseColumn<ShipmentRow>[] = BOARD_COLUMNS.m
         const status = displayStatusOf(row)
         const options: DenseOption[] = [{ value: status, label: sentence(status) }]
         if (pastDeliveryOf(row, Date.now())) options.push(PAST_DELIVERY_OPTION)
+        if (readyForReviewOf(row)) options.push(READY_FOR_REVIEW_OPTION)
         return options
       },
       sortValue: statusSortKey,
