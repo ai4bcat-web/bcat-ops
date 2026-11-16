@@ -960,10 +960,10 @@ describe('ShipmentsBoard', () => {
       expect(screen.getByRole('tab', { name: /^All/ })).toHaveAttribute('aria-selected', 'true')
     })
 
-    it('lists a released delivered shipment as Released on All, and keeps Delivered for an unreleased one', async () => {
+    it('lists a released delivered shipment by its invoice stage on All, and keeps Delivered for an unreleased one', async () => {
       renderBoard('/tms/shipments?list=all', [unreleased, released])
       await waitFor(() => expect(screen.getByText('S002')).toBeTruthy())
-      expect(within(screen.getByText('S002').closest('tr')!).getByText(/^RELEASED/)).toBeTruthy()
+      expect(within(screen.getByText('S002').closest('tr')!).getByText(/^(READY TO INVOICE|INVOICED|RELEASED)/)).toBeTruthy()
       expect(within(screen.getByText('S001').closest('tr')!).getByText(/^DELIVERED/)).toBeTruthy()
     })
 

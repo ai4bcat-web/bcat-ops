@@ -7,8 +7,8 @@
  *            (Ryne 2026-11-15: a load is never in Load Review and on the board's working view at once).
  *   Voided = voided shipments and nothing else. A voided row is listed here and NEVER in Active or All.
  *
- * Released to invoicing = the order has left DOCS_NEEDED: `readyToInvoiceAt` or
- * `invoiceId` is set, or `arStatus` is any other rung (UNBILLED, UNPAID, PAID,
+ * Released to invoicing = the order has left DOCS_NEEDED: `readyToInvoiceAt`, `invoiceId`, `invoiceNumber`,
+ * `invoicedAt` or `factoringItemId` is set, or `arStatus` is any other rung (UNBILLED, UNPAID, PAID,
  * INVOICE_NOT_NEEDED, LEGACY). A row with no order data is not released.
  *
  * Imports are relative and type-only so a Lambda could bundle this file.
@@ -25,6 +25,10 @@ export interface ListRow {
   arStatus?: ArStatus | null
   readyToInvoiceAt?: string | null
   invoiceId?: string | null
+  /** The order's invoice number / invoiced stamp and its OTR queue row: any of them means the load was invoiced or handed to the factor. */
+  invoiceNumber?: string | null
+  invoicedAt?: string | null
+  factoringItemId?: string | null
   /** The Load Review push stamp: once set, the load belongs to Load Review, not the board's working view. */
   loadReviewPushedAt?: string | null
   pickupMonth?: string | null
@@ -73,8 +77,13 @@ export function parseShipmentList(value: string | null | undefined): ShipmentLis
   return value === 'all' || value === 'voided' ? value : 'active'
 }
 
+/**
+ * Released to invoicing (Ryne 2026-11-16: nothing invoiced, manually or factored, stays an active shipment): the order
+ * has left DOCS_NEEDED, or carries an invoice (id, number or invoiced stamp), or has an OTR queue row.
+ */
 export function isReleasedToInvoicing(row: ListRow): boolean {
   return row.readyToInvoiceAt != null || row.invoiceId != null
+    || row.invoiceNumber != null || row.invoicedAt != null || row.factoringItemId != null
     || (row.arStatus != null && row.arStatus !== 'DOCS_NEEDED')
 }
 

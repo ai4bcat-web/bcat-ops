@@ -225,18 +225,24 @@ describe('Status column for released shipments', () => {
     { type: 'delivery', departedAt: '2026-01-03T00:00:00Z' },
   ] as unknown as ShipmentRow['stops']
 
-  it('reads RELEASED for a delivered shipment whose order left DOCS_NEEDED, and keeps the stored status', () => {
+  it('a released load reads where its invoice stands, and keeps the stored status (Ryne 2026-11-16)', () => {
     const released = row('r', { status: 'DELIVERED', arStatus: 'UNBILLED', stops })
-    expect(status.value(released)).toBe('RELEASED')
+    expect(status.value(released)).toBe('READY TO INVOICE')
     expect(displayStatusOf(released)).toBe('RELEASED')
     expect(boardStatusOf(released)).toBe('DELIVERED')
-    expect(status.value(row('i', { status: 'DELIVERED', invoiceId: 'inv-1' }))).toBe('RELEASED')
+    expect(status.value(row('i', { status: 'DELIVERED', invoiceId: 'inv-1', arStatus: 'UNPAID' }))).toBe('INVOICED')
+    expect(status.value(row('p', { status: 'DELIVERED', invoiceId: 'inv-2', arStatus: 'PAID' }))).toBe('PAID')
   })
 
-  it('reads RELEASED for any load past Load Review, whatever its stop status (Ryne 2026-11-14)', () => {
-    expect(status.value(row('o', { status: 'OPEN', arStatus: 'UNBILLED' }))).toBe('RELEASED')
-    expect(status.value(row('e', { status: 'IN_TRANSIT', readyToInvoiceAt: '2026-02-01T00:00:00.000Z' }))).toBe('RELEASED')
-    expect(status.value(row('c', { status: 'CANCELED', arStatus: 'UNBILLED' }))).not.toBe('RELEASED')
+  it('any load past Load Review reads its invoice stage, whatever its stop status (Ryne 2026-11-14)', () => {
+    expect(displayStatusOf(row('o', { status: 'OPEN', arStatus: 'UNBILLED' }))).toBe('RELEASED')
+    expect(status.value(row('e', { status: 'IN_TRANSIT', readyToInvoiceAt: '2026-02-01T00:00:00.000Z' }))).toBe('READY TO INVOICE')
+    expect(displayStatusOf(row('c', { status: 'CANCELED', arStatus: 'UNBILLED' }))).not.toBe('RELEASED')
+  })
+
+  it('an imported order with only an invoice number, or an OTR queue row, is released', () => {
+    expect(displayStatusOf(row('n', { status: 'DELIVERED', invoiceNumber: '14878' }))).toBe('RELEASED')
+    expect(displayStatusOf(row('f', { status: 'DELIVERED', factoringItemId: '14878' }))).toBe('RELEASED')
   })
 
   it('leaves unreleased and voided rows as they were', () => {
