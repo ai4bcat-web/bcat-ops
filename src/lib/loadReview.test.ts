@@ -422,7 +422,9 @@ describe('factoring fields (Ryne 2026-11-14)', () => {
   })
 
   it('imported history and the server extras do not repeat it', () => {
-    expect(failingReasons(evaluateLoadReview({ row: delivered({ factorGaps: ['PO_MISSING'], legacyImported: true }) })).some((r) => r.code.startsWith('FACTOR_'))).toBe(false)
+    expect(failingReasons(evaluateLoadReview({ row: delivered({ factorGaps: ['PO_MISSING'], legacyImported: true, loadReviewPushedAt: null }) })).some((r) => r.code.startsWith('FACTOR_'))).toBe(false)
+    // An import that was pushed into Load Review is live freight (14860), so it is checked like any other load.
+    expect(failingReasons(evaluateLoadReview({ row: delivered({ factorGaps: ['PO_MISSING'], legacyImported: true, loadReviewPushedAt: '2026-11-16T15:04:03.540Z' }) })).some((r) => r.code.startsWith('FACTOR_'))).toBe(true)
     expect(failingReasons(evaluateLoadReview({ row: delivered({ factorGaps: ['PO_MISSING'] }), extras: [] })).some((r) => r.code.startsWith('FACTOR_'))).toBe(false)
   })
 })

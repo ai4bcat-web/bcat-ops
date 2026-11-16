@@ -12,6 +12,7 @@
  * Imports are relative and alias-free: the Lambda bundles `loadReviewExtras` and
  * `loadReviewRefusal` so the server refuses on exactly the sentences the page shows.
  */
+import { isLegacyHistory } from './legacyHistory'
 import { stopPlace } from './stopPlace'
 import type { ApStatus, ArStatus, AssignmentType, LoadWorkflowStatus, ShipmentBuildState, ShipmentStatus } from '../types/tms'
 import {
@@ -395,17 +396,17 @@ export function evaluateLoadReview(input: {
     // The release gate (supplied or derived from the row) already owns POD; the
     // requirement list stays the same, the sentence is not said twice.
     reasons.push(...loadReviewExtras({
-      shipment: { legacyImported: row.legacyImported, ownFleet: isOwnFleetReviewLoad(row) },
+      shipment: { legacyImported: isLegacyHistory(row), ownFleet: isOwnFleetReviewLoad(row) },
       facts: reviewFactsOfRow(row),
       requirements: reviewRequirementsForLoad(input.requirements ?? DEFAULT_REVIEW_REQUIREMENTS, row).filter((key) => key !== 'podReceived'),
     }))
     // Ryne 2026-11-14: a factored load cannot leave Load Review without what OTR needs from booking. The server's
     // extras carry the same list (with its full sentences) once the drawer has read them.
-    for (const code of row.legacyImported === true ? [] : row.factorGaps ?? []) {
+    for (const code of isLegacyHistory(row) ? [] : row.factorGaps ?? []) {
       const tab: LoadReviewTab = code.startsWith('PICKUP') || code.startsWith('DELIVERY') ? 'stops' : 'overview'
       reasons.push(reason(`FACTOR_${code}`, `Missing for factoring: ${FACTOR_GAP_LABEL[code]}`, 'details', openTab(tab)))
     }
-    if (row.legacyImported !== true) {
+    if (!isLegacyHistory(row)) {
       reasons.push(...customerBillingReasons(row.customerBillingGaps, { skipBillingMethod: (row.factorGaps ?? []).includes('BILLING_METHOD') }))
     }
   }

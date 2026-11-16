@@ -73,6 +73,7 @@ import {
   supersede,
 } from '../../../src/lib/shipmentDocuments'
 import { isCarShipperLoad } from '../../../src/lib/carShipper'
+import { isLegacyHistory } from '../../../src/lib/legacyHistory'
 import { customerRefOf, type CustomerRefReference } from '../../../src/lib/customerRef'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { planPendingCarrierBills, readPendingBillContext, writePendingBill } from '../_shared/pendingCarrierBill'
@@ -264,7 +265,7 @@ export function customerDocGate(args: {
     customer: args.customer as Pick<CustomerRecord, 'requiredDocsForInvoice'> | null,
     settings: args.settings as Pick<TmsSettings, 'defaultRequiredDocs' | 'requiredCarrierUploadTypes'> | null,
     scope: 'CUSTOMER',
-    legacyImported: args.bundle.shipment?.legacyImported === true,
+    legacyImported: isLegacyHistory(args.bundle.shipment as { legacyImported?: boolean | null; loadReviewPushedAt?: string | null } | null),
     carShipper: isCarShipperLoad(args.bundle.shipment as { revDivision?: string | null } | null),
     revDivision: (args.bundle.shipment as { revDivision?: string | null } | null)?.revDivision ?? null,
     // Own fleet: the customer's tender on the load counts as the outside rate confirmation (Ryne 2026-11-16).
@@ -1441,7 +1442,7 @@ function reviewExtras(bundle: Bundle, order: Row, customer: Row | null, settings
   return carShippingReasons([
     ...loadReviewExtras({
       shipment: {
-        legacyImported: bundle.shipment.legacyImported === true,
+        legacyImported: isLegacyHistory(bundle.shipment as { legacyImported?: boolean | null; loadReviewPushedAt?: string | null }),
         // Asset load (revenue division ASSETS or own fleet): needs no carrier rate, expense or profit.
         ownFleet: assetLoadOf(bundle),
       },
@@ -1459,7 +1460,7 @@ function reviewExtras(bundle: Bundle, order: Row, customer: Row | null, settings
 /** The factoring gaps, then the customer's billing gaps (every customer: billing method and AP e-mail), said once. */
 function factorAndCustomerReasons(bundle: Bundle, order: Row, customer: Row | null): LoadReviewReason[] {
   const factor = factorReviewReasons(bundle, order, customer)
-  if (bundle.shipment.legacyImported === true) return factor
+  if (isLegacyHistory(bundle.shipment as { legacyImported?: boolean | null; loadReviewPushedAt?: string | null })) return factor
   return [
     ...factor,
     ...customerBillingReasons(customerBillingGaps(customer as unknown as CustomerBillingFacts | null, {
@@ -1477,7 +1478,7 @@ function factorAndCustomerReasons(bundle: Bundle, order: Row, customer: Row | nu
  * driver's status update simply does not happen yet; the status update itself is never refused. Imported history is exempt.
  */
 function factorReviewReasons(bundle: Bundle, order: Row, customer: Row | null): LoadReviewReason[] {
-  if (bundle.shipment.legacyImported === true) return []
+  if (isLegacyHistory(bundle.shipment as { legacyImported?: boolean | null; loadReviewPushedAt?: string | null })) return []
   const orderId = String(order.id ?? '')
   const stops: Stop[] = []
   for (const load of bundle.loads) {
@@ -1540,6 +1541,19 @@ export async function pushToReviewVerdict(deps: DocumentDeps, shipmentId: string
   return { shipment, reasons }
 }
 
+/**
+ * An imported shipment stops being exempt history the moment it is pushed into Load Review (isLegacyHistory), so the
+ * cached document gate on its order has to be worked out again under the live rules: the cache an import wrote says
+ * "nothing missing", and Load Review reads that cache. Called right after the push stamp is written.
+ */
+export async function recacheAfterReviewPush(deps: DocumentDeps, shipmentId: string, pushedAt: string): Promise<void> {
+  const bundle = await readBundle(deps.store, shipmentId)
+  if (bundle.shipment.legacyImported !== true) return
+  const pushed: Bundle = { ...bundle, shipment: { ...bundle.shipment, loadReviewPushedAt: pushedAt } }
+  const writes = await recacheDocGates(deps, pushed, bundle.documents, pushedAt)
+  if (writes.length > 0) await transact(deps.store.db, writes, 'document gate cache')
+}
+
 /** Only the literal `{ source: 'LOAD_REVIEW' }` counts; anything else is an ordinary release. */
 function reviewPayload(value: unknown): { source: 'LOAD_REVIEW' } | null {
   if (value == null || typeof value !== 'object') return null
@@ -1575,7 +1589,7 @@ export async function reviewLoad(deps: DocumentDeps, input: Row): Promise<Row> {
     salesRepId: bundle.shipment.salesRepId ?? null,
     revDivision: bundle.shipment.revDivision ?? null,
     revSubdivision: bundle.shipment.revSubdivision ?? null,
-    legacyImported: bundle.shipment.legacyImported === true,
+    legacyImported: isLegacyHistory(bundle.shipment as { legacyImported?: boolean | null; loadReviewPushedAt?: string | null }),
     pendingDocReviewCount: bundle.documents.filter((doc) => doc.status !== 'VOID' && doc.reviewStatus === 'PENDING' && doc.type !== 'POD').length,
   }
 }
