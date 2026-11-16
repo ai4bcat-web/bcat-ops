@@ -123,12 +123,12 @@ export const DEFAULT_ALJEX_PROFILE: AljexProfile = {
     AIR: ft('AIR'),
     OCN: ft('OCEAN'),
     R: ft('RAIL'),
-    // Vehicle-transport guess (plan §5.6 rule 2, proposed, Ryne to confirm O-5/O-7).
-    V: ft('FTL', 'CAR_SHIPPING'),
-    VA: ft('FTL', 'CAR_SHIPPING'),
-    VH: ft('FTL', 'CAR_SHIPPING'),
-    VM: ft('FTL', 'CAR_SHIPPING'),
-    VZ: ft('FTL', 'CAR_SHIPPING'),
+    // V* are van-type codes, not vehicle transport: the type letter never picks a division (Ryne 2026-11-16, 239 loads were mis-tagged CAR_SHIPPING).
+    V: ft('FTL'),
+    VA: ft('FTL'),
+    VH: ft('FTL'),
+    VM: ft('FTL'),
+    VZ: ft('FTL'),
     // Meaning unknown: FTL, the code is preserved as an order reference (D4b).
     STRA: ft('FTL'),
     ZAK: ft('FTL'),
@@ -209,7 +209,6 @@ export const DEFAULT_ALJEX_PROFILE: AljexProfile = {
   ownerOperatorCarrierIds: [],
   divisionRules: [
     { when: 'ownAsset', division: 'ASSETS' },
-    { when: 'typeCodes', division: 'CAR_SHIPPING', typeCodes: ['V', 'VA', 'VH', 'VM', 'VZ'] },
     { when: 'carrierIds', division: 'OWNER_OPERATOR', carrierIds: [] },
     // Aljex Rev Type (AW-CDE-plan C.5): behind every specific rule above, ahead of the default.
     { when: 'revType', division: 'BROKERAGE', revType: 'B' },

@@ -77,7 +77,7 @@ import {
   validateNotificationSubscriptions,
   validateNotificationWebhooks,
 } from '../../../src/lib/brokerage/notifications'
-import { DIVISION_REP_KEYS, parseDivisionSalesReps } from '../../../src/lib/divisionSalesRep'
+import { DIVISION_REP_KEYS, parseDivisionRepConfigs } from '../../../src/lib/divisionSalesRep'
 import { validatePaymentTerms } from '../../../src/lib/brokerage/paymentTerms'
 import {
   IMPORT_ENTITIES,
@@ -2263,10 +2263,10 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
     notificationDefaults: keep(input.notificationDefaults, validateNotificationDefaults, 'notificationDefaults'),
     divisionSalesReps: keep(input.divisionSalesReps, (v) => {
       if (v === null) return null
-      const map = parseDivisionSalesReps(v)
+      const map = parseDivisionRepConfigs(v)
       const bad = Object.keys(map).filter((k) => !(DIVISION_REP_KEYS as readonly string[]).includes(k))
       if (bad.length) throw new Error(`divisionSalesReps: unknown division ${bad.join(', ')}`)
-      return map
+      return Object.fromEntries(Object.entries(map).map(([k, c]) => [k, c.allowed.length > 1 ? c : c.default]))
     }, 'divisionSalesReps'),
     progressSteps: keep(input.progressSteps, validateProgressSteps, 'progressSteps'),
     costManualEntries: keep(input.costManualEntries, validateCostManualEntries, 'costManualEntries'),
