@@ -294,7 +294,11 @@ function gateFromRow(row: LoadReviewRow): LoadReviewReason[] {
     out.push(reason('NOT_DELIVERED', `Not delivered yet (status ${row.status})`, 'details', GATE_CODE_TAB.NOT_DELIVERED))
   }
   if (row.docsMissing == null) {
-    out.push(reason('DOCS_UNCHECKED', 'Documents not checked yet', 'documents', GATE_CODE_TAB.DOC_MISSING))
+    // Unchecked only matters when this customer needs a POD or an RC at all (AUTO SHIPPER needs neither).
+    const notRequired = row.docsNotRequired ?? []
+    if (!(notRequired.includes('POD') && notRequired.includes('RATE_CON'))) {
+      out.push(reason('DOCS_UNCHECKED', 'Documents not checked yet', 'documents', GATE_CODE_TAB.DOC_MISSING))
+    }
   } else {
     // A cache written before BOL became optional may still list it; it never blocks.
     // A document the customer does not need never blocks, even on a cache written before the customer said so.
