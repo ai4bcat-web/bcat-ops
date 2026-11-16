@@ -1,7 +1,8 @@
 import { TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { parseEmailList, type BillingMethod } from '@/lib/billingMethod'
 import type { RemitTo } from '@/types/tms'
-import { EmailListField } from './EmailListField'
+import { apEmailTokens } from '@/lib/apEmails'
+import { EmailChipsInput } from './EmailChipsInput'
 import type { CustomerFormValue } from './useCustomerForm'
 
 const BILLING_METHOD_OPTIONS: { value: BillingMethod | ''; label: string }[] = [
@@ -48,13 +49,13 @@ export function BillingMethodFields({
           : 'Required for every customer. The first address is the main one; every address listed here receives the invoice and the aging statement.'}
         error={errors.apEmail ?? errors.apEmailsExtra}
       >
-        <EmailListField
-          initial={[value.apEmail, ...parseEmailList(value.apEmailsExtraText)]}
+        <EmailChipsInput
+          value={apEmailTokens({ apEmail: value.apEmail, apEmailsExtra: parseEmailList(value.apEmailsExtraText) })}
           label="AP e-mail"
-          placeholder="ap@customer.com"
-          onChange={(rows) => {
-            set('apEmail', rows[0] ?? '')
-            set('apEmailsExtraText', rows.slice(1).join('\n'))
+          placeholder="ap@customer.com — paste or type several, separated by commas"
+          onChange={(list) => {
+            set('apEmail', list[0] ?? '')
+            set('apEmailsExtraText', list.slice(1).join('\n'))
           }}
         />
       </TmsField>
@@ -82,12 +83,11 @@ export function BillingMethodFields({
       )}
       {!isFactor && (
         <TmsField label="Copy on invoices" error={errors.invoiceCopyEmails}>
-          <EmailListField
-            initial={parseEmailList(value.invoiceCopyText)}
+          <EmailChipsInput
+            value={parseEmailList(value.invoiceCopyText)}
             label="Copy on invoices"
             placeholder="copy@customer.com"
-            addLabel="+ Add copy address"
-            onChange={(rows) => set('invoiceCopyText', rows.join('\n'))}
+            onChange={(list) => set('invoiceCopyText', list.join('\n'))}
           />
         </TmsField>
       )}

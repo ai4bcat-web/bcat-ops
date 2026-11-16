@@ -15,16 +15,14 @@ import { toast } from 'sonner'
 import { TmsButton, TmsDialog, TmsInput } from '@/features/tms/kit'
 import { generateInvoice, getLoads, getShipment, graphqlErrorText, moveToManualInvoice, updateCustomer } from '@/lib/apiClient'
 import { isValidEmail } from '@/lib/billingMethod'
+import { apEmailStorage, apEmailTokens } from '@/lib/apEmails'
+import { EmailChipsInput } from '@/features/directory/components/EmailChipsInput'
 import { otrRejectionDetails } from '@/lib/otrRejection'
 import type { FactoringItem } from '@/types'
 import type { CustomerRecord, InvoiceRecord, ShipmentRecord } from '@/types/tms'
 import { SendReviewCarousel } from '@/features/ar/components/SendReviewCarousel'
 
 type StepState = 'todo' | 'busy' | 'done'
-
-function splitEmails(text: string): string[] {
-  return text.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean)
-}
 
 function StepHead({ n, title, state }: { n: number; title: string; state: StepState }) {
   return (
@@ -218,26 +216,27 @@ function CustomerForm({ customer, itemId, proNumber, reasonText, state, setState
   setError: (e: string | null) => void
   onSaved: (next: CustomerRecord) => void
 }) {
-  const [apEmail, setApEmail] = useState(customer.apEmail ?? '')
-  const [extra, setExtra] = useState((customer.apEmailsExtra ?? []).join(', '))
+  const [emails, setEmails] = useState<string[]>(() => apEmailTokens(customer))
   const [terms, setTerms] = useState(customer.paymentTermsDays != null ? String(customer.paymentTermsDays) : '')
   const done = state === 'done'
 
   async function save() {
-    const extraList = splitEmails(extra)
+    const { apEmail: primary, apEmailsExtra } = apEmailStorage(emails)
+    const apEmail = primary ?? ''
+    const extraList = apEmailsExtra ?? []
     const termsDays = terms.trim() === '' ? null : Number(terms)
-    if (!isValidEmail(apEmail.trim())) { setError('Enter the customer’s AP e-mail: the invoice is e-mailed there.'); return }
-    if (!extraList.every(isValidEmail)) { setError('One of the extra e-mails does not look like an e-mail address.'); return }
+    if (!isValidEmail(apEmail)) { setError('Enter the customer’s AP e-mail: the invoice is e-mailed there.'); return }
+    if (!extraList.every(isValidEmail)) { setError('One of the e-mails does not look like an e-mail address.'); return }
     if (termsDays == null || !Number.isInteger(termsDays) || termsDays < 0 || termsDays > 365) { setError('Payment terms are required (days, e.g. 30).'); return }
     setError(null)
-    const changed = (customer.apEmail ?? '') !== apEmail.trim()
+    const changed = (customer.apEmail ?? '') !== apEmail
       || (customer.apEmailsExtra ?? []).join(',') !== extraList.join(',')
       || customer.paymentTermsDays !== termsDays
     if (!changed) { setState('done'); return }
     setState('busy')
     try {
       const next = await updateCustomer(customer.id, {
-        apEmail: apEmail.trim(),
+        apEmail,
         apEmailsExtra: extraList,
         paymentTermsDays: termsDays,
         changeReason: `OTR rejected PRO ${proNumber} (${reasonText}); invoicing manually`,
@@ -254,14 +253,10 @@ function CustomerForm({ customer, itemId, proNumber, reasonText, state, setState
 
   return (
     <>
-      <label className="flex flex-col gap-1" htmlFor={`fix-ap-${itemId}`}>
-        <span className="text-xs font-semibold tms-muted">AP / invoice e-mail (required)</span>
-        <TmsInput id={`fix-ap-${itemId}`} type="email" value={apEmail} disabled={done} placeholder="ap@customer.com" onChange={(e) => setApEmail(e.target.value)} />
-      </label>
-      <label className="flex flex-col gap-1" htmlFor={`fix-ap-extra-${itemId}`}>
-        <span className="text-xs font-semibold tms-muted">More e-mails for the invoice (optional, comma separated)</span>
-        <TmsInput id={`fix-ap-extra-${itemId}`} value={extra} disabled={done} onChange={(e) => setExtra(e.target.value)} />
-      </label>
+      <div className="flex flex-col gap-1">
+        <span className="text-xs font-semibold tms-muted">AP / invoice e-mails (required; every address gets the invoice)</span>
+        <EmailChipsInput id={`fix-ap-${itemId}`} label="AP e-mail" value={emails} disabled={done} onChange={setEmails} />
+      </div>
       <label className="flex flex-col gap-1" htmlFor={`fix-terms-${itemId}`}>
         <span className="text-xs font-semibold tms-muted">Payment terms, days (required)</span>
         <TmsInput id={`fix-terms-${itemId}`} inputMode="numeric" value={terms} disabled={done} onChange={(e) => setTerms(e.target.value)} />

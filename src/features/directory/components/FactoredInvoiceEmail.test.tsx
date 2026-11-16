@@ -21,7 +21,7 @@ describe('AP e-mail for every customer (Ryne 2026-11-16: required, factored cust
     render(<Harness initial={{ billingMethod: 'FACTOR', apEmail: 'ap@motus.test' }} />)
     expect(screen.getByText('AP e-mails (required)')).toBeTruthy()
     expect(screen.getByText(/Required for every customer\. This customer factors/)).toBeTruthy()
-    expect((screen.getByLabelText('AP e-mail 1') as HTMLInputElement).value).toBe('ap@motus.test')
+    expect(screen.getAllByTestId('email-chip').map((c) => c.textContent)).toContain('ap@motus.test')
     expect(screen.getByLabelText('Notice of assignment email')).toBeTruthy()
   })
   it('says it is required for a manual customer', () => {

@@ -22,6 +22,8 @@ import { formatDateTimeInput, fromDateTimeInput } from '@/lib/date'
 import type { CustomerRecord, OrderReference, ShipmentBundle } from '@/types/tms'
 import type { Stop } from '@/types'
 import { DEFAULT_REVIEW_REQUIREMENTS } from '@/lib/reviewRequirements'
+import { apEmailList, apEmailTokens } from '@/lib/apEmails'
+import { EmailChipsInput } from '@/features/directory/components/EmailChipsInput'
 
 function Mark({ ok }: { ok: boolean }) {
   return ok ? <CheckCircle2 size={14} aria-label="OK" className="lr-icon-ok" /> : <XCircle size={14} aria-label="Missing" className="lr-icon-bad" />
@@ -98,7 +100,7 @@ export function ReviewFixPanel({ shipmentId, readOnly, busy, onSaved, failing }:
   </div>
 }
 
-type CustomerPatchFields = Pick<CustomerRecord, 'billingMethod' | 'customerType' | 'mcNumber' | 'apEmail' | 'paymentTermsDays' | 'reviewRequirements'>
+type CustomerPatchFields = Pick<CustomerRecord, 'billingMethod' | 'customerType' | 'mcNumber' | 'apEmail' | 'apEmailsExtra' | 'paymentTermsDays' | 'reviewRequirements'>
 
 function CustomerFix({ customer, customers, linked, off, flagged, onLink, onSave }: {
   customer: CustomerRecord | null
@@ -139,8 +141,13 @@ function CustomerFix({ customer, customers, linked, off, flagged, onLink, onSave
           </TmsSelect></label>
         <label className={`lr-fix-field ${factored && value('customerType') !== 'SHIPPER' && !text(value('mcNumber')) ? 'lr-fix-flag' : ''}`}>MC #
           <TmsInput aria-label="MC number" value={value('mcNumber') ?? ''} disabled={off} onChange={(e) => setDraft((d) => ({ ...d, mcNumber: e.target.value }))} /></label>
-        <label className={`lr-fix-field ${docOn('apEmail') && !text(value('apEmail')) ? 'lr-fix-flag' : ''}`}>AP / invoice e-mail{!docOn('apEmail') && <span className="tms-muted text-xs"> (not required)</span>}
-          <TmsInput aria-label="AP e-mail" type="email" value={value('apEmail') ?? ''} disabled={off} onChange={(e) => setDraft((d) => ({ ...d, apEmail: e.target.value }))} /></label>
+        <div className={`lr-fix-field ${docOn('apEmail') && apEmailList({ apEmail: value('apEmail'), apEmailsExtra: value('apEmailsExtra') }).length === 0 ? 'lr-fix-flag' : ''}`}>AP / invoice e-mails{!docOn('apEmail') && <span className="tms-muted text-xs"> (not required)</span>}
+          <EmailChipsInput
+            label="AP e-mail"
+            disabled={off}
+            value={apEmailTokens({ apEmail: value('apEmail'), apEmailsExtra: value('apEmailsExtra') })}
+            onChange={(list) => setDraft((d) => ({ ...d, apEmail: list[0] ?? null, apEmailsExtra: list.length > 1 ? list.slice(1) : null }))}
+          /></div>
         <label className={`lr-fix-field ${!value('paymentTermsDays') ? 'lr-fix-flag' : ''}`}>Payment terms (days)
           <TmsInput aria-label="Payment terms days" type="number" min={0} value={value('paymentTermsDays') ?? ''} disabled={off} onChange={(e) => setDraft((d) => ({ ...d, paymentTermsDays: e.target.value === '' ? null : Number(e.target.value) }))} /></label>
         <fieldset className="lr-fix-field"><legend>Required to invoice</legend>

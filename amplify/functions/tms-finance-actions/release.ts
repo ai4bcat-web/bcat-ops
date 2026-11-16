@@ -16,6 +16,7 @@
  * The permission (owner, ADMIN, or `page-billingRelease`) is enforced by the router before any
  * function here runs.
  */
+import { apEmailList, type ApEmailFields } from '../../../src/lib/apEmails'
 import { assertString, optionalString, assertRecord, type Caller } from '../_shared/actionInputs'
 import { assertNotSquareInvoiced } from '../../../src/lib/invoiceDelivery'
 import { emailInvoice, generateInvoice, assertCustomerResolved, readOrderContext } from './invoices'
@@ -66,9 +67,7 @@ function methodOf(customer: CustomerRecord | null, revDivision?: string | null):
 }
 
 function apEmailOf(customer: CustomerRecord | null): string | null {
-  const raw = (customer as unknown as Row | null)?.apEmail
-  const email = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
-  return email || null
+  return apEmailList(customer as unknown as ApEmailFields | null)[0] ?? null
 }
 
 /** Over-limit is a flag: any failure reading the book simply yields no flag. */
@@ -202,9 +201,8 @@ export function manualInvoiceRecipients(
   customer: CustomerRecord | null,
   alwaysCopy: unknown,
 ): { to: string[]; cc: string[] } {
-  const ap = apEmailOf(customer)
-  const extra = normalizeEmailList((customer as unknown as Row | null)?.apEmailsExtra ?? [], 'apEmailsExtra')
-  const to = [...(ap ? [ap] : []), ...extra].filter((email, index, all) => all.indexOf(email) === index)
+  // One reader for the AP list (legacy "a@x.com, b@x.com" strings split): src/lib/apEmails.ts.
+  const to = apEmailList(customer as unknown as ApEmailFields | null)
   const own = normalizeEmailList((customer as unknown as Row | null)?.invoiceCopyEmails ?? [], 'invoiceCopyEmails')
   const company = normalizeEmailList(alwaysCopy ?? [], 'invoiceAlwaysCopyEmails')
   const cc = [...own, ...company].filter((email, index, all) => all.indexOf(email) === index && !to.includes(email))
