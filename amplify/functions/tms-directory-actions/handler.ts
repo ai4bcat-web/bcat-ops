@@ -11,6 +11,7 @@
  * to DynamoDB. Load repoints during merge use the generated AppSync mutation
  * (updateLoad) with IAM auth so subscriptions fire.
  */
+import { splitEmailText } from '../../../src/lib/apEmails'
 import { getAmplifyDataClientConfig, type DataClientEnv } from '@aws-amplify/backend-function/runtime'
 import { Amplify } from 'aws-amplify'
 import { generateClient } from 'aws-amplify/data'
@@ -1100,9 +1101,12 @@ function resolveBillingFields(
   const extraRaw = 'apEmailsExtra' in input ? optionalStringArray(input.apEmailsExtra, 254) : before.apEmailsExtra
   const copyRaw = 'invoiceCopyEmails' in input ? optionalStringArray(input.invoiceCopyEmails, 254) : before.invoiceCopyEmails
   const copy = copyRaw ? [...new Set(copyRaw.map((e) => e.toLowerCase()))] : null
-  const apLower = apRaw ? apRaw.toLowerCase() : null
-  // Extras are lowercased and de-duplicated, and never repeat the primary address.
-  const extra = extraRaw ? [...new Set(extraRaw.map((e) => e.toLowerCase()))].filter((e) => e !== apLower) : null
+  // A pasted "a@x.com, b@x.com" in either field becomes one address per entry: the first is the main AP e-mail,
+  // the rest go to the extras (src/lib/apEmails.ts). Extras are lowercased, de-duplicated, never repeat the main one.
+  const apTokens = splitEmailText(apRaw)
+  const apLower = apTokens[0] ?? null
+  const extraTokens = [...apTokens.slice(1), ...(extraRaw ?? []).flatMap((e) => splitEmailText(e))]
+  const extra = extraRaw || apTokens.length > 1 ? [...new Set(extraTokens)].filter((e) => e !== apLower) : null
   const after: BillingFieldsState = {
     billingMethod: method,
     apEmail: apLower,

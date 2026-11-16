@@ -4,6 +4,7 @@
  * directory Lambda all read the same rules.
  */
 import { normalizeCustomerName } from './customerDuplicates'
+import { apEmailList, splitEmailText } from './apEmails'
 
 export type BillingMethod = 'FACTOR' | 'MANUAL'
 export const BILLING_METHODS: readonly BillingMethod[] = ['FACTOR', 'MANUAL']
@@ -36,14 +37,9 @@ export function parseEmailList(text: string): string[] {
   return out
 }
 
-/** Every To address for a manual invoice: the primary AP e-mail first, then the extras, lowercased and de-duplicated. */
+/** Every To address for a manual invoice: the main AP e-mail first, then the extras; legacy comma lists split (apEmails.ts). */
 export function allApEmails(c: { apEmail?: string | null; apEmailsExtra?: string[] | null } | null | undefined): string[] {
-  const out: string[] = []
-  for (const raw of [c?.apEmail, ...(c?.apEmailsExtra ?? [])]) {
-    const e = String(raw ?? '').trim().toLowerCase()
-    if (e && !out.includes(e)) out.push(e)
-  }
-  return out
+  return apEmailList(c)
 }
 
 export function isInternalEmail(email: string): boolean {
@@ -160,14 +156,17 @@ export function validateBillingFields(c: BillingFields & { invoiceCopyEmails?: s
   const errors: Record<string, string> = {}
   if (c.billingMethod && !BILLING_METHODS.includes(c.billingMethod)) errors.billingMethod = 'Choose Factor or Manual'
   else if (opts.requireAll && !c.billingMethod) errors.billingMethod = 'Choose how this customer is billed: Factor or Manual invoice'
-  const ap = (c.apEmail ?? '').trim()
+  const apTokens = splitEmailText(c.apEmail)
+  const ap = apTokens[0] ?? ''
   const apRequired = opts.apEmailRequired !== false
   if (apRequired && c.billingMethod === 'MANUAL' && !ap) errors.apEmail = 'Manual billing needs the customer’s AP e-mail'
   else if (apRequired && opts.requireAll && !ap) errors.apEmail = 'Every customer needs an AP e-mail'
-  else if (ap && !isValidEmail(ap)) errors.apEmail = 'Enter a valid e-mail address'
+  else if (apTokens.some((e) => !isValidEmail(e))) {
+    errors.apEmail = apTokens.length === 1 ? 'Enter a valid e-mail address' : `Not a valid e-mail: ${apTokens.filter((e) => !isValidEmail(e)).join(', ')}`
+  }
   const noa = (c.noaEmail ?? '').trim()
   if (noa && !isValidEmail(noa)) errors.noaEmail = 'Enter a valid e-mail address'
-  const badExtra = (c.apEmailsExtra ?? []).filter((e) => !isValidEmail(e))
+  const badExtra = (c.apEmailsExtra ?? []).flatMap((e) => splitEmailText(e)).filter((e) => !isValidEmail(e))
   if (badExtra.length) errors.apEmailsExtra = `Not a valid e-mail: ${badExtra.join(', ')}`
   const bad = (c.invoiceCopyEmails ?? []).filter((e) => !isValidEmail(e))
   if (bad.length) errors.invoiceCopyEmails = `Not a valid e-mail: ${bad.join(', ')}`

@@ -1013,6 +1013,18 @@ describe('UPSERT_CUSTOMER', () => {
       }))).rejects.toThrow('Not a valid e-mail: nope')
     })
 
+    it('splits a pasted AP e-mail list into the main address and the extras (14815 WHIMSY)', async () => {
+      send.mockImplementation((cmd: MockCommand) => {
+        if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+        if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+        return Promise.resolve({})
+      })
+      const result = await handler(event('UPSERT_CUSTOMER', {
+        name: 'Whimsy', billingMethod: 'MANUAL', apEmail: 'gomara@whimsytrucking.com, JGUDEL@whimsytrucking.com',
+      }))
+      expect(result).toMatchObject({ apEmail: 'gomara@whimsytrucking.com', apEmailsExtra: ['jgudel@whimsytrucking.com'] })
+    })
+
     it('stores a notice-of-assignment e-mail lowercased, keeps it when absent, and rejects a bad one', async () => {
       send.mockImplementation((cmd: MockCommand) => {
         if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })

@@ -4,6 +4,8 @@
  * board, Load Review and the tms-shipment-actions Lambda read the same rule. The AP e-mail can be waived per customer
  * (customerApEmailRequired in reviewRequirements.ts; Ryne 2026-11-16: AUTO SHIPPER); callers pass that in.
  */
+import { apEmailList } from './apEmails'
+
 export type CustomerBillingGapCode = 'CUSTOMER_BILLING_METHOD' | 'CUSTOMER_AP_EMAIL'
 
 export interface CustomerBillingFacts {
@@ -19,14 +21,9 @@ export const CUSTOMER_BILLING_GAP_MESSAGE: Record<CustomerBillingGapCode, string
   CUSTOMER_AP_EMAIL: 'Customer has no AP e-mail',
 }
 
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-/** The customer's AP e-mails that look like addresses, primary first. */
+/** The customer's AP e-mails that look like addresses, primary first. Legacy "a@x.com, b@x.com" strings are split (apEmails.ts). */
 export function customerApEmails(customer: CustomerBillingFacts | null | undefined): string[] {
-  if (!customer) return []
-  return [customer.apEmail, ...(customer.apEmailsExtra ?? [])]
-    .map((v) => (v ?? '').trim())
-    .filter((v) => EMAIL.test(v))
+  return apEmailList(customer)
 }
 
 /** Factor or Manual. A legacy `factored` flag counts as Factor, as isFactorBilled reads it. */

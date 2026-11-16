@@ -4,6 +4,7 @@
  * so the two cannot drift. Editing an existing customer never runs these.
  */
 import { isValidEmail } from './billingMethod'
+import { splitEmailText } from './apEmails'
 
 /** Ivan Cartage, the top-level OwnershipDivision a new customer's revenue defaults to. */
 export const DEFAULT_NEW_CUSTOMER_DIVISION = 'ASSETS'
@@ -63,9 +64,10 @@ export function newCustomerProblems(c: NewCustomerFields): NewCustomerProblem[] 
     out.push({ field: 'billingMethod', label: 'Billing method', message: 'Choose Factor or Invoice manually' })
   }
   if (blank(c.defaultDivisionKey)) out.push({ field: 'defaultDivisionKey', label: 'Default rev division', message: 'Choose a default rev division' })
-  const ap = (c.apEmail ?? '').trim()
-  if (!ap) out.push({ field: 'apEmail', label: 'AP e-mail 1', message: 'Accounts payable e-mail 1 is required' })
-  else if (!isValidEmail(ap)) out.push({ field: 'apEmail', label: 'AP e-mail 1', message: 'Enter a valid e-mail address' })
+  // A pasted "a@x.com, b@x.com" is a list (apEmails.ts); every address in it must be valid.
+  const apTokens = splitEmailText(c.apEmail)
+  if (apTokens.length === 0) out.push({ field: 'apEmail', label: 'AP e-mail 1', message: 'Accounts payable e-mail 1 is required' })
+  else if (apTokens.some((e) => !isValidEmail(e))) out.push({ field: 'apEmail', label: 'AP e-mail 1', message: 'Enter a valid e-mail address' })
   const bad = (c.invoiceCopyEmails ?? []).filter((e) => !isValidEmail(e))
   if (bad.length) out.push({ field: 'invoiceCopyEmails', label: 'AP copy-to e-mail', message: `Not a valid e-mail: ${bad.join(', ')}` })
   return out

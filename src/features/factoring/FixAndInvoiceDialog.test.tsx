@@ -62,7 +62,8 @@ describe('Fix & invoice manually', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('AP e-mail')
     expect(api.updateCustomer).not.toHaveBeenCalled()
 
-    fireEvent.change(screen.getByLabelText(/AP \/ invoice e-mail/), { target: { value: 'ap@acme.com' } })
+    fireEvent.change(screen.getByLabelText('AP e-mail'), { target: { value: 'ap@acme.com' } })
+    fireEvent.keyDown(screen.getByLabelText('AP e-mail'), { key: 'Enter' })
     fireEvent.click(screen.getByTestId('fix-save-customer'))
     await waitFor(() => expect(api.updateCustomer).toHaveBeenCalledWith('c1', expect.objectContaining({
       apEmail: 'ap@acme.com', paymentTermsDays: 30, changeSource: 'Factoring · OTR rejected',
