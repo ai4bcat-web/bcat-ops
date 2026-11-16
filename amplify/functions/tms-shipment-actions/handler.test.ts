@@ -5304,6 +5304,36 @@ describe('READY_TO_INVOICE', () => {
       expect([...table(TABLES.audit).values()].some((row) => row.action === 'RECORD_BILL_PENDING')).toBe(true)
     })
 
+    it('is created for imported Aljex freight released through Load Review (14863)', async () => {
+      const ids = await deliveredCarrierLoad()
+      table(TABLES.shipment).set(ids.shipmentId, {
+        ...table(TABLES.shipment).get(ids.shipmentId)!, legacyImported: true, loadReviewPushedAt: '2026-11-13T21:21:08.545Z',
+      })
+      const result = await ready(ids.orderId, review) as { apRecords: { created: { carrierName: string; grossCents: number }[] } }
+      expect(result.apRecords.created.map((c) => [c.carrierName, c.grossCents])).toEqual([['SWIFT TRANSPORTATION', 140_000]])
+      expect(bills()).toHaveLength(1)
+    })
+
+    it('is not created for imported Aljex history released without a review', async () => {
+      const ids = await deliveredCarrierLoad()
+      table(TABLES.shipment).set(ids.shipmentId, { ...table(TABLES.shipment).get(ids.shipmentId)!, legacyImported: true })
+      await ready(ids.orderId)
+      expect(bills()).toEqual([])
+    })
+
+    it('RECONCILE_BILLING creates the missing AP record for imported freight that went through Load Review', async () => {
+      const ids = await deliveredCarrierLoad()
+      table(TABLES.shipment).set(ids.shipmentId, { ...table(TABLES.shipment).get(ids.shipmentId)!, legacyImported: true })
+      await ready(ids.orderId)
+      expect(bills()).toEqual([])
+      table(TABLES.shipment).set(ids.shipmentId, { ...table(TABLES.shipment).get(ids.shipmentId)!, loadReviewPushedAt: '2026-11-13T21:21:08.545Z' })
+      const check = await call('RECONCILE_BILLING', {}, ADMIN) as { gaps: { orderId: string }[] }
+      expect(check.gaps.map((g) => g.orderId)).toEqual([ids.orderId])
+      const fixed = await call('RECONCILE_BILLING', { createMissingFor: ids.orderId }, ADMIN) as { apRecords: { created: unknown[] } }
+      expect(fixed.apRecords.created).toHaveLength(1)
+      expect(bills()).toHaveLength(1)
+    })
+
     it('is not created twice when the assignment already has a bill', async () => {
       const ids = await deliveredCarrierLoad()
       const leg = [...table(TABLES.carrier).values()].find((row) => row.loadId === ids.loadId && row.status === 'ACTIVE')!
