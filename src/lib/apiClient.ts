@@ -2566,6 +2566,9 @@ let loadCarriersHaveLegs = true
 // field list, so a row could not tell a sent link from none. Own flag, dropped and retried on a backend that predates trackingAcceptedAt.
 const LOAD_CARRIER_V6_FIELDS = ['trackingLinkId', 'trackingStartedAt', 'trackingStoppedAt', 'trackingAcceptedAt']
 let loadCarriersHaveTracking = true
+// When tracking-automation texted the link by itself (2026-11-16). Own flag, dropped and retried before the deploy.
+const LOAD_CARRIER_V7_FIELDS = ['autoTrackingClaimAt']
+let loadCarriersHaveAutoTracking = true
 const loadCarrierFields = () => [
   LOAD_CARRIER_FIELDS,
   loadCarriersHaveCarrierV2 ? LOAD_CARRIER_V2_FIELDS.join(' ') : '',
@@ -2573,6 +2576,7 @@ const loadCarrierFields = () => [
   loadCarriersHaveAp ? LOAD_CARRIER_V4_FIELDS.join(' ') : '',
   loadCarriersHaveLegs ? LOAD_CARRIER_V5_FIELDS.join(' ') : '',
   loadCarriersHaveTracking ? LOAD_CARRIER_V6_FIELDS.join(' ') : '',
+  loadCarriersHaveAutoTracking ? LOAD_CARRIER_V7_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 
 /** Every LoadCarrier read, with a group dropped and retried if the backend predates it. */
@@ -2581,6 +2585,11 @@ async function readLoadCarriers<T>(run: (fields: string) => Promise<T>): Promise
     try {
       return withParsedPrefs(await run(loadCarrierFields()))
     } catch (err) {
+      if (loadCarriersHaveAutoTracking && fieldNamed(LOAD_CARRIER_V7_FIELDS, err)) {
+        console.warn('[apiClient] backend has no autoTrackingClaimAt on LoadCarrier yet — querying without it until deploy')
+        loadCarriersHaveAutoTracking = false
+        continue
+      }
       if (loadCarriersHaveTracking && fieldNamed(LOAD_CARRIER_V6_FIELDS, err)) {
         console.warn('[apiClient] backend has no tracking-link fields on LoadCarrier yet — querying without them until deploy')
         loadCarriersHaveTracking = false
@@ -9091,7 +9100,26 @@ export interface AutomationRunResult {
   mode: 'AUTO' | 'MANUAL'
   checked: number; acted: number; deferred: number; escalated: number; skipped: number; errors: number
   pod: { checked: number; requested: number; skipped: number; deferred: number }
+  trackingLinks?: { due: number; sent: number; off: number }
   reasons: string[]
+}
+
+export interface AutoTrackingPreviewRow {
+  shipmentId: string
+  shipmentNumber: string
+  loadId: string
+  loadCarrierId: string
+  carrierName: string | null
+  driverName: string | null
+  /** Masked, e.g. (312) ***-**67. */
+  phone: string
+  pickupAppt: string | null
+  decision: { kind: 'SEND' | 'WAIT' | 'SKIP'; sendAt: string | null; reason?: string }
+}
+/** Read-only: what the automatic tracking-link send would do for today's and tomorrow's pickups. Never sends. */
+export async function previewAutoTrackingLinks(): Promise<AutoTrackingPreviewRow[]> {
+  const out = await trackingAction<{ rows: AutoTrackingPreviewRow[] }>('PREVIEW_AUTO_TRACKING_LINKS', {})
+  return out.rows ?? []
 }
 /** One sweep of the tracking automation: `AUTO` honours the policy switches, `MANUAL` (admin) ignores them. */
 export async function runTrackingAutomation(input?: { mode?: 'AUTO' | 'MANUAL'; shipmentIds?: string[] }): Promise<AutomationRunResult> {

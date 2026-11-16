@@ -18,6 +18,7 @@ import { CustomersPanel } from './automation/CustomersPanel'
 import { DivisionsPanel } from './automation/DivisionsPanel'
 import { patchProblems } from './automation/policyPatch'
 import { TrackingAutomationEditor } from './automation/TrackingAutomationEditor'
+import { AutoTrackingPreview } from './automation/AutoTrackingPreview'
 import { ErrorText, GroupLabel, Hint, Loading, Panel, SettingsCard, Stack } from './settingsKit'
 
 type Tab = 'defaults' | 'divisions' | 'customers'
@@ -106,6 +107,7 @@ export function TrackingAutomationCard() {
           {tab === 'defaults' && (
             <>
               <TrackingAutomationEditor scope="GLOBAL" value={global} inherited={DEFAULT_AUTOMATION_POLICY} onChange={setGlobal} />
+              <AutoTrackingPreview enabled={normalizeTrackingAutomation(settings?.trackingAutomation).global.trackingLinkAuto === true} />
               <Panel>
                 <GroupLabel>Default check-call plan</GroupLabel>
                 <CheckCallPlanFields value={plan} onChange={(patch) => setPlan({ ...plan, ...patch })} />
@@ -144,6 +146,7 @@ export function TrackingAutomationCard() {
                 Checked {result.checked}, acted {result.acted}, deferred {result.deferred}, escalated {result.escalated},
                 skipped {result.skipped}, errors {result.errors}. POD: checked {result.pod.checked}, requested {result.pod.requested},
                 skipped {result.pod.skipped}, deferred {result.pod.deferred}.
+                {result.trackingLinks && ` Tracking links: due ${result.trackingLinks.due}, sent ${result.trackingLinks.sent}, switched off ${result.trackingLinks.off}.`}
               </span>
             </TmsAlert>
           )}

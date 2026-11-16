@@ -47,6 +47,11 @@ export type TemplatePlaceholder = (typeof TEMPLATE_PLACEHOLDERS)[number]
 export interface AutomationPolicy {
   checkCallsAuto: boolean
   podAuto: boolean
+  /**
+   * Text the driver the tracking link on the pickup day by itself (an hour before a timed
+   * pickup appointment, 08:00 Chicago without one). Off by default (Ryne 2026-11-16).
+   */
+  trackingLinkAuto: boolean
   podChannels: AutomationChannel[]
   quietHours: QuietHours
   templates: AutomationTemplates
@@ -69,6 +74,7 @@ const EMPTY_TEMPLATES: AutomationTemplates = {
 export const DEFAULT_AUTOMATION_POLICY: AutomationPolicy = {
   checkCallsAuto: false,
   podAuto: false,
+  trackingLinkAuto: false,
   podChannels: ['SMS', 'EMAIL'],
   quietHours: { enabled: true, start: '21:00', end: '06:00', timezone: TZ, channels: ['SMS'] },
   templates: EMPTY_TEMPLATES,
@@ -124,6 +130,7 @@ export function normalizeAutomationPatch(raw: unknown): AutomationPolicyPatch {
   if (!row) return out
   if (typeof row.checkCallsAuto === 'boolean') out.checkCallsAuto = row.checkCallsAuto
   if (typeof row.podAuto === 'boolean') out.podAuto = row.podAuto
+  if (typeof row.trackingLinkAuto === 'boolean') out.trackingLinkAuto = row.trackingLinkAuto
   const podChannels = channelList(row.podChannels)
   if (podChannels) out.podChannels = podChannels
   const quiet = normalizeQuietHours(row.quietHours)
@@ -173,7 +180,7 @@ export function validateAutomationPatch(raw: unknown): AutomationPolicyPatch {
   if (raw == null) return {}
   const row = asRecord(raw)
   if (!row) throw new Error('Automation settings must be an object')
-  for (const key of ['checkCallsAuto', 'podAuto'] as const) {
+  for (const key of ['checkCallsAuto', 'podAuto', 'trackingLinkAuto'] as const) {
     if (row[key] != null && typeof row[key] !== 'boolean') throw new Error(`${key} must be true or false`)
   }
   if (row.podChannels != null) {
@@ -266,11 +273,12 @@ export function resolveAutomation(ctx: AutomationContext): ResolvedAutomation {
     templates: { ...DEFAULT_AUTOMATION_POLICY.templates },
   }
   const policySource: ResolvedAutomation['policySource'] = {
-    checkCallsAuto: 'DEFAULT', podAuto: 'DEFAULT', podChannels: 'DEFAULT', quietHours: 'DEFAULT', templates: 'DEFAULT',
+    checkCallsAuto: 'DEFAULT', podAuto: 'DEFAULT', trackingLinkAuto: 'DEFAULT', podChannels: 'DEFAULT', quietHours: 'DEFAULT', templates: 'DEFAULT',
   }
   for (const [source, patch] of layers) {
     if (patch.checkCallsAuto !== undefined) { policy.checkCallsAuto = patch.checkCallsAuto; policySource.checkCallsAuto = source }
     if (patch.podAuto !== undefined) { policy.podAuto = patch.podAuto; policySource.podAuto = source }
+    if (patch.trackingLinkAuto !== undefined) { policy.trackingLinkAuto = patch.trackingLinkAuto; policySource.trackingLinkAuto = source }
     if (patch.podChannels !== undefined) { policy.podChannels = [...patch.podChannels]; policySource.podChannels = source }
     if (patch.quietHours !== undefined) { policy.quietHours = { ...patch.quietHours, channels: [...patch.quietHours.channels] }; policySource.quietHours = source }
     if (patch.templates) {

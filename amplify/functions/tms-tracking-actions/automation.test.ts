@@ -312,3 +312,77 @@ describe('runTrackingAutomation', () => {
     })
   })
 })
+
+describe('automatic tracking link (Ryne 2026-11-16)', () => {
+  // 2026-02-02 is CST: a 10:00 pickup → send at 09:00 = 15:00Z.
+  const pickupLoad = { status: 'BOOKED', pickupAppt: '2026-02-02T16:00:00.000Z', pickupApptType: 'exact', checkCallOpen: undefined }
+  const pickupShipment = { status: 'BOOKED', pickupAppt: '2026-02-02T16:00:00.000Z' }
+
+  function linkDeps(store: MemoryStore) {
+    const claimed = new Set<string>()
+    const send = vi.fn(async (loadCarrierId: string) => {
+      // The real dep's conditional write: one claim per leg, ever.
+      if (claimed.has(loadCarrierId)) return null
+      claimed.add(loadCarrierId)
+      return { smsStatus: 'SENT' }
+    })
+    const deps = makeDeps(store, {
+      queryShipmentsByPickup: async (status, from, to) =>
+        [...(store as unknown as { table(n: string): Map<string, Row> }).table('Shipment-test').values()].filter(
+          (s) => s.status === status && String(s.pickupAppt) >= from && String(s.pickupAppt) <= to,
+        ),
+      sendAutoTrackingLink: send,
+    })
+    return { deps, send }
+  }
+
+  it('sends nothing while the switch is off, and the preview still lists the load', async () => {
+    const store = new MemoryStore()
+    seed(store, { shipment: pickupShipment, load: pickupLoad })
+    now = '2026-02-02T15:05:00.000Z'
+    const { deps, send } = linkDeps(store)
+    const result = await runTrackingAutomation(deps, {}, SYSTEM)
+    expect(send).not.toHaveBeenCalled()
+    expect(result.trackingLinks).toEqual({ due: 1, sent: 0, off: 1 })
+    const { autoTrackingPass } = await import('./automation')
+    const rows = await autoTrackingPass(deps, { send: false, caller: SYSTEM })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ shipmentNumber: 'BC1001', phone: '(224) ***-**37', decision: { kind: 'SEND', sendAt: '2026-02-02T15:00:00.000Z' } })
+  })
+
+  it('sends once an hour before pickup when on, and never twice', async () => {
+    const store = new MemoryStore()
+    seed(store, { settings: { trackingAutomation: { global: { trackingLinkAuto: true } } }, shipment: pickupShipment, load: pickupLoad })
+    const { deps, send } = linkDeps(store)
+    now = '2026-02-02T14:55:00.000Z'
+    await runTrackingAutomation(deps, {}, SYSTEM)
+    expect(send).not.toHaveBeenCalled()
+    now = '2026-02-02T15:00:00.000Z'
+    const first = await runTrackingAutomation(deps, {}, SYSTEM)
+    expect(send).toHaveBeenCalledWith('lc-1')
+    expect(first.trackingLinks?.sent).toBe(1)
+    const second = await runTrackingAutomation(deps, {}, SYSTEM)
+    expect(second.trackingLinks?.sent).toBe(0)
+  })
+
+  it('skips a leg whose link was already sent by hand', async () => {
+    const store = new MemoryStore()
+    seed(store, {
+      settings: { trackingAutomation: { global: { trackingLinkAuto: true } } }, shipment: pickupShipment, load: pickupLoad,
+      carrier: { trackingLinkId: 'tok-1', trackingStartedAt: '2026-02-01T20:00:00.000Z' },
+    })
+    const { deps, send } = linkDeps(store)
+    now = '2026-02-02T15:30:00.000Z'
+    await runTrackingAutomation(deps, {}, SYSTEM)
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('a scoped run never texts drivers', async () => {
+    const store = new MemoryStore()
+    seed(store, { settings: { trackingAutomation: { global: { trackingLinkAuto: true } } }, shipment: pickupShipment, load: pickupLoad })
+    const { deps, send } = linkDeps(store)
+    now = '2026-02-02T15:30:00.000Z'
+    await runTrackingAutomation(deps, { shipmentIds: ['shp-1'] }, SYSTEM)
+    expect(send).not.toHaveBeenCalled()
+  })
+})

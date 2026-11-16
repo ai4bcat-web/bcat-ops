@@ -260,6 +260,8 @@ export type ShipmentRow = ShipmentRecord & {
   trackingStartedAt?: string | null
   trackingAcceptedAt?: string | null
   trackingStoppedAt?: string | null
+  /** Set when tracking-automation texted the link by itself. */
+  autoTrackingClaimAt?: string | null
   podRequestedAt?: string | null
   /** Carrier-scope paperwork still outstanding (the leg's own gate, not the order's). */
   legDocsMissing?: string[] | null

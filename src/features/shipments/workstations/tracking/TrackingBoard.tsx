@@ -163,6 +163,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
     onFocus,
     graceMinutes,
     prefsOf,
+    autoLinkOn,
     onAssignTracker,
     email,
     nameOf,
@@ -175,7 +176,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [pageSize, setPageSize] = useState(PAGE_SIZE)
 
-  const allColumns = useMemo(() => trackingColumns({ nowMs, nameOf, prefsOf }), [nowMs, nameOf, prefsOf])
+  const allColumns = useMemo(() => trackingColumns({ nowMs, nameOf, prefsOf, autoLinkOn }), [nowMs, nameOf, prefsOf, autoLinkOn])
   const prefs = useDenseGridPrefs({
     gridId: 'tracking',
     email,

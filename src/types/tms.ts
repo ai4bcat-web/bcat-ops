@@ -2133,6 +2133,8 @@ export interface LoadCarrierRecord {
   trackingStoppedAt?: string | null
   /** When the driver first accepted the tracking link (stamped once per sent link by tracking-api). */
   trackingAcceptedAt?: string | null
+  /** Set when tracking-automation texted the link by itself (never twice). */
+  autoTrackingClaimAt?: string | null
   // AT-plan MC0 — several carriers on one load
   /** `Stop.id`s of the load this carrier covers. Absent/empty = every stop. */
   legStopIds?: string[] | null
