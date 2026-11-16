@@ -347,6 +347,7 @@ import type {
   TmsSettings as TmsSettingsRecord,
 } from '../../../src/types/tms'
 import { carryStopState } from './stopCarry'
+import { isOwnerOperatorLoad, ooPodStopOps, type PodStop } from '../../../src/lib/ooPodDelivery'
 
 const dynamo = new DynamoDBClient({})
 const cognito = new CognitoIdentityProviderClient({})
@@ -5000,6 +5001,55 @@ function applyStopOp(stopsIn: StopRow[], op: StopOp, stopId: string | null, patc
   }
 
   return resequence(stops)
+}
+
+/**
+ * After a POD is filed on a shipment: an owner operator's POD is the delivery (Ryne 2026-11-16).
+ * Fills the blank stop times and walks the load to Delivered through updateStop, so the check
+ * calls, rollup, board and settlements move exactly as if a person had typed the times. Never
+ * fails the upload: anything that refuses (no driver, a stale load) is logged and left alone.
+ */
+async function afterPodFiled(result: Row, input: Row, caller: Caller): Promise<Row> {
+  const doc = (result as { document?: Row }).document
+  const type = String(doc?.type ?? input.type ?? '')
+  const shipmentId = optionalString(input.shipmentId, 100)
+  if (type !== 'POD' || !shipmentId) return result
+  if (doc && (doc.status === 'VOID' || doc.status === 'DELETED')) return result
+  try {
+    const delivered = await deliverOwnerOperatorOnPod(shipmentId, String(doc?.createdAt ?? nowIso()), caller)
+    if (delivered.length === 0) return result
+    return { ...result, bundle: await readBundle(shipmentId) } as Row
+  } catch (err) {
+    console.warn('[oo-pod-delivered] skipped', shipmentId, err instanceof Error ? err.message : err)
+    return result
+  }
+}
+
+/** Every owner-operator load on the shipment that is not delivered yet, delivered at `podAt`. Returns the load ids moved. */
+export async function deliverOwnerOperatorOnPod(shipmentId: string, podAt: string, caller: Caller): Promise<string[]> {
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment || shipment.voidedAt || shipment.status === 'CANCELED') return []
+  const loadIds = (Array.isArray(shipment.loadIds) ? shipment.loadIds : []).map(String)
+  const moved: string[] = []
+  for (const loadId of loadIds) {
+    const load = await getById(LOAD_TABLE_NAME, loadId)
+    if (!load || load.voidedAt || load.status === 'CANCELED' || isDeliveredOrLater(load.status)) continue
+    const driverId = optionalString(load.deliveryDriverId, 100) ?? optionalString(load.pickupDriverId, 100)
+    const driver = driverId ? await getById(DRIVER_TABLE_NAME, driverId) : null
+    if (!isOwnerOperatorLoad({ revSubdivision: optionalString(shipment.revSubdivision, 60), driver: driver as { fleetGroup?: string | null; driverType?: string | null } | null })) continue
+    const stops = readStops(load) as unknown as PodStop[]
+    const at = Date.parse(podAt) > Date.now() ? nowIso() : podAt
+    const ops = ooPodStopOps(stops, at)
+    if (ops.length === 0) continue
+    await updateStop({
+      loadId,
+      expectedUpdatedAt: String(load.updatedAt ?? ''),
+      ops: ops.map((o) => ({ op: 'SET_TIMES', stopId: o.stopId, patch: o.patch })),
+    }, caller)
+    await writeAudit('LOAD', loadId, 'OO_POD_DELIVERED', caller, { shipmentId, podAt: at, note: 'Delivered (POD uploaded, owner operator)', stops: ops.map((o) => o.stopId) })
+    moved.push(loadId)
+  }
+  return moved
 }
 
 async function updateStop(input: Row, caller: Caller): Promise<Row> {
@@ -9673,7 +9723,7 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
     case 'PREPARE_DOCUMENT_UPLOAD':
       return prepareDocumentUpload(documentDeps, input)
     case 'COMMIT_DOCUMENT':
-      return commitDocument(documentDeps, input, caller)
+      return afterPodFiled(await commitDocument(documentDeps, input, caller), input, caller)
     case 'SAVE_GENERATED_DOCUMENT':
       return saveGeneratedDocument(documentDeps, input, caller)
     case 'EMAIL_BOL':
@@ -9681,13 +9731,13 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
     case 'SEND_ADDRESS_DETAILS':
       return sendAddressDetails(input, caller)
     case 'ATTACH_DRIVER_DOC':
-      return attachDriverDoc(documentDeps, input, caller)
+      return afterPodFiled(await attachDriverDoc(documentDeps, input, caller), input, caller)
     case 'ATTACH_INVOICE_DOC':
       return attachInvoiceDoc(documentDeps, input, caller)
     case 'REVIEW_DOCUMENT':
       return reviewDocument(documentDeps, input, caller)
     case 'UPDATE_DOCUMENT':
-      return updateDocument(documentDeps, input, caller)
+      return afterPodFiled(await updateDocument(documentDeps, input, caller), input, caller)
     case 'VOID_DOCUMENT':
       return voidDocument(documentDeps, input, caller)
     case 'SET_LOAD_REQUIRED_DOCS':
