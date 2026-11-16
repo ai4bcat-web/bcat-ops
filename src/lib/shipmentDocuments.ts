@@ -600,6 +600,19 @@ export function isOwnFleetLoad(
   })
 }
 
+/**
+ * Where an asset load's outside rate confirmation is (Ryne 2026-11-16), as the Documents box shows it and the gate counts
+ * it: filed RATE_CON / CUSTOMER_RATE_CON rows, and the tender on the load (`Load.rateConfirmKey`, attached from the intake
+ * e-mail or the Loads drawer). One function, so the editor's box, the gate, the board and Load Review never disagree.
+ */
+export function assetRateConTenders(
+  loads: readonly { id: string; rateConfirmKey?: string | null; voidedAt?: string | null; deletedAt?: string | null }[],
+): { loadId: string; key: string }[] {
+  return loads
+    .filter((load) => !load.voidedAt && !load.deletedAt && isOutsideRateConKey(load.rateConfirmKey))
+    .map((load) => ({ loadId: load.id, key: String(load.rateConfirmKey).trim() }))
+}
+
 export function legacyRateConDocumentId(loadId: string): string {
   return `rck:${loadId}`
 }

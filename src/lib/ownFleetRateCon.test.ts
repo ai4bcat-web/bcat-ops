@@ -50,3 +50,15 @@ describe('own fleet needs an outside rate confirmation (Ryne 2026-11-16)', () =>
     expect(codes(evaluateReleaseGate({ ...(input as object), ownFleetTenderOnLoad: true } as never))).not.toContain('DOC_MISSING:RATE_CON')
   })
 })
+
+describe('assetRateConTenders: the tender on the load, as the Documents box and the gate both read it', () => {
+  it('lists outside tenders on live loads only', async () => {
+    const { assetRateConTenders } = await import('./shipmentDocuments')
+    expect(assetRateConTenders([
+      { id: 'l1', rateConfirmKey: 'rate-confirms/l1/rate-confirm.pdf' },
+      { id: 'l2', rateConfirmKey: 'rate-confirms/carrier/l2/lc-v1.pdf' },
+      { id: 'l3', rateConfirmKey: 'rate-confirms/l3/rate-confirm.pdf', voidedAt: '2026-11-01' },
+      { id: 'l4', rateConfirmKey: null },
+    ])).toEqual([{ loadId: 'l1', key: 'rate-confirms/l1/rate-confirm.pdf' }])
+  })
+})
