@@ -111,3 +111,7 @@
   .tms-shell.tms-scroll-main .aa-load-review > .tms-dense-page { flex: 1 1 auto; min-height: 0; }
   .tms-shell.tms-scroll-main .aa-load-review .tms-dense-body { min-height: 280px; }
 }
+
+/* A section with edits the rail's Save changes has not saved yet. */
+.tms-portal .lr-unsaved { margin-left: 8px; padding: 0 6px; border: 1px solid var(--tms-badge-orange); border-radius: 999px; color: var(--tms-badge-orange); font-size: 11px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; }
+.tms-portal .lr-doc-confirm { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 4px; }
