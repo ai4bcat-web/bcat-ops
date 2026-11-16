@@ -5,6 +5,8 @@
  * Pure and dependency-light on purpose — the finance Lambda bundles this by relative
  * import, so nothing here may touch node:, the DOM or an alias.
  */
+import { customerDocsNotRequired, customerFactorsForOtr, isAssetLoad, rateConRequired } from './reviewRequirements'
+import { isCarShipperLoad } from './carShipper'
 import { canEmailTo, type ShipmentDocumentRecord, type ShipmentDocumentType } from './shipmentDocuments'
 
 // ── Square-invoiced divisions ───────────────────────────────────────────────
@@ -221,11 +223,52 @@ export interface InvoiceAttachmentPlan {
   items: InvoiceAttachmentItem[]
 }
 
+/**
+ * Which of the POD / RC cells apply to this load, the board's rules (Ryne 2026-11-16): the RC column is for asset loads
+ * only, and a customer that unticks POD or RC on its Load Review list (Batory, AUTO SHIPPER...) is N/A for it.
+ * Omitted, the plan keeps the older reading (RC for an Ivan invoice, POD always).
+ */
+export interface InvoiceColumnRules {
+  /** True only for an asset load whose customer needs a rate confirmation (the shared `rateConRequired`). */
+  rateConApplies: boolean
+  /** False when the customer's Load Review list drops "POD received". */
+  podRequired: boolean
+}
+
+/**
+ * The POD / RC cell rules for one invoice's load, from the customer row, the org settings and the load's legs: the same
+ * rules the board's cells use (`rateConRequired`, `customerDocsNotRequired`, `isAssetLoad`), so AR cannot disagree with it.
+ */
+export function invoiceColumnRulesOf(input: {
+  customer: Parameters<typeof customerDocsNotRequired>[0]
+  settings: Parameters<typeof customerDocsNotRequired>[1]
+  revDivision?: string | null
+  legs?: readonly { kind?: string | null; carrierName?: string | null; status?: string | null }[]
+}): InvoiceColumnRules {
+  const waived = customerDocsNotRequired(input.customer, input.settings, input.revDivision)
+  const liveLegs = (input.legs ?? []).filter((leg) => leg.status !== 'BOUNCED')
+  const asset = isAssetLoad({
+    revDivision: input.revDivision,
+    legKinds: liveLegs.map((leg) => leg.kind),
+    carrierNames: liveLegs.map((leg) => leg.carrierName),
+  })
+  return {
+    rateConApplies: asset && rateConRequired({
+      asset,
+      carShipper: isCarShipperLoad({ revDivision: input.revDivision }),
+      customerFactors: customerFactorsForOtr(input.customer, input.revDivision),
+      customerWaivesRateCon: waived.includes('RATE_CON'),
+    }),
+    podRequired: !waived.includes('POD'),
+  }
+}
+
 /** The same rule as the send, as the review screen and the list columns show it. */
 export function invoiceAttachmentPlan(
   documents: readonly ShipmentDocumentRecord[],
   scope: InvoiceAttachmentScope,
   invoicePdf: { name: string; sizeBytes: number | null } | null,
+  rules?: InvoiceColumnRules,
 ): InvoiceAttachmentPlan {
   const docs = invoiceEmailDocuments(documents, scope)
   const items: InvoiceAttachmentItem[] = []
@@ -241,8 +284,12 @@ export function invoiceAttachmentPlan(
     : []
   return {
     invoicePdf: invoicePdf ? 'ATTACHED' : 'MISSING',
-    pod: docs.some((doc) => doc.type === 'POD') ? 'ATTACHED' : 'MISSING',
-    rateCon: !scope.ivan ? 'NOT_INCLUDED' : docs.some((doc) => isRateConType(doc.type)) ? 'ATTACHED' : 'MISSING',
+    pod: docs.some((doc) => doc.type === 'POD') ? 'ATTACHED' : rules && !rules.podRequired ? 'NOT_INCLUDED' : 'MISSING',
+    rateCon: rules
+      ? (rules.rateConApplies
+        ? (documents.some((doc) => isCustomerRateCon(doc) && isLiveDocument(doc)) ? 'ATTACHED' : 'MISSING')
+        : 'NOT_INCLUDED')
+      : !scope.ivan ? 'NOT_INCLUDED' : docs.some((doc) => isRateConType(doc.type)) ? 'ATTACHED' : 'MISSING',
     count: items.filter((item) => !item.inInvoicePdf).length,
     ...(unmergeablePods.length > 0 ? { unmergeablePods } : {}),
     totalBytes: items.reduce((sum, item) => sum + (item.sizeBytes ?? 0), 0),

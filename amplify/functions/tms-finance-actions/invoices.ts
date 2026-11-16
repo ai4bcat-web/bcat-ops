@@ -61,6 +61,7 @@ import {
   assertNotSquareInvoiced,
   customerPacketIds,
   invoiceAttachmentPlan,
+  invoiceColumnRulesOf,
   invoiceEmailDocuments,
   mergesIntoInvoicePdf,
   isCustomerRateCon,
@@ -1385,6 +1386,7 @@ export async function invoiceAttachmentPlans(input: Row): Promise<Row> {
     assertString(item, `invoiceIds[${index}]`), MAX_PLAN_INVOICES)
   const plans: Row[] = []
   const queue = [...new Set(ids)]
+  const planSettings = await getSettings().catch(() => null)
   const worker = async (): Promise<void> => {
     for (let id = queue.shift(); id != null; id = queue.shift()) {
       try {
@@ -1413,10 +1415,20 @@ export async function invoiceAttachmentPlans(input: Row): Promise<Row> {
             })
           : (rawDocumentRows as unknown as ShipmentDocumentRecord[])
         const scope = attachmentScopeOf(invoice, { shipment, gateLoadIds: loads })
+        // The board's rules for the POD / RC cells: RC only on asset loads and never for a customer that unticks it; POD unless
+        // the customer's Load Review list drops it (a factored customer can waive neither). One reading, so AR agrees with the board.
+        const customer = invoice.customerId ? await getById(CUSTOMER_TABLE_NAME, invoice.customerId) : null
+        const columns = invoiceColumnRulesOf({
+          customer: customer as Parameters<typeof invoiceColumnRulesOf>[0]['customer'],
+          settings: planSettings as Parameters<typeof invoiceColumnRulesOf>[0]['settings'],
+          revDivision: shipment?.revDivision,
+          legs: carrierRows as unknown as LoadCarrierRecord[],
+        })
         const plan = invoiceAttachmentPlan(
           documentRows as unknown as ShipmentDocumentRecord[],
           scope,
           invoice.pdfKey ? { name: attachmentNameOf(invoice), sizeBytes: invoice.pdfSizeBytes ?? null } : null,
+          columns,
         )
         // The same carrier-pay guard the send runs, so the review and the list show it first.
         const docs = invoiceEmailDocuments(documentRows as unknown as ShipmentDocumentRecord[], scope)

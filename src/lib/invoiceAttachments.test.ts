@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { invoiceAttachmentPlan, invoiceEmailDocuments, isCustomerRateCon, isMergeablePodType } from './invoiceDelivery'
+import { invoiceAttachmentPlan, invoiceColumnRulesOf, invoiceEmailDocuments, isCustomerRateCon, isMergeablePodType } from './invoiceDelivery'
 import { carrierDocumentReason, carrierPayAmounts, carrierPayInText } from './carrierPayGuard'
 import type { ShipmentDocumentRecord } from '../types/tms'
 
@@ -130,5 +130,56 @@ describe('there is no POD review step (14907; "All pods can be reviewed in the l
     const internal = doc({ type: 'POD', source: 'DRIVER_APP', reviewStatus: 'PENDING', audience: 'INTERNAL' })
     const out = invoiceEmailDocuments([carrierOther, rejected, internal], { attachIds: [], orderId: 'o1', loadIds: [], ivan: false })
     expect(out).toEqual([])
+  })
+})
+
+describe('AR POD / RC columns follow the board rules (Ryne, 2026-11-16)', () => {
+  const pod = doc({ type: 'POD' })
+  const customerRc = doc({ type: 'CUSTOMER_RATE_CON' })
+  const bcatRc = doc({ type: 'BCAT_RATE_CON', source: 'GENERATED', orderId: null, loadCarrierId: 'lc1' })
+  // Batory's list unticks "RC received" (the stored list from prod, minus rateConReceived).
+  const batory = {
+    billingMethod: 'MANUAL',
+    reviewRequirements: ['revDivision', 'referenceNumber', 'podReceived', 'apEmail', 'salesRep', 'revenueEntered', 'expenseEntered', 'profitEntered'],
+  }
+  const plain = { billingMethod: 'MANUAL' }
+  const own = [{ kind: 'OWN_ASSET', carrierName: 'IVAN CARTAGE (LOCAL DRIVERS)', status: 'ACTIVE' }]
+  const plan = (docs: ShipmentDocumentRecord[], rules: ReturnType<typeof invoiceColumnRulesOf>) =>
+    invoiceAttachmentPlan(docs, { ivan: true, orderId: 'o1', loadIds: [] }, null, rules)
+
+  it('Batory asset load with no rate con: RC is not required, not "Missing" (20038, 20004)', () => {
+    const rules = invoiceColumnRulesOf({ customer: batory, settings: null, revDivision: 'ASSETS', legs: own })
+    expect(rules).toEqual({ rateConApplies: false, podRequired: true })
+    expect(plan([pod], rules)).toMatchObject({ pod: 'ATTACHED', rateCon: 'NOT_INCLUDED' })
+  })
+
+  it('an ordinary asset load: a customer rate con is Attached, none is Missing, a BCAT one never counts', () => {
+    const rules = invoiceColumnRulesOf({ customer: plain, settings: null, revDivision: 'ASSETS', legs: own })
+    expect(rules.rateConApplies).toBe(true)
+    expect(plan([pod, customerRc], rules).rateCon).toBe('ATTACHED')
+    expect(plan([pod], rules).rateCon).toBe('MISSING')
+    expect(plan([pod, bcatRc], rules).rateCon).toBe('MISSING')
+  })
+
+  it('a brokered load (Meredith 20011): RC is N/A whether or not one is on file', () => {
+    const rules = invoiceColumnRulesOf({ customer: plain, settings: null, revDivision: 'BROKERAGE', legs: [{ kind: 'CARRIER', carrierName: 'LENTI INC', status: 'ACTIVE' }] })
+    expect(rules.rateConApplies).toBe(false)
+    expect(plan([pod], rules).rateCon).toBe('NOT_INCLUDED')
+    expect(plan([pod, customerRc], rules).rateCon).toBe('NOT_INCLUDED')
+  })
+
+  it('a brokered load with no POD (Danisco 14860) is Missing; a customer that drops POD (AUTO SHIPPER) is N/A', () => {
+    const rules = invoiceColumnRulesOf({ customer: plain, settings: null, revDivision: 'BROKERAGE', legs: [] })
+    expect(plan([], rules).pod).toBe('MISSING')
+    const autoShipper = { billingMethod: 'MANUAL', reviewRequirements: ['revDivision', 'referenceNumber', 'salesRep', 'revenueEntered', 'expenseEntered', 'profitEntered'] }
+    const carShip = invoiceColumnRulesOf({ customer: autoShipper, settings: null, revDivision: 'CAR_SHIPPING', legs: [] })
+    expect(carShip).toEqual({ rateConApplies: false, podRequired: false })
+    expect(plan([], carShip)).toMatchObject({ pod: 'NOT_INCLUDED', rateCon: 'NOT_INCLUDED' })
+  })
+
+  it('a factored customer cannot waive the POD or the RC on an asset load', () => {
+    const factored = { billingMethod: 'FACTOR', reviewRequirements: batory.reviewRequirements }
+    const rules = invoiceColumnRulesOf({ customer: factored, settings: null, revDivision: 'ASSETS', legs: own })
+    expect(rules).toEqual({ rateConApplies: true, podRequired: true })
   })
 })
