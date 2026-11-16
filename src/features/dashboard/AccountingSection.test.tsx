@@ -11,7 +11,7 @@ import type { ArWorklistRow } from '@/hooks/useArWorklist'
 import type { InvoiceRecord, OrderRecord, ShipmentRecord } from '@/types/tms'
 import { ageInvoices } from '@/lib/arAging'
 import { ArPage } from '@/features/ar/ArPage'
-import { ReceivablesCards, AccountingSection } from './AccountingSection'
+import { ReceivablesCard, AccountingSection } from './AccountingSection'
 
 const worklistMock = vi.hoisted(() => vi.fn())
 const openInvoicesMock = vi.hoisted(() => vi.fn())
@@ -106,31 +106,47 @@ beforeEach(() => {
   openInvoicesMock.mockReturnValue({ invoices: openSet, aging: ageInvoices(openSet, '2026-10-28'), loading: false, error: null, refresh: vi.fn().mockResolvedValue(undefined) })
 })
 
-async function cardText(ui: React.ReactElement, testId: string): Promise<string> {
-  const { unmount } = render(<MemoryRouter>{ui}</MemoryRouter>)
+/** The page's Receivables card row value (e.g. "$3,400.00") as whole dollars ("$3,400"), the dashboard's format. */
+const dollars = (pageValue: string) => pageValue.replace(/\.\d\d$/, '')
+
+async function pageRows(): Promise<Record<string, string>> {
+  const { unmount } = render(<MemoryRouter><ArPage /></MemoryRouter>)
   await settle()
-  const text = screen.getByTestId(testId).textContent ?? ''
+  const out: Record<string, string> = {}
+  for (const li of screen.getByTestId('ar-summary').querySelectorAll('li')) {
+    const label = li.querySelector('.tms-list-row-label')?.firstChild?.textContent?.trim() ?? ''
+    out[label] = `${li.querySelector('.tms-list-row-value')?.textContent ?? ''} · ${li.querySelector('.tms-list-row-sub-text')?.textContent ?? ''}`
+  }
+  const ready = screen.getByTestId('ar-tab-card').querySelector('li')
+  out['Ready to invoice'] = `${ready?.querySelector('.tms-list-row-value')?.textContent ?? ''} · ${ready?.querySelector('.tms-list-row-sub-text')?.textContent ?? ''}`
   unmount()
-  return text
+  return out
 }
 
-describe('dashboard Accounting cards', () => {
-  it('reads the same Receivables, division and Ready to invoice numbers as the Invoicing page', async () => {
-    for (const id of ['ar-summary', 'ar-division-card', 'ar-tab-card']) {
-      const page = await cardText(<ArPage />, id)
-      const dash = await cardText(<ReceivablesCards />, id)
-      expect(dash).toBe(page)
-      expect(page).not.toBe('')
+describe('dashboard Accounts receivable card', () => {
+  it('reads the same figures as the Invoicing page', async () => {
+    const page = await pageRows()
+    render(<MemoryRouter><ReceivablesCard /></MemoryRouter>)
+    await settle()
+    const card = screen.getByTestId('dashboard-ar-card')
+    const [openValue, openSub] = page['Open AR'].split(' · ')
+    expect(card).toHaveTextContent(dollars(openValue))
+    expect(card).toHaveTextContent(`open · ${openSub}`)
+    const row = (key: string) => screen.getByTestId(`summary-row-${key}`).textContent ?? ''
+    for (const [key, label] of [['shippers', 'Pending with shippers'], ['late', 'Late'], ['collected', 'Collected this month'], ['ready', 'Ready to invoice']] as const) {
+      const [value, sub] = page[label].split(' · ')
+      expect(row(key)).toContain(dollars(value))
+      expect(row(key)).toContain(sub.split(' ')[0])
     }
+    expect(page['Open AR']).toContain('$3,400.00')
   })
 
-  it('shows Open AR across every division, sent invoices only', async () => {
-    render(<MemoryRouter><ReceivablesCards /></MemoryRouter>)
+  it('shows Factoring inside the card with the shared OTR buckets', async () => {
+    render(<MemoryRouter><ReceivablesCard /></MemoryRouter>)
     await settle()
-    const summary = screen.getByTestId('ar-summary')
-    expect(summary).toHaveTextContent('Open AR')
-    expect(summary).toHaveTextContent('$3,400.00')
-    expect(summary).toHaveTextContent('2 invoices')
+    for (const label of ['Waiting on OTR approval', 'Approved by OTR, not marked paid', 'Not sent to OTR yet', 'Manually invoiced', 'OTR rejected']) {
+      expect(screen.getByText(label)).toBeInTheDocument()
+    }
   })
 
   it('shows nothing to someone without an accounting grant', async () => {

@@ -1,48 +1,28 @@
 /**
- * Accounting on the Operations Dashboard: the Invoicing page's Receivables and Payables cards
- * (Ryne 2026-11-15: "display all information about ar and ap in cards… match the cards from the
- * accounting page").
+ * Accounts receivable and Accounts payable on the Operations Dashboard: two high-level cards in
+ * the old Factoring card's look (Ryne 2026-11-15: "only show high level details about accounts
+ * receivable and accounts payable, kind of like how the factoring is shown"; "Factoring should
+ * move under accounts receivable card").
  *
- * The same card components fed by the same hooks and summary functions as the Invoicing page
- * (`useArSummaryModel`, `useApSummaryModel`), with no filters and every billing, so the numbers
- * here are the page's numbers. Each half shows only on its own accounting grant; a row opens the
- * matching view, tab and filter on the Invoicing page.
+ * Every figure comes from the same hooks and summary functions as the Invoicing page
+ * (`useArSummaryModel`, `useApSummaryModel`, `src/lib/factoredOpen.ts`), with no filters and
+ * every billing, so a number here is the page's number. Each card shows only on its own
+ * accounting grant; a row opens the matching tab.
  */
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Landmark, Truck } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { chicagoDateStr } from '@/lib/date'
-import { ArSummaryStrip } from '@/features/ar/ArSummaryStrip'
+import { FACTORED_BUCKET_LABEL, FACTORED_BUCKET_TITLE, type FactoredBucket } from '@/lib/factoredOpen'
 import { lastThreeMonths } from '@/features/ar/arViews'
 import { readyQueueUnfiltered, useArSummaryModel } from '@/features/ar/useArSummaryModel'
-import { useFactorReadiness } from '@/features/ar/useFactorReadiness'
-import { useDeliveredNotReady } from '@/features/ar/useDeliveredNotReady'
-import { ApSummaryStrip } from '@/features/ap/components/ApSummaryStrip'
-import { billsAging, billsExpected } from '@/features/ap/apViews'
 import { useApSummaryModel } from '@/features/ap/useApSummaryModel'
-import { ApAgingCard, ApExpectedCard, ArReadyCard, ProfitCheckCard } from '@/features/finance/AccountingCards'
-import { apAgingStats, apExpectedStats, arReadyStats } from '@/features/finance/accountingStats'
-import { AccountingReportsDialog } from '@/features/finance/AccountingReportsDialog'
-import type { AccountingReportKind } from '@/features/finance/accountingReports'
-import { useNeedsReview } from '@/features/finance/useNeedsReview'
-import { payableLink, receivableLink } from '@/features/finance/accountingLinks'
+import { arReadyStats } from '@/features/finance/accountingStats'
+import { factoredLink, payableLink, receivableLink } from '@/features/finance/accountingLinks'
+import { DashboardSummaryCard, type DashboardSummaryRow } from './DashboardSummaryCard'
 
-/** One column on a phone, as many 300px columns as fit beyond that: a card is never narrower than its amounts. */
-const GRID: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))',
-  gap: 12,
-  alignItems: 'start',
-}
-
-function SectionHead({ title, onOpen, openLabel }: { title: string; onOpen: () => void; openLabel: string }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>{title}</div>
-      <button type="button" className="tms-link" onClick={onOpen} style={{ fontSize: 12.5 }}>{openLabel}</button>
-    </div>
-  )
-}
+const n = (count: number, unit: string) => `${count} ${unit}${count === 1 ? '' : 's'}`
 
 export function AccountingSection() {
   const { hasPageAccess } = useAuth()
@@ -50,68 +30,96 @@ export function AccountingSection() {
   const showAp = hasPageAccess('carrierPay')
   if (!showAr && !showAp) return null
   return (
-    <section aria-label="Accounting" data-testid="dashboard-accounting" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {showAr && <ReceivablesCards />}
-      {showAp && <PayablesCards />}
+    <section
+      aria-label="Accounting"
+      data-testid="dashboard-accounting"
+      // As many 280px columns as fit, one on a phone: the two cards sit at the KPI cards' width.
+      style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))', gap: 12, alignItems: 'start' }}
+    >
+      {showAr && <ReceivablesCard />}
+      {showAp && <PayablesCard />}
     </section>
   )
 }
 
-export function ReceivablesCards() {
+/** Factoring, by where each open factored invoice stands with OTR, and the tab it opens. */
+const FACTORING_ROWS: { bucket: FactoredBucket; color: string; link: () => string; always?: boolean }[] = [
+  { bucket: 'WAITING', color: 'var(--tms-badge-blue)', link: () => factoredLink('PENDING_WITH_OTR'), always: true },
+  { bucket: 'APPROVED', color: 'var(--tms-badge-green)', link: () => factoredLink('FACTORED'), always: true },
+  { bucket: 'NOT_SENT', color: 'var(--tms-badge-orange)', link: () => receivableLink({ tab: 'ready' }), always: true },
+  { bucket: 'MANUAL', color: 'var(--tms-badge-pink)', link: () => receivableLink({ tab: 'invoiced' }), always: true },
+  { bucket: 'REJECTED', color: 'var(--tms-badge-red)', link: () => factoredLink('OTR_REJECTED'), always: true },
+  { bucket: 'NO_RECORD', color: 'var(--tms-chart-9)', link: () => factoredLink('ALL') },
+  { bucket: 'OTHER', color: 'var(--tms-chart-9)', link: () => factoredLink('ALL') },
+]
+
+export function ReceivablesCard() {
   const navigate = useNavigate()
   const [asOf] = useState(() => chicagoDateStr(new Date()))
   // The page's default month, so the factoring queue rows resolve their invoices the same way.
   const month = useMemo(() => lastThreeMonths(asOf)[0], [asOf])
   const m = useArSummaryModel(asOf, month)
-  const ready = useMemo(() => readyQueueUnfiltered({
+  const ready = useMemo(() => arReadyStats(readyQueueUnfiltered({
     unbilledRows: m.unbilled.rows, drafts: m.split.drafts, monthInvoices: m.paidInvoices,
     openInvoices: m.open.invoices, factoringItems: m.factoringItems, lookups: m.lookups,
-  }), [m.unbilled.rows, m.split.drafts, m.paidInvoices, m.open.invoices, m.factoringItems, m.lookups])
-  const readiness = useFactorReadiness(ready, true)
-  const deliveredNotReady = useDeliveredNotReady(true)
-  const [report, setReport] = useState<AccountingReportKind | null>(null)
+  }), new Map(), asOf).total, [m.unbilled.rows, m.split.drafts, m.paidInvoices, m.open.invoices, m.factoringItems, m.lookups, asOf])
+  const s = m.cardSummary
+  const loading = m.open.loading
+
+  const rows: DashboardSummaryRow[] = [
+    { key: 'shippers', label: 'Pending with shippers', count: s.pendingShippersCount, cents: s.pendingShippersCents, color: 'var(--tms-primary)', onOpen: () => navigate(receivableLink({ tab: 'invoiced' })) },
+    { key: 'late', label: 'Late', count: s.lateCount, cents: s.lateCents, color: 'var(--tms-badge-red)', title: 'Past due, every billing', onOpen: () => navigate(receivableLink({ tab: 'invoiced', due: 'past' })) },
+    { key: 'collected', label: 'Collected this month', count: s.collectedMonthCount, cents: s.collectedMonthCents, color: 'var(--tms-badge-green)', title: 'Paid in full this month, by paid date', onOpen: () => navigate(receivableLink({ tab: 'paid' })) },
+    { key: 'ready', label: 'Ready to invoice', count: ready.count, cents: ready.cents, color: 'var(--tms-badge-orange)', onOpen: () => navigate(receivableLink({ tab: 'ready' })) },
+  ]
+  const factoring: DashboardSummaryRow[] = FACTORING_ROWS
+    .filter((r) => r.always || s.factored[r.bucket].count > 0)
+    .map((r) => ({
+      key: `factored-${r.bucket}`,
+      label: FACTORED_BUCKET_LABEL[r.bucket],
+      title: FACTORED_BUCKET_TITLE[r.bucket],
+      count: s.factored[r.bucket].count,
+      cents: s.factored[r.bucket].cents,
+      color: r.color,
+      onOpen: () => navigate(r.link()),
+    }))
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }} data-testid="dashboard-receivables">
-      <SectionHead title="Accounts receivable" openLabel="Open Invoicing" onOpen={() => navigate(receivableLink())} />
-      <div style={GRID}>
-        <ArSummaryStrip summary={m.cardSummary} division={null} onDivision={(key) => navigate(receivableLink({ tab: 'invoiced', division: key }))} />
-        <ArReadyCard stats={arReadyStats(ready, readiness, asOf)} deliveredNotReady={deliveredNotReady} onLoadReview={() => navigate('/tms/load-review')} />
-        <ProfitCheckCard asOf={asOf} onOpenReport={setReport} testId="dashboard-profit-check" />
-      </div>
-      {report && <AccountingReportsDialog side="AR" asOf={asOf} initialKind={report} onClose={() => setReport(null)} />}
-    </div>
+    <DashboardSummaryCard
+      title="Accounts receivable"
+      icon={<Landmark size={15} />}
+      headline={loading ? null : s.openCents}
+      sublabel={`open · ${n(s.openCount, 'invoice')}`}
+      rows={rows}
+      groups={[{ key: 'factoring', label: `Factoring · ${n(s.pendingOtrCount, 'open invoice')}`, rows: factoring }]}
+      accent={s.lateCents > 0 ? 'var(--tms-badge-red)' : 'var(--tms-primary)'}
+      onOpen={() => navigate(receivableLink())}
+      testId="dashboard-ar-card"
+    />
   )
 }
 
-export function PayablesCards() {
+export function PayablesCard() {
   const navigate = useNavigate()
   const [asOf] = useState(() => chicagoDateStr(new Date()))
   const m = useApSummaryModel(asOf)
-  const needsReview = useNeedsReview()
-  const reviewByShipment = useMemo(() => new Map(needsReview.rows.map((row) => [row.id, row])), [needsReview.rows])
-
+  const s = m.summaryAll
+  const rows: DashboardSummaryRow[] = [
+    { key: 'expected', label: 'Expected', count: s.expected.count, cents: s.expected.cents, color: 'var(--tms-badge-orange)', title: 'Waiting on the carrier invoice date', onOpen: () => navigate(payableLink({ tab: 'expected' })) },
+    { key: 'aging', label: 'Aging', count: s.aging.count, cents: s.aging.cents, color: 'var(--tms-primary)', onOpen: () => navigate(payableLink({ tab: 'aging' })) },
+    { key: 'past-due', label: 'Past due', count: s.pastDue.count, cents: s.pastDue.cents, color: 'var(--tms-badge-red)', onOpen: () => navigate(payableLink({ tab: 'aging', due: 'past' })) },
+    { key: 'next7', label: 'Due next 7 days', count: s.dueNext7.count, cents: s.dueNext7.cents, color: 'var(--tms-badge-blue)', onOpen: () => navigate(payableLink({ tab: 'aging', due: 'week' })) },
+  ]
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }} data-testid="dashboard-payables">
-      <SectionHead title="Accounts payable" openLabel="Open Payables" onOpen={() => navigate(payableLink())} />
-      <div style={GRID}>
-        <ApSummaryStrip
-          summary={m.summaryAll}
-          divisionName={m.divisionName}
-          division={null}
-          onDivision={(key) => navigate(payableLink({ tab: 'aging', division: key }))}
-          onCashRequirements={() => navigate(payableLink({ tab: 'aging' }))}
-          onTab={(tab) => navigate(payableLink({ tab }))}
-        />
-        <ApExpectedCard stats={apExpectedStats(billsExpected(m.totalsAll), reviewByShipment, asOf)} />
-        <ApAgingCard
-          stats={apAgingStats(billsAging(m.totalsAll), asOf)}
-          due={null}
-          onDue={(due) => navigate(payableLink({ tab: 'aging', due }))}
-          parties={[]}
-          onParty={(id) => navigate(payableLink({ tab: 'aging', party: id }))}
-        />
-      </div>
-    </div>
+    <DashboardSummaryCard
+      title="Accounts payable"
+      icon={<Truck size={15} />}
+      headline={m.open.loading ? null : s.open.cents}
+      sublabel={`open · ${n(s.open.count, 'bill')}`}
+      rows={rows}
+      accent={s.pastDue.cents > 0 ? 'var(--tms-badge-red)' : 'var(--tms-primary)'}
+      onOpen={() => navigate(payableLink())}
+      testId="dashboard-ap-card"
+    />
   )
 }

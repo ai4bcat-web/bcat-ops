@@ -1,17 +1,11 @@
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Package, DollarSign, AlertCircle, CalendarClock,
+  Package, DollarSign, CalendarClock,
   RefreshCw, Plus, Handshake, Sparkles,
 } from 'lucide-react'
 import { KpiCard } from '@/components/ui/kpi-card'
-import { useFactoringItems } from '@/hooks/useFactoringItems'
-import { factoringTotals, type FactoringTotals } from '@/lib/factoringTotals'
-import { FACTORED_BUCKET_LABEL, openBalanceByFactoringItem, waitingOnOtrTotal } from '@/lib/factoredOpen'
-import { amountOf } from '@/features/factoring/factoringQueueStats'
-import { useOpenInvoices } from '@/hooks/useOpenInvoices'
 import type { RevenueSplit, LoadsSplit } from '@/lib/revenueByFleet'
-import { useLoads } from '@/hooks/useLoads'
 import { TZ } from '@/lib/date'
 import { ComplianceAlertsWidget } from './ComplianceAlertsWidget'
 import { RepairInvoicesWidget } from './RepairInvoicesWidget'
@@ -74,89 +68,6 @@ function BrokerCoveredCard({ count, countDelta, revenue, revenueDelta, sublabel,
           <DualDeltaBadge delta={signed(revenueDelta, cents)} dir={dir(revenueDelta)} />
         </div>
         <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>{sublabel}</div>
-      </div>
-    </div>
-  )
-}
-
-/**
- * The factoring queue as money, not just a count.
- *
- * "12 to factor" says nothing about whether that is a quiet afternoon or thirty thousand
- * dollars sitting unsent. Three buckets, each with its own figure, and one line across the
- * top for what is still owed to us — waiting to send plus sent and unpaid — because that is
- * the number somebody actually wants when they ask how the week is going.
- *
- * Where a row cannot be valued it is SAID, never folded into the total as zero. A figure
- * that quietly omits rows is worse than no figure on a card whose whole job is the amount.
- */
-function FactoringCard({ totals, loading, onOpen }: {
-  totals: FactoringTotals
-  loading: boolean
-  onOpen: () => void
-}) {
-  const accent = totals.needToFactor.count > 0 ? 'var(--tms-badge-red)' : 'var(--tms-primary)'
-  const rows: { label: string; bucket: FactoringTotals['needToFactor']; color: string }[] = [
-    { label: 'Need to factor', bucket: totals.needToFactor, color: 'var(--tms-badge-orange)' },
-    { label: FACTORED_BUCKET_LABEL.WAITING, bucket: totals.pendingWithOtr, color: 'var(--tms-badge-blue)' },
-    { label: 'Invoice manually', bucket: totals.manualInvoice, color: 'var(--tms-badge-pink)' },
-    { label: 'Factored', bucket: totals.factored, color: 'var(--tms-badge-green)' },
-  ]
-  const unvalued = rows.reduce((n, r) => n + r.bucket.unvalued, 0)
-
-  return (
-    <div
-      onClick={onOpen}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onOpen() }}
-      className="tms-card"
-      style={{ position: 'relative', cursor: 'pointer' }}
-    >
-      <div style={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%',
-        background: accent, filter: 'blur(60px)', opacity: 0.18, pointerEvents: 'none' }} />
-      <div style={{ padding: '16px 18px', position: 'relative' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>
-            Factoring
-          </div>
-          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tms-text-2)' }}>
-            <AlertCircle size={15} />
-          </div>
-        </div>
-
-        {/* Still owed to us — the headline, because it is the question being asked. */}
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
-          <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1.1,
-            color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>
-            {loading ? '—' : cents(totals.outstandingAmount)}
-          </div>
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginBottom: 12 }}>
-          outstanding · {totals.outstandingCount} invoice{totals.outstandingCount === 1 ? '' : 's'}
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {rows.map((r) => (
-            <div key={r.label} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--tms-text-2)', whiteSpace: 'nowrap' }}>
-                <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: r.color, flexShrink: 0 }} />
-                {r.label}
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--tms-muted)' }}>{r.bucket.count}</span>
-              </span>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>
-                {cents(r.bucket.amount)}
-              </span>
-            </div>
-          ))}
-        </div>
-
-        {unvalued > 0 && (
-          <div style={{ marginTop: 10, fontSize: 11, color: 'var(--tms-badge-orange)' }}>
-            {unvalued} invoice{unvalued === 1 ? '' : 's'} with no rate on the load — not in these totals
-          </div>
-        )}
       </div>
     </div>
   )
@@ -372,34 +283,6 @@ export function DashboardPage() {
   const kpiFinal = kpi.state !== 'loading'
   const needsAppt = useBatoryApptCount()
 
-  /*
-   * The factoring queue, counted off the same rows the Factoring page works from, so the
-   * card and the page can never disagree about how much is waiting.
-   */
-  const { items: factoringItems, loading: factoringLoading } = useFactoringItems()
-  // The live working set — a voided load is not revenue and must not be counted here.
-  const { loads } = useLoads()
-  /*
-   * Valued off the loads as well as the queue: nothing is submitted yet on a NEED_TO_FACTOR
-   * row, so it has no OTR amount and the rate on the load it resolves to is the only figure
-   * there is.
-   */
-  /*
-   * "Waiting on OTR approval" is the shared definition (src/lib/factoredOpen.ts): the same set and
-   * money as the factoring queue's tab and the Receivables card's line of that name.
-   */
-  const openInvoices = useOpenInvoices()
-  const factoringTotalsValue = useMemo(() => {
-    const totals = factoringTotals(factoringItems, loads)
-    const waiting = waitingOnOtrTotal(factoringItems, openBalanceByFactoringItem(openInvoices.invoices), amountOf)
-    const pendingWithOtr = { count: waiting.count, amount: waiting.cents, unvalued: 0 }
-    return {
-      ...totals,
-      pendingWithOtr,
-      outstandingAmount: totals.needToFactor.amount + pendingWithOtr.amount + totals.manualInvoice.amount,
-      outstandingCount: totals.needToFactor.count + pendingWithOtr.count + totals.manualInvoice.count,
-    }
-  }, [factoringItems, loads, openInvoices.invoices])
   const navigate = useNavigate()
   const { hasPageAccess, isAdmin } = useAuth()
   // The assistant's door is the same as the dashboards' (owner, ADMIN or the TMS page); the Lambda enforces it again.
@@ -485,15 +368,15 @@ export function DashboardPage() {
         {canAsk && askOpen && <AssistantChat />}
 
         {/* ── KPI strip ────────────────────────────────────────────────────── */}
-        {/* Six cards, one row on desktop. */}
+        {/* Five cards, one row on desktop. */}
         <div
           data-testid="legacy-kpis-all"
-          data-state={kpiFinal && !factoringLoading && needsAppt !== null ? kpi.state : 'loading'}
+          data-state={kpiFinal && needsAppt !== null ? kpi.state : 'loading'}
           data-source={kpi.source ?? ''}
           data-asof={kpi.asOf ?? ''}
           data-kpi-flips={kpi.flips}
           // Phones and tablets: as many columns as fit at 240px each (one on a phone), so a card is never narrower than its amounts.
-          style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))' : 'repeat(6, minmax(0, 1fr))', gap: 12 }}
+          style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))' : 'repeat(5, minmax(0, 1fr))', gap: 12 }}
         >
           {/* Loads, Revenue and Broker covered come from the rollup together; `display: contents` keeps them grid items. */}
           <div
@@ -537,22 +420,6 @@ export function DashboardPage() {
               ) : <KpiSkeleton label="Broker Covered" />}
             </Cell>
           </div>
-          {/*
-            The factoring queue in money, not a derived "past delivery not invoiced" guess.
-
-            That old number came from appointment dates and the ready-to-invoice flag, so it
-            could sit at forty while the queue people actually work was empty — two numbers
-            about the same money, disagreeing. This reads the queue itself, and reads it as
-            an amount, because "12 to factor" says nothing about whether that is a quiet
-            afternoon or thirty thousand dollars sitting unsent.
-          */}
-          <Cell order={2}>
-            <FactoringCard
-              totals={factoringTotalsValue}
-              loading={factoringLoading}
-              onOpen={() => navigate('/tms/invoicing/factored')}
-            />
-          </Cell>
           {/* What we owe vendors, beside what we are owed. */}
           <Cell order={3}>
             <VendorApCard onOpen={() => navigate('/tms/vendors')} />
@@ -571,9 +438,9 @@ export function DashboardPage() {
           </Cell>
         </div>
 
-        {/* ── Accounting: the Invoicing page's AR and AP cards, on each accounting grant only ─ */}
+        {/* ── Accounts receivable (with Factoring) and Accounts payable, on each accounting grant only ─ */}
         {(hasPageAccess('invoicing') || hasPageAccess('carrierPay')) && (
-          <LazyWidget enabled={kpiFinal} minHeight={560} label="accounting"><AccountingSection /></LazyWidget>
+          <LazyWidget enabled={kpiFinal} minHeight={340} label="accounting"><AccountingSection /></LazyWidget>
         )}
 
         {/* ── Brokerage (BCAT Logistics): right under the top cards ─ */}

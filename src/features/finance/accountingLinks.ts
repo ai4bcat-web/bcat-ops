@@ -24,6 +24,7 @@ function link(path: string, partyKey: string, l: AccountingLink): string {
 }
 
 export const receivableLink = (l: AccountingLink = {}) => link('/tms/invoicing', 'customer', l)
+export const factoredLink = (tab?: string) => (tab ? `/tms/invoicing/factored?tab=${tab}` : '/tms/invoicing/factored')
 export const payableLink = (l: AccountingLink = {}) => link('/tms/invoicing/payable', 'carrier', l)
 
 /** The `?tab=` the page was opened on, when it is one of `tabs`. */

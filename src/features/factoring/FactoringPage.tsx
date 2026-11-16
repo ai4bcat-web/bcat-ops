@@ -55,6 +55,7 @@ import { FactoringCards } from './FactoringCards'
 import { useOpenInvoices } from '@/hooks/useOpenInvoices'
 import { FACTORED_BUCKET_LABEL, isWaitingOnOtr, openBalanceByFactoringItem, waitingOnOtrTotal } from '@/lib/factoredOpen'
 import { amountOf } from './factoringQueueStats'
+import { tabFromUrl } from '@/features/finance/accountingLinks'
 
 // ── Status labels ────────────────────────────────────────────────────────────
 
@@ -461,7 +462,8 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   useResolveLoads(items.map((i) => i.loadId))
   const { user, isAdmin } = useAuth()
   const [search, setSearch] = useState('')
-  const [activeTab, setActiveTab] = useState<FilterKey>('PENDING_WITH_OTR')
+  // `?tab=` opens a tab directly (the Operations Dashboard's Accounts receivable card links here).
+  const [activeTab, setActiveTab] = useState<FilterKey>(() => tabFromUrl(FILTER_ORDER, 'PENDING_WITH_OTR'))
   /** On the Pending tab: one of OTR's own labels (or OTR_UNREPORTED) to narrow to, or null for all. */
   const [otrFilter, setOtrFilter] = useState<string | null>(null)
   /** Show only the rows OTR turned down (they have to be invoiced by hand), across every tab. */
