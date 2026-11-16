@@ -10,7 +10,7 @@ import { chicagoDateStr, formatBoardDate } from '@/lib/date'
 import { boardStatusOf } from '@/lib/shipmentViewDefs'
 import { needsBillingReview, REVIEW_BILLING_LABEL } from '@/lib/reviewBilling'
 import { reviewFactsOfRow } from './batchReview'
-import { docsMissingOf, type ShipmentRow } from './shipmentViews'
+import { docsMissingOf, registerRowText, type ShipmentRow } from './shipmentViews'
 
 export type BoardFlag = 'missingReference' | 'missingSalesRep' | 'missingRevDivision' | 'docsMissing' | 'reviewBilling' | 'checkCallOverdue' | 'pastDeliveryDate' | 'detention'
 
@@ -122,3 +122,9 @@ export function pastDeliveryOf(
   const { day, daysLate, label } = late
   return { day, daysLate, tooltip: `Scheduled delivery ${label} — not marked delivered (${daysLate} ${daysLate === 1 ? 'day' : 'days'})` }
 }
+
+/** Days past the scheduled delivery day for the board's sortable Past due (days) column; empty when not late. */
+export function pastDueDaysOf(row: ShipmentRow, nowMs: number = Date.now()): number | null {
+  return pastDeliveryOf(row, nowMs)?.daysLate ?? null
+}
+registerRowText('pastDueDays', (row) => { const d = pastDueDaysOf(row); return d == null ? '' : String(d) })

@@ -65,3 +65,16 @@ describe('REQS in the editor rail', () => {
     expect(reqsAsIssues(reqs, [], [])).toEqual([])
   })
 })
+
+describe('REQS export text', () => {
+  it('exports the combined list, not the factoring-only text', async () => {
+    const { boardReqsListText, setBoardReqSources } = await import('./boardReqs')
+    const { reqsExportText } = await import('./shipmentViews')
+    setBoardReqSources(SRC)
+    const r = row({ salesRepId: null, reference: null, customerFactors: true, factorGaps: ['PO_MISSING', 'PICKUP_ZIP'] })
+    const text = reqsExportText(r)
+    expect(text).toBe(boardReqsListText(boardReqsOf(r, SRC)))
+    expect(text).toContain('Sales rep')
+    expect(reqsExportText(row({}))).toBe('')
+  })
+})

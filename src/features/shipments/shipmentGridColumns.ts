@@ -7,7 +7,7 @@ import { optionsOfRow, type DenseColumn, type DenseOption } from '@/features/tms
 import { customerDisplayName } from '@/lib/customerResolution'
 import { LADDER_FILTER_OPTIONS, assignmentChipText } from './carrierLadder'
 import { boardStatusOf } from '@/lib/shipmentViewDefs'
-import { pastDeliveryOf } from './boardChips'
+import { pastDeliveryOf, pastDueDaysOf } from './boardChips'
 import { BOARD_COLUMNS, displayStatusOf, carrierSortKey, invoiceStatusOfRow, rowShipmentType, type ShipmentRow } from './shipmentViews'
 import { boardReqsOfRow, boardReqsText } from './boardReqs'
 import type { IntroducedColumn } from './teamColumnLayout'
@@ -72,6 +72,10 @@ const BOARD_STATUS_ORDER = ['OPEN', 'COVERED', 'DISPATCHED', 'ARRIVED', 'DEPARTE
  * drops the late ones. Same test as the row's chip and the stats strip: `pastDeliveryOf`.
  */
 export const PAST_DELIVERY_FILTER_VALUE = 'PAST DELIVERY DATE'
+/** The Status filter is set to show only the late loads (its Past delivery date option, not excluded). */
+export function pastDeliveryOnly(filter: { values?: string[]; exclude?: boolean } | undefined): boolean {
+  return Boolean(filter && !filter.exclude && filter.values?.includes(PAST_DELIVERY_FILTER_VALUE))
+}
 const PAST_DELIVERY_OPTION: DenseOption = { value: PAST_DELIVERY_FILTER_VALUE, label: 'Past delivery date' }
 
 export const STATUS_OPTIONS: DenseOption[] = [
@@ -146,6 +150,15 @@ export const SHIPMENT_GRID_COLUMNS: DenseColumn<ShipmentRow>[] = BOARD_COLUMNS.m
       fixedOptions: FACTOR_INFO_OPTIONS,
       optionsOf: (row) => [boardReqsOfRow(row).length > 0 ? FACTOR_INFO_OPTIONS[0] : FACTOR_INFO_OPTIONS[1]],
       sortValue: (row) => boardReqsOfRow(row).length,
+    }
+  }
+  if (col.key === 'pastDueDays') {
+    // Days past the scheduled delivery day (the same rule as the Past delivery date chip), so the late loads sort oldest first.
+    return {
+      ...base,
+      align: 'right',
+      text: (row) => { const d = pastDueDaysOf(row); return d == null ? '' : String(d) },
+      sortValue: (row) => pastDueDaysOf(row) ?? -1,
     }
   }
   if (col.key === 'carrierAssignment') {

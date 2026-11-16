@@ -377,6 +377,23 @@ export function factorInfoTitle(row: ShipmentRow): string {
   return [fields, `Missing document${docs.length === 1 ? '' : 's'}: ${docs.join(', ')}`].filter(Boolean).join(' · ')
 }
 
+/**
+ * Column text that lives in modules importing this one (REQS in boardReqs.ts, days past delivery in boardChips.ts).
+ * They register it at load, which keeps this module free of an import cycle; until then the fallback stands in.
+ */
+const registeredText = new Map<string, (row: ShipmentRow) => string>()
+export function registerRowText(key: 'reqs' | 'pastDueDays', fn: (row: ShipmentRow) => string): void {
+  registeredText.set(key, fn)
+}
+/** The REQS column's export text: the combined list (boardReqs.ts), else the factoring-only text. */
+export function reqsExportText(row: ShipmentRow): string {
+  return registeredText.get('reqs')?.(row) ?? factorInfoTitle(row)
+}
+/** Whole days past the scheduled delivery day ("5"), empty when the load is not late (boardChips.ts pastDeliveryOf). */
+export function pastDueDaysText(row: ShipmentRow): string {
+  return registeredText.get('pastDueDays')?.(row) ?? ''
+}
+
 /** The row's invoice status: the board's live read when it has one, the order's cached AR fields otherwise. */
 export function invoiceStatusOfRow(row: ShipmentRow): LoadInvoiceStatus {
   return row.invoiceStatus ?? loadInvoiceStatusOf(row)
@@ -1114,7 +1131,8 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'paidAt', label: 'Paid At', group: 'Order', value: (r) => formatBoardDateTime(r.paidAt), width: 140 },
   { key: 'arBalance', label: 'AR Balance', group: 'Order', value: (r) => formatCentsOrEmpty(r.arBalanceCents), width: 120 },
   { key: 'invoiceStatus', label: 'Invoice Status', group: 'Order', value: (r) => loadInvoiceStatusText(invoiceStatusOfRow(r), formatBoardDate), width: 150 },
-  { key: 'factorInfo', label: 'Reqs', group: 'Order', value: (r) => factorInfoTitle(r), width: 110 },
+  { key: 'factorInfo', label: 'Reqs', group: 'Order', value: (r) => reqsExportText(r), width: 110 },
+  { key: 'pastDueDays', label: 'Past Due (days)', group: 'Order', value: (r) => pastDueDaysText(r), width: 120 },
   { key: 'factoringItem', label: 'Factoring Item', group: 'Order', value: (r) => r.factoringItemId ?? '', width: 140 },
   {
     key: 'docsRequired',
