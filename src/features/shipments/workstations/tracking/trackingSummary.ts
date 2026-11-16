@@ -50,12 +50,11 @@ function placeOf(
 
 /**
  * POD state from the documents on the bundle when the board row is not at hand.
- * A POD is "received" once any live POD document is not awaiting review or rejected.
+ * A POD is "received" once any live POD document is not rejected (there is no POD review step).
  */
 function podFromBundle(bundle: ShipmentBundle, delivered: boolean): PodState | null {
   if (!delivered) return null
   const pods = (bundle.documents ?? []).filter((d) => d.type === 'POD' && d.status === 'ACTIVE')
-  if (pods.some((d) => d.reviewStatus === 'PENDING')) return 'IN_REVIEW'
   if (pods.some((d) => d.reviewStatus !== 'REJECTED')) return 'RECEIVED'
   const leg = bundle.loadCarriers.find((c) => c.status === 'ACTIVE')
   return leg?.podRequestedAt ? 'REQUESTED' : 'NEEDED'

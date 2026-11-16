@@ -112,7 +112,7 @@ describe('carrier pay guard', () => {
   })
 })
 
-describe('a driver-sent POD that is still waiting for review (14907, Ryne 2026-11-16)', () => {
+describe('there is no POD review step (14907; "All pods can be reviewed in the load review page", Ryne 2026-11-16)', () => {
   // Order id is null, load id set: how a recovered driver POD is filed.
   const waiting = doc({ type: 'POD', source: 'DRIVER_APP', reviewStatus: 'PENDING', orderId: null, loadId: 'l1', name: 'image.pdf' })
   const scope = { attachIds: [], orderId: 'o1', loadIds: ['l1'], ivan: true } as const
@@ -122,11 +122,13 @@ describe('a driver-sent POD that is still waiting for review (14907, Ryne 2026-1
     expect(invoiceAttachmentPlan([waiting], scope, { name: 'Invoice.pdf', sizeBytes: 1 }).pod).toBe('ATTACHED')
   })
 
-  it('a carrier-portal upload, a rejected page and an internal page still do not', () => {
-    const carrierUpload = doc({ type: 'POD', source: 'CARRIER_PORTAL', reviewStatus: 'PENDING' })
+  it('a carrier-portal POD goes too; a rejected page, an internal page and a non-POD carrier upload do not', () => {
+    const carrierPod = doc({ type: 'POD', source: 'CARRIER_PORTAL', reviewStatus: 'PENDING' })
+    expect(invoiceEmailDocuments([carrierPod], { attachIds: [], orderId: 'o1', loadIds: [], ivan: false }).map((d) => d.id)).toEqual([carrierPod.id])
+    const carrierOther = doc({ type: 'BOL', source: 'CARRIER_PORTAL', reviewStatus: 'PENDING' })
     const rejected = doc({ type: 'POD', source: 'DRIVER_APP', reviewStatus: 'REJECTED' })
     const internal = doc({ type: 'POD', source: 'DRIVER_APP', reviewStatus: 'PENDING', audience: 'INTERNAL' })
-    const out = invoiceEmailDocuments([carrierUpload, rejected, internal], { attachIds: [], orderId: 'o1', loadIds: [], ivan: false })
+    const out = invoiceEmailDocuments([carrierOther, rejected, internal], { attachIds: [], orderId: 'o1', loadIds: [], ivan: false })
     expect(out).toEqual([])
   })
 })

@@ -125,11 +125,16 @@ describe('evaluateDocGate — customer scope', () => {
   })
 
   const notPresent: [string, Partial<ShipmentDocumentRecord>][] = [
-    ['PENDING review', { reviewStatus: 'PENDING' }],
     ['REJECTED review', { reviewStatus: 'REJECTED' }],
     ['VOID', { status: 'VOID' }],
     ['SUPERSEDED', { status: 'SUPERSEDED' }],
   ]
+
+  it('counts a POD still marked PENDING (there is no POD review step)', () => {
+    const result = customerGate([doc('POD', { reviewStatus: 'PENDING' })])
+    expect(result.missing).toEqual([])
+    expect(result.pendingReview).toEqual([])
+  })
 
   it.each(notPresent)('does not count a %s row', (_label, overrides) => {
     const result = customerGate([doc('POD', overrides)])

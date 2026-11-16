@@ -67,7 +67,6 @@ import {
   gateLoadIds,
   generatedFilename,
   generatedKey,
-  isDriverDocAwaitingReview,
   isOwnFleetLoad,
   isPointerDocument,
   nextVersion,
@@ -162,9 +161,8 @@ const RATEABLE_LOAD_STATUSES: readonly LoadWorkflowStatus[] = ['DELIVERED', 'INV
 async function stampPodReceived(deps: DocumentDeps, doc: Row): Promise<void> {
   if (!LANE_RATE_SAMPLE_TABLE_NAME) return
   if (doc.type !== 'POD' || doc.status !== 'ACTIVE') return
-  // A portal upload nobody has looked at yet is not a POD we have; the release gate
-  // does not count it either.
-  if (doc.reviewStatus === 'PENDING' || doc.reviewStatus === 'REJECTED') return
+  // A refused POD is not a POD we have; there is no review wait for any other.
+  if (doc.reviewStatus === 'REJECTED') return
   const loadId = optionalString(doc.loadId, 100)
   if (!loadId) return
   const at = optionalString(doc.uploadedAt, 64) ?? optionalString(doc.createdAt, 64) ?? nowIso()
@@ -748,10 +746,8 @@ export async function attachDriverDoc(deps: DocumentDeps, input: Row, caller: Ca
     audience: 'ALL',
     status: 'ACTIVE',
     version: nextVersion(bundle.documents as unknown as ShipmentDocumentRecord[], type, loadId),
-    // A POD our own review approved is accepted by construction; leaving reviewStatus
-    // unset keeps it out of the sparse review queue. A page filed automatically from the driver app
-    // (`pending`) waits for a reviewer instead: it shows in Documents but does not count until accepted.
-    ...(input.pending === true ? { reviewStatus: 'PENDING' } : {}),
+    // No POD review step (Ryne 2026-11-16): a POD is accepted when it is filed, so reviewStatus stays unset and it
+    // never enters the review queue. (`pending` from older callers is ignored.)
     uploadedBy: `driver:${String(submissionDoc.driverId ?? '')}`,
     uploadedAt: now,
     createdBy: caller.email,
@@ -1099,17 +1095,8 @@ export async function readyToInvoice(
   if (!review && bundle.shipment.legacyImported !== true) throw new Error(LOAD_REVIEW_ONLY_MESSAGE)
 
   const now = nowIso()
-  // Move to billing accepts the driver-app pages still waiting for review on this order (Ryne 2026-11-16: speed). The
-  // reviewer has the POD in front of them in Load Review; the acceptance is recorded under their name.
-  const releaseLoadIds = gateLoadIds(
-    bundle.loads as unknown as { id: string; orderId?: string | null }[],
-    bundle.orders as unknown as { id: string }[],
-    orderId,
-  )
-  const accepted = bundle.documents.filter((doc) => isDriverDocAwaitingReview(doc as unknown as ShipmentDocumentRecord)
-    && ((doc.orderId != null && String(doc.orderId) === orderId) || (doc.loadId != null && releaseLoadIds.includes(String(doc.loadId)))))
-  const acceptPatch: Row = { reviewStatus: 'ACCEPTED', reviewedAt: now, reviewedBy: caller.email, reviewNote: 'Accepted on Move to billing', updatedAt: now }
-  const releaseDocuments = bundle.documents.map((doc) => (accepted.includes(doc) ? { ...doc, ...acceptPatch } : doc))
+  // No POD review step (Ryne 2026-11-16): nothing is accepted on Move to billing; every POD counts when it is filed.
+  const releaseDocuments = bundle.documents
   const gate = customerDocGate({ bundle, documents: releaseDocuments, order, customer, settings })
   // The carrier's AP record is made by the move itself, before the order leaves review: if it cannot
   // be written, nothing is released and a second press picks up where this one stopped.
@@ -1137,15 +1124,9 @@ export async function readyToInvoice(
     deps.store.db,
     [
       updateItemTx(deps.store.tables.order, orderId, patch, expectedUpdatedAt),
-      ...accepted.map((doc) => updateItemTx(deps.store.tables.shipmentDocument, String(doc.id), acceptPatch, null)),
     ],
     'order',
   )
-  for (const doc of accepted) {
-    await deps.writeAudit('SHIPMENT_DOCUMENT', String(doc.id), 'REVIEW_DOCUMENT', caller, {
-      shipmentId, decision: 'ACCEPT', type: doc.type, note: 'Accepted on Move to billing',
-    })
-  }
   if (review) {
     const verdict = evaluateLoadReview({
       row: {
@@ -1154,7 +1135,7 @@ export async function readyToInvoice(
         status: bundle.shipment.status as ShipmentStatus,
         orderRevenueCents: numberOrNull(order.revenueCents),
         costCents: bundle.financials.reduce((sum, row) => sum + (numberOrNull(row.costCents) ?? 0), 0),
-        pendingDocReviewCount: bundle.documents.filter((doc) => doc.status !== 'VOID' && doc.reviewStatus === 'PENDING').length,
+        pendingDocReviewCount: bundle.documents.filter((doc) => doc.status !== 'VOID' && doc.reviewStatus === 'PENDING' && doc.type !== 'POD').length,
       },
       gate: release,
       extras: [],
@@ -1595,7 +1576,7 @@ export async function reviewLoad(deps: DocumentDeps, input: Row): Promise<Row> {
     revDivision: bundle.shipment.revDivision ?? null,
     revSubdivision: bundle.shipment.revSubdivision ?? null,
     legacyImported: bundle.shipment.legacyImported === true,
-    pendingDocReviewCount: bundle.documents.filter((doc) => doc.status !== 'VOID' && doc.reviewStatus === 'PENDING').length,
+    pendingDocReviewCount: bundle.documents.filter((doc) => doc.status !== 'VOID' && doc.reviewStatus === 'PENDING' && doc.type !== 'POD').length,
   }
 }
 

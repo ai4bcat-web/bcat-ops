@@ -797,7 +797,7 @@ describe('POST /u/<token>/commit', () => {
     mockS3Send.mockResolvedValue({ ContentLength: 2048, ContentType: 'application/pdf' })
   })
 
-  it('writes one PENDING document row and the link counter, and touches nothing else', async () => {
+  it('writes one document row (a POD needs no review) and the link counter, and touches nothing else', async () => {
     route({ link: uploadLink() })
     const res = await post(`/u/${TOKEN}/commit`, commit)
     expect(res.statusCode).toBe(200)
@@ -815,7 +815,6 @@ describe('POST /u/<token>/commit', () => {
       type: 'POD',
       s3Key: DOC_KEY,
       source: 'CARRIER_PORTAL',
-      reviewStatus: 'PENDING',
       status: 'ACTIVE',
       version: 1,
       audience: 'ALL',

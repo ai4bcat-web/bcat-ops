@@ -71,7 +71,7 @@ export interface ReleaseGateDocument {
   voidedAt?: string | null
   reviewStatus?: string | null
   audience?: string | null
-  /** DRIVER_APP: one of our drivers filed it, and it counts while it waits for review (isDriverDocAwaitingReview). */
+  /** DRIVER_APP: one of our drivers filed it; a POD counts the moment it is filed (there is no POD review step). */
   source?: string | null
 }
 
@@ -170,7 +170,7 @@ function countsAsPresent(doc: ReleaseGateDocument): boolean {
   if ((doc.status ?? 'ACTIVE') !== 'ACTIVE') return false
   if (doc.voidedAt) return false
   if (doc.reviewStatus === 'REJECTED') return false
-  return doc.reviewStatus !== 'PENDING' || doc.source === 'DRIVER_APP'
+  return doc.reviewStatus !== 'PENDING' || doc.source === 'DRIVER_APP' || doc.type === 'POD'
 }
 
 /**

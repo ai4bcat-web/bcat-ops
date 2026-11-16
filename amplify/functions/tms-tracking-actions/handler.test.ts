@@ -1393,9 +1393,9 @@ describe('EMAIL_DOCUMENTS', () => {
     expect(notices()).toHaveLength(0)
   })
 
-  it('refuses a carrier-portal upload nobody has reviewed yet', async () => {
+  it('refuses a carrier-portal upload (not a POD) nobody has reviewed yet, but sends a POD at once', async () => {
     seed()
-    seedDocument({ source: 'CARRIER_PORTAL', reviewStatus: 'PENDING' })
+    seedDocument({ source: 'CARRIER_PORTAL', reviewStatus: 'PENDING', type: 'OTHER' })
 
     await expect(
       call('EMAIL_DOCUMENTS', {
@@ -1506,7 +1506,6 @@ describe('INGEST_SHIPMENT_MESSAGE with attachments', () => {
       type: 'POD',
       name: 'POD_BC1001.pdf',
       source: 'CARRIER_PORTAL',
-      reviewStatus: 'PENDING',
       status: 'ACTIVE',
       contentType: 'application/pdf',
     })

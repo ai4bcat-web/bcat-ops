@@ -1954,7 +1954,7 @@ async function sendMilestoneNotice(input: Row, caller: Caller): Promise<Row> {
  * when it can. `canEmailTo` is the rule; this only explains what it decided.
  */
 function whyNotEmailable(doc: Row, recipientKind: 'CUSTOMER' | 'CARRIER'): string | null {
-  const view = doc as unknown as Pick<ShipmentDocumentRecord, 'audience' | 'status' | 'reviewStatus'>
+  const view = doc as unknown as Pick<ShipmentDocumentRecord, 'audience' | 'status' | 'reviewStatus' | 'type'>
   if (canEmailTo(view, recipientKind)) return null
   const name = optionalString(doc.name, 200) ?? String(doc.id)
   if (doc.status === 'VOID') return `${name} is void`
@@ -2203,7 +2203,8 @@ async function ingestAttachments(
       status: 'ACTIVE',
       version: 1,
       supersedesId: null,
-      reviewStatus: 'PENDING',
+      // No POD review step: only another kind of carrier upload waits for a person.
+      ...(type === 'POD' ? {} : { reviewStatus: 'PENDING' }),
       uploadedBy: caller.email,
       uploadedAt: now,
       createdBy: caller.email,
