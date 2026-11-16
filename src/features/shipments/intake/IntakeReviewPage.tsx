@@ -26,6 +26,7 @@ import { canMoveToActive, ensureRequiredStops, fieldStatusOf, intakeFieldKeys, i
 import type { CustomerRecord, TmsSettings } from '@/types/tms'
 import type { IntakeFields, IntakeLoadRecord, IntakeMeta, IntakeStop } from '@/types/intake'
 import { IntakeFieldRow } from './IntakeFieldRow'
+import { MarkBuiltDialog } from './MarkBuiltDialog'
 import { SourceEmailCard } from './SourceEmailCard'
 import { duplicateGroups } from '@/lib/intakeDuplicates'
 import { BuiltNotice, DeleteIntakeDialog, DuplicateNotice, IntakeNotes } from './DuplicateParts'
@@ -82,6 +83,7 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
   const [busy, setBusy] = useState(false)
   const [customerQuery, setCustomerQuery] = useState<string | null>(null)
   const [dismissOpen, setDismissOpen] = useState(false)
+  const [markBuiltOpen, setMarkBuiltOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const { isOwnerOrAdmin } = useIntakePermissions()
   const queue = useIntakeLoads({ status: 'OPEN', enabled: row.status === 'OPEN' })
@@ -441,15 +443,20 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
           </div>
         ) : null}
 
-        {canReview && row.status === 'OPEN' ? (
+        {row.status === 'OPEN' ? (
           <div className="tms-intake-footer">
-            <TmsButton size="sm" disabled={busy} onClick={confirmAll} title="Confirming fields does not review the load">Confirm all auto-filled</TmsButton>
-            <TmsButton size="sm" variant="ghost" disabled={busy} onClick={revert}>Revert to e-mail</TmsButton>
+            {canReview ? <TmsButton size="sm" disabled={busy} onClick={confirmAll} title="Confirming fields does not review the load">Confirm all auto-filled</TmsButton> : null}
+            {canReview ? <TmsButton size="sm" variant="ghost" disabled={busy} onClick={revert}>Revert to e-mail</TmsButton> : null}
             <span className="tms-intake-footer-spacer" />
-            {isOwnerOrAdmin ? <TmsButton variant="destructive" data-testid="intake-delete" disabled={busy} onClick={() => setDeleteOpen(true)}>Delete</TmsButton> : null}
-            <TmsButton variant="destructive" disabled={busy} onClick={() => setDismissOpen(true)}>Dismiss</TmsButton>
-            <TmsButton variant="primary" data-testid="intake-create" disabled={busy || !gate.ok} onClick={() => { if (builtMatches.length > 0) setBuiltConfirmOpen(true); else void move() }}>Create shipment</TmsButton>
+            {/* Anyone on Build can tie the e-mail to a PRO they built elsewhere (Ryne 2026-11-16). */}
+            <TmsButton data-testid="intake-review-mark-built" disabled={busy} onClick={() => setMarkBuiltOpen(true)}>Already built</TmsButton>
+            {canReview && isOwnerOrAdmin ? <TmsButton variant="destructive" data-testid="intake-delete" disabled={busy} onClick={() => setDeleteOpen(true)}>Delete</TmsButton> : null}
+            {canReview ? <TmsButton variant="destructive" disabled={busy} onClick={() => setDismissOpen(true)}>Dismiss</TmsButton> : null}
+            {canReview ? <TmsButton variant="primary" data-testid="intake-create" disabled={busy || !gate.ok} onClick={() => { if (builtMatches.length > 0) setBuiltConfirmOpen(true); else void move() }}>Create shipment</TmsButton> : null}
           </div>
+        ) : null}
+        {markBuiltOpen ? (
+          <MarkBuiltDialog row={row} open onOpenChange={setMarkBuiltOpen} onLinked={() => navigate('/tms/shipments/intake')} />
         ) : null}
       </div>
 

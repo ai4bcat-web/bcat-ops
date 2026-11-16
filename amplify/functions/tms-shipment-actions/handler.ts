@@ -609,6 +609,7 @@ type Action =
   | 'INTAKE_MARK_REVIEWED'
   | 'INTAKE_DISMISS'
   | 'INTAKE_LINK_SHIPMENT'
+  | 'INTAKE_UNLINK_SHIPMENT'
   | 'INTAKE_ATTACH_FILES'
   | 'INTAKE_DELETE'
   | 'INTAKE_NOT_DUPLICATE'
@@ -925,7 +926,7 @@ function isActionAuthorized(action: Action, caller: Caller): boolean {
     return groups.includes(LOADS_PAGE_GROUP) || groups.includes(QUOTES_PAGE_GROUP) || tms
   }
   // Whoever builds a shipment from an intake load can tie the two together: the link is the end of the build, not a review step.
-  if (action === 'INTAKE_LINK_SHIPMENT' || action === 'INTAKE_ATTACH_FILES' || action === 'INTAKE_AUTOLINK_BUILT') return groups.includes(INTAKE_REVIEW_PAGE_GROUP) || groups.includes(LOADS_PAGE_GROUP) || tms
+  if (action === 'INTAKE_LINK_SHIPMENT' || action === 'INTAKE_UNLINK_SHIPMENT' || action === 'INTAKE_ATTACH_FILES' || action === 'INTAKE_AUTOLINK_BUILT') return groups.includes(INTAKE_REVIEW_PAGE_GROUP) || groups.includes(LOADS_PAGE_GROUP) || tms
   if (INTAKE_REVIEW_ACTIONS[action]) return groups.includes(INTAKE_REVIEW_PAGE_GROUP)
   if (LOAD_REVIEW_ACTIONS[action]) return groups.includes(LOAD_REVIEW_PAGE_GROUP) || groups.includes(LOADS_PAGE_GROUP) || tms
   if (action === 'RECONCILE_BILLING') return BILLING_RECONCILE_GROUPS.some((g) => groups.includes(g)) || groups.includes(LOADS_PAGE_GROUP) || tms
@@ -9546,6 +9547,7 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
     case 'INTAKE_NOT_DUPLICATE':
     case 'INTAKE_ADD_NOTE':
     case 'INTAKE_AUTOLINK_BUILT':
+    case 'INTAKE_UNLINK_SHIPMENT':
       return runIntakeAction(intakeDeps, action as IntakeAction, input, caller)
     case 'CHECK_CREDIT':
       return checkCredit(input)

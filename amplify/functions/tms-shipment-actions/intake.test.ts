@@ -48,6 +48,11 @@ function applyItem(item: TransactWriteItem): void {
     const name = /#(\w+) = :/.exec(part)?.[1]
     if (name) next[name] = values[`:${name}`]
   }
+  const remove = / REMOVE (.+)$/.exec(u.UpdateExpression ?? '')?.[1] ?? ''
+  for (const part of remove.split(', ')) {
+    const name = /#(\w+)/.exec(part)?.[1]
+    if (name) delete next[name]
+  }
   rows(u.TableName!).set(key, next)
 }
 
@@ -89,7 +94,7 @@ const deps = (): IntakeDeps => ({
   tables: T,
   attachFiles: (...args: unknown[]) => attachFiles(...args),
   getById: async (t, id) => rows(t).get(id) ?? null,
-  queryIndex: async (t, _i, _k, v) => [...rows(t).values()].filter((r) => r.shipmentId === v),
+  queryIndex: async (t, _i, k, v) => [...rows(t).values()].filter((r) => r[k] === v),
   transact: async (items, label) => {
     // All-or-nothing: check every CAS before writing any.
     const snapshot = new Map([...store].map(([k, v]) => [k, new Map(v)]))
@@ -284,6 +289,52 @@ describe('INTAKE_LINK_SHIPMENT', () => {
     await expect(run('INTAKE_LINK_SHIPMENT', { intakeId: 'il:r1', shipmentId: 'shp-2' })).rejects.toThrow(/already became another/)
     seedIntake({ status: 'DISMISSED' })
     await expect(run('INTAKE_LINK_SHIPMENT', { intakeId: 'il:r1', shipmentId: 'shp-1' })).rejects.toThrow(/open intake load/)
+  })
+})
+
+describe('INTAKE_LINK_SHIPMENT via MANUAL ("Already built")', () => {
+  beforeEach(() => { rows(T.shipment).set('shp-1', { id: 'shp-1', number: '20061' }) })
+
+  it('links the row to the typed PRO, records who and the PRO, and copies the e-mail files', async () => {
+    rows(T.intakeLoad).get('il:r1')!.attachments = JSON.stringify([{ key: 'intake-attachments/a/rc.pdf', name: 'rc.pdf', contentType: 'application/pdf', size: 10 }])
+    await run('INTAKE_LINK_SHIPMENT', { intakeId: 'il:r1', shipmentId: 'shp-1', via: 'MANUAL' })
+    expect(intake()).toMatchObject({ status: 'MOVED', shipmentId: 'shp-1', shipmentNumber: '20061' })
+    expect(attachFiles).toHaveBeenCalled()
+    expect(audits.find((a) => a.type === 'INTAKE_LOAD')?.changes).toMatchObject({ via: 'MANUAL', pro: '20061', linkedBy: caller.email, relinked: false })
+  })
+
+  it('refuses a voided PRO but treats a NULL-typed void marker as live', async () => {
+    rows(T.shipment).set('shp-1', { id: 'shp-1', number: '20061', voidedAt: '2026-11-10T00:00:00.000Z' })
+    await expect(run('INTAKE_LINK_SHIPMENT', { intakeId: 'il:r1', shipmentId: 'shp-1', via: 'MANUAL' })).rejects.toThrow(/voided/)
+    rows(T.shipment).set('shp-1', { id: 'shp-1', number: '20061', voidedAt: null })
+    await run('INTAKE_LINK_SHIPMENT', { intakeId: 'il:r1', shipmentId: 'shp-1', via: 'MANUAL' })
+    expect(intake().status).toBe('MOVED')
+  })
+
+  it('asks for a confirm when another e-mail already points at the PRO, then links on confirm', async () => {
+    rows(T.intakeLoad).set('il:other', { id: 'il:other', status: 'MOVED', shipmentId: 'shp-1', subject: 'First tender', updatedAt: 'x', version: 1 })
+    await expect(run('INTAKE_LINK_SHIPMENT', { intakeId: 'il:r1', shipmentId: 'shp-1', via: 'MANUAL' })).rejects.toThrow(/^ALREADY_LINKED:.*First tender/)
+    expect(intake().status).toBe('OPEN')
+    await run('INTAKE_LINK_SHIPMENT', { intakeId: 'il:r1', shipmentId: 'shp-1', via: 'MANUAL', confirmRelink: true })
+    expect(intake()).toMatchObject({ status: 'MOVED', shipmentId: 'shp-1' })
+  })
+})
+
+describe('INTAKE_UNLINK_SHIPMENT', () => {
+  beforeEach(() => { rows(T.shipment).set('shp-1', { id: 'shp-1', number: '20061' }) })
+
+  it('puts a linked row back in the queue, clears the shipment, remembers it and audits both sides', async () => {
+    await run('INTAKE_LINK_SHIPMENT', { intakeId: 'il:r1', shipmentId: 'shp-1', via: 'MANUAL' })
+    const out = (await run('INTAKE_UNLINK_SHIPMENT', { intakeId: 'il:r1' })) as unknown as { status: string; shipmentId: string | null }
+    expect(out).toMatchObject({ status: 'OPEN', shipmentId: null })
+    expect(intake().status).toBe('OPEN')
+    expect(intake().shipmentId).toBeUndefined()
+    expect(intake().unlinkedShipmentIds).toEqual(['shp-1'])
+    expect(audits.filter((a) => a.action === 'INTAKE_UNLINK_SHIPMENT').map((a) => a.type).sort()).toEqual(['INTAKE_LOAD', 'SHIPMENT'])
+  })
+
+  it('refuses a row that is not linked', async () => {
+    await expect(run('INTAKE_UNLINK_SHIPMENT', { intakeId: 'il:r1' })).rejects.toThrow(/linked to a shipment/)
   })
 })
 

@@ -43,7 +43,7 @@ import { INTAKE_DELETED_REASON, NOT_DUPLICATE_TOKEN } from '../../../src/lib/int
 import { autoLinkTarget, builtMatchesFor, keyTokens, needsBuiltCheck, normRef, refCandidates, type BuiltShipment } from '../../../src/lib/intakeBuilt'
 import type { IntakeFields, IntakeLoadRecord, IntakeMeta, IntakeNote } from '../../../src/types/intake'
 
-export const INTAKE_ACTIONS = ['INTAKE_SAVE_DRAFT', 'INTAKE_MARK_REVIEWED', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS', 'INTAKE_LINK_SHIPMENT', 'INTAKE_ATTACH_FILES', 'INTAKE_DELETE', 'INTAKE_NOT_DUPLICATE', 'INTAKE_ADD_NOTE', 'INTAKE_AUTOLINK_BUILT'] as const
+export const INTAKE_ACTIONS = ['INTAKE_SAVE_DRAFT', 'INTAKE_MARK_REVIEWED', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS', 'INTAKE_LINK_SHIPMENT', 'INTAKE_ATTACH_FILES', 'INTAKE_DELETE', 'INTAKE_NOT_DUPLICATE', 'INTAKE_ADD_NOTE', 'INTAKE_AUTOLINK_BUILT', 'INTAKE_UNLINK_SHIPMENT'] as const
 export type IntakeAction = (typeof INTAKE_ACTIONS)[number]
 
 /** A PROMOTING row with no shipment older than this was abandoned (Lambda timeout is shorter). */
@@ -74,6 +74,11 @@ export interface IntakeDeps {
     assignAsset?(input: Row, caller: Caller): Promise<Row>
   }
   now(): string
+}
+
+/** A void/delete marker counts only as a real timestamp; a NULL-typed attribute (DUPLICATE_SHIPMENT, #510) is not one. */
+function isLiveMarker(value: unknown): boolean {
+  return typeof value === 'string' && value.length > 0
 }
 
 // ── Row <-> record ───────────────────────────────────────────────────────────
@@ -133,6 +138,7 @@ export function intakeRecordOf(row: Row): IntakeLoadRecord {
     version: numberOrNull(row.version) ?? 1,
     createdAt: String(row.createdAt ?? ''),
     updatedAt: String(row.updatedAt ?? ''),
+    unlinkedShipmentIds: jsonOf<string[]>(row.unlinkedShipmentIds, []),
   }
 }
 
@@ -376,20 +382,55 @@ export async function intakeLinkShipment(deps: IntakeDeps, input: Row, caller: C
   if (row.shipmentId && row.shipmentId !== shipmentId) throw new Error('This intake load already became another shipment')
   if (row.status === 'MOVED' && row.shipmentId === shipmentId) return intakeRecordOf(row) as unknown as Row
   if (row.status !== 'OPEN' && row.status !== 'PROMOTING') throw new Error('Only an open intake load can be linked to a shipment')
+  const manual = input.via === 'MANUAL'
+  if (manual) {
+    // Ryne 2026-11-16: anyone on Build can say "I already built this as PRO N". The PRO must be a live shipment, and a
+    // shipment another e-mail already points at needs an explicit confirm (a repeat tender can legitimately share one).
+    if (isLiveMarker(shipment.voidedAt) || isLiveMarker(shipment.deletedAt)) throw new Error(`PRO ${String(shipment.number ?? '')} is voided`)
+    if (input.confirmRelink !== true) {
+      const other = (await deps.queryIndex(deps.tables.intakeLoad, 'intakeLoadsByStatusAndReceivedAt', 'status', 'MOVED'))
+        .find((r) => r.shipmentId === shipmentId && String(r.id) !== intakeId)
+      if (other) throw new Error(`ALREADY_LINKED: PRO ${String(shipment.number ?? '')} is already linked to another intake e-mail ("${String(other.subject ?? other.fromEmail ?? other.id)}"). Confirm to link this one too.`)
+    }
+  }
   const shipmentNumber = String(shipment.number ?? '')
   const saved = await writeIntake(deps, row, { shipmentId, shipmentNumber, status: 'MOVED', updatedBy: caller.email }, [], false)
   // The e-mail the load came in on (rate con / tender) lands in the shipment's Documents, so nobody re-uploads it by hand.
   const files = attachmentFilesOf(row)
   const attached = deps.attachFiles && files.length ? await deps.attachFiles(shipmentId, intakeId, files, caller) : 0
-  const via = input.via === 'BUILT_MATCH' ? 'BUILT_MATCH' : 'CREATE_FORM'
+  const via = input.via === 'BUILT_MATCH' ? 'BUILT_MATCH' : manual ? 'MANUAL' : 'CREATE_FORM'
   const changes: Row = {
     linkedBy: caller.email, runId: row.runId ?? null, via,
     ...(via === 'BUILT_MATCH' ? { reference: optionalString(input.matchedValue, 200) ?? null } : {}),
+    ...(manual ? { pro: shipmentNumber, relinked: input.confirmRelink === true } : {}),
     ...(attached ? { documentsAttached: attached } : {}),
   }
   await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_LINK_SHIPMENT', caller, { ...changes, shipmentId })
   await deps.writeAudit('SHIPMENT', shipmentId, 'INTAKE_LINK_SHIPMENT', caller, { ...changes, intakeId })
   return intakeRecordOf(saved) as unknown as Row
+}
+
+// ── INTAKE_UNLINK_SHIPMENT ───────────────────────────────────────────────────
+
+/**
+ * Undo a link (Ryne 2026-11-16): someone typed the wrong PRO, or the auto-link picked the wrong shipment. The row goes back to
+ * OPEN in the queue and remembers the shipment it was unlinked from, so the already-built auto-link never re-ties it to the same
+ * one. The shipment keeps any documents the link copied onto it.
+ */
+export async function intakeUnlinkShipment(deps: IntakeDeps, input: Row, caller: Caller): Promise<Row> {
+  const intakeId = assertString(input.intakeId, 'intakeId')
+  const row = await loadRow(deps, intakeId)
+  const shipmentId = typeof row.shipmentId === 'string' ? row.shipmentId : ''
+  if (row.status !== 'MOVED' || !shipmentId) throw new Error('Only an intake e-mail linked to a shipment can be unlinked')
+  const unlinked = [...new Set([...jsonOf<string[]>(row.unlinkedShipmentIds, []), shipmentId])]
+  const now = deps.now()
+  const next: Row = { status: 'OPEN', unlinkedShipmentIds: unlinked, updatedBy: caller.email, updatedAt: now, version: (numberOrNull(row.version) ?? 1) + 1 }
+  await deps.transact([updateItemTx(deps.tables.intakeLoad, intakeId, next, String(row.updatedAt ?? ''), { remove: ['shipmentId', 'shipmentNumber'] })], 'intake unlink')
+  const changes: Row = { unlinkedBy: caller.email, shipmentNumber: row.shipmentNumber ?? null }
+  await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_UNLINK_SHIPMENT', caller, { ...changes, shipmentId })
+  await deps.writeAudit('SHIPMENT', shipmentId, 'INTAKE_UNLINK_SHIPMENT', caller, { ...changes, intakeId })
+  const { shipmentId: _s, shipmentNumber: _n, ...rest } = row
+  return intakeRecordOf({ ...rest, ...next }) as unknown as Row
 }
 
 // ── INTAKE_MARK_REVIEWED ─────────────────────────────────────────────────────
@@ -636,6 +677,8 @@ export function runIntakeAction(deps: IntakeDeps, action: IntakeAction, input: R
       return intakeAddNote(deps, input, caller)
     case 'INTAKE_AUTOLINK_BUILT':
       return intakeAutolinkBuilt(deps, caller).then((linked) => ({ linked }) as unknown as Row)
+    case 'INTAKE_UNLINK_SHIPMENT':
+      return intakeUnlinkShipment(deps, input, caller)
   }
 }
 
@@ -676,6 +719,8 @@ async function autolinkRows(deps: IntakeDeps, rows: IntakeLoadRecord[], caller: 
   for (const row of rows) {
     const target = autoLinkTarget(builtMatchesFor(row, shipments, tokens))
     if (!target || (only && target.shipmentId !== only.id)) continue
+    // A row someone unlinked from this shipment stays unlinked from it.
+    if ((row.unlinkedShipmentIds ?? []).includes(target.shipmentId)) continue
     try {
       await intakeLinkShipment(deps, { intakeId: row.id, shipmentId: target.shipmentId, via: 'BUILT_MATCH', matchedValue: target.value }, caller)
       linked += 1

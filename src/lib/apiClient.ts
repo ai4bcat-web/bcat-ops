@@ -3193,6 +3193,16 @@ export async function linkIntakeShipment(input: { intakeId: string; shipmentId: 
   return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_LINK_SHIPMENT', input))
 }
 
+/** "I already built this as PRO N" (Ryne 2026-11-16): link an intake e-mail to an existing shipment by hand. A shipment another e-mail already points at needs `confirmRelink`. */
+export async function markIntakeBuilt(input: { intakeId: string; shipmentId: string; confirmRelink?: boolean }): Promise<IntakeLoadRecord> {
+  return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_LINK_SHIPMENT', { ...input, via: 'MANUAL' }))
+}
+
+/** Undo a link: the e-mail goes back to the Intake queue and is never auto-linked to that shipment again. */
+export async function unlinkIntakeShipment(input: { intakeId: string }): Promise<IntakeLoadRecord> {
+  return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_UNLINK_SHIPMENT', input))
+}
+
 /** Tie every open intake row whose reference belongs to exactly one built shipment to that shipment (the server decides which). */
 export async function autolinkIntakeBuilt(): Promise<{ linked: number }> {
   return shipmentAction<{ linked: number }>('INTAKE_AUTOLINK_BUILT', {})

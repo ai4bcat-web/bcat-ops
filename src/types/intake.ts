@@ -64,4 +64,6 @@ export interface IntakeLoadRecord {
   lastEditedBy: string | null; lastEditedAt: string | null
   dismissedBy: string | null; dismissedAt: string | null; dismissReason: string | null
   createdBy: string; updatedBy: string; version: number; createdAt: string; updatedAt: string
+  /** Shipments this e-mail was unlinked from (server-side only): the already-built auto-link never re-ties it to them. */
+  unlinkedShipmentIds?: string[]
 }
