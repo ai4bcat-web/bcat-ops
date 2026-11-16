@@ -17,6 +17,21 @@ export function profitOf(row: ShipmentListRow): { cents: number; pct: number | n
   return { cents: revenue - cost, pct: revenue > 0 ? Math.round(((revenue - cost) / revenue) * 1000) / 10 : null }
 }
 
+/**
+ * What the POD / RC cell says, honestly: "On file" only when the document cache confirms the file. When the review check
+ * passes without that confirmation, it names what it trusted: the documents were signed off by hand, the customer does
+ * not require this document, or the order's document check found nothing missing.
+ */
+export function docBasisText(row: ShipmentListRow, docType: 'POD' | 'RATE_CON'): string {
+  const cell = docCellOf(row, docType)
+  if (cell === 'PRESENT') return 'On file'
+  if (cell === 'NA') return 'N/A'
+  if (row.docsOverrideAt) return 'Signed off (no file seen)'
+  if (Array.isArray(row.docsRequired) && !row.docsRequired.includes(docType)) return 'Not required'
+  if (Array.isArray(row.docsMissing) && !row.docsMissing.includes(docType)) return 'Doc check OK (file not seen)'
+  return ''
+}
+
 function carrierNames(row: ShipmentListRow): string {
   const names = (row.carriers ?? []).map((c) => c.name).filter((n): n is string => Boolean(n && n.trim()))
   return names.length > 0 ? names.join(', ') : (row.carrierName ?? '')
@@ -26,8 +41,8 @@ function carrierNames(row: ShipmentListRow): string {
 export function reviewFieldText(row: ShipmentListRow, key: LoadReviewFieldKey): string {
   switch (key) {
     case 'customerRef': return row.customerReference ?? row.reference ?? ''
-    case 'pod': return docCellOf(row, 'POD') === 'PRESENT' ? 'On file' : docCellOf(row, 'POD') === 'NA' ? 'N/A' : ''
-    case 'rateCon': return docCellOf(row, 'RATE_CON') === 'PRESENT' ? 'On file' : docCellOf(row, 'RATE_CON') === 'NA' ? 'N/A' : ''
+    case 'pod': return docBasisText(row, 'POD')
+    case 'rateCon': return docBasisText(row, 'RATE_CON')
     case 'customerRate': { const c = customerRateCents(row); return c == null ? '' : formatCents(c) }
     case 'carrierRate': return row.costCents == null ? '' : formatCents(row.costCents)
     case 'profit': { const p = profitOf(row); return p == null ? '' : `${formatCents(p.cents)}${p.pct == null ? '' : ` (${p.pct}%)`}` }
@@ -46,11 +61,14 @@ export function reviewFieldCell(row: ShipmentListRow, verdict: LoadReviewVerdict
   const text = reviewFieldText(row, key)
   if (!verdict) return { text, ok: null, reasons: [] }
   const reasons = loadReviewFieldReasons(verdict)[key].map((r) => r.message)
-  return { text, ok: reasons.length === 0, reasons }
+  // A failing document has nothing on file to vouch for: the basis text would contradict the NEED.
+  return { text: reasons.length > 0 && (key === 'pod' || key === 'rateCon') ? '' : text, ok: reasons.length === 0, reasons }
 }
 
-/** The Ready column: a check when every field passes, else what it needs. */
+/** The Ready column: "Ready" when every field passes, else "N to fix: <the columns that need something>". */
 export function reviewReadyText(verdict: LoadReviewVerdict | undefined): string {
   if (!verdict) return ''
-  return verdict.ok ? 'Ready' : `NEED ${loadReviewNeeds(verdict).join(', ')}`
+  if (verdict.ok) return 'Ready'
+  const needs = loadReviewNeeds(verdict)
+  return `${needs.length} to fix: ${needs.join(', ')}`
 }
