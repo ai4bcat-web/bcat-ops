@@ -551,3 +551,12 @@ describe('already built: auto-link (INTAKE_AUTOLINK_BUILT and the reconcile afte
     expect(intake().status).toBe('OPEN')
   })
 })
+
+describe('isTenderFileKey (20059: the forwarded-tender workflow stores its files under workflow-inbox/)', () => {
+  it('accepts Intake and workflow tender files, nothing else', async () => {
+    const { isTenderFileKey } = await import('./intake')
+    expect(isTenderFileKey('intake-attachments/a/ratecon.pdf')).toBe(true)
+    expect(isTenderFileKey('workflow-inbox/daa24d81/0-order_confirmation_10121814.pdf')).toBe(true)
+    expect(isTenderFileKey('rate-confirms/carrier/l1/lc1-v1.pdf')).toBe(false)
+  })
+})
