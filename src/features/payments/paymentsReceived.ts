@@ -197,7 +197,7 @@ export function filterReceived(
 
 export interface ReceivedTotals {
   count: number
-  /** Payments in (positive), net of reversals of payments. */
+  /** Payments in that still stand (not reversed). */
   paymentsCents: number
   paymentsCount: number
   creditsCents: number
@@ -205,7 +205,7 @@ export interface ReceivedTotals {
   debitsCents: number
   debitsCount: number
   writeOffsCents: number
-  reversalsCents: number
+  /** Reversal rows listed; they and the rows they reversed are left out of every total. */
   reversalsCount: number
   unappliedCents: number
   /** Σ signed amounts: what the rows in view add up to. */
@@ -215,16 +215,18 @@ export interface ReceivedTotals {
 export function receivedTotals(rows: readonly ReceivedRow[]): ReceivedTotals {
   const t: ReceivedTotals = {
     count: rows.length, paymentsCents: 0, paymentsCount: 0, creditsCents: 0, creditsCount: 0, debitsCents: 0, debitsCount: 0,
-    writeOffsCents: 0, reversalsCents: 0, reversalsCount: 0, unappliedCents: 0, netCents: 0,
+    writeOffsCents: 0, reversalsCount: 0, unappliedCents: 0, netCents: 0,
   }
   for (const r of rows) {
+    // A reversal and the row it undid cancel out: the pair is listed, but neither is counted as money in.
+    if (r.type === 'reversal') { t.reversalsCount += 1; continue }
+    if (r.reversed) continue
     t.netCents += r.amountCents
     t.unappliedCents += r.unappliedCents
     if (r.type === 'payment') { t.paymentsCents += r.amountCents; t.paymentsCount += 1 }
     else if (r.type === 'credit') { t.creditsCents += r.amountCents; t.creditsCount += 1 }
     else if (r.type === 'debit') { t.debitsCents += r.amountCents; t.debitsCount += 1 }
-    else if (r.type === 'write-off') t.writeOffsCents += r.amountCents
-    else { t.reversalsCents += r.amountCents; t.reversalsCount += 1 }
+    else t.writeOffsCents += r.amountCents
   }
   return t
 }

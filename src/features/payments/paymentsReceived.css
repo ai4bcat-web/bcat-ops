@@ -1,0 +1,16 @@
+/* The filter row: each control keeps its own width and the row wraps (the kit's selects fill their parent). */
+.tms-shell .pr-filters .tms-select,
+.tms-shell .pr-filters .tms-input {
+  width: auto;
+  flex: 0 0 auto;
+  max-width: 240px;
+}
+
+@media (max-width: 640px) {
+  .tms-shell .pr-filters .tms-select,
+  .tms-shell .pr-filters .tms-input {
+    flex: 1 1 calc(50% - 8px);
+    max-width: none;
+    min-width: 0;
+  }
+}

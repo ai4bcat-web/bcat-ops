@@ -92,6 +92,13 @@ describe('filters, totals, ledger and CSV', () => {
     expect(t).toMatchObject({ paymentsCents: 60_000, paymentsCount: 2, creditsCents: -1_500, debitsCents: 2_500, unappliedCents: 5_000, netCents: 61_000 })
   })
 
+  it('leaves a reversal and the payment it undid out of the totals', () => {
+    const undone = fromArPayment(pay({ id: 'x', amountCents: 9_000, unappliedCents: 0, reversedByPaymentId: 'r' }), names)
+    const reversal = fromArPayment(pay({ id: 'r', kind: 'REVERSAL', amountCents: 9_000, unappliedCents: 0, reversesPaymentId: 'x' }), names)
+    const t = receivedTotals([...rows, undone, reversal])
+    expect(t).toMatchObject({ paymentsCents: 60_000, paymentsCount: 2, reversalsCount: 1, netCents: 61_000 })
+  })
+
   it('runs a total oldest first for one customer', () => {
     const ledger = withRunningTotal(rows.filter((r) => r.customerId === 'c1'))
     expect(ledger.map((r) => [r.id, r.runningCents])).toEqual([['a', 50_000], ['c', 48_500]])

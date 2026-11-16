@@ -9,6 +9,7 @@
  * Aljex CRED/DEBT memos kept as history.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import './paymentsReceived.css'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Download, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
@@ -205,10 +206,11 @@ export function PaymentsReceivedPage() {
     { key: 'month', label: 'Collected this month', value: formatCents(collected.collectedMonthCents), sub: chip(collected.collectedMonthCount, 'invoice'),
       title: 'Invoices paid this month, by paid date. Same as the Receivables card.' },
     { key: 'payments', label: `Payments · ${rangeLabel}`, value: formatCents(totals.paymentsCents), sub: chip(totals.paymentsCount, 'payment'),
-      title: 'Cash receipts in the rows below.' },
+      title: 'Cash receipts in the rows below that still stand (reversed ones are left out).' },
     { key: 'credits', label: 'Credits', value: formatCents(totals.creditsCents), sub: chip(totals.creditsCount, 'credit') },
     { key: 'debits', label: 'Debits', value: formatCents(totals.debitsCents), sub: chip(totals.debitsCount, 'debit') },
-    ...(totals.reversalsCount > 0 ? [{ key: 'reversals', label: 'Reversals', value: formatCents(totals.reversalsCents), sub: chip(totals.reversalsCount, 'reversal'), tone: 'warn' as const }] : []),
+    ...(totals.reversalsCount > 0 ? [{ key: 'reversals', label: 'Reversed', value: chip(totals.reversalsCount, 'reversal'), sub: 'not counted',
+      title: 'Each reversal and the payment it undid are listed but left out of these totals.', tone: 'warn' as const }] : []),
     { key: 'unapplied', label: 'Unapplied', value: formatCents(totals.unappliedCents), tone: totals.unappliedCents > 0 ? 'warn' : 'default' },
   ]
 
@@ -268,7 +270,8 @@ export function PaymentsReceivedPage() {
         </span>
       )
     }
-    return undefined
+    // Every other column draws its own text (the grid shows what this returns).
+    return columns.find((c) => c.key === key)?.text(r) ?? null
   }
 
   const customer = oneCustomer ? customerById.get(oneCustomer) ?? null : null
@@ -298,7 +301,7 @@ export function PaymentsReceivedPage() {
 
         <TmsSummaryChips aria-label="Payments received at a glance" testId="payments-received-totals" items={summaryItems} />
 
-        <div className="tms-filter-row flex flex-wrap items-center gap-2" data-testid="payments-received-filters">
+        <div className="tms-filter-row pr-filters" data-testid="payments-received-filters">
           <TmsSelect aria-label="Dates" value={activePreset} onChange={(e) => {
             const p = range.find((x) => x.key === e.target.value)
             if (p) setFilter((f) => ({ ...f, from: p.from, to: p.to }))
