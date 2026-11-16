@@ -22,7 +22,6 @@ import { renderInvoiceEmail } from '@/lib/shipmentNotices'
 import type { FactoringItem } from '@/types'
 import type { CustomerRecord, InvoiceAdjustment, InvoiceRecord, ShipmentRecord, TmsSettings } from '@/types/tms'
 import { centsFromInput, inputFromCents } from './money'
-import { RECORD_PAYMENT_LINK_LABEL, recordPaymentPath } from '@/features/payments/links'
 import { InvoicePacketFrame } from './InvoicePacketFrame'
 import { useCustomerPaymentFacts } from '@/hooks/useCustomerPaymentFacts'
 import { PAYMENT_METHOD_LABEL, settlementOf } from '@/lib/daysToPay'
@@ -154,9 +153,7 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
             <TmsButton aria-label="Send to factor instead" disabled={saving} onClick={() => onFactor(current)}>Send to factor</TmsButton>
           )}
           {sent && !factored && current.status !== 'VOID' && current.status !== 'PAID' && current.balanceCents > 0 && (
-            <Link className="tms-btn tms-btn-secondary tms-btn-sm" to={recordPaymentPath({ customerId: current.customerId, invoiceId: current.id })}>
-              {RECORD_PAYMENT_LINK_LABEL}
-            </Link>
+            <span className="text-sm tms-muted" data-testid="payments-recorded-note">Payments are recorded in Payments received.</span>
           )}
           {canVoid && onVoid && current.status !== 'VOID' && (
             <TmsButton variant="ghost" aria-label="Void invoice" disabled={saving} onClick={() => onVoid(current)}>Void</TmsButton>

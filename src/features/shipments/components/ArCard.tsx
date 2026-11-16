@@ -21,7 +21,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Ban, Banknote, FileText, Mail, Send } from 'lucide-react'
+import { Ban, FileText, Mail, Send } from 'lucide-react'
 import { toast } from 'sonner'
 import { Switch } from '@/components/ui/switch'
 import { TmsBadge, TmsButton, TmsCard, TmsMetaList, TmsStatRow } from '@/features/tms/kit'
@@ -37,7 +37,6 @@ import { GenerateInvoiceDialog } from '@/features/ar/components/GenerateInvoiceD
 import { useBillingGrant, BILLING_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
 import { EmailInvoiceDialog } from '@/features/ar/components/EmailInvoiceDialog'
 import { useCustomerPaymentFacts } from '@/hooks/useCustomerPaymentFacts'
-import { RECORD_PAYMENT_LINK_LABEL, recordPaymentPath } from '@/features/payments/links'
 import { PAYMENT_METHOD_LABEL, settlementOf } from '@/lib/daysToPay'
 import { formatDay } from '@/features/ar/arViews'
 import { SendToFactorDialog } from '@/features/ar/components/SendToFactorDialog'
@@ -292,9 +291,7 @@ export function ArCard({ bundle, onReload }: ArCardProps) {
             </TmsButton>
             {/* Payments are recorded only on Payments received (Ryne 2026-11-15). */}
             {invoice && invoice.balanceCents > 0 && !invoice.factored && (
-              <Link className="tms-btn tms-btn-secondary tms-btn-sm" to={recordPaymentPath({ customerId: invoice.customerId, invoiceId: invoice.id })}>
-                <Banknote size={13} className="mr-1" />{RECORD_PAYMENT_LINK_LABEL}
-              </Link>
+              <span className="text-sm tms-muted" data-testid="payments-recorded-note">Payments are recorded in Payments received.</span>
             )}
             {order.factoringItemId || invoice?.factoringItemId ? (
               <TmsBadge tone="purple" data-testid="ar-factor-status">

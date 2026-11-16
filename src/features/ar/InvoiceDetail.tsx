@@ -37,7 +37,6 @@ import { useBillingGrant, BILLING_GRANT_MESSAGE } from './useBillingGrant'
 import { ReasonDialog } from './components/ReasonDialog'
 import { ChangeTimeline } from '@/components/ChangeTimeline'
 import { entitiesWithSpellings } from '@/components/changeTimelineModel'
-import { RECORD_PAYMENT_LINK_LABEL, recordPaymentPath } from '@/features/payments/links'
 import { SendToFactorDialog } from './components/SendToFactorDialog'
 import { WriteOffDialog } from './components/WriteOffDialog'
 
@@ -179,9 +178,7 @@ export function InvoiceDetail() {
           </TmsButton>
           {/* Payments are recorded only on Payments received (Ryne 2026-11-15). */}
           {invoice.status !== 'VOID' && invoice.status !== 'PAID' && invoice.balanceCents > 0 && (
-            <Link className="tms-btn tms-btn-secondary" to={recordPaymentPath({ customerId: invoice.customerId, invoiceId: invoice.id })}>
-              {RECORD_PAYMENT_LINK_LABEL}
-            </Link>
+            <span className="text-sm tms-muted" data-testid="payments-recorded-note">Payments are recorded in Payments received.</span>
           )}
           <TmsButton aria-label="Send to factor" disabled={busy || !canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => setDialog({ kind: 'factor' })}>
             Send to Factor
