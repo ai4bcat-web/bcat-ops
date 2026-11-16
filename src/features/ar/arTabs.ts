@@ -2,7 +2,8 @@
  * The Invoicing status tabs' labels and badges (Ryne 2026-11-15: every badge must tie to a number on
  * the cards). One set of definitions, shared with the Receivables card:
  *  - Invoiced = sent, unpaid invoices. With Billed: All it is "Open AR"; Manually invoiced is
- *    "Pending with shippers"; Factoring is "Factored, open". The label says which.
+ *    "Pending with shippers"; Factoring is "Factored, open". The tooltip says which.
+ *  - Labels are just "Ready to Invoice", "Invoiced", "Aging" (Ryne 2026-11-16); the amounts live in the tooltips.
  *  - There is no Paid tab (Ryne 2026-11-16): what was paid, and when, lives on Accounting → Payments received.
  *  - Aging = the same invoices as "Open AR" (any billing), counted in invoices, not customers.
  *  - Payments, credits and debits live on their own page, Accounting → Payments received (Ryne 2026-11-15).
@@ -17,12 +18,6 @@ import type { InvoiceRecord } from '@/types/tms'
 
 interface CountTotal { count: number; total: string }
 
-const INVOICED_LABEL: Record<ArBilledBy, string> = {
-  all: 'Invoiced',
-  manual: 'Invoiced to shippers',
-  factored: 'Invoiced through OTR',
-}
-
 export function arTabs(input: {
   billedBy: ArBilledBy
   ready: CountTotal
@@ -32,14 +27,14 @@ export function arTabs(input: {
 }): TmsTab[] {
   const { billedBy } = input
   return [
-    { key: 'ready', label: `Ready to invoice · ${input.ready.total}`, count: input.ready.count, testId: 'ar-tab-ready',
-      title: 'Released from Load Review, invoice not sent yet. Same as "Ready" on the Ready to invoice card.' },
-    { key: 'invoiced', label: `${INVOICED_LABEL[billedBy]} · ${input.invoiced.total} open`, count: input.invoiced.count, testId: 'ar-tab-invoiced',
-      title: billedBy === 'all' ? 'Sent and unpaid. Same as "Open AR".'
+    { key: 'ready', label: 'Ready to Invoice', count: input.ready.count, testId: 'ar-tab-ready',
+      title: `${input.ready.total}. Released from Load Review, invoice not sent yet. Same as "Ready" on the Ready to invoice card.` },
+    { key: 'invoiced', label: 'Invoiced', count: input.invoiced.count, testId: 'ar-tab-invoiced',
+      title: `${input.invoiced.total} open. ` + (billedBy === 'all' ? 'Sent and unpaid. Same as "Open AR".'
         : billedBy === 'manual' ? 'Sent to the customer and unpaid. Same as "Pending with shippers". Pick Billed: All to see OTR too.'
-          : 'Factored through OTR and unpaid. Same as "Factored, open". Pick Billed: All to see shippers too.' },
-    { key: 'aging', label: `Aging · ${input.aging.total} open`, count: input.aging.count, testId: 'ar-tab-aging',
-      title: 'Every open invoice by age, any billing. Same as "Open AR".' },
+          : 'Factored through OTR and unpaid. Same as "Factored, open". Pick Billed: All to see shippers too.') },
+    { key: 'aging', label: 'Aging', count: input.aging.count, testId: 'ar-tab-aging',
+      title: `${input.aging.total} open. Every open invoice by age, any billing. Same as "Open AR".` },
     { key: 'review', label: 'Needs review', count: input.review, testId: 'ar-tab-review',
       title: 'Loads flagged for a finance check (not invoices).' },
   ]
