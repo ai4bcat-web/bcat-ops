@@ -4528,9 +4528,10 @@ describe('SET_AR_STATUS', () => {
   it('refuses UNBILLED with the gate’s reasons when the paperwork is missing', async () => {
     const ids = await deliverable()
     await deliver(ids)
-    // Delivered, but nothing else the gate asks for: both documents and a leg.
+    // Delivered, but nothing else the gate asks for: the POD and a leg. A brokered load for a customer that does not
+    // factor owes no rate confirmation (Ryne 2026-11-16).
     await expect(call('SET_AR_STATUS', { orderId: ids.orderId, status: 'UNBILLED' }))
-      .rejects.toThrow(/Missing document: POD; Missing document: RATE_CON; No carrier or driver assigned/)
+      .rejects.toThrow(/Missing document: POD; No carrier or driver assigned/)
     expect(table(TABLES.order).get(ids.orderId)!.arStatus).toBe('DOCS_NEEDED')
   })
 
@@ -4784,7 +4785,7 @@ describe('documents', () => {
   })
 
   it('re-caches what the order still needs in the same write', async () => {
-    seedCustomer({ requiredDocsForInvoice: ['POD', 'LUMPER_RECEIPT'] })
+    seedCustomer({ requiredDocsForInvoice: ['POD', 'LUMPER_RECEIPT'], billingMethod: 'FACTOR' })
     const ids = await delivered()
     const prepared = await prepare(ids.shipmentId)
     putS3Object(prepared.s3Key, { ContentLength: 1024, ContentType: 'application/pdf' })
@@ -4869,7 +4870,7 @@ describe('documents', () => {
    * until a person accepts it, and voiding it puts the requirement straight back.
    */
   it('moves the gate only once a portal upload is accepted, and back when it is voided', async () => {
-    seedCustomer({ requiredDocsForInvoice: ['POD'] })
+    seedCustomer({ requiredDocsForInvoice: ['POD'], billingMethod: 'FACTOR' })
     const ids = await delivered()
     seedPortalUpload(ids)
 
@@ -4918,7 +4919,7 @@ describe('documents', () => {
    * list in the cached gate straight away, and clearing it takes it back out.
    */
   it('adds and removes a per-load required document in the cached gate', async () => {
-    seedCustomer({ requiredDocsForInvoice: ['POD'] })
+    seedCustomer({ requiredDocsForInvoice: ['POD'], billingMethod: 'FACTOR' })
     const ids = await delivered()
     await expect(
       call('SET_LOAD_REQUIRED_DOCS', { shipmentId: ids.shipmentId, loadId: ids.loadId, requiredDocTypes: ['INVOICE'] }),
@@ -5040,7 +5041,7 @@ describe('bill of lading', () => {
     })
 
     it('stamps the slot on the audit row and re-caches the required-doc gate with the row', async () => {
-      seedCustomer({ requiredDocsForInvoice: ['BOL'] })
+      seedCustomer({ requiredDocsForInvoice: ['BOL'], billingMethod: 'FACTOR' })
       const ids = await draftWithTwoDeliveries()
       const before = table(TABLES.order).get(ids.orderId)!
       expect(before.docsMissing ?? ['BOL']).toEqual(['BOL'])

@@ -31,7 +31,7 @@ describe('per-load required documents', () => {
       loadIds: ['l1'],
       loadCarriers: [],
       documents: [],
-      customer: { requiredDocsForInvoice: ['POD'] },
+      customer: { requiredDocsForInvoice: ['POD'], billingMethod: 'FACTOR' } as never,
       settings: null,
       extraDocTypes: ['LUMPER_RECEIPT'],
     })

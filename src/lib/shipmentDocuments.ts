@@ -25,7 +25,7 @@
  * notifier Lambdas bundle this file by path, so a `@/` alias would break the
  * function build.
  */
-import { customerDocsNotRequired } from './reviewRequirements'
+import { customerDocsNotRequired, customerFactorsForOtr, isAssetLoad, rateConRequired } from './reviewRequirements'
 import { NEVER_BLOCKING_DOC_TYPES } from './releaseGate'
 import type {
   CustomerRecord,
@@ -510,7 +510,21 @@ export function evaluateDocGate(input: DocGateInput): DocGateResult {
   // optional and never holds an invoice. Per-load extras (`Load.requiredDocTypes`) are explicit and block as written.
   const gated = input.scope === 'CARRIER' ? required : required.filter((type) => !NEVER_BLOCKING_DOC_TYPES.includes(type))
   if (input.scope !== 'CARRIER') {
-    if (input.carShipper !== true && !gated.includes('RATE_CON')) gated.push('RATE_CON')
+    // The outside rate confirmation follows the one rule (rateConRequired): asset loads and factored customers need it,
+    // brokered loads for a customer that does not factor, car shipping and waiving customers do not.
+    const needsRateCon = rateConRequired({
+      asset: input.ownFleet === true,
+      carShipper: input.carShipper === true,
+      customerFactors: customerFactorsForOtr(input.customer as { billingMethod?: string | null; factored?: boolean | null } | null | undefined),
+      customerWaivesRateCon: customerDocsNotRequired(
+        input.customer as { reviewRequirements?: string[] | null } | null | undefined,
+        input.settings as { reviewRequirements?: string[] | null } | null | undefined,
+      ).includes('RATE_CON'),
+    })
+    if (needsRateCon && !gated.includes('RATE_CON')) gated.push('RATE_CON')
+    // A brokered load for a customer that does not factor owes no rate confirmation, even when its list names one. Car
+    // shipping keeps the older behaviour (nothing added, an explicit list stands).
+    if (!needsRateCon && input.carShipper !== true && gated.includes('RATE_CON') && !(input.extraDocTypes ?? []).includes('RATE_CON')) gated.splice(gated.indexOf('RATE_CON'), 1)
     // POD / RC the customer does not need to invoice (its Load Review list), like the release gate.
     const notRequired = customerDocsNotRequired(
       input.customer as { reviewRequirements?: string[] | null } | null | undefined,
@@ -573,14 +587,17 @@ export function isOutsideRateConKey(key: string | null | undefined): boolean {
   return k.length > 0 && !k.startsWith('rate-confirms/carrier/')
 }
 
-/** Own fleet (Ivan Cartage): the ASSETS revenue division, or every live assignment is our own truck. */
+/** An asset load (isAssetLoad): ASSETS, or our own trucks / Ivan Cartage on a live assignment. */
 export function isOwnFleetLoad(
   shipment: { revDivision?: string | null } | null | undefined,
-  loadCarriers: readonly { status?: string | null; kind?: string | null }[] = [],
+  loadCarriers: readonly { status?: string | null; kind?: string | null; carrierName?: string | null }[] = [],
 ): boolean {
-  if (shipment?.revDivision === 'ASSETS') return true
   const active = loadCarriers.filter((lc) => lc.status === 'ACTIVE')
-  return active.length > 0 && active.every((lc) => lc.kind === 'OWN_ASSET')
+  return isAssetLoad({
+    revDivision: shipment?.revDivision ?? null,
+    legKinds: active.map((lc) => lc.kind ?? null),
+    carrierNames: active.map((lc) => lc.carrierName ?? null),
+  })
 }
 
 export function legacyRateConDocumentId(loadId: string): string {

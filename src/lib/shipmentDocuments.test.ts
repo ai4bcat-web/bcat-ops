@@ -62,7 +62,8 @@ function customerGate(
     loadIds: ['ld-1'],
     loadCarriers,
     documents,
-    customer: { requiredDocsForInvoice: required },
+    // A factored customer: OTR needs the rate confirmation, so the gate asks for it (rateConRequired).
+    customer: { requiredDocsForInvoice: required, billingMethod: 'FACTOR' } as never,
     scope: 'CUSTOMER',
     carShipper,
   })
@@ -169,6 +170,14 @@ describe('evaluateDocGate — the rate confirmation is always required except fo
 
   it('leaves it off a car-shipping load', () => {
     expect(customerGate([doc('POD')], ['POD'], [carrier('lc-1')], true).required).toEqual(['POD'])
+  })
+
+  it('leaves it off a brokered load for a customer that does not factor, even if their list names it (Ryne 2026-11-16)', () => {
+    const gate = evaluateDocGate({
+      order: { id: 'ord-1' }, loadIds: ['ld-1'], loadCarriers: [carrier('lc-1')], documents: [doc('POD')],
+      customer: { requiredDocsForInvoice: ['POD', 'RATE_CON'], billingMethod: 'MANUAL' } as never, scope: 'CUSTOMER', carShipper: false,
+    })
+    expect(gate.required).toEqual(['POD'])
   })
 })
 

@@ -10,6 +10,7 @@
  */
 import type { CustomerBillingGapCode } from '@/lib/customerBillingReady'
 import { STATUS_META } from '@/lib/apptStatus'
+import { isAssetLoad, rateConRequired } from '@/lib/reviewRequirements'
 import { PHASE_LABEL, deliveryPhase, deliveryPhaseText } from '@/lib/deliveryPhase'
 import { phaseInputOfRow } from './deliveryPhaseInputs'
 import { rateConStatusText } from '@/lib/rateConLabel'
@@ -346,7 +347,7 @@ export function openMissingDocs(row: ShipmentRow): MissingDocCode[] {
   if (row.invoiceId || row.factoringItemId || row.legacyImported === true) return []
   const factored = row.customerFactors === true
   const out: MissingDocCode[] = []
-  if ((factored || row.revDivision === 'ASSETS') && docCellOf(row, 'RATE_CON') === 'MISSING') out.push('RATE_CON')
+  if (docCellOf(row, 'RATE_CON') === 'MISSING') out.push('RATE_CON')
   if (factored && docCellOf(row, 'POD') === 'MISSING') out.push('POD')
   return out
 }
@@ -820,10 +821,23 @@ export function podStatusOf(row: Pick<ShipmentRow, 'revDivision' | 'docsMissing'
  * retyped into a rate confirmation, counts the moment the gate re-reads (Ryne 2026-11-14).
  */
 export function rateConIn(row: Pick<ShipmentRow, 'rateConSignedAt' | 'rateConStatus' | 'rateConOnFile'> & { docsMissing?: string[] | null; docsRequired?: string[] | null; docsPresent?: string[] | null }): boolean {
-  if (Boolean(row.rateConSignedAt) || row.rateConStatus === 'SIGNED' || row.rateConOnFile === true) return true
+  // On an asset load our own truck's signature on our own rate con is not the outside rate confirmation.
+  const asset = isAssetLoad({ revDivision: (row as { revDivision?: string | null }).revDivision ?? null, assignmentType: (row as { assignmentType?: string | null }).assignmentType ?? null })
+  if (!asset && (Boolean(row.rateConSignedAt) || row.rateConStatus === 'SIGNED')) return true
+  if (row.rateConOnFile === true) return true
   if (Array.isArray(row.docsPresent) && row.docsPresent.includes('RATE_CON')) return true
   return Array.isArray(row.docsMissing) && Array.isArray(row.docsRequired)
     && row.docsRequired.includes('RATE_CON') && !row.docsMissing.includes('RATE_CON')
+}
+
+/** The board row's facts for the one RC rule (rateConRequired in reviewRequirements.ts). */
+export function rowNeedsRateCon(row: { revDivision?: string | null; assignmentType?: string | null; carrierName?: string | null; customerFactors?: boolean | null; docsNotRequired?: string[] | null; carriers?: readonly { name?: string | null }[] | null }): boolean {
+  return rateConRequired({
+    asset: isAssetLoad({ revDivision: row.revDivision ?? null, assignmentType: row.assignmentType ?? null, carrierName: row.carrierName ?? null, carrierNames: (row.carriers ?? []).map((c) => c?.name ?? null) }),
+    carShipper: row.revDivision === 'CAR_SHIPPING',
+    customerFactors: row.customerFactors === true,
+    customerWaivesRateCon: row.docsNotRequired?.includes('RATE_CON') === true,
+  })
 }
 
 export type DocCellState = 'PRESENT' | 'MISSING' | 'NA' | ''
@@ -839,6 +853,9 @@ export function docCellOf(
   docType: 'POD' | 'RATE_CON',
 ): DocCellState {
   if (row.revDivision === 'CAR_SHIPPING') return 'NA'
+  // RC follows the one rule (rateConRequired, Ryne 2026-11-16): N/A on a brokered load for a customer that does not
+  // factor, on AUTO SHIPPER work and for a customer that waives it; ✓ / NEED on an asset load or a factored customer's.
+  if (docType === 'RATE_CON' && !rowNeedsRateCon(row)) return 'NA'
   // The customer does not need this document to invoice (Ryne 2026-11-15: AUTO SHIPPER), unless it is on file anyway.
   if (row.docsNotRequired?.includes(docType)) return docType === 'POD' && Array.isArray(row.docsPresent) && row.docsPresent.includes('POD') ? 'PRESENT' : 'NA'
   const delivered = boardStatusOf(row) === 'DELIVERED'
@@ -870,7 +887,9 @@ export function docsMissingOf(row: Pick<ShipmentRow, 'status' | 'voidedAt' | 'de
   const podOnFile = Array.isArray(row.docsPresent) && row.docsPresent.includes('POD')
   if (!podOnFile && (row.docsMissing == null || row.docsMissing.includes('POD')) && !out.includes('POD')) out.push('POD')
   // The gate's RATE_CON and the board's RC are the same document: count it once.
-  if (!rateConIn(row) && !out.includes('RC') && !out.includes('RATE_CON') && !(row as { docsNotRequired?: string[] | null }).docsNotRequired?.includes('RATE_CON')) out.push('RC')
+  if (rowNeedsRateCon(row) && !rateConIn(row) && !out.includes('RC') && !out.includes('RATE_CON')) out.push('RC')
+  // A brokered load that needs no outside rate confirmation does not owe one, whatever an older cached gate said.
+  if (!rowNeedsRateCon(row)) return out.filter((t) => t !== 'RATE_CON' && t !== 'RC')
   return out
 }
 

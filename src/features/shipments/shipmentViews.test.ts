@@ -498,7 +498,7 @@ describe('board filter set helpers', () => {
 })
 
 describe('POD column', () => {
-  const r = (over: Record<string, unknown>) => ({ revDivision: 'BROKERAGE', docsRequired: ['POD', 'BOL'], docsMissing: [], ...over }) as never
+  const r = (over: Record<string, unknown>) => ({ revDivision: 'BROKERAGE', customerFactors: true, docsRequired: ['POD', 'BOL'], docsMissing: [], ...over }) as never
   it('flags a shipment whose POD is outstanding, for every revenue type except car shipping', () => {
     expect(podStatusOf(r({ docsMissing: ['POD'] }))).toBe('NO_POD')
     expect(podStatusOf(r({ revDivision: 'ASSETS', docsMissing: ['POD', 'BOL'] }))).toBe('NO_POD')
@@ -532,7 +532,7 @@ describe('POD column', () => {
 })
 
 describe('docsMissingOf: a delivered shipment needs a POD and an RC', () => {
-  const d = (over: Record<string, unknown>) => ({ status: 'DELIVERED', revDivision: 'BROKERAGE', docsMissing: [], rateConOnFile: true, ...over }) as never
+  const d = (over: Record<string, unknown>) => ({ status: 'DELIVERED', revDivision: 'BROKERAGE', customerFactors: true, docsMissing: [], rateConOnFile: true, ...over }) as never
   it('is empty for a delivered shipment with both', () => {
     expect(docsMissingOf(d({}))).toEqual([])
   })
@@ -554,7 +554,10 @@ describe('docsMissingOf: a delivered shipment needs a POD and an RC', () => {
   })
   it('asks own fleet for the outside rate con unless the customer waives it (Ryne 2026-11-16)', () => {
     expect(docsMissingOf(d({ revDivision: 'ASSETS', rateConOnFile: false }))).toEqual(['RC'])
-    expect(docsMissingOf({ ...d({ revDivision: 'ASSETS', rateConOnFile: false }), docsNotRequired: ['RATE_CON'] } as never)).toEqual([])
+    expect(docsMissingOf({ ...d({ revDivision: 'ASSETS', rateConOnFile: false, customerFactors: false }), docsNotRequired: ['RATE_CON'] } as never)).toEqual([])
+  })
+  it('a brokered load for a customer that does not factor owes no RC, even if an older cached gate listed it', () => {
+    expect(docsMissingOf(d({ customerFactors: false, rateConOnFile: false, docsMissing: ['RATE_CON'] }))).toEqual([])
   })
 })
 

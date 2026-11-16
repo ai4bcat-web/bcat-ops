@@ -121,6 +121,11 @@ export interface ReleaseGateInput {
   ownFleet?: boolean
   /** An own-fleet load carries the customer's tender on `Load.rateConfirmKey` (isOutsideRateConKey). */
   ownFleetTenderOnLoad?: boolean
+  /**
+   * Whether this load needs an outside rate confirmation (rateConRequired, reviewRequirements.ts): the one rule the
+   * board, Load Review and the document gate use. Absent = the older rule (always, except car shipping).
+   */
+  rateConRequired?: boolean
 }
 
 export interface ReleaseGateResult {
@@ -173,7 +178,7 @@ export function requiredDocTypesForRelease(
   requiredDocTypes: readonly string[],
   legs: readonly ReleaseGateLeg[],
   extraDocTypes: readonly string[] = [],
-  opts: { carShipper?: boolean; notRequired?: readonly string[] } = {},
+  opts: { carShipper?: boolean; notRequired?: readonly string[]; rateConRequired?: boolean } = {},
 ): string[] {
   void legs
   const out: string[] = []
@@ -184,12 +189,15 @@ export function requiredDocTypesForRelease(
     if (!explicit && skip.has(trimmed)) return
     if (trimmed && !out.includes(trimmed)) out.push(trimmed)
   }
+  // When the one rule says no outside rate confirmation is needed, the customer's list does not ask for one either.
+  const rateConOff = opts.rateConRequired === false
   for (const type of requiredDocTypes) {
     if (typeof type === 'string' && NEVER_BLOCKING_DOC_TYPES.includes(type.trim())) continue
+    if (rateConOff && typeof type === 'string' && type.trim() === 'RATE_CON') continue
     add(type)
   }
   for (const type of ALWAYS_REQUIRED_DOC_TYPES) add(type)
-  if (!opts.carShipper) add('RATE_CON')
+  if (opts.rateConRequired === true || (opts.rateConRequired === undefined && !opts.carShipper)) add('RATE_CON')
   for (const type of extraDocTypes) add(type, true)
   return out
 }
@@ -232,7 +240,7 @@ export function evaluateReleaseGate(input: ReleaseGateInput): ReleaseGateResult 
     if (!perCarrierRateCon && carrierLegs.some((leg) => leg.rateConStatus === 'SIGNED')) {
       present.add('RATE_CON')
     }
-    for (const type of requiredDocTypesForRelease(input.requiredDocTypes, legs, input.extraDocTypes ?? [], { carShipper: isCarShipperLoad(shipment), notRequired: input.notRequiredDocTypes ?? [] })) {
+    for (const type of requiredDocTypesForRelease(input.requiredDocTypes, legs, input.extraDocTypes ?? [], { carShipper: isCarShipperLoad(shipment), notRequired: input.notRequiredDocTypes ?? [], rateConRequired: input.rateConRequired })) {
       if (type === 'RATE_CON' && perCarrierRateCon) {
         const unsigned = carrierLegs.filter((leg) => leg.rateConStatus !== 'SIGNED')
         if (unsigned.length > 0) {

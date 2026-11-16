@@ -24,7 +24,8 @@ import {
   type Row,
 } from './shipmentStore'
 import { gateLoadIds, isOutsideRateConKey, isOwnFleetLoad, requiredDocTypesFor } from '../../../src/lib/shipmentDocuments'
-import { customerDocsNotRequired } from '../../../src/lib/reviewRequirements'
+import { customerDocsNotRequired, customerFactorsForOtr, rateConRequired } from '../../../src/lib/reviewRequirements'
+import { isCarShipperLoad } from '../../../src/lib/carShipper'
 import { loadExtraDocTypes } from '../../../src/lib/loadRequiredDocs'
 import type {
   ReleaseGateDocument,
@@ -223,9 +224,21 @@ export async function loadReleaseGateInput(
   )
   const ownFleetTenderOnLoad = ownFleet && orderLoads.some((load) => isOutsideRateConKey(load.rateConfirmKey as string | null | undefined))
 
+  const notRequiredDocTypes = customerDocsNotRequired(
+    customer as { reviewRequirements?: string[] | null } | null,
+    settings as { reviewRequirements?: string[] | null } | null,
+  )
+
   return {
     ownFleet,
     ownFleetTenderOnLoad,
+    // Car shipping keeps the older rule (nothing added); everything else follows the one rule.
+    rateConRequired: isCarShipperLoad(shipment as { revDivision?: string | null }) ? undefined : rateConRequired({
+      asset: ownFleet,
+      carShipper: isCarShipperLoad(shipment as { revDivision?: string | null }),
+      customerFactors: customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null),
+      customerWaivesRateCon: notRequiredDocTypes.includes('RATE_CON'),
+    }),
     shipment: {
       status: shipment.status == null ? null : String(shipment.status),
       voidedAt: shipment.voidedAt == null ? null : String(shipment.voidedAt),
