@@ -36,9 +36,8 @@ import { cn } from '@/lib/utils'
 import { GenerateInvoiceDialog } from '@/features/ar/components/GenerateInvoiceDialog'
 import { useBillingGrant, BILLING_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
 import { EmailInvoiceDialog } from '@/features/ar/components/EmailInvoiceDialog'
-import { ReceivePaymentDialog } from '@/features/ar/components/ReceivePaymentDialog'
 import { useCustomerPaymentFacts } from '@/hooks/useCustomerPaymentFacts'
-import { MarkPaidDialog } from '@/features/ar/components/MarkPaidDialog'
+import { RECORD_PAYMENT_LINK_LABEL, recordPaymentPath } from '@/features/payments/links'
 import { PAYMENT_METHOD_LABEL, settlementOf } from '@/lib/daysToPay'
 import { formatDay } from '@/features/ar/arViews'
 import { SendToFactorDialog } from '@/features/ar/components/SendToFactorDialog'
@@ -68,7 +67,7 @@ const BUCKET_TONE: Record<AgingBucket, 'gray' | 'orange' | 'red'> = {
   D91_PLUS: 'red',
 }
 
-type ArDialog = { kind: 'generate' } | { kind: 'email' } | { kind: 'payment' } | { kind: 'markPaid' } | { kind: 'factor' } | { kind: 'void' } | null
+type ArDialog = { kind: 'generate' } | { kind: 'email' } | { kind: 'factor' } | { kind: 'void' } | null
 
 export interface ArCardProps {
   bundle: ShipmentBundle
@@ -86,8 +85,7 @@ export function ArCard({ bundle, onReload }: ArCardProps) {
   const [dialog, setDialog] = useState<ArDialog>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [factsVersion, setFactsVersion] = useState(0)
-  const paymentFacts = useCustomerPaymentFacts(invoice?.customerId ? [invoice.customerId] : [], factsVersion)
+  const paymentFacts = useCustomerPaymentFacts(invoice?.customerId ? [invoice.customerId] : [], 0)
   const paymentLines = invoice ? paymentFacts.linesByInvoice.get(invoice.id) ?? [] : []
 
   // No synchronous setState before the first await; a failed read keeps what we had.
@@ -292,15 +290,11 @@ export function ArCard({ bundle, onReload }: ArCardProps) {
             <TmsButton size="sm" onClick={() => setDialog({ kind: 'email' })}>
               <Mail size={13} className="mr-1" />E-mail
             </TmsButton>
-            {(invoice?.balanceCents ?? 0) > 0 && !invoice?.factored && (
-              <TmsButton size="sm" variant="primary" onClick={() => setDialog({ kind: 'markPaid' })}>
-                <Banknote size={13} className="mr-1" />Mark paid
-              </TmsButton>
-            )}
-            {(invoice?.balanceCents ?? 0) > 0 && (
-              <TmsButton size="sm" onClick={() => setDialog({ kind: 'payment' })}>
-                <Banknote size={13} className="mr-1" />Receive payment
-              </TmsButton>
+            {/* Payments are recorded only on Payments received (Ryne 2026-11-15). */}
+            {invoice && invoice.balanceCents > 0 && !invoice.factored && (
+              <Link className="tms-btn tms-btn-secondary tms-btn-sm" to={recordPaymentPath({ customerId: invoice.customerId, invoiceId: invoice.id })}>
+                <Banknote size={13} className="mr-1" />{RECORD_PAYMENT_LINK_LABEL}
+              </Link>
             )}
             {order.factoringItemId || invoice?.factoringItemId ? (
               <TmsBadge tone="purple" data-testid="ar-factor-status">
@@ -339,28 +333,6 @@ export function ArCard({ bundle, onReload }: ArCardProps) {
       {dialog?.kind === 'email' && invoiceId && (
         <EmailInvoiceDialog
           invoiceId={invoiceId}
-          busy={busy}
-          onClose={() => setDialog(null)}
-          onDone={() => { setDialog(null); void refresh() }}
-        />
-      )}
-      {/*
-        * The payment is applied to the invoice's customer, not to whatever the order
-        * carries now: an order may have no Customer record linked at all, and only an
-        * invoice — which cannot be generated without one — proves there is money owed.
-        */}
-      {dialog?.kind === 'markPaid' && invoice && (
-        <MarkPaidDialog
-          invoices={[invoice]}
-          onClose={() => setDialog(null)}
-          onDone={() => { setFactsVersion((v) => v + 1); void refresh() }}
-        />
-      )}
-      {dialog?.kind === 'payment' && invoice && (
-        <ReceivePaymentDialog
-          customerId={invoice.customerId}
-          customerName={invoice.customerName ?? shipment.customerName ?? undefined}
-          invoiceId={invoiceId ?? undefined}
           busy={busy}
           onClose={() => setDialog(null)}
           onDone={() => { setDialog(null); void refresh() }}

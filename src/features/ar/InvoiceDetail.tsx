@@ -37,14 +37,12 @@ import { useBillingGrant, BILLING_GRANT_MESSAGE } from './useBillingGrant'
 import { ReasonDialog } from './components/ReasonDialog'
 import { ChangeTimeline } from '@/components/ChangeTimeline'
 import { entitiesWithSpellings } from '@/components/changeTimelineModel'
-import { ReceivePaymentDialog } from './components/ReceivePaymentDialog'
+import { RECORD_PAYMENT_LINK_LABEL, recordPaymentPath } from '@/features/payments/links'
 import { SendToFactorDialog } from './components/SendToFactorDialog'
 import { WriteOffDialog } from './components/WriteOffDialog'
-import type { ArPaymentMethod } from '@/types/tms'
 
 type DetailDialog =
   | { kind: 'email' }
-  | { kind: 'payment'; method?: ArPaymentMethod }
   | { kind: 'factor' }
   | { kind: 'writeOff' }
   | { kind: 'void' }
@@ -179,9 +177,12 @@ export function InvoiceDetail() {
           <TmsButton variant="primary" aria-label="E-mail invoice" disabled={busy || !canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => setDialog({ kind: 'email' })}>
             E-mail
           </TmsButton>
-          <TmsButton aria-label="Receive payment" disabled={busy} onClick={() => setDialog({ kind: 'payment' })}>
-            Receive payment
-          </TmsButton>
+          {/* Payments are recorded only on Payments received (Ryne 2026-11-15). */}
+          {invoice.status !== 'VOID' && invoice.status !== 'PAID' && invoice.balanceCents > 0 && (
+            <Link className="tms-btn tms-btn-secondary" to={recordPaymentPath({ customerId: invoice.customerId, invoiceId: invoice.id })}>
+              {RECORD_PAYMENT_LINK_LABEL}
+            </Link>
+          )}
           <TmsButton aria-label="Send to factor" disabled={busy || !canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => setDialog({ kind: 'factor' })}>
             Send to Factor
           </TmsButton>
@@ -473,31 +474,11 @@ export function InvoiceDetail() {
               ]}
             />
           )}
-          <div className="mt-2">
-            <TmsButton
-              aria-label="Record factor payment"
-              disabled={busy}
-              onClick={() => setDialog({ kind: 'payment', method: 'FACTOR' })}
-            >
-              Record factor payment
-            </TmsButton>
-          </div>
         </TmsCard>
       )}
 
       {dialog?.kind === 'email' && (
         <EmailInvoiceDialog invoiceId={invoice.id} busy={busy} onClose={() => setDialog(null)} onDone={closeAndRefresh} />
-      )}
-      {dialog?.kind === 'payment' && (
-        <ReceivePaymentDialog
-          customerId={invoice.customerId}
-          customerName={invoice.customerName ?? ''}
-          invoiceId={invoice.id}
-          method={dialog.method}
-          busy={busy}
-          onClose={() => setDialog(null)}
-          onDone={closeAndRefresh}
-        />
       )}
       {dialog?.kind === 'factor' && (
         <SendToFactorDialog invoiceId={invoice.id} busy={busy} onClose={() => setDialog(null)} onDone={closeAndRefresh} />

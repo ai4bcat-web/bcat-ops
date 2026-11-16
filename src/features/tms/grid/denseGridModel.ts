@@ -4,6 +4,7 @@
  * No React, no I/O, so the rules are testable and the Shipments lists, Load Tracking and
  * Intake all narrow and order rows the same way.
  */
+import type { ReactNode } from 'react'
 import { chicagoDateStr } from '@/lib/date'
 import { headerDefaultWidth, headerFont } from './columnMeasure'
 
@@ -333,4 +334,18 @@ export function orderByGroup<T>(
     return collator.compare(a.group.label, b.group.label) || a.group.key.localeCompare(b.group.key)
   })
   return { rows: entries.flatMap((e) => e.rows), groups: entries.map((e) => e.group) }
+}
+
+/**
+ * What a cell draws: the view's own `renderCell`, or the column's text when it returns `undefined`.
+ * Views draw only their special columns (buttons, chips) and return `undefined` for the rest;
+ * without this fallback every other column rendered blank (AR Aging, Payments received, 2026-11-15).
+ */
+export function cellContent<T>(
+  renderCell: ((row: T, columnKey: string) => ReactNode) | undefined,
+  row: T,
+  col: { key: string; text: (row: T) => string },
+): ReactNode {
+  const own = renderCell?.(row, col.key)
+  return own === undefined ? col.text(row) : own
 }

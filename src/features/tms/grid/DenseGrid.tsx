@@ -40,6 +40,7 @@ import {
 } from './denseGridModel'
 import { DenseFilterPopover } from './DenseFilterPopover'
 import { DenseCards } from './DenseCards'
+import { cellContent } from './denseGridModel'
 import { PHONE_MAX_WIDTH, useMaxWidth, type DenseCardLayout } from './denseCardLayout'
 import './dense-grid.css'
 
@@ -51,6 +52,7 @@ const MEASURED_MAX_PX = 640
 const FALLBACK_VIEWPORT = 720
 /** Matches `.tms-dg-popover` width in dense-grid.css. */
 const POPOVER_WIDTH = 280
+
 
 export interface DenseGridProps<T> {
   /** The page shows every word in capitals: auto-fit widths allow for the wider letters. */
@@ -65,6 +67,7 @@ export interface DenseGridProps<T> {
   fitRows?: readonly T[]
   rowKey: (row: T) => string
   /** The cell body; falls back to the column's text. */
+  /** A cell's own drawing; returning `undefined` falls back to the column's text (null draws nothing). */
   renderCell?: (row: T, columnKey: string) => ReactNode
   density: DenseDensity
   /** Widths the user dragged, by column key. */
@@ -522,7 +525,7 @@ export function DenseGrid<T>({
                         data-col={col.key}
                         title={col.fixed ? undefined : col.text(row)}
                       >
-                        {renderCell ? renderCell(row, col.key) : col.text(row)}
+                        {cellContent(renderCell, row, col)}
                       </td>
                     )
                   })}

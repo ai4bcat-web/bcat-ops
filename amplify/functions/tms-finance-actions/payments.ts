@@ -64,7 +64,7 @@ import {
 } from './store'
 import { runCommissionsAfter } from './commissions'
 
-const METHODS: readonly ArPaymentMethod[] = ['CHECK', 'ACH', 'WIRE', 'CARD', 'FACTOR', 'OTHER']
+const METHODS: readonly ArPaymentMethod[] = ['CHECK', 'ACH', 'WIRE', 'CARD', 'ZELLE', 'FACTOR', 'OTHER']
 const MAX_NOTE = 2000
 
 /** One row of the ledger, as the dialogs and the detail page read it back. */

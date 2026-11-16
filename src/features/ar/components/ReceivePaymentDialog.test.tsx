@@ -104,8 +104,15 @@ function total(label: string): string {
   return screen.getByLabelText(label).textContent ?? ''
 }
 
+/** Step one's primary button: Review (the payment is read back before it is saved). */
 function postButton(): HTMLButtonElement {
-  return screen.getByRole('button', { name: 'Post' }) as HTMLButtonElement
+  return screen.getByRole('button', { name: 'Review' }) as HTMLButtonElement
+}
+
+/** Review, then Save payment on the read-back. */
+function post() {
+  fireEvent.click(postButton())
+  fireEvent.click(screen.getByRole('button', { name: 'Save payment' }))
 }
 
 beforeEach(() => {
@@ -133,7 +140,7 @@ describe('ReceivePaymentDialog', () => {
     await openForm()
 
     type('Payment amount', '2500.00')
-    fireEvent.click(screen.getByRole('button', { name: /Auto-allocate/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Apply oldest first/ }))
 
     await waitFor(() => expect(total('Applied total')).toBe('$2,500.00'))
     expect((screen.getByLabelText('Apply to invoice INV-000002') as HTMLInputElement).value).toBe('2500.00')
@@ -219,7 +226,7 @@ describe('ReceivePaymentDialog', () => {
 
     fireEvent.click(screen.getByLabelText('Accept as paid in full'))
     type('Reason for accepting the overpayment', 'rounded up')
-    fireEvent.click(postButton())
+    post()
     await waitFor(() => expect(recordPayment).toHaveBeenCalled())
     expect(recordPayment.mock.calls[0][0]).toMatchObject({ acceptOverage: true, overageReason: 'rounded up' })
   })
@@ -236,10 +243,37 @@ describe('ReceivePaymentDialog', () => {
     await waitFor(() => expect(postButton().disabled).toBe(true))
     type('Reason for ignoring the rest of invoice INV-000002', 'disputed lumper')
     await waitFor(() => expect(postButton().disabled).toBe(false))
-    fireEvent.click(postButton())
+    post()
 
     await waitFor(() => expect(writeOffInvoice).toHaveBeenCalled())
     expect(recordPayment.mock.calls[0][0].acceptOverage).toBeUndefined()
     expect(writeOffInvoice.mock.calls[0][0]).toMatchObject({ invoiceId: 'inv-2', amountCents: 50_000, reason: 'disputed lumper' })
+  })
+
+  it('opens with the handed-over invoices ticked and paid in full, and reads the payment back before saving', async () => {
+    recordPayment.mockResolvedValue({ payment: { amountCents: 350_000 }, invoices: [], duplicate: false })
+    render(<ReceivePaymentDialog customerId="cust-1" customerName="Acme Foods" invoiceIds={['inv-1', 'inv-2']} onClose={vi.fn()} onDone={vi.fn()} />)
+    const amount = await openForm()
+    expect(amount.value).toBe('3500.00')
+    expect((screen.getByLabelText('Pay invoice INV-000001 in full') as HTMLInputElement).checked).toBe(true)
+    fireEvent.click(screen.getByLabelText('Pay invoice INV-000001 in full'))
+    expect((screen.getByLabelText('Apply to invoice INV-000001') as HTMLInputElement).value).toBe('')
+    fireEvent.click(screen.getByLabelText('Pay invoice INV-000001 in full'))
+    fireEvent.click(postButton())
+    const confirm = screen.getByTestId('record-payment-confirm')
+    expect(confirm.textContent).toContain('Invoice INV-000001')
+    expect(confirm.textContent).toContain('Invoice INV-000002')
+    expect(recordPayment).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Save payment' }))
+    await waitFor(() => expect(recordPayment).toHaveBeenCalled())
+    expect(recordPayment.mock.calls[0][0].applications).toEqual([
+      { invoiceId: 'inv-1', amountCents: 100_000 }, { invoiceId: 'inv-2', amountCents: 250_000 },
+    ])
+  })
+
+  it('offers Zelle', async () => {
+    renderDialog()
+    await openForm()
+    expect(screen.getByRole('option', { name: 'Zelle' })).toBeTruthy()
   })
 })

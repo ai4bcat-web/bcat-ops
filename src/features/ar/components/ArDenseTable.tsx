@@ -35,6 +35,8 @@ export interface ArGrid<T> {
   kpis?: DenseKpi[]
   /** Phone cards: which columns go on top (DenseGrid's `cardLayout`). */
   cardLayout?: DenseCardLayout
+  /** A row (or phone card) opens its detail. */
+  onRowClick?: (row: T) => void
   /** Optional grouping: rows are re-ordered by group after sort and filter, a header row per group. */
   group?: {
     keyOf: (row: T) => string
@@ -49,7 +51,7 @@ export function ArDenseTable<T>({ grid, pageFilters }: {
   pageFilters?: { count: number; onClear: () => void }
 }) {
   const email = useAuthUser()?.email ?? ''
-  const { gridId, label, columns: catalogAll, rows, rowKey, renderCell, empty, kpis, group, cardLayout } = grid
+  const { gridId, label, columns: catalogAll, rows, rowKey, renderCell, empty, kpis, group, cardLayout, onRowClick } = grid
   const [filters, setFilters] = useState<DenseFilters>({})
   const [search, setSearch] = useState('')
 
@@ -136,6 +138,7 @@ export function ArDenseTable<T>({ grid, pageFilters }: {
           groupKeyOf={group?.keyOf}
           renderGroupHeader={group?.header}
           cardLayout={cardLayout}
+          onRowClick={onRowClick}
         />
       </div>
     </div>

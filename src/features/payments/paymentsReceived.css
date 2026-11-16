@@ -1,14 +1,110 @@
-/* The filter row: each control keeps its own width and the row wraps (the kit's selects fill their parent). */
-.tms-shell .pr-filters .tms-select,
-.tms-shell .pr-filters .tms-input {
+/* Payments received: one compact filter row, invoice chips, reversed rows struck through. */
+.tms-shell .pr-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-block: 4px 8px;
+}
+
+/* The kit's selects and inputs fill their parent; here each keeps its own width and the row wraps. */
+.tms-shell .pr-toolbar .tms-select,
+.tms-shell .pr-toolbar .tms-input {
   width: auto;
   flex: 0 0 auto;
-  max-width: 240px;
+  max-width: 220px;
+}
+
+.tms-shell .pr-toggle {
+  border: 1px solid var(--tms-border);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 13px;
+  background: var(--tms-card);
+  color: inherit;
+  cursor: pointer;
+  min-height: 32px;
+}
+
+.tms-shell .pr-toggle[aria-pressed='true'] {
+  border-color: var(--tms-primary);
+  color: var(--tms-primary);
+  font-weight: 600;
+}
+
+.tms-shell .pr-toggle-muted {
+  border-style: dashed;
+  color: var(--tms-muted);
+}
+
+.tms-shell .pr-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tms-shell .pr-chip {
+  border: 1px solid var(--tms-border);
+  border-radius: 6px;
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.tms-shell .pr-reversed,
+.tms-portal .pr-reversed {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.tms-portal .pr-detail {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 16px;
+  margin: 0;
+}
+
+.tms-portal .pr-detail dt {
+  color: var(--tms-muted);
+}
+
+.tms-portal .pr-detail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.tms-portal .pr-pick-list {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tms-portal .pr-pick-list button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.tms-portal .pr-pick-list button:hover,
+.tms-portal .pr-pick-list button:focus-visible {
+  background: var(--tms-surface-hover);
 }
 
 @media (max-width: 640px) {
-  .tms-shell .pr-filters .tms-select,
-  .tms-shell .pr-filters .tms-input {
+  .tms-shell .pr-toolbar .tms-select,
+  .tms-shell .pr-toolbar .tms-input {
     flex: 1 1 calc(50% - 8px);
     max-width: none;
     min-width: 0;

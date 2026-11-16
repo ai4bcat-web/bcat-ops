@@ -30,6 +30,9 @@ vi.mock('@/lib/paymentsClient', () => ({
 vi.mock('@/hooks/useDirectory', () => ({ useDirectory: () => ({ customers: [{ id: 'c1', name: 'TANAGER LOGISTICS' }] }) }))
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({ useOwnershipDivisions: () => ({ divisions: [] }) }))
 vi.mock('@/hooks/useCustomerAr', () => ({ useCustomerAr: () => ({ openCents: 0, unappliedCents: 0, refresh: async () => {} }) }))
+vi.mock('@/features/ar/components/ReceivePaymentDialog', () => ({
+  ReceivePaymentDialog: (p: { customerId: string; invoiceIds?: string[] }) => <p>Record payment for {p.customerId}: {(p.invoiceIds ?? []).join(',')}</p>,
+}))
 vi.mock('@/hooks/useAuth', () => ({ useAuthUser: () => ({ email: 'ryne@bcatcorp.com', groups: ['ADMIN'] }) }))
 
 import { PaymentsReceivedPage } from './PaymentsReceivedPage'
@@ -42,6 +45,11 @@ describe('Payments received page', () => {
     expect(within(totals).getByText('Collected this month')).toBeTruthy()
     // One row: the 2020 check and the 2025 Aljex memo fall outside the default range (this month).
     expect(await screen.findByText('1 rows')).toBeTruthy()
-    expect(within(totals).getByText('Payments · This month')).toBeTruthy()
+    expect(within(totals).getByText('Payments · this month')).toBeTruthy()
+  })
+
+  it('opens Record payment from the link other screens use, with the customer and invoices picked', async () => {
+    render(<MemoryRouter initialEntries={['/tms/payments-received?record=1&customer=c1&invoice=14096&invoice=14097']}><PaymentsReceivedPage /></MemoryRouter>)
+    expect(await screen.findByText('Record payment for c1: 14096,14097')).toBeTruthy()
   })
 })

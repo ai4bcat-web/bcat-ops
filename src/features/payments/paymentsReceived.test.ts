@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { computeArSummary } from '@/features/ar/arSummary'
 import type { ArPaymentRecord, InvoiceRecord } from '@/types/tms'
 import {
-  aljexDate, filterReceived, fromAljexMemo, fromArPayment, monthBounds, receivedCsv, receivedTotals, withRunningTotal,
+  aljexDate, filterReceived, fromAljexMemo, fromArPayment, hideReversed, inView, monthBounds, receivedCsv, receivedTotals, withRunningTotal,
   type ReceivedFilter,
 } from './paymentsReceived'
 
@@ -118,4 +118,29 @@ describe('filters, totals, ledger and CSV', () => {
     })
     expect([s.collectedMonthCount, s.collectedMonthCents, s.collectedWeekCount, s.collectedWeekCents]).toEqual([2, 15_000, 1, 10_000])
   })
+
+describe('reversed pairs and views', () => {
+  const undone = pay({ id: 'x', reversedByPaymentId: 'r', amountCents: 9_000 })
+  const reversal = pay({ id: 'r', kind: 'REVERSAL', reversesPaymentId: 'x', amountCents: 9_000, receivedAt: '2026-11-15T12:00:00.000Z', note: 'OTR never paid' })
+  const rows = [
+    fromArPayment(undone, names, (id) => (id === 'x' ? reversal : undefined)),
+    fromArPayment(reversal, names),
+    fromArPayment(pay({ id: 'ok' }), names),
+    fromArPayment(pay({ id: 'cm', kind: 'CREDIT_MEMO', amountCents: 100 }), names),
+  ]
+
+  it('carries the reversal date and reason onto the reversed payment', () => {
+    expect(rows[0]).toMatchObject({ reversed: true, reversedOn: '2026-11-15', reversedReason: 'OTR never paid' })
+  })
+
+  it('hides a reversed payment and its reversal unless asked', () => {
+    expect(hideReversed(rows, false).map((r) => r.id)).toEqual(['ok', 'cm'])
+    expect(hideReversed(rows, true)).toHaveLength(4)
+  })
+
+  it('splits payments from credits and debits', () => {
+    expect(rows.filter((r) => inView(r, 'payments')).map((r) => r.id)).toEqual(['x', 'r', 'ok'])
+    expect(rows.filter((r) => inView(r, 'adjustments')).map((r) => r.id)).toEqual(['cm'])
+  })
+})
 })

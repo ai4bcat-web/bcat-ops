@@ -47,6 +47,9 @@ export interface ReceivedRow {
   note: string | null
   /** True once a later reversal has undone this row. */
   reversed: boolean
+  /** The reversal's date and reason, when it was read. */
+  reversedOn: string | null
+  reversedReason: string | null
   /** The BCAT row itself, for Reverse. Null on Aljex history. */
   payment: ArPaymentRecord | null
 }
@@ -60,7 +63,12 @@ const KIND_TYPE: Record<ArPaymentRecord['kind'], ReceivedType> = {
 
 const ymd = (iso: string | null | undefined): string | null => (iso && /^\d{4}-\d{2}-\d{2}/.test(iso) ? iso.slice(0, 10) : null)
 
-export function fromArPayment(p: ArPaymentRecord, customerName: (id: string) => string): ReceivedRow {
+export function fromArPayment(
+  p: ArPaymentRecord,
+  customerName: (id: string) => string,
+  reversalOf: (paymentId: string) => ArPaymentRecord | undefined = () => undefined,
+): ReceivedRow {
+  const reversal = p.reversedByPaymentId ? reversalOf(p.id) : undefined
   const type = KIND_TYPE[p.kind] ?? 'payment'
   const sign = type === 'payment' ? 1 : -1
   const invoices: ReceivedInvoiceRef[] = (p.applications ?? []).map((a) => ({ invoiceId: a.invoiceId, amountCents: a.amountCents }))
@@ -81,6 +89,8 @@ export function fromArPayment(p: ArPaymentRecord, customerName: (id: string) => 
     recordedBy: p.createdBy || null,
     note: p.note || null,
     reversed: Boolean(p.reversedByPaymentId),
+    reversedOn: ymd(reversal?.receivedAt ?? reversal?.createdAt),
+    reversedReason: reversal?.note || null,
     payment: p,
   }
 }
@@ -150,8 +160,27 @@ export function fromAljexMemo(row: AljexMemoRow, customerIdByName: (name: string
     recordedBy: by ? `${by} (Aljex)` : 'Aljex',
     note: f.get('Description') ?? null,
     reversed: false,
+    reversedOn: null,
+    reversedReason: null,
     payment: null,
   }
+}
+
+/** The list's segmented control: cash receipts, adjustments (credits, debits, write-offs), or both. */
+export type ReceivedView = 'payments' | 'adjustments' | 'all'
+
+export function inView(row: ReceivedRow, view: ReceivedView): boolean {
+  if (view === 'all') return true
+  const cash = row.type === 'payment' || (row.type === 'reversal' && row.payment != null)
+  return view === 'payments' ? cash : !cash
+}
+
+/**
+ * Reversed rows are hidden by default (Ryne 2026-11-15): a payment that was reversed and the
+ * reversal that undid it cancel out, so the pair only shows with "Show reversed".
+ */
+export function hideReversed(rows: readonly ReceivedRow[], show: boolean): ReceivedRow[] {
+  return show ? [...rows] : rows.filter((r) => !r.reversed && r.type !== 'reversal')
 }
 
 export interface ReceivedFilter {
