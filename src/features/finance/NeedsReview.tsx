@@ -9,14 +9,19 @@
  * resolve, reopen) in a dialog. Cleared shipment flags leave the list; resolved questions stay under
  * Resolved.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Search } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { TmsBadge, TmsButton, TmsDialog, TmsInput, TmsSegmentedTabs, TmsTable, type ColumnDef } from '@/features/tms/kit'
 import { QuestionCard } from '@/features/openQuestions/QuestionCard'
+import { LinkQuestionActions } from '@/features/openQuestions/LinkQuestionActions'
+import { isLinkCustomerQuestion, linkQuestionShipment } from '@/features/directory/unlinked'
+import { useUnlinkedShipments } from '@/features/directory/useUnlinkedShipments'
+import { listCustomers } from '@/lib/apiClient'
+import { updateOpenQuestionRow } from '@/lib/openQuestionsClient'
 import {
-  AREA_LABEL, ageDays, questionOnSide, whoFromEmail, type OpenQuestion, type OpenQuestionFilter,
+  AREA_LABEL, ageDays, appendNote, questionOnSide, statusFor, toOpenQuestion, whoFromEmail, type OpenQuestion, type OpenQuestionFilter,
 } from '@/features/openQuestions/openQuestions'
 import { reviewItems, type ReviewItem } from './needsReviewItems'
 import { useAuthUser } from '@/hooks/useAuth'
@@ -24,7 +29,7 @@ import { financeAction, setDeliveredDate, type FinanceReviewShipment } from '@/l
 import { errorText } from '@/lib/errorText'
 import { formatDateShort } from '@/lib/date'
 import { shipmentEditorPath } from '@/lib/shipmentLinks'
-import type { InvoiceRecord } from '@/types/tms'
+import type { CustomerRecord, InvoiceRecord } from '@/types/tms'
 
 interface Props {
   rows: FinanceReviewShipment[]
@@ -54,6 +59,32 @@ export function NeedsReviewList({ rows, error, side, onCleared, invoiceFor, onOp
   const openCount = rows.length + mine.filter((it) => it.status === 'OPEN').length
   const resolvedCount = mine.filter((it) => it.status === 'RESOLVED').length
   const answeringItem = answering ? mine.find((it) => it.id === answering) ?? null : null
+  // Unlinked-customer questions (the sweep's "link X to Y?"): one-click link buttons, and they close themselves once the load
+  // has a customer, whichever screen made the link.
+  const openLinkQs = useMemo(() => mine.filter((it) => it.status === 'OPEN' && isLinkCustomerQuestion(it)), [mine])
+  const unlinked = useUnlinkedShipments(openLinkQs.length > 0)
+  const [customers, setCustomers] = useState<CustomerRecord[]>([])
+  useEffect(() => {
+    if (openLinkQs.length === 0) return
+    let cancelled = false
+    listCustomers().then((c) => { if (!cancelled) setCustomers(c) }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [openLinkQs.length > 0]) // eslint-disable-line react-hooks/exhaustive-deps
+  const autoResolved = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    // Only trust the list when it read cleanly and was not cut short: a missing shipment then really is linked (or void).
+    if (!unlinked.loaded || unlinked.error || unlinked.total > unlinked.rows.length) return
+    const stillUnlinked = new Set(unlinked.rows.map((r) => r.id))
+    for (const q of openLinkQs) {
+      const t = linkQuestionShipment(q)
+      if (!t || stillUnlinked.has(t.shipmentId) || autoResolved.current.has(q.id)) continue
+      autoResolved.current.add(q.id)
+      const notes = appendNote(q.notes, `${t.pro} now has a customer linked.`, 'Needs review')
+      updateOpenQuestionRow(q.id, { adminNotes: notes, status: statusFor(true) })
+        .then((saved) => onQuestionSaved?.(toOpenQuestion(saved)))
+        .catch(() => autoResolved.current.delete(q.id))
+    }
+  }, [unlinked.loaded, unlinked.error, unlinked.total, unlinked.rows, openLinkQs, onQuestionSaved])
   const clear = (row: FinanceReviewShipment) => {
     setBusy(row.id)
     financeAction('CLEAR_FINANCE_REVIEW', { shipmentId: row.id })
@@ -161,9 +192,16 @@ export function NeedsReviewList({ rows, error, side, onCleared, invoiceFor, onOp
       key: 'actions', header: '',
       render: (it) => (it.kind === 'flag'
         ? <TmsButton size="sm" variant="ghost" disabled={busy === it.row.id} onClick={() => clear(it.row)}>Mark reviewed</TmsButton>
-        : <TmsButton size="sm" variant={it.question.status === 'OPEN' ? 'primary' : 'ghost'} onClick={() => setAnswering(it.question.id)}>
-          {it.question.status === 'OPEN' ? 'Answer' : 'View'}
-        </TmsButton>),
+        : (
+          <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+            {isLinkCustomerQuestion(it.question) ? (
+              <LinkQuestionActions question={it.question} customers={customers} who={who} onResolved={(next) => onQuestionSaved?.(next)} />
+            ) : null}
+            <TmsButton size="sm" variant={it.question.status === 'OPEN' && !isLinkCustomerQuestion(it.question) ? 'primary' : 'ghost'} onClick={() => setAnswering(it.question.id)}>
+              {it.question.status === 'OPEN' ? 'Answer' : 'View'}
+            </TmsButton>
+          </span>
+        )),
     },
   ]
   return (

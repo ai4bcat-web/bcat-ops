@@ -55,6 +55,9 @@ import { AgingStatementDialog } from '@/features/ar/components/AgingStatementDia
 import { changeNeedsReason, customerFieldLabel, diffCustomer } from '@/lib/customerAudit'
 import { StatusActionDialog } from './StatusActionDialog'
 import { FlowDefaultsCard } from './FlowDefaultsCard'
+import { UnlinkedLoadsPanel } from './UnlinkedLoadsPanel'
+import { candidatesFor } from '../unlinked'
+import { useUnlinkedShipments } from '../useUnlinkedShipments'
 import { TrackingPrefsFields } from './TrackingPrefsFields'
 import { TrackingAutomationEditor } from '@/features/settings/automation/TrackingAutomationEditor'
 import { resolveAutomation } from '@/lib/trackingAutomation'
@@ -97,6 +100,7 @@ const tabs = [
   { key: 'quoting', label: 'Quoting' },
   { key: 'aiAgents', label: 'AI Agents' },
   { key: 'shipments', label: 'Shipments' },
+  { key: 'unlinked', label: 'Unlinked loads' },
   { key: 'quotes', label: 'Quotes' },
   { key: 'ar', label: 'AR' },
 ]
@@ -145,6 +149,10 @@ export function CustomerProfile({
   const [statusAction, setStatusAction] = useState<'activate' | 'deactivate' | 'close' | null>(null)
   const { loads, orders, shipments, lastLoadAt, loading: loadsLoading } = useCustomerOrders(customer.id, customer)
   const ar = useCustomerAr(customer.id)
+  // Loads saved with only a typed name that look like this customer (Ryne 2026-11-16): linked from here.
+  const unlinked = useUnlinkedShipments()
+  const unlinkedCount = useMemo(() => candidatesFor(customer, unlinked.rows).length, [customer, unlinked.rows])
+  const profileTabs = useMemo(() => tabs.map((t) => (t.key === 'unlinked' ? { ...t, count: unlinkedCount, title: 'Loads typed with this customer\'s name but not linked to it' } : t)), [unlinkedCount])
   const crm = useCrmAccount(customer.id)
   const auth = useAuth()
   const isManager = isCrmManager(auth)
@@ -315,7 +323,7 @@ export function CustomerProfile({
           onReleaseDomain={crm.releaseDomain}
         />
 
-        <TmsTabs tabs={tabs} active={tab} onSelect={setTab} />
+        <TmsTabs tabs={profileTabs} active={tab} onSelect={setTab} />
 
         {tab === 'account' && (
           <div style={{ display: 'grid', gap: 16 }}>
@@ -637,6 +645,10 @@ export function CustomerProfile({
                 </div>
               ))}
           </div>
+        )}
+
+        {tab === 'unlinked' && (
+          <UnlinkedLoadsPanel unlinked={unlinked} customers={[customer]} customer={customer} />
         )}
 
         {tab === 'history' && <CustomerHistoryTab customerId={customer.id} refreshKey={customer.updatedAt} />}

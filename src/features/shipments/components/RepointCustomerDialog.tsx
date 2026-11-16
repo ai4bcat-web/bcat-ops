@@ -15,6 +15,8 @@ export interface RepointCustomerDialogProps {
   onOpenChange: (open: boolean) => void
   /** Called with the customer the shipment now belongs to. */
   onRepointed?: (customerId: string) => void | Promise<void>
+  /** Needs review's "Create customer…": open the picker's create form at once. */
+  startCreating?: boolean
 }
 
 const NO_REASON = '(no reason given)'
@@ -48,6 +50,7 @@ export function RepointCustomerDialog({
   open,
   onOpenChange,
   onRepointed,
+  startCreating = false,
 }: RepointCustomerDialogProps) {
   const [customerId, setCustomerId] = useState<string>(shipment.customerId ?? '')
   const [reason, setReason] = useState('')
@@ -289,6 +292,7 @@ export function RepointCustomerDialog({
               customers={customers as CustomerRecord[]}
               value={customerId || null}
               initialQuery={linking ? (shipment.customerName ?? '') : ''}
+              startCreating={startCreating && linking}
               onChange={(id) => { setCustomerId(id ?? ''); setError(null) }}
             />
           </TmsField>

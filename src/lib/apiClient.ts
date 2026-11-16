@@ -2766,6 +2766,25 @@ export async function setShipmentCustomer(input: { shipmentId: string; customerI
   return shipmentAction<ShipmentBundle>('SET_SHIPMENT_CUSTOMER', input)
 }
 
+/** One shipment that carries a typed customer name but no customer record (LIST_UNLINKED_SHIPMENTS). */
+export interface UnlinkedShipment {
+  id: string
+  number: string | null
+  customerName: string
+  originCity: string | null
+  destinationCity: string | null
+  pickupAppt: string | null
+  deliveryAppt: string | null
+  status: string | null
+  inLoadReview: boolean
+  updatedAt: string | null
+}
+
+/** Every live shipment still waiting for a customer link, newest PRO first (capped; `total` is the full count). */
+export async function listUnlinkedShipments(): Promise<{ rows: UnlinkedShipment[]; total: number }> {
+  return shipmentAction<{ rows: UnlinkedShipment[]; total: number }>('LIST_UNLINKED_SHIPMENTS', {})
+}
+
 /**
  * Move a leg's PRO. `aljexId` is field-level read-only to clients, so this is the only
  * route: it claims the new PRO and never releases the old one, which is what makes a PRO

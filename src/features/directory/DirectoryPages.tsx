@@ -15,6 +15,8 @@ import { useCrmAccounts } from '@/features/crm/useCrmAccounts'
 import { isCrmManager, isOverdue, kindLabel, relativeDay } from '@/features/crm/format'
 import { useDirectory, type CustomerRecord, type LocationRecord } from '@/hooks/useDirectory'
 import { downloadCsv, recordsToFullCsv } from '@/lib/directoryCsv'
+import { UnlinkedLoadsPanel } from './components/UnlinkedLoadsPanel'
+import { useUnlinkedShipments } from './useUnlinkedShipments'
 import { listCustomers, listLocations } from '@/lib/apiClient'
 import {
   TmsBadge,
@@ -92,14 +94,15 @@ const CUSTOMER_STATUSES: CustomerStatus[] = ['NEW', 'CONTACTED', 'QUALIFIED', 'Q
 const PAGE_SIZE = 100
 
 type BoardTab = 'leads' | 'active' | 'inactive'
-type StatusTab = BoardTab | 'all'
-const STATUS_TABS: StatusTab[] = ['active', 'leads', 'inactive', 'all']
+type StatusTab = BoardTab | 'all' | 'unlinked'
+const STATUS_TABS: StatusTab[] = ['active', 'leads', 'inactive', 'all', 'unlinked']
 const STATUS_TAB_KEY = 'tms:customers:status-tab'
 /** The status tab a visit opens on when the link has no `?status=`: the last one used, else Active. */
 function rememberedStatusTab(): StatusTab {
   try {
     const saved = window.localStorage.getItem(STATUS_TAB_KEY)
-    if (saved && (STATUS_TABS as string[]).includes(saved)) return saved as StatusTab
+    // "Unlinked loads" is a work queue reached on purpose (the link or the tab), never the page a visit opens on.
+    if (saved && saved !== 'unlinked' && (STATUS_TABS as string[]).includes(saved)) return saved as StatusTab
   } catch { /* storage blocked: Active */ }
   return 'active'
 }
@@ -240,6 +243,8 @@ export function CustomersPage() {
   const profileId = params.get('customer')
   // The directory's 3,000+ locations are only read by the profile's "Shipping locations" tab.
   const dir = useDirectory({ includeArchived: true, locations: profileId != null })
+  // Loads with a typed customer name and no customer record: worked through on the "Unlinked loads" tab (Ryne 2026-11-16).
+  const unlinked = useUnlinkedShipments()
   const auth = useAuth()
   const { isAdmin, user } = auth
   const isManager = isCrmManager(auth)
@@ -321,7 +326,7 @@ export function CustomersPage() {
   const [remembered] = useState<StatusTab>(() => rememberedStatusTab())
   const activeTab: StatusTab = (STATUS_TABS as string[]).includes(statusParam ?? '') ? (statusParam as StatusTab) : remembered
   const setActiveTab = useCallback((tab: StatusTab) => {
-    try { window.localStorage.setItem(STATUS_TAB_KEY, tab) } catch { /* not remembered */ }
+    try { if (tab !== 'unlinked') window.localStorage.setItem(STATUS_TAB_KEY, tab) } catch { /* not remembered */ }
     setParams((prev) => {
       const next = new URLSearchParams(prev)
       next.set('status', tab)
@@ -579,10 +584,16 @@ export function CustomersPage() {
             { key: 'leads', label: 'Prospects', count: counts.leads, testId: 'customers-tab-leads' },
             { key: 'inactive', label: 'Inactive', count: counts.inactive, testId: 'customers-tab-inactive' },
             { key: 'all', label: 'All', count: rowsWithStatus.length, testId: 'customers-tab-all' },
+            { key: 'unlinked', label: 'Unlinked loads', count: unlinked.total, testId: 'customers-tab-unlinked', title: 'Loads saved with a typed customer name and no customer record' },
           ]}
           active={activeTab}
           onSelect={(key) => { setActiveTab(key as StatusTab); setPageSize(PAGE_SIZE) }}
         />
+        {activeTab === 'unlinked' ? (
+          <div className="tms-dense-body" style={{ padding: 12 }}>
+            <UnlinkedLoadsPanel unlinked={unlinked} customers={dir.customers} />
+          </div>
+        ) : (
         <div className="tms-dense-body">
           <CustomerBulkEdit
             customers={sortedRows.filter((r) => selectedIds.has(r.record.id)).map((r) => r.record)}
@@ -631,6 +642,7 @@ export function CustomersPage() {
             </div>
           )}
         </div>
+        )}
       </div>
 
       {removeQueue.length > 0 && (
