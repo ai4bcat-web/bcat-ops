@@ -834,6 +834,13 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     { key: 'po', header: 'PO #', group: 'Invoice', text: (i) => poOf(i) || 'missing' },
     { key: 'customer', header: 'Customer', group: 'Invoice', text: (i) => customerOf(i).name || '\u2014', width: 190 },
     {
+      key: 'why', header: 'Why', group: 'Status', width: 440, extraPx: 80,
+      text: (i) => reasonOf(i).short,
+      filter: 'multi',
+      optionsOf: (i) => { const r = reasonOf(i); return [{ value: r.kind, label: FACTORING_REASON_LABEL[r.kind] }] },
+      sortValue: (i) => FACTORING_REASON_LABEL[reasonOf(i).kind],
+    },
+    {
       key: 'amount', header: 'Amount', group: 'Invoice', align: 'right', extraPx: 24,
       text: (i) => { const a = invoiceAmountOf(i); return a == null ? 'Add rate' : money(a) },
       sortValue: (i) => { const a = invoiceAmountOf(i); return a == null ? null : Math.round(a * 100) },
@@ -870,17 +877,10 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       optionsOf: (i) => [{ value: i.status, label: FACTORING_STATUS_LABEL[i.status] }],
       sortValue: (i) => FACTORING_STATUS_LABEL[i.status],
     },
-    {
-      key: 'why', header: 'Why', group: 'Status', width: 340, extraPx: 60,
-      text: (i) => reasonOf(i).short,
-      filter: 'multi',
-      optionsOf: (i) => { const r = reasonOf(i); return [{ value: r.kind, label: FACTORING_REASON_LABEL[r.kind] }] },
-      sortValue: (i) => FACTORING_REASON_LABEL[reasonOf(i).kind],
-    },
     { key: 'actions', header: 'Actions', group: 'Status', text: () => '', fixed: true, filter: false, sortable: false, width: 350, stickyEnd: true },
   ], [activeTab, reasonOf])
   const prefs = useDenseGridPrefs({
-    gridId: 'factoring-queue-v2',
+    gridId: 'factoring-queue-v3',
     email: user?.email,
     defaultColumns: denseCols.map((c) => c.key),
     validKeys: denseCols.map((c) => c.key),
