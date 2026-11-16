@@ -43,8 +43,9 @@ import { loadFromFactoringItem } from './loadFromInvoice'
 import { ManualInvoicePanel } from './ManualInvoicePanel'
 import { manualSentInfo } from '@/lib/manualInvoice'
 import { noBuyInfo } from '@/lib/noBuy'
-import { inOtrRejectedTab, isOtrRejected, mayInvoiceManually, needsManualInvoice, otrRejection } from '@/lib/otrRejection'
-import { MoveToManualDialog } from './MoveToManualDialog'
+import { inOtrRejectedTab, isOtrRejected, mayInvoiceManually, needsManualInvoice, otrRejection, otrRejectionDetails } from '@/lib/otrRejection'
+import { TABLET_MAX_WIDTH } from '@/features/tms/grid/denseCardLayout'
+import { FixAndInvoiceDialog } from './FixAndInvoiceDialog'
 import { InvoiceManuallyDialog } from './InvoiceManuallyDialog'
 import { CustomerPaidCell, CustomerPaidDialog } from './CustomerPaidCell'
 import { formatPaidOn } from './formatPaidOn'
@@ -327,7 +328,7 @@ function NoBuyFlag({ item }: { item: FactoringItem }) {
   return (
     <>
       <TmsBadge tone="pink" title={reason ?? undefined}>No buy</TmsBadge>
-      {reason && <span className="max-w-[18rem] truncate text-xs tms-muted" title={reason}>{reason}</span>}
+      {reason && <span className="text-xs tms-muted whitespace-normal" style={{ overflowWrap: 'anywhere' }}>{reason}</span>}
     </>
   )
 }
@@ -339,7 +340,7 @@ function RejectedFlag({ item }: { item: FactoringItem }) {
   return (
     <>
       <TmsBadge tone="red" title={`${rejection.reason}. Stays in the factoring queue: resolve it with OTR.`} data-testid="otr-rejected-flag">Needs attention</TmsBadge>
-      <span className="max-w-[18rem] truncate text-xs tms-muted" title={rejection.reason}>{rejection.reason}</span>
+      <span className="text-xs tms-muted whitespace-normal" style={{ overflowWrap: 'anywhere' }} data-testid="otr-rejected-reason">{otrRejectionDetails(item)?.headline ?? rejection.reason}</span>
     </>
   )
 }
@@ -743,7 +744,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       key: 'status',
       header: 'STATUS',
       render: (item) => (
-        <div className="flex items-center gap-2 whitespace-nowrap">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <StatusBadge item={item} />
           <OtrStatusFlag item={item} />
           <NoBuyFlag item={item} />
@@ -757,8 +758,8 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       key: 'actions',
       header: 'ACTIONS',
       render: (item: FactoringItem) => (
-        <div className="flex items-center gap-2 whitespace-nowrap">
-          {canMoveManually(item, user) && (
+        <div className="flex flex-wrap items-center gap-2" data-testid={`factoring-actions-${item.id}`}>
+          {canMoveManually(item, user) && !isOtrRejected(item) && (
             <TmsButton
               size="sm"
               variant="ghost"
@@ -774,12 +775,12 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
             <TmsButton
               size="sm"
               variant="secondary"
-              aria-label={`Move PRO ${item.proNumber} to manual invoice`}
+              aria-label={`Fix and invoice PRO ${item.proNumber} manually`}
               data-testid={`move-manual-${item.id}`}
               disabled={pendingIds.has(item.id)}
               onClick={() => setMoveManualId(item.id)}
             >
-              Move to manual invoice
+              Fix &amp; invoice manually
             </TmsButton>
           )}
           {offersResend(item) && !noBuyInfo(item).noBuy && (
@@ -845,13 +846,13 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       filter: 'date', dateOf: (i) => (i.status === 'INVOICED_MANUALLY' ? sentAtOf(i) : i.receivedAt) || null,
     },
     {
-      key: 'status', header: 'Status', group: 'Status', extraPx: 130,
+      key: 'status', header: 'Status', group: 'Status', extraPx: 130, width: 320,
       text: (i) => `${FACTORING_STATUS_LABEL[i.status]}${i.status === 'PENDING_WITH_OTR' ? ` \u00b7 OTR: ${otrLabelOf(i)}` : ''}${noBuyInfo(i).noBuy ? ' \u00b7 No buy' : ''}${otrRejection(i) && !noBuyInfo(i).noBuy ? ' \u00b7 Needs attention' : ''}`,
       filter: 'multi',
       optionsOf: (i) => [{ value: i.status, label: FACTORING_STATUS_LABEL[i.status] }],
       sortValue: (i) => FACTORING_STATUS_LABEL[i.status],
     },
-    { key: 'actions', header: 'Actions', group: 'Status', text: () => '', fixed: true, filter: false, sortable: false, width: 280 },
+    { key: 'actions', header: 'Actions', group: 'Status', text: () => '', fixed: true, filter: false, sortable: false, width: 380 },
   ], [activeTab])
   const prefs = useDenseGridPrefs({
     gridId: 'factoring-queue',
@@ -954,6 +955,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
             fitRows={filtered}
             rowKey={(item) => item.id}
             renderCell={renderFactoringCell}
+            cardsBelow={TABLET_MAX_WIDTH}
             density={prefs.density}
             userWidths={prefs.widths}
             stickyCount={Math.max(1, prefs.pinned.length)}
@@ -1005,11 +1007,12 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       {paidEditItem && <CustomerPaidDialog item={paidEditItem} onClose={() => setPaidEditId(null)} onDone={refresh} />}
       {resendItem && <ResendToOtrDialog item={resendItem} onClose={() => setResendId(null)} onDone={refresh} />}
       {moveManualItem && (
-        <MoveToManualDialog
+        <FixAndInvoiceDialog
           item={moveManualItem}
-          customerName={customerOf(moveManualItem).name}
+          customers={customers}
+          isAdmin={isAdmin}
           onClose={() => setMoveManualId(null)}
-          onDone={() => { setMoveManualId(null); void refresh() }}
+          onChanged={() => { void refresh() }}
         />
       )}
 

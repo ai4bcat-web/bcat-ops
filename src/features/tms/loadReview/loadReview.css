@@ -11,7 +11,8 @@
 .tms-shell .aa-check-pass { color: var(--tms-badge-green); }
 .tms-shell .aa-check-fail { color: var(--tms-badge-red); }
 .tms-shell .aa-field { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-.tms-shell .aa-field-need > span:first-child { color: var(--tms-text-muted, inherit); }
+.tms-shell .aa-field.aa-check-fail .aa-field-value { color: var(--tms-text, inherit); font-weight: 400; }
+.tms-shell .aa-field.aa-check-fail a { color: inherit; }
 
 /* ── Load review drawer: pass/fail at a glance (Ryne 2026-11-12) ─────────── */
 .tms-portal .lr-icon-ok { color: var(--tms-badge-green); flex: none; }

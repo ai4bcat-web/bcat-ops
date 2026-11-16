@@ -6,7 +6,7 @@
  * Same columns, cells and handlers as the table: the page decides nothing new beyond which column keys go on top (`DenseCardLayout`).
  */
 import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react'
-import { cellContent, type DenseColumn } from './denseGridModel'
+import type { DenseColumn } from './denseGridModel'
 import type { DenseCardLayout } from './denseCardLayout'
 
 type Item<T> = { kind: 'row'; row: T } | { kind: 'group'; key: string; rows: T[] }
@@ -48,8 +48,9 @@ export function DenseCards<T>({
   const actionCols = columns.filter((c, i) => c.header === '' && i > firstNamed && !onTop.has(c.key))
   const detailCols = columns.filter((c) => c.header !== '' && !onTop.has(c.key)).slice(0, layout?.detailCount ?? 6)
   const cell = (row: T, key: string) => {
-    const col = byKey.get(key)
-    return col ? cellContent(renderCell, row, col) : renderCell?.(row, key)
+    // renderCell overrides only the cells it decorates; undefined falls back to the column's text.
+    const drawn = renderCell?.(row, key)
+    return drawn === undefined ? byKey.get(key)?.text(row) : drawn
   }
   // A tap opens the row: the page's handler, or else the title's own link (Shipments draws the PRO as a link and has no row click).
   const openCard = (e: ReactMouseEvent<HTMLElement>, row: T) => {

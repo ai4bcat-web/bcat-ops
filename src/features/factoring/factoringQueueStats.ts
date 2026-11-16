@@ -19,8 +19,9 @@ const dayNum = (iso: string | null | undefined): number | null => {
   return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / DAY_MS : null
 }
 
-/** Dollars on the invoice: what readiness assembled, else what was sent to OTR. */
-export const amountOf = (item: FactoringItem): number => invoiceAmountOf(item) ?? item.otrAmount ?? 0
+/** Dollars on the invoice: what readiness assembled, else what was sent to OTR (`otrAmount` is cents). */
+export const amountOf = (item: FactoringItem): number =>
+  invoiceAmountOf(item) ?? (typeof item.otrAmount === 'number' ? item.otrAmount / 100 : 0)
 
 export interface PendingOtrStats {
   count: number

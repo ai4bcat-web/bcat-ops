@@ -154,18 +154,23 @@ describe('invoices OTR turned down', () => {
     await setup(rows, 'jenny@bcatcorp.com')
     fireEvent.click(screen.getByRole('tab', { name: /^All/ }))
     expect(screen.getByText('DE3')).toBeInTheDocument()
+    // Rows OTR turned down (Dead, No buy) get the one guided fix; our own auth failure gets neither.
     expect(screen.queryByRole('button', { name: 'Invoice manually for PRO DE3' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Invoice manually for PRO NB5' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Invoice manually for PRO ER2' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Invoice manually for PRO NB5' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Fix and invoice PRO DE3 manually' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Fix and invoice PRO NB5 manually' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Fix and invoice PRO ER2 manually' })).not.toBeInTheDocument()
     expect(screen.getByTestId('otr-rejected-strip').textContent).toMatch(/1 invoice OTR will not buy: invoice manually\. 2 invoices need attention at OTR/)
   })
 
-  it('gives an admin the override on a Dead row, labelled as one', async () => {
+  it('gives a Dead row the guided fix and says why in full, not the bare Invoice manually override', async () => {
     await setup([item({ id: 'dead', proNumber: 'DE3', status: 'PENDING_WITH_OTR', otrStatus: 4 as never, otrInvoiceId: 'x' })], 'ryne@bcatcorp.com')
     // Dead is not waiting on OTR approval: it lives under OTR rejected.
     fireEvent.click(screen.getByRole('tab', { name: /^OTR rejected/ }))
-    const btn = screen.getByRole('button', { name: 'Invoice manually for PRO DE3' })
-    expect(btn.getAttribute('title')).toMatch(/Admin override/)
+    expect(screen.queryByRole('button', { name: 'Invoice manually for PRO DE3' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Fix and invoice PRO DE3 manually' })).toBeInTheDocument()
+    expect(screen.getByTestId('otr-rejected-reason')).toHaveTextContent('OTR: Dead — this invoice will not be funded')
   })
 
   it('shows no strip when OTR has turned nothing down', async () => {
@@ -451,7 +456,7 @@ describe('invoicing by hand', () => {
     fireEvent.click(screen.getByRole('tab', { name: /^OTR rejected/ }))
     expect(screen.getByText('No buy')).toBeInTheDocument()
     expect(screen.getByText(/not approved/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Invoice manually for PRO B2' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Fix and invoice PRO B2 manually' })).toBeInTheDocument()
   })
 
   it('opens a manual row to its checklist, not the OTR editor', async () => {
@@ -549,10 +554,10 @@ describe('OTR rejected', () => {
     expect(screen.getByText('MI7')).toBeInTheDocument()
   })
 
-  it('lists what OTR turned down, not our own auth failures, and moves one to manual invoice after a confirmation', async () => {
+  it('lists what OTR turned down, not our own auth failures, and opens the guided fix with the reason', async () => {
     const api = await import('@/lib/apiClient')
-    const move = vi.mocked(api.moveToManualInvoice).mockResolvedValue({ proNumber: 'NB5', orderId: 'o', customerId: 'c', voidedInvoice: null, note: '' })
-    const { refresh } = await setup([
+    const move = vi.mocked(api.moveToManualInvoice)
+    await setup([
       item({ id: 'nb', proNumber: 'NB5', status: 'MANUAL_INVOICE', brokerCheckResult: 'NO_BUY', manualReason: 'NO_BUY', otrError: 'OTR will not buy from MC 7' }),
       item({ id: 'au', proNumber: 'AU6', status: 'PENDING_WITH_OTR', otrError: '400: OTR auth failed (400)' }),
     ])
@@ -561,10 +566,10 @@ describe('OTR rejected', () => {
     expect(screen.queryByText('AU6')).not.toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: /^Invoice manually/ })).not.toBeInTheDocument()
     fireEvent.click(screen.getByTestId('move-manual-nb'))
-    expect(screen.getByTestId('move-manual-dialog')).toHaveTextContent('OTR will not buy from MC 7')
+    expect(screen.getByTestId('fix-invoice-reason')).toHaveTextContent('OTR will not buy from MC 7')
+    // No customer on the row or its load: step 1 says so, and step 2 cannot run before step 1.
+    await waitFor(() => expect(screen.getByTestId('fix-invoice-dialog')).toHaveTextContent('no customer in BCAT Ops'))
+    expect(screen.getByTestId('fix-move-manual')).toBeDisabled()
     expect(move).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByTestId('move-manual-confirm'))
-    await waitFor(() => expect(move).toHaveBeenCalledWith({ factoringItemId: 'nb' }))
-    await waitFor(() => expect(refresh).toHaveBeenCalled())
   })
 })
