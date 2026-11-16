@@ -8802,6 +8802,29 @@ describe('Step AH — UPDATE_STOP SET_DETAILS', () => {
     await send({ name: 'New Name', hours: '6-2' })
     expect(stopOf(loadId, 'stp-pu').contact).toMatchObject({ hours: '6-2' })
   })
+
+  it('SET_LOCATION never blanks the ZIP Build captured (Ryne 2026-11-16)', async () => {
+    const { loadId } = await withStops()
+    const load = table(TABLES.load).get(loadId)!
+    const stops = (JSON.parse(String(load.stops)) as Row[]).map((s) => s.id === 'stp-pu'
+      ? { ...s, locationId: 'loc-fab', address: { street: '1925 Enterprise Ct', city: 'LIBERTYVILLE', state: 'IL', zip: '60048' } }
+      : s)
+    table(TABLES.load).set(loadId, { ...load, stops: JSON.stringify(stops) })
+    const send = (patch: Row): Promise<Row> => call('UPDATE_STOP', {
+      loadId, expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt, op: 'SET_LOCATION', stopId: 'stp-pu', patch,
+    })
+    // A caller that sends no address (the stop card's rename) keeps it.
+    await send({ locationId: 'loc-fab', name: 'FabTech', city: 'LIBERTYVILLE, IL' })
+    expect(stopOf(loadId, 'stp-pu').address).toMatchObject({ street: '1925 Enterprise Ct', zip: '60048' })
+    // An address without the ZIP key keeps the ZIP; an explicit null clears it.
+    await send({ locationId: 'loc-fab', name: 'FabTech', city: 'LIBERTYVILLE, IL', address: { street: '1925 Enterprise Court' } })
+    expect(stopOf(loadId, 'stp-pu').address).toMatchObject({ street: '1925 Enterprise Court', zip: '60048' })
+    await send({ locationId: 'loc-fab', name: 'FabTech', city: 'LIBERTYVILLE, IL', address: { zip: null } })
+    expect(stopOf(loadId, 'stp-pu').address).toMatchObject({ zip: null })
+    // A different place takes the address it was sent.
+    await send({ locationId: 'loc-sai', name: 'SAI', city: 'ST CHARLES, IL', address: { street: '290 Kautz Road', city: 'ST CHARLES', state: 'IL', zip: '60174' } })
+    expect(stopOf(loadId, 'stp-pu').address).toEqual({ street: '290 Kautz Road', city: 'ST CHARLES', state: 'IL', zip: '60174' })
+  })
 })
 
 // ── Step AE: Push to DAT from a quote ────────────────────────────────────────
