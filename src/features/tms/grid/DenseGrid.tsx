@@ -96,6 +96,10 @@ export interface DenseGridProps<T> {
   empty?: ReactNode
   /** Scroll returns to the top when this changes (a new filter, sort, tab or search). */
   resetKey?: string
+  /** Where to put the scroll once rows first arrive (coming back to the list); later resetKey changes still go to the top. */
+  initialScrollTop?: number
+  /** Hears the vertical scroll position, so a page can bring the reader back to it. */
+  onScrollTop?: (top: number) => void
   /** Namespaces the filter pickers' recently-used values. */
   recentKey: string
   'aria-label': string
@@ -152,6 +156,8 @@ export function DenseGrid<T>({
   collapsedGroups,
   empty,
   resetKey,
+  initialScrollTop,
+  onScrollTop,
   recentKey,
   'aria-label': ariaLabel,
   testId,
@@ -234,16 +240,29 @@ export function DenseGrid<T>({
     return () => observer.disconnect()
   }, [])
 
-  // A new filter, sort or tab starts at the top (the scroll event resets the window).
+  // A new filter, sort or tab starts at the top (the scroll event resets the window). The first run keeps
+  // the place a returning reader left (initialScrollTop), applied once the rows are there to scroll through.
+  const pendingScroll = useRef<number | null>(initialScrollTop && initialScrollTop > 0 ? initialScrollTop : null)
+  const firstReset = useRef(true)
   useEffect(() => {
+    if (firstReset.current) { firstReset.current = false; if (pendingScroll.current != null) return }
+    pendingScroll.current = null
     if (scrollRef.current) scrollRef.current.scrollTop = 0
   }, [resetKey])
+  useEffect(() => {
+    const el = scrollRef.current
+    if (pendingScroll.current == null || !el || rows.length === 0) return
+    el.scrollTop = pendingScroll.current
+    setTopRow(Math.floor(el.scrollTop / rowHeight))
+    pendingScroll.current = null
+  }, [rows.length, rowHeight])
 
   const lastLeft = useRef(0)
   const onScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
       const next = Math.floor(e.currentTarget.scrollTop / rowHeight)
       setTopRow((prev) => (prev === next ? prev : next))
+      onScrollTop?.(e.currentTarget.scrollTop)
       // The popover is anchored to its header cell: when the columns slide under it, close it.
       const left = e.currentTarget.scrollLeft
       if (left !== lastLeft.current) {
@@ -251,7 +270,7 @@ export function DenseGrid<T>({
         setOpenFilter(null)
       }
     },
-    [rowHeight],
+    [rowHeight, onScrollTop],
   )
 
   // Close the filter popover on an outside click or Escape.

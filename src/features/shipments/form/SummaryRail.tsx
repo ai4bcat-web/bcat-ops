@@ -70,7 +70,7 @@ function SummaryRailImpl({ common, summary, rows, attempted, Roles, RateHistory,
             <ul className="tms-rail-reqs">
               {missing.map((i) => (
                 <li key={i.id}>
-                  <button type="button" className="tms-rail-req" data-testid={`rail-missing-${i.id}`} data-done="false" data-missing="true" title={i.message} onClick={() => form.focusField(i.fieldKey)}>
+                  <button type="button" className="tms-rail-req" data-testid={`rail-missing-${i.id}`} data-done="false" data-missing="true" title={i.message} onClick={() => { if (i.fieldKey) form.focusField(i.fieldKey) }}>
                     <AlertCircle size={12} aria-hidden="true" />
                     <span>{i.label}</span>
                   </button>

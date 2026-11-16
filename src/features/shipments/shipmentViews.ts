@@ -1100,7 +1100,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'paidAt', label: 'Paid At', group: 'Order', value: (r) => formatBoardDateTime(r.paidAt), width: 140 },
   { key: 'arBalance', label: 'AR Balance', group: 'Order', value: (r) => formatCentsOrEmpty(r.arBalanceCents), width: 120 },
   { key: 'invoiceStatus', label: 'Invoice Status', group: 'Order', value: (r) => loadInvoiceStatusText(invoiceStatusOfRow(r), formatBoardDate), width: 150 },
-  { key: 'factorInfo', label: 'Factoring Info', group: 'Order', value: (r) => factorInfoTitle(r), width: 110 },
+  { key: 'factorInfo', label: 'Reqs', group: 'Order', value: (r) => factorInfoTitle(r), width: 110 },
   { key: 'factoringItem', label: 'Factoring Item', group: 'Order', value: (r) => r.factoringItemId ?? '', width: 140 },
   {
     key: 'docsRequired',
