@@ -3,17 +3,28 @@
  * customer, ticked and received in bulk.
  *
  * - The set is Open AR's own: every sent invoice still ISSUED or PARTIAL (`listOpenInvoices`).
- * - Factored invoices are OTR's to collect, so they sit in one separate "Factored (OTR)" group with no
- *   tick boxes: a customer's check is never put against an invoice OTR already bought.
+ * - Two sections, each grouped by customer (Ryne 2026-11-16): Manually invoiced (the customer pays us)
+ *   and Factored (OTR pays us). Both are receivable.
  * - Receiving builds ONE RECORD_PAYMENT per customer: the ticked invoices are its applications, the
- *   check # its reference, the payment date its receivedAt.
+ *   check # / OTR reference its reference, the payment date its receivedAt.
+ * - A factored invoice is paid less OTR's fee (default 2%, `TmsSettings.factorFeeBps`). Amount paid is
+ *   pre-filled at balance less the fee, and the fee is closed on the invoice as a write-off reasoned
+ *   "Factoring fee (OTR n%)", so the invoice ends PAID. Only the fee is closed: a short pay beyond it stays open.
  *
  * Pure: the page loads the invoices and posts the payment; this groups, totals and validates.
  */
 import { customerRefOf } from '@/lib/customerRef'
 import type { ArPaymentMethod, InvoiceRecord, PaymentApplication } from '@/types/tms'
 
-export const FACTORED_GROUP = '__factored_otr__'
+export type OutstandingSectionKey = 'manual' | 'factored'
+
+export const DEFAULT_FACTOR_FEE_BPS = 200
+
+/** The write-off reason that marks OTR's fee, so reports can find it. */
+export const factorFeeReason = (bps: number) => `Factoring fee (OTR ${bps / 100}%)`
+
+/** OTR's fee on a balance, to the cent. */
+export const factorFeeCents = (balanceCents: number, bps: number) => Math.round((balanceCents * bps) / 10_000)
 
 export interface OutstandingRow {
   invoiceId: string
@@ -32,12 +43,20 @@ export interface OutstandingRow {
 }
 
 export interface OutstandingGroup {
-  /** The customer id, or FACTORED_GROUP for the OTR group. */
+  /** `<section>:<customerId>`. */
   key: string
+  customerId: string
   label: string
-  /** Factored invoices can't be received here. */
-  receivable: boolean
+  factored: boolean
   rows: OutstandingRow[]
+  openCents: number
+}
+
+export interface OutstandingSection {
+  key: OutstandingSectionKey
+  label: string
+  groups: OutstandingGroup[]
+  count: number
   openCents: number
 }
 
@@ -70,35 +89,38 @@ export function outstandingRow(inv: InvoiceRecord, asOf: string): OutstandingRow
   }
 }
 
-/** Open invoices grouped by customer (A→Z), oldest invoice first, with the factored ones in their own group last. */
+/** Open invoices in two sections — Manually invoiced, Factored (OTR) — each grouped by customer A→Z, oldest invoice first. */
 export function groupOutstanding(
   invoices: readonly InvoiceRecord[],
   nameOf: (customerId: string, fallback: string) => string,
   asOf: string,
-): OutstandingGroup[] {
-  const byCustomer = new Map<string, OutstandingGroup>()
-  const factored: OutstandingGroup = { key: FACTORED_GROUP, label: 'Factored (OTR)', receivable: false, rows: [], openCents: 0 }
+): OutstandingSection[] {
+  const groups = new Map<string, OutstandingGroup>()
   for (const inv of invoices) {
     if (inv.status !== 'ISSUED' && inv.status !== 'PARTIAL') continue
     if ((inv.balanceCents ?? 0) <= 0) continue
     const row = outstandingRow(inv, asOf)
-    const group = row.factored
-      ? factored
-      : byCustomer.get(inv.customerId) ?? (() => {
-        const g: OutstandingGroup = {
-          key: inv.customerId, label: nameOf(inv.customerId, inv.customerName || inv.customerId), receivable: true, rows: [], openCents: 0,
-        }
-        byCustomer.set(inv.customerId, g)
-        return g
-      })()
-    group.rows.push(row)
-    group.openCents += row.balanceCents
+    const key = `${row.factored ? 'factored' : 'manual'}:${inv.customerId}`
+    let g = groups.get(key)
+    if (!g) {
+      g = { key, customerId: inv.customerId, label: nameOf(inv.customerId, inv.customerName || inv.customerId), factored: row.factored, rows: [], openCents: 0 }
+      groups.set(key, g)
+    }
+    g.rows.push(row)
+    g.openCents += row.balanceCents
   }
   const byDate = (a: OutstandingRow, b: OutstandingRow) => a.invoiceDate.localeCompare(b.invoiceDate) || a.number.localeCompare(b.number)
-  const groups = [...byCustomer.values()].sort((a, b) => a.label.localeCompare(b.label))
-  for (const g of groups) g.rows.sort(byDate)
-  factored.rows.sort(byDate)
-  return factored.rows.length > 0 ? [...groups, factored] : groups
+  for (const g of groups.values()) g.rows.sort(byDate)
+  const section = (key: OutstandingSectionKey, label: string): OutstandingSection => {
+    const list = [...groups.values()].filter((g) => g.factored === (key === 'factored')).sort((a, b) => a.label.localeCompare(b.label))
+    return { key, label, groups: list, count: list.reduce((n, g) => n + g.rows.length, 0), openCents: list.reduce((n, g) => n + g.openCents, 0) }
+  }
+  return [section('manual', 'Manually invoiced'), section('factored', 'Factored (OTR)')].filter((s) => s.count > 0)
+}
+
+/** What Amount paid starts at when an invoice is ticked: the balance, less OTR's fee on a factored one. */
+export function prefillCents(row: OutstandingRow, feeBps: number): number {
+  return row.factored ? row.balanceCents - factorFeeCents(row.balanceCents, feeBps) : row.balanceCents
 }
 
 /** Typed dollars → cents; null when it isn't a number. */
@@ -116,26 +138,49 @@ export interface ReceiveLine {
 }
 
 export interface ReceiveDraft {
-  customerId: string
   lines: ReceiveLine[]
   reference: string
   /** YYYY-MM-DD. */
   receivedAt: string
   method: ArPaymentMethod
+  /** OTR's fee in basis points, for factored lines. */
+  feeBps: number
+}
+
+export interface PlannedLine {
+  invoiceId: string
+  pro: string
+  customerId: string
+  factored: boolean
+  balanceCents: number
+  /** Money received against the invoice. */
+  paidCents: number
+  /** OTR's fee closed on the invoice after the payment posts (0 on a manual invoice). */
+  feeCents: number
+  /** What stays open afterwards (a short pay beyond the fee). */
+  leftCents: number
 }
 
 export interface ReceivePlan {
   ok: boolean
   /** One plain sentence per problem, shown under the bar. */
   errors: string[]
-  amountCents: number
-  applications: PaymentApplication[]
+  lines: PlannedLine[]
+  receivedCents: number
+  feeCents: number
+  /** Σ invoice balances covered. */
+  invoiceCents: number
+  /** One RECORD_PAYMENT per customer. */
+  payments: Array<{ customerId: string; amountCents: number; applications: PaymentApplication[] }>
 }
 
-/** Checks the ticked lines and builds the one payment they become. */
+/**
+ * Checks the ticked lines and builds what they become: one payment per customer, and on each factored
+ * invoice OTR's fee — never more than the fee, never more than what is left after the payment.
+ */
 export function planReceive(d: ReceiveDraft): ReceivePlan {
   const errors: string[] = []
-  const applications: PaymentApplication[] = []
+  const lines: PlannedLine[] = []
   for (const { row, amount } of d.lines) {
     const cents = parseDollars(amount)
     if (cents == null || cents <= 0) { errors.push(`Enter the amount paid on ${row.pro}.`); continue }
@@ -143,25 +188,40 @@ export function planReceive(d: ReceiveDraft): ReceivePlan {
       errors.push(`${row.pro}: $${(cents / 100).toFixed(2)} is more than the $${(row.balanceCents / 100).toFixed(2)} balance.`)
       continue
     }
-    if (row.factored) { errors.push(`${row.pro} is factored; OTR collects it.`); continue }
-    applications.push({ invoiceId: row.invoiceId, amountCents: cents })
+    const fee = row.factored ? Math.min(factorFeeCents(row.balanceCents, d.feeBps), row.balanceCents - cents) : 0
+    lines.push({
+      invoiceId: row.invoiceId, pro: row.pro, customerId: row.customerId, factored: row.factored, balanceCents: row.balanceCents,
+      paidCents: cents, feeCents: fee, leftCents: row.balanceCents - cents - fee,
+    })
   }
   if (d.lines.length === 0) errors.push('Tick at least one invoice.')
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d.receivedAt)) errors.push('Enter the payment date.')
   if (d.method === 'CHECK' && !d.reference.trim()) errors.push('Enter the check number.')
-  const amountCents = applications.reduce((s, a) => s + a.amountCents, 0)
-  return { ok: errors.length === 0 && applications.length > 0, errors, amountCents, applications }
+  const byCustomer = new Map<string, PaymentApplication[]>()
+  for (const l of lines) byCustomer.set(l.customerId, [...(byCustomer.get(l.customerId) ?? []), { invoiceId: l.invoiceId, amountCents: l.paidCents }])
+  const payments = [...byCustomer].map(([customerId, applications]) => ({
+    customerId, applications, amountCents: applications.reduce((s, a) => s + a.amountCents, 0),
+  }))
+  return {
+    ok: errors.length === 0 && lines.length > 0,
+    errors,
+    lines,
+    receivedCents: lines.reduce((s, l) => s + l.paidCents, 0),
+    feeCents: lines.reduce((s, l) => s + l.feeCents, 0),
+    invoiceCents: lines.reduce((s, l) => s + l.balanceCents, 0),
+    payments,
+  }
 }
 
-/** The RECORD_PAYMENT input for a clean plan. */
-export function recordPaymentInput(d: ReceiveDraft, plan: ReceivePlan, clientRequestId: string) {
+/** The RECORD_PAYMENT input for one customer's payment in a clean plan. */
+export function recordPaymentInput(d: ReceiveDraft, payment: ReceivePlan['payments'][number], clientRequestId: string) {
   return {
-    customerId: d.customerId,
+    customerId: payment.customerId,
     receivedAt: d.receivedAt,
     method: d.method,
     reference: d.reference.trim() || undefined,
-    amountCents: plan.amountCents,
-    applications: plan.applications,
+    amountCents: payment.amountCents,
+    applications: payment.applications,
     creditApplications: [],
     clientRequestId,
   }

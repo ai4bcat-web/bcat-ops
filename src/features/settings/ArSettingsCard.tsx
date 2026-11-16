@@ -50,6 +50,7 @@ export function ArSettingsCard() {
   const [factorZip, setFactorZip] = useState('')
   const [factorEmail, setFactorEmail] = useState('')
   const [factorNotice, setFactorNotice] = useState('')
+  const [factorFeePct, setFactorFeePct] = useState('2')
   const [seriesStart, setSeriesStart] = useState('')
   const [maxImported, setMaxImported] = useState<number | null>(null)
   const [plainNumbers, setPlainNumbers] = useState(false)
@@ -76,6 +77,7 @@ export function ArSettingsCard() {
         setFactorZip(s?.factorRemitTo?.address?.zip ?? '')
         setFactorEmail(s?.factorRemitTo?.email ?? '')
         setFactorNotice(s?.factorRemitTo?.noticeText ?? '')
+        setFactorFeePct(String((s?.factorFeeBps ?? 200) / 100))
         // Posting money is admin-only unless somebody deliberately opened it up.
         setBatchEmail(s?.invoiceBatchEmail ?? 'PER_INVOICE')
       })
@@ -98,6 +100,8 @@ export function ArSettingsCard() {
     setError(null)
     if (formatError) { setError(formatError); return }
     if (seriesProblem) { setError(seriesProblem); return }
+    const feePct = Number(factorFeePct.trim())
+    if (!Number.isFinite(feePct) || feePct < 0 || feePct > 10) { setError('The OTR factoring fee must be a percent between 0 and 10'); return }
     // A factor remit-to with no name is not a remit-to; it clears the whole block.
     const name = factorName.trim()
     const address = [factorStreet, factorCity, factorState, factorZip].some((v) => v.trim())
@@ -120,6 +124,7 @@ export function ArSettingsCard() {
           ? { name, address, email: factorEmail.trim() || null, noticeText: factorNotice.trim() || null }
           : null,
         invoiceBatchEmail: batchEmail,
+        factorFeeBps: Math.round(feePct * 100),
         // Only a series start the person changed is sent: the Lambda moves the counter forward on it.
         ...(seriesStart.trim() !== '' && Number(seriesStart) !== (savedSeriesStart ?? -1)
           ? { invoiceSeriesStart: Number(seriesStart) }
@@ -234,6 +239,9 @@ export function ArSettingsCard() {
           <Panel>
             <GroupLabel>Factor remit-to</GroupLabel>
             <Hint>Printed instead of the division&rsquo;s remit-to on a factored customer&rsquo;s invoice. Leave the name blank to turn it off.</Hint>
+            <TmsField label="OTR factoring fee (%)" hint="Taken off a factored invoice when OTR pays it. Payments Received fills in the invoice less this fee and closes the fee on the invoice.">
+              <TmsInput aria-label="OTR factoring fee percent" inputMode="decimal" value={factorFeePct} onChange={(e) => setFactorFeePct(e.target.value)} />
+            </TmsField>
             <div className="tms-grid tms-grid-2">
               <TmsField label="Name">
                 <TmsInput aria-label="Factor name" value={factorName} onChange={(e) => setFactorName(e.target.value)} />

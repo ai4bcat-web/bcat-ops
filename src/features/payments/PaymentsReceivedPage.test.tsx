@@ -11,6 +11,8 @@ vi.mock('@/lib/apiClient', () => ({
   graphqlErrorText: () => '',
   reversePayment: vi.fn(),
   recordPayment: vi.fn(),
+  writeOffInvoice: vi.fn(),
+  getTmsSettings: vi.fn(async () => ({ factorFeeBps: 200 })),
   listShipmentsByNumber: vi.fn(async () => []),
   listArPayments: vi.fn(async (): Promise<ArPaymentRecord[]> => [
     { id: 'p1', customerId: 'c1', kind: 'PAYMENT', receivedAt: `${ym}-02T12:00:00.000Z`, method: 'ACH', reference: 'ACH-77',
@@ -53,18 +55,21 @@ vi.mock('@/hooks/useAuth', () => ({ useAuthUser: () => ({ email: 'ryne@bcatcorp.
 import { PaymentsReceivedPage } from './PaymentsReceivedPage'
 
 describe('Payments Received page', () => {
-  it('opens on Outstanding: open invoices by customer, factored ones in their own OTR group', async () => {
+  it('opens on Outstanding: Manually invoiced and Factored (OTR), factored ticks pre-fill at 98%', async () => {
     render(<MemoryRouter><PaymentsReceivedPage /></MemoryRouter>)
     const out = await screen.findByTestId('payments-outstanding')
-    const groups = within(out).getAllByTestId('outstanding-group')
-    expect(groups).toHaveLength(2)
-    expect(within(groups[0]).getByText('TANAGER LOGISTICS')).toBeTruthy()
-    expect(within(groups[0]).getByTestId('outstanding-days-to-pay').textContent).toBe('No terms · pays in 42 days avg')
-    expect(within(groups[1]).getByText('Factored (OTR)')).toBeTruthy()
-    expect(within(groups[1]).queryAllByRole('checkbox')).toHaveLength(0)
-    fireEvent.click(within(groups[0]).getAllByLabelText('Select 14200')[0])
-    expect(within(groups[0]).getByTestId('receive-bar')).toBeTruthy()
-    expect((within(groups[0]).getAllByLabelText('Amount paid on 14200')[0] as HTMLInputElement).value).toBe('500.00')
+    const manual = within(out).getByTestId('outstanding-section-manual')
+    const factored = within(out).getByTestId('outstanding-section-factored')
+    expect(within(manual).getByText('TANAGER LOGISTICS')).toBeTruthy()
+    expect(within(manual).getByTestId('outstanding-days-to-pay').textContent).toBe('No terms · pays in 42 days avg')
+    fireEvent.click(within(manual).getAllByLabelText('Select 14200')[0])
+    expect(within(manual).getByTestId('receive-bar')).toBeTruthy()
+    expect((within(manual).getAllByLabelText('Amount paid on 14200')[0] as HTMLInputElement).value).toBe('500.00')
+    fireEvent.click(within(factored).getAllByLabelText('Select 14201')[0])
+    expect((within(factored).getAllByLabelText('Amount paid on 14201')[0] as HTMLInputElement).value).toBe('294.00')
+    fireEvent.change(within(factored).getByLabelText('OTR remittance or ACH reference'), { target: { value: 'OTR-9' } })
+    fireEvent.click(within(within(factored).getByTestId('receive-bar-factored')).getByTestId('receive-payments'))
+    expect((await screen.findByTestId('receive-fee-summary')).textContent).toBe('Received $294.00 · OTR fee 2% $6.00 · Invoice total $300.00')
   })
 
   it('lists this month by default and ties "Collected this month" to the card computation', async () => {

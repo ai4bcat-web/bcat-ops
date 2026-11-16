@@ -1317,6 +1317,9 @@ export async function saveArSettings(input: Row, caller: Caller): Promise<Row> {
   }
   const termsDays = optionalInteger(input.defaultPaymentTermsDays, { min: 0, max: 365, label: 'defaultPaymentTermsDays' })
   if (termsDays != null) patch.defaultPaymentTermsDays = termsDays
+  // OTR's fee, basis points: 0–1000 (10%).
+  const feeBps = optionalInteger(input.factorFeeBps, { min: 0, max: 1000, label: 'factorFeeBps' })
+  if (feeBps != null) patch.factorFeeBps = feeBps
   if (input.factorRemitTo != null) {
     // A blob without a name silently turns every factored customer's bill back into
     // "pay us", which is the one mistake this whole field exists to prevent.
