@@ -24,6 +24,8 @@ export interface LifecycleTab {
   pageKey: string
   /** The `useShellBadgeCounts` key for the count badge, if any. */
   badgeKey: string | null
+  /** A second key counting the items on this tab that need attention: tints the badge amber and fills its tooltip. */
+  attentionKey?: string
 }
 
 export const LIFECYCLE_TABS: readonly LifecycleTab[] = [
@@ -71,6 +73,7 @@ export const LIFECYCLE_TABS: readonly LifecycleTab[] = [
     matches: ['/tms/tracking', '/tms/tracking/*'],
     pageKey: 'loads',
     badgeKey: 'loadTracking',
+    attentionKey: 'loadTrackingDue',
   },
   {
     key: 'review',

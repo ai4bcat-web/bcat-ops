@@ -52,6 +52,19 @@ describe('LifecycleTabs', () => {
     expect(screen.queryByTestId('lifecycle-badge-view')).not.toBeInTheDocument()
   })
 
+  it('badges Track with the loads in tracking, amber when something is due', () => {
+    setup('/tms/tracking', () => true, { loadTracking: 5, loadTrackingDue: 2 })
+    expect(screen.getByTestId('lifecycle-badge-track')).toHaveTextContent('5')
+    expect(screen.getByTestId('lifecycle-badge-track').querySelector('.tms-count-amber')).not.toBeNull()
+    expect(screen.getByTestId('lifecycle-tab-track')).toHaveAttribute('title', expect.stringContaining('5 loads · 2 need attention'))
+  })
+
+  it('keeps the Track badge green when nothing is due', () => {
+    setup('/tms/tracking', () => true, { loadTracking: 1 })
+    expect(screen.getByTestId('lifecycle-badge-track').querySelector('.tms-count-green')).not.toBeNull()
+    expect(screen.getByTestId('lifecycle-tab-track')).toHaveAttribute('title', expect.stringContaining('1 load'))
+  })
+
   it('badges View with the active shipment count', () => {
     setup('/tms/shipments', () => true, { activeShipments: 123 })
     expect(screen.getByTestId('lifecycle-badge-view')).toHaveTextContent('123')
