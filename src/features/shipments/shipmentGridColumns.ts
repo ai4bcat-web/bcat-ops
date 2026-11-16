@@ -7,7 +7,9 @@ import { optionsOfRow, type DenseColumn, type DenseOption } from '@/features/tms
 import { customerDisplayName } from '@/lib/customerResolution'
 import { LADDER_FILTER_OPTIONS, assignmentChipText } from './carrierLadder'
 import { boardStatusOf } from '@/lib/shipmentViewDefs'
-import { BOARD_COLUMNS, displayStatusOf, carrierSortKey, factorInfoText, invoiceStatusOfRow, missingCountOf, rowShipmentType, type ShipmentRow } from './shipmentViews'
+import { pastDeliveryOf } from './boardChips'
+import { BOARD_COLUMNS, displayStatusOf, carrierSortKey, invoiceStatusOfRow, rowShipmentType, type ShipmentRow } from './shipmentViews'
+import { boardReqsOfRow, boardReqsText } from './boardReqs'
 import type { IntroducedColumn } from './teamColumnLayout'
 import { LOAD_INVOICE_STATUS_LABEL, LOAD_INVOICE_STATUS_ORDER } from '@/lib/loadInvoiceStatus'
 import { SHIPMENT_TYPES, shipmentTypeLabel } from '@/lib/shipmentTypes'
@@ -64,12 +66,23 @@ const NUMBER_FIELDS: Record<string, { value: (row: ShipmentRow) => number | null
 
 const BOARD_STATUS_ORDER = ['OPEN', 'COVERED', 'DISPATCHED', 'ARRIVED', 'DEPARTED', 'DELIVERED', 'IN LOAD REVIEW', 'RELEASED', 'HOLD', 'RESERVED', 'VOIDED']
 
-export const STATUS_OPTIONS: DenseOption[] = BOARD_STATUS_ORDER.map((s) => ({ value: s, label: sentence(s) }))
+/**
+ * "Past delivery date" rides in the Status filter beside the statuses. A row carries it as a second
+ * facet value, so ticking it with a status shows either (OR, like any two statuses), and Exclude
+ * drops the late ones. Same test as the row's chip and the stats strip: `pastDeliveryOf`.
+ */
+export const PAST_DELIVERY_FILTER_VALUE = 'PAST DELIVERY DATE'
+const PAST_DELIVERY_OPTION: DenseOption = { value: PAST_DELIVERY_FILTER_VALUE, label: 'Past delivery date' }
+
+export const STATUS_OPTIONS: DenseOption[] = [
+  PAST_DELIVERY_OPTION,
+  ...BOARD_STATUS_ORDER.map((s) => ({ value: s, label: sentence(s) })),
+]
 
 /** Factoring Info filter: flagged, or nothing to fix (not factored, complete, or already invoiced). */
 export const FACTOR_INFO_OPTIONS: DenseOption[] = [
-  { value: 'MISSING', label: 'Missing factoring info' },
-  { value: 'OK', label: 'Nothing missing' },
+  { value: 'MISSING', label: 'Needs something' },
+  { value: 'OK', label: 'Complete' },
 ]
 export const INVOICE_STATUS_OPTIONS: DenseOption[] = LOAD_INVOICE_STATUS_ORDER.map((k) => ({ value: k, label: LOAD_INVOICE_STATUS_LABEL[k] }))
 
@@ -100,7 +113,9 @@ export const SHIPMENT_GRID_COLUMNS: DenseColumn<ShipmentRow>[] = BOARD_COLUMNS.m
       fixedOptions: STATUS_OPTIONS,
       optionsOf: (row) => {
         const status = displayStatusOf(row)
-        return [{ value: status, label: sentence(status) }]
+        const options: DenseOption[] = [{ value: status, label: sentence(status) }]
+        if (pastDeliveryOf(row, Date.now())) options.push(PAST_DELIVERY_OPTION)
+        return options
       },
       sortValue: statusSortKey,
       extraPx: 110, // the tracking pill beside the status text
@@ -121,15 +136,16 @@ export const SHIPMENT_GRID_COLUMNS: DenseColumn<ShipmentRow>[] = BOARD_COLUMNS.m
     }
   }
   if (col.key === 'factorInfo') {
-    // Ryne 2026-11-14: a factored load missing what OTR needs is flagged until it is invoiced. The cell says "Missing 3"; the tooltip lists them.
+    // REQS (Ryne 2026-11-16): what stops Push to load review plus, for a factored customer, what OTR needs (boardReqs.ts).
+    // The cell says "2 NEED" or ✓; the tooltip and the editor's rail list the same items.
     return {
       ...base,
       width: 110,
       filter: 'multi',
-      text: factorInfoText,
+      text: (row) => boardReqsText(boardReqsOfRow(row)),
       fixedOptions: FACTOR_INFO_OPTIONS,
-      optionsOf: (row) => [missingCountOf(row) > 0 ? FACTOR_INFO_OPTIONS[0] : FACTOR_INFO_OPTIONS[1]],
-      sortValue: (row) => missingCountOf(row),
+      optionsOf: (row) => [boardReqsOfRow(row).length > 0 ? FACTOR_INFO_OPTIONS[0] : FACTOR_INFO_OPTIONS[1]],
+      sortValue: (row) => boardReqsOfRow(row).length,
     }
   }
   if (col.key === 'carrierAssignment') {

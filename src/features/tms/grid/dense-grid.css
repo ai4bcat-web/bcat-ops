@@ -419,6 +419,8 @@
 .tms-shell .tms-dg-table tbody tr.tms-dg-clickable { cursor: pointer; }
 .tms-shell .tms-dg-table tbody tr:hover td { box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--tms-text) 6%, transparent); }
 .tms-shell .tms-dg-table tbody tr[data-selected='true'] td { box-shadow: inset 0 0 0 9999px var(--tms-surface-selected); }
+/* The row a person opened last, marked when they come back to the list. */
+.tms-shell .tms-dg-table tbody tr[data-last-opened='true'] td:first-child { box-shadow: inset 3px 0 0 0 var(--tms-primary); }
 .tms-shell .tms-dg-table tbody tr[data-tone='voided'] td,
 .tms-shell .tms-dg-table tbody tr[data-tone='canceled'] td { text-decoration: line-through; }
 

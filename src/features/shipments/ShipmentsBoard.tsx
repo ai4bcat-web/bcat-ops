@@ -114,8 +114,6 @@ import {
   type ShipmentRow,
   profitByDivision,
   invoiceStatusOfRow,
-  factorInfoText,
-  factorInfoTitle,
 } from './shipmentViews'
 import { useRowsWithInvoiceStatus } from './useBoardInvoiceStatus'
 import { loadInvoiceStatusText } from '@/lib/loadInvoiceStatus'
@@ -139,6 +137,8 @@ import {
 import type { BatchShipmentTask, CustomerRecord, LocationRecord, ShipmentColumnTemplateRecord, TmsSettings, UserProfileRecord } from '@/types/tms'
 import { REVIEW_BILLING_LABEL, needsBillingReview, reviewBillingNote } from '@/lib/reviewBilling'
 import { matchesFlags, pastDeliveryOf, type BoardFlag } from './boardChips'
+import { boardReqsOfRow, boardReqsText, setBoardReqSources } from './boardReqs'
+import { boardListKey, boardViewKey, clearBoardView, readBoardView, readText, writeBoardView, writeText } from './boardViewState'
 import { BatchActionBar } from './board/BatchActionBar'
 import {
   outcomesFromServer,
@@ -291,8 +291,25 @@ export function ShipmentsBoard() {
   const { shipments: workingRows, loading: workingLoading, partial: workingPartial, error: workingError, refresh: refreshWorking } = useShipments({ kind: 'working' })
   const { customers, locations } = useDirectory()
   const staff = useStaff(email)
-  const [params] = useSearchParams()
+  const [params, setListParams] = useSearchParams()
   const list = parseShipmentList(params.get('list'))
+  // Coming back to the board with no list in the link opens the one this person had last (Active, All, Voided).
+  const listKey = boardListKey(user?.userId)
+  const urlList = params.get('list')
+  useEffect(() => {
+    if (urlList) return
+    const last = readText(listKey)
+    if (last && last !== 'active' && parseShipmentList(last) === last) {
+      setListParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.set('list', last)
+        return next
+      }, { replace: true })
+    }
+    // Only on arrival: once a list is in the URL, the person's own clicks decide.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => { writeText(listKey, list) }, [listKey, list])
   const [period, setPeriod] = useState<Period>({ key: 'this' })
   const [thisMonth] = useState(() => currentMonth(new Date()))
   const [reports, setReports] = useState<Record<'left' | 'right', PaneReport>>({ left: { query: '' }, right: { query: '' } })
@@ -467,6 +484,7 @@ export function ShipmentsBoard() {
           isAdmin={isAdmin}
           currentUser={email}
           email={email}
+          userId={user?.userId ?? null}
           onSplit={() => setSplit((s) => !s)}
           onReport={report}
         />
@@ -493,6 +511,7 @@ export function ShipmentsBoard() {
             isAdmin={isAdmin}
             currentUser={email}
             email={email}
+            userId={user?.userId ?? null}
             onSplit={() => setSplit((s) => !s)}
             onReport={report}
           />
@@ -538,6 +557,8 @@ interface BoardPaneProps {
   isAdmin: boolean
   currentUser: string
   email: string
+  /** Cognito sub: the key the board remembers this person's filters under. */
+  userId: string | null
   onSplit: () => void
   onReport?: (pane: 'left' | 'right', report: PaneReport) => void
 }
@@ -561,16 +582,22 @@ function BoardPane({
   isAdmin,
   currentUser,
   email,
+  userId,
   onSplit,
   onReport,
 }: BoardPaneProps) {
   const navigate = useNavigate()
+  // What this person left set on this pane and list (filters, flags, search, how far they had loaded and scrolled).
+  const viewKey = boardViewKey(userId, pane, list)
+  const [saved] = useState(() => readBoardView(viewKey))
   const { staff: staffProfiles } = staff
   const divisions = useOwnershipDivisions().divisions ?? SEED_DIVISIONS
   const { drivers } = useDrivers()
   const { carriers: directoryCarriers } = useCarriers()
   // Set during render so the Carrier column's text, sort and filter all see the mapping on the first paint.
   useMemo(() => setFleetDrivers(drivers), [drivers])
+  // REQS reads each customer's Load Review list and the org default (boardReqs.ts), set before the grid renders.
+  useMemo(() => setBoardReqSources({ customers, orgDefault: settings?.reviewRequirements }), [customers, settings])
   const { equipment } = useTrucks()
   // Step W: the roster the batch can book onto Ivan Cartage loads (active, not a broker placeholder).
   const ivanDrivers = useMemo(
@@ -586,8 +613,8 @@ function BoardPane({
 
   const [params, setParams] = useSearchParams()
   const urlQuery = params.get('q')
-  const [typed, setTyped] = useState('')
-  const [pageSize, setPageSize] = useState(PAGE_SIZE_INITIAL)
+  const [typed, setTyped] = useState(() => saved.query ?? '')
+  const [pageSize, setPageSize] = useState(() => (saved.pageSize ? normalizePageSize(saved.pageSize) : PAGE_SIZE_INITIAL))
   const query = urlQuery ?? typed
   const setQuery = useCallback(
     (next: string) => {
@@ -634,8 +661,14 @@ function BoardPane({
   const layout = layoutDraft ?? teamLayout
   const columnKeys = layout.columns
   const [columnsOpen, setColumnsOpen] = useState(false)
-  const [filters, setFilters] = useState<DenseFilters>({})
-  const [flags, setFlags] = useState<ReadonlySet<BoardFlag>>(() => new Set())
+  const [filters, setFilters] = useState<DenseFilters>(() => saved.filters ?? {})
+  const [flags, setFlags] = useState<ReadonlySet<BoardFlag>>(() => new Set(saved.flags ?? []))
+  const [lastOpenedId, setLastOpenedId] = useState<string | null>(() => saved.lastOpenedId ?? null)
+  const scrollTopRef = useRef(saved.scrollTop ?? 0)
+  // The row a person opened last stays marked when they come back to the list.
+  const openShipmentFromRow = useCallback((id: string) => {
+    setLastOpenedId(id)
+  }, [])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [capRefusal, setCapRefusal] = useState<string | null>(null)
   const [barOutcomes, setBarOutcomes] = useState<BatchOutcome[] | undefined>()
@@ -914,7 +947,7 @@ function BoardPane({
         const held = lockHeldByOther(row, email, Date.now())
         return (
           <>
-            <Link className="tms-link tms-board-link" to={shipmentEditorPath(row.id)} onClick={(e) => e.stopPropagation()}>{row.number ?? ''}</Link>
+            <Link className="tms-link tms-board-link" to={shipmentEditorPath(row.id)} onClick={(e) => { e.stopPropagation(); openShipmentFromRow(row.id) }}>{row.number ?? ''}</Link>
             {held ? <Lock size={12} aria-label={`${held.by} is editing`} data-testid="board-lock-icon" style={{ marginLeft: 4, verticalAlign: 'middle' }}><title>{`${held.by} is editing this shipment`}</title></Lock> : null}
           </>
         )
@@ -960,11 +993,22 @@ function BoardPane({
         return <span className="flex items-center gap-1" data-testid="carrier-cell">{name}<TrackingModeNotSetRowChip row={row} /></span>
       }
       if (columnKey === 'factorInfo') {
-        const text = factorInfoText(row)
-        if (!text) return null
+        // REQS: one list of what Push to load review and (for a factored customer) OTR still need. The editor's rail
+        // gets the same list through the link's state, so its What's missing count equals this chip.
+        if (row.voidedAt || row.status === 'CANCELED') return null
+        const reqs = boardReqsOfRow(row)
+        if (reqs.length === 0) return <span className="text-[color:var(--tms-badge-green)]" title="Everything Load Review and factoring need is in" data-testid="reqs-ok"><Check size={14} aria-label="Complete" /></span>
+        const list = reqs.map((r) => r.label).join(', ')
         return (
-          <Link to={`${shipmentEditorPath(row.id)}?missing=1`} className="tms-board-link" title={`${factorInfoTitle(row)} — open the shipment to fill them in`} onClick={(e) => e.stopPropagation()} data-testid="factor-info-link">
-            <TmsBadge tone="orange" title={factorInfoTitle(row)} data-testid="factor-info-pill">{text}</TmsBadge>
+          <Link
+            to={`${shipmentEditorPath(row.id)}?missing=1`}
+            state={{ boardReqs: reqs }}
+            className="tms-board-link"
+            title={`Needs: ${list} — open the shipment to fill them in`}
+            onClick={(e) => { e.stopPropagation(); openShipmentFromRow(row.id) }}
+            data-testid="factor-info-link"
+          >
+            <TmsBadge tone={reqs.length > 2 ? 'red' : 'orange'} title={`Needs: ${list}`} data-testid="factor-info-pill">{boardReqsText(reqs)}</TmsBadge>
           </Link>
         )
       }
@@ -1041,7 +1085,9 @@ function BoardPane({
       const col = BOARD_COLUMNS.find((c) => c.key === columnKey)
       return col ? col.value(row) : null
     },
-    [directoryCarriers, email],
+    // customers / settings: the REQS cell reads them through setBoardReqSources, so a refresh of either redraws it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [directoryCarriers, email, openShipmentFromRow, customers, settings],
   )
 
   const rowHandlers = useCallback(
@@ -1121,11 +1167,45 @@ function BoardPane({
     },
     [resetPage],
   )
+  // Remember where this person left the board until they press Clear filters. Scroll is written a beat
+  // after it settles; everything else as it changes.
+  const persistView = useCallback(() => {
+    writeBoardView(viewKey, {
+      filters,
+      flags: [...flags],
+      query: typed,
+      pageSize,
+      scrollTop: scrollTopRef.current,
+      lastOpenedId,
+    })
+  }, [viewKey, filters, flags, typed, pageSize, lastOpenedId])
+  useEffect(() => { persistView() }, [persistView])
+  const scrollSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const onGridScroll = useCallback((top: number) => {
+    scrollTopRef.current = top
+    if (scrollSaveTimer.current) clearTimeout(scrollSaveTimer.current)
+    scrollSaveTimer.current = setTimeout(persistView, 300)
+  }, [persistView])
+  // Leaving the page (opening a shipment) writes the very last scroll position.
+  const persistRef = useRef(persistView)
+  persistRef.current = persistView
+  useEffect(() => () => {
+    if (scrollSaveTimer.current) clearTimeout(scrollSaveTimer.current)
+    persistRef.current()
+  }, [])
+
+  const sortIsDefault = prefs.sort == null || (prefs.sort.key === DEFAULT_SORT.key && prefs.sort.dir === DEFAULT_SORT.dir)
+  const clearFilterCount = activeFilterCount(filters) + flags.size + (query.trim() ? 1 : 0) + (sortIsDefault ? 0 : 1)
   const clearFilters = useCallback(() => {
     setFilters({})
     setFlags(new Set())
+    setQuery('')
+    prefs.setSort(DEFAULT_SORT)
+    setLastOpenedId(null)
+    scrollTopRef.current = 0
+    clearBoardView(viewKey)
     resetPage()
-  }, [resetPage])
+  }, [resetPage, setQuery, prefs, viewKey])
 
   // The stats strip counts what the list shows now, so it follows every filter. It is always on.
   // Revenue and gross profit count only delivered shipments (DELIVERED is the shipment's last
@@ -1165,7 +1245,19 @@ function BoardPane({
       { label: 'Open', value: open },
       { label: 'In transit', value: moving },
       { label: 'Delivered', value: delivered },
-      { label: 'Need docs', value: docs, tone: docs > 0 ? 'warn' : undefined },
+      {
+        label: 'Need docs',
+        value: docs,
+        tone: docs > 0 ? 'warn' : undefined,
+        title: flags.has('docsMissing') ? 'Showing only shipments missing a document. Click to show all.' : 'Shipments missing a document. Click to show only these.',
+        active: flags.has('docsMissing'),
+        onClick: () => setFlags((prev) => {
+          const next = new Set(prev)
+          if (next.has('docsMissing')) next.delete('docsMissing')
+          else next.add('docsMissing')
+          return next
+        }),
+      },
       {
         label: 'Past delivery date',
         value: pastDelivery,
@@ -1232,7 +1324,7 @@ function BoardPane({
             tabs={[{ key: 'active', label: 'Active' }, { key: 'all', label: 'All' }, { key: 'voided', label: 'Voided' }]}
           />
         )}
-        <ClearFiltersButton count={activeFilterCount(filters) + flags.size} onClear={clearFilters} />
+        <ClearFiltersButton count={clearFilterCount} onClear={clearFilters} />
         <span className="tms-dense-spacer" />
         <TmsButton size="sm" variant="secondary" data-testid="export-active-shipments" title="Every active shipment with every field" onClick={exportAllActive}>
           <Download size={14} aria-hidden="true" /> Export all active
@@ -1295,7 +1387,7 @@ function BoardPane({
             rows={shownRows}
             apiKey={MAPS_KEY}
             mapId={MAPS_MAP_ID}
-            onOpenShipment={(id) => setOpenDrawerId(id)}
+            onOpenShipment={(id) => { openShipmentFromRow(id); setOpenDrawerId(id) }}
           />
         ) : (
           <DenseGrid<ShipmentRow>
@@ -1303,6 +1395,9 @@ function BoardPane({
             aria-label="Shipments"
             recentKey={`tms:shipments:recent:${email}`}
             resetKey={`${query}|${flags.size}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
+            initialScrollTop={saved.scrollTop}
+            onScrollTop={onGridScroll}
+            rowAttrs={(r): Record<string, string> => (r.id === lastOpenedId ? { 'data-last-opened': 'true' } : {})}
             columns={gridColumns}
             rows={shownRows}
             fitRows={fitRows}
