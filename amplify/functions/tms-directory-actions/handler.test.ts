@@ -940,6 +940,40 @@ describe('UPSERT_CUSTOMER', () => {
     })
   })
 
+  it('a patch (Load Review rail) needs no name and keeps every field it does not carry', async () => {
+    // 14925 ICAT LOGISTICS (Ryne 2026-11-16): switching Manual → Factor from the rail said "name must be a string".
+    const existing = makeDynamoItem({
+      id: 'c-icat', name: 'ICAT LOGISTICS, INC', normalizedName: 'icat logistics', active: true,
+      billingMethod: 'MANUAL', mcNumber: '468137', apEmail: 'apinvoices@icatlogistics.com', paymentTermsDays: 30,
+      contactName: 'Pat Dispatcher', notes: 'Call before noon', aliases: ['ICAT'], reviewRequirements: ['podReceived', 'rateConReceived', 'apEmail'],
+      createdAt: '2025-01-01', createdBy: 'someone@bcatcorp.com', updatedAt: '2025-01-02',
+    })
+    let update: MockCommand | undefined
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [existing], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Update') { update = cmd; return Promise.resolve({ Attributes: existing }) }
+      if (cmd.__type === 'Put') return Promise.resolve({})
+      throw new Error('unexpected')
+    })
+    await handler(event('UPSERT_CUSTOMER', { id: 'c-icat', expectedUpdatedAt: '2025-01-02', patch: true, billingMethod: 'FACTOR', changeReason: 'Load Review', changeSource: 'LOAD_REVIEW' }))
+    const values = (update?.input as { ExpressionAttributeValues: Record<string, unknown> }).ExpressionAttributeValues
+    expect(values).toMatchObject({
+      ':name': { S: 'ICAT LOGISTICS, INC' },
+      ':billingMethod': { S: 'FACTOR' },
+      ':mcNumber': { S: '468137' },
+      ':contactName': { S: 'Pat Dispatcher' },
+      ':notes': { S: 'Call before noon' },
+      ':paymentTermsDays': { N: '30' },
+    })
+    expect(values[':aliases']).toEqual({ L: [{ S: 'ICAT' }] })
+  })
+
+  it('a full save without a name is still refused', async () => {
+    send.mockImplementation(() => Promise.resolve({}))
+    await expect(handler(event('UPSERT_CUSTOMER', { id: 'c-icat', expectedUpdatedAt: '2025-01-02', billingMethod: 'FACTOR' }))).rejects.toThrow('name must be a string')
+  })
+
   describe('billing method (Step AW)', () => {
     const flagged = () => makeDynamoItem({
       id: 'c-1', name: 'Acme', normalizedName: 'acme', active: true,

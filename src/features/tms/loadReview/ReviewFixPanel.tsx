@@ -13,7 +13,7 @@ import { TmsButton, TmsCard, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { DirectoryPicker } from '@/components/directory-picker/DirectoryPicker'
 import { OwnFleetDriverPicker } from '@/components/OwnFleetDriverPicker'
 import { useOwnFleetRoster } from '@/hooks/useOwnFleetRoster'
-import { assignAsset, getShipmentBundle, listCustomers, setShipmentCustomer, updateCustomer, updateOrderDetails, updateStop } from '@/lib/apiClient'
+import { assignAsset, getShipmentBundle, listCustomers, setShipmentCustomer, patchCustomer, updateOrderDetails, updateStop } from '@/lib/apiClient'
 import { customerRefOf } from '@/lib/customerRef'
 import { isFactorBilled } from '@/lib/factorBilling'
 import { stopPlace, stopsList } from '@/lib/stopPlace'
@@ -24,6 +24,11 @@ import type { Stop } from '@/types'
 import { DEFAULT_REVIEW_REQUIREMENTS } from '@/lib/reviewRequirements'
 import { apEmailList, apEmailTokens } from '@/lib/apEmails'
 import { EmailChipsInput } from '@/features/directory/components/EmailChipsInput'
+
+/** The version stamp of one load in a freshly read bundle. */
+function freshLoadUpdatedAt(b: ShipmentBundle, loadId: string): string | undefined {
+  return b.loads.find((l) => l.id === loadId)?.updatedAt ?? undefined
+}
 
 function Mark({ ok }: { ok: boolean }) {
   return ok ? <CheckCircle2 size={14} aria-label="OK" className="lr-icon-ok" /> : <XCircle size={14} aria-label="Missing" className="lr-icon-bad" />
@@ -59,6 +64,13 @@ export function ReviewFixPanel({ shipmentId, readOnly, busy, onSaved, failing }:
   const customerId = bundle?.orders[0]?.customerId ?? bundle?.shipment.customerId ?? null
   const customer = useMemo(() => customers?.find((c) => c.id === customerId) ?? null, [customers, customerId])
 
+  // The board and the shipment notifier touch a shipment's version often; a rail save reads it fresh just before writing,
+  // so a stamp from when the rail opened is never a false "changed by someone else".
+  async function freshBundle(): Promise<ShipmentBundle> {
+    const next = whole(await getShipmentBundle(shipmentId))
+    if (!next) throw new Error('The shipment could not be read. Reload and try again.')
+    return next
+  }
   async function save(label: string, action: () => Promise<unknown>, success: string) {
     setSaving(label)
     setError(null)
@@ -83,12 +95,13 @@ export function ReviewFixPanel({ shipmentId, readOnly, busy, onSaved, failing }:
     <CustomerFix customer={customer} customers={customers ?? []} linked={Boolean(customerId)} off={off} flagged={failing.has('NO_CUSTOMER') || failing.has('FACTOR_CUSTOMER_MC') || failing.has('FACTOR_BILLING_METHOD')}
       onLink={(id) => void save('customer', () => setShipmentCustomer({ shipmentId, customerId: id }), 'Customer linked')}
       onSave={(patch) => customer && void save('customer', async () => {
-        const updated = await updateCustomer(customer.id, { ...patch, changeReason: 'Load Review', changeSource: 'LOAD_REVIEW' }, customer.updatedAt ?? '')
+        // A patch: only the fields edited here change; everything else on the customer keeps what is stored.
+        const updated = await patchCustomer(customer.id, { ...patch, changeReason: 'Load Review', changeSource: 'LOAD_REVIEW' }, customer.updatedAt ?? '')
         setCustomers((list) => (list ?? []).map((c) => c.id === updated.id ? updated : c))
       }, `${customer.name} saved`)} />
     <RefFix bundle={bundle} off={off} flagged={[...failing].some((c) => c === 'FACTOR_PO_MISSING' || c.startsWith('REFERENCE'))}
-      onSave={(references) => order && void save('ref', () => updateOrderDetails({ shipmentId, expectedUpdatedAt: bundle.shipment.updatedAt ?? '', order: { references } }), 'Customer ref saved')} />
-    <StopsFix bundle={bundle} off={off} onSave={(label, loadId, updatedAt, op) => void save(label, () => updateStop({ loadId, expectedUpdatedAt: updatedAt ?? undefined, ...op }), 'Stop saved')} />
+      onSave={(references) => order && void save('ref', async () => updateOrderDetails({ shipmentId, expectedUpdatedAt: (await freshBundle()).shipment.updatedAt ?? '', order: { references } }), 'Customer ref saved')} />
+    <StopsFix bundle={bundle} off={off} onSave={(label, loadId, _updatedAt, op) => void save(label, async () => updateStop({ loadId, expectedUpdatedAt: freshLoadUpdatedAt(await freshBundle(), loadId), ...op }), 'Stop saved')} />
     <DriverFix bundle={bundle} off={off} flagged={failing.has('DRIVER_MISSING') || failing.has('CARRIER_NOT_ASSIGNED')}
       onAssign={(loadId, driverId, updatedAt) => void save('driver', () => assignAsset({ loadId, driverId, expectedUpdatedAt: updatedAt ?? undefined }), 'Driver assigned')} />
     {otr.length > 0 && <TmsCard className={`lr-check ${otr.every((c) => c.ok) ? 'lr-check-ok' : 'lr-check-bad'}`} title={<span id={FIX_ANCHOR.otr} className="lr-check-title"><Mark ok={otr.every((c) => c.ok)} />Factoring (OTR)</span>}>

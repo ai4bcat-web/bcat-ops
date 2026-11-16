@@ -11,7 +11,7 @@ vi.mock('@/lib/apiClient', () => ({
   listCustomers: mocks.customers,
   updateStop: mocks.stop,
   updateOrderDetails: mocks.order,
-  updateCustomer: mocks.customer,
+  patchCustomer: mocks.customer,
   setShipmentCustomer: mocks.link,
   assignAsset: mocks.assign,
 }))
