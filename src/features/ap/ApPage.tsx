@@ -41,7 +41,7 @@ import { AP_STRIP_LABELS } from '@/features/ar/agingStripLabels'
 import { ReasonDialog } from '@/features/ar/components/ReasonDialog'
 import { agingChipFor, formatDay, lastThreeMonths, monthLabel } from '@/features/ar/arViews'
 import { NeedsReviewList } from '@/features/finance/NeedsReview'
-import { useNeedsReview } from '@/features/finance/useNeedsReview'
+import { openReviewCount, useNeedsReview } from '@/features/finance/useNeedsReview'
 import {
   AP_PAYMENT_KIND_LABEL, AP_PAYMENT_METHOD_LABEL, AP_PAYEE_KIND_LABEL, AP_TABS, BILL_STATUS_LABEL,
   EMPTY_TO_BE_PAID_FILTERS, applyToBePaidFilters, avgDaysToPayBills, awaitingInvoiceTotals, billCarrierOptions,
@@ -372,7 +372,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     payments: carrierAp.payments.length,
     report: open.aging.byParty.length,
     inbox: inboxStatus.status?.openCount ?? 0,
-    review: needsReview.rows.length,
+    review: openReviewCount(needsReview.rows, needsReview.questions, 'AP'),
   }
 
   const reviewNow = () => {
@@ -452,7 +452,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       <ApAgingCard stats={apAgingStats(billsAging(totalsBills), asOf)} due={owed.due} onDue={(due) => setOwed({ ...owed, due })} parties={owed.parties} onParty={onCarrier} />
     )
     : tab === 'paid' ? <ApPaidCard stats={apPaidStats(settled, facts, apPaymentLines)} monthLabel={monthLabel(month)} />
-    : tab === 'review' ? <ReviewReasonCard counts={reviewReasonCounts(needsReview.rows)} total={needsReview.rows.length} />
+    : tab === 'review' ? <ReviewReasonCard counts={reviewReasonCounts(needsReview.rows)} total={openReviewCount(needsReview.rows, needsReview.questions, 'AP')} questions={openReviewCount([], needsReview.questions, 'AP')} />
     : null
   const openDrawer = (bill: CarrierBillRecord) => setDrawerId(bill.id)
   const chargesFor = (bill: CarrierBillRecord) => setDialog({ kind: 'charges', loadCarrierId: bill.loadCarrierId, shipmentId: bill.shipmentId, bill })
@@ -627,7 +627,8 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         <BillingGapsPanel onFixed={() => void refreshAll()} />
         {/* Keyed by grid so each view keeps its own saved columns, filters and sort. */}
         {tab === 'review' ? (
-          <NeedsReviewList side="AP" rows={needsReview.rows} error={needsReview.error} onCleared={needsReview.refresh} />
+          <NeedsReviewList side="AP" rows={needsReview.rows} error={needsReview.error} onCleared={needsReview.refresh}
+            questions={needsReview.questions} onQuestionSaved={needsReview.replaceQuestion} />
         ) : (
           <ApDenseList<never> key={current.gridId} config={current} email={user?.email} onRefresh={chrome.onRefresh}
             pageFilters={{ count: owedFilterCount(owed), onClear: () => setOwed({ parties: [], divisions: [], due: null }) }} />

@@ -51,7 +51,7 @@ import {
   batchGenerateInvoices, getTmsSettings, graphqlErrorText, voidInvoice,
 } from '@/lib/apiClient'
 import { NeedsReviewList } from '@/features/finance/NeedsReview'
-import { useNeedsReview } from '@/features/finance/useNeedsReview'
+import { openReviewCount, useNeedsReview } from '@/features/finance/useNeedsReview'
 import {
   AR_AGING_BUCKETS, AR_AGING_BUCKET_LABEL, agingCsv,
   type AgingSummary,
@@ -424,7 +424,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     ready: { count: queue.READY.length, total: queueTotal('READY') },
     invoiced: { count: queue.INVOICED.length, total: queueTotal('INVOICED') },
     aging: { count: filteredOpen.length, total: formatCents(aging.totalCents) },
-    review: needsReview.rows.length,
+    review: openReviewCount(needsReview.rows, needsReview.questions, 'AR'),
   })
 
   const error = unbilled.error ?? invoiced.error ?? open.error
@@ -538,7 +538,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     : tab === 'invoiced' ? (
       <ArInvoicedCard stats={arInvoicedStats(queue.INVOICED, asOf)} due={owed.due} onDue={(due) => setOwed({ ...owed, due })} parties={owed.parties} onParty={onParty} />
     )
-    : tab === 'review' ? <ReviewReasonCard counts={reviewReasonCounts(needsReview.rows)} total={needsReview.rows.length} />
+    : tab === 'review' ? <ReviewReasonCard counts={reviewReasonCounts(needsReview.rows)} total={openReviewCount(needsReview.rows, needsReview.questions, 'AR')} questions={openReviewCount([], needsReview.questions, 'AR')} />
     : null
 
   return (
@@ -600,6 +600,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         {tab === 'review' ? (
           <NeedsReviewList
             side="AR" rows={needsReview.rows} error={needsReview.error} onCleared={needsReview.refresh}
+            questions={needsReview.questions} onQuestionSaved={needsReview.replaceQuestion}
             invoiceFor={(shipmentId) => liveInvoiceByShipment.get(shipmentId)}
             onOpenInvoice={(inv) => setDialog({ kind: 'edit', invoice: inv })}
           />

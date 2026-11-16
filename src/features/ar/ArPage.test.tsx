@@ -20,6 +20,7 @@ const invoiceMock = vi.hoisted(() => vi.fn())
 const authGroups = vi.hoisted(() => ({ current: [] as string[] }))
 vi.mock('@/hooks/useAuth', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/hooks/useAuth')>()),
+  useAuth: () => ({ isAdmin: false, isOwner: false, hasPageAccess: () => true }),
   useAuthUser: () => ({ userId: 'u', email: 'x@bcatcorp.com', groups: authGroups.current }),
 }))
 

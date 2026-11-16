@@ -629,7 +629,7 @@ driverApiFn.addToRolePolicy(
 driverApiFn.addToRolePolicy(
   new PolicyStatement({ actions: ['dynamodb:UpdateItem', 'dynamodb:PutItem'], resources: [driverApiLocationTable.tableArn] }),
 )
-// A driver POD that matches no load is raised in Accounting → Open questions (a Feedback row): PutItem only.
+// A driver POD that matches no load is raised as an open question in Accounting → Needs review (a Feedback row): PutItem only.
 driverApiFn.addToRolePolicy(
   new PolicyStatement({ actions: ['dynamodb:PutItem'], resources: [stageTables['Feedback'].tableArn] }),
 )

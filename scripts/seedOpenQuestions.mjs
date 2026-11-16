@@ -1,4 +1,4 @@
-// Seeds Accounting → Open questions (Feedback rows with page 'accounting-open-question') from a JSON file.
+// Seeds the open questions shown in Accounting → Needs review (Feedback rows with page 'accounting-open-question') from a JSON file.
 //
 // Each item in the file: { key, area: 'AP'|'AR'|'DOCS'|'LOAD'|'OTHER', question, refs: [{ pro, party?, amount?, note?,
 // bill?: <carrier name fragment> | true, invoice?: true }], aljex?, bcat?, context?, source? }.

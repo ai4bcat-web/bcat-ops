@@ -199,7 +199,7 @@ const EQUIPMENT_TABLE = process.env.EQUIPMENT_TABLE_NAME ?? ''
 const TRUCK_CONFIG_TABLE = process.env.TRUCK_CONFIG_TABLE_NAME ?? ''
 const TRUCK_LOCATION_TABLE = process.env.TRUCK_LOCATION_TABLE_NAME ?? ''
 const MAINTENANCE_TASK_TABLE = process.env.MAINTENANCE_TASK_TABLE_NAME ?? ''
-// Accounting → Open questions rows (Feedback): an unmatched driver POD is raised there. PutItem only.
+// Open-question rows (Feedback), shown in Accounting → Needs review: an unmatched driver POD is raised there. PutItem only.
 const FEEDBACK_TABLE = process.env.FEEDBACK_TABLE_NAME ?? ''
 const MOTIVE_API_KEY = process.env.MOTIVE_API_KEY ?? ''
 const MOTIVE_BASE = 'https://api.gomotive.com/v1'
@@ -1680,7 +1680,7 @@ async function resolveLoadIdByPro(referenceNumber: string | null, driverId: stri
 
 /**
  * A POD that no load could be found for is kept (it is the driver's paperwork) and raised in
- * Accounting → Open questions, so a person attaches it instead of it sitting unseen.
+ * Accounting → Needs review (as an open question), so a person attaches it instead of it sitting unseen.
  * Chad's POD for 20031 waited a day with nothing anywhere saying it needed placing.
  * Idempotent by id; best-effort, like everything after the upload itself.
  */

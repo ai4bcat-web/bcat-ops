@@ -77,7 +77,6 @@ import { InvoiceDetail } from '@/features/ar/InvoiceDetail'
 import { BillDetail } from '@/features/ap/BillDetail'
 import { HoursPage } from '@/features/hours/HoursPage'
 import { VendorApPage } from '@/features/vendor-ap/VendorApPage'
-import { OpenQuestionsPage } from '@/features/openQuestions/OpenQuestionsPage'
 import { PaymentsReceivedPage } from '@/features/payments/PaymentsReceivedPage'
 import { DispatchPage } from '@/features/dispatch/DispatchPage'
 import { PodsPage } from '@/features/pods/PodsPage'
@@ -199,7 +198,8 @@ export default function App() {
                   <Route path="payments-received" element={<RequirePage page={['invoicing']}><PaymentsReceivedPage /></RequirePage>} />
                   <Route path="invoicing/payments" element={<Navigate to="/tms/payments-received" replace />} />
                   <Route path="vendors" element={<RequirePage page={['vendorAp']}><VendorApPage /></RequirePage>} />
-                  <Route path="open-questions" element={<RequireAdmin><OpenQuestionsPage /></RequireAdmin>} />
+                  {/* Open questions moved into Accounts Receivable → Needs review (Ryne 2026-11-16). */}
+                  <Route path="open-questions" element={<Navigate to="/tms/invoicing?tab=review" replace />} />
                   {/* Hidden, not removed: no nav item, but four live deep links land here. */}
                   <Route path="workflows" element={<RequirePage page="tms"><DormantPage page="workflows"><WorkflowsPage /></DormantPage></RequirePage>} />
                   <Route path="workflows/runs/:id" element={<RequirePage page="tms"><DormantPage page="workflows"><RunTracePage /></DormantPage></RequirePage>} />

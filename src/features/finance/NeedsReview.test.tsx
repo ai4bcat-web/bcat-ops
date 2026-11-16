@@ -11,9 +11,20 @@ vi.mock('@/lib/apiClient', () => ({
   listFinanceReviewShipments: vi.fn(async () => []),
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+const updateOpenQuestionRow = vi.fn()
+vi.mock('@/lib/openQuestionsClient', () => ({
+  listOpenQuestionRows: vi.fn(async () => []),
+  updateOpenQuestionRow: (...a: unknown[]) => updateOpenQuestionRow(...a),
+}))
+vi.mock('@/hooks/useAuth', () => ({
+  useAuthUser: () => ({ email: 'ryne@bcatcorp.com' }),
+  useAuth: () => ({ isAdmin: true, isOwner: true }),
+}))
 
 import { NeedsReviewList } from './NeedsReview'
-import { sortReview } from './useNeedsReview'
+import { reviewItems } from './needsReviewItems'
+import { openReviewCount, sortReview } from './useNeedsReview'
+import type { OpenQuestion } from '@/features/openQuestions/openQuestions'
 
 const rows = [
   { id: 'shp-2', number: '14433', customerName: 'BATORY FOODS', status: 'DELIVERED', financeReviewAt: '2026-11-13T20:00:00Z', financeReviewReason: 'AR sheet carrier CES DEVELOPMENT INC owed; no carrier on shipment', financeReviewApNote: 'AR sheet: $700.00 owed to CES DEVELOPMENT INC' },
@@ -57,7 +68,7 @@ describe('NeedsReviewList', () => {
     render(<MemoryRouter><NeedsReviewList side="AR" rows={rows} error={null} onCleared={() => {}} /></MemoryRouter>)
     fireEvent.change(screen.getByTestId('needs-review-search-ar'), { target: { value: 'spot' } })
     expect(screen.queryByText('BATORY FOODS')).toBeNull()
-    expect(screen.getByText('1 of 2 rows')).toBeTruthy()
+    expect(screen.getByText('1 row')).toBeTruthy()
     fireEvent.change(screen.getByTestId('needs-review-search-ar'), { target: { value: '14433' } })
     expect(screen.getByText('BATORY FOODS')).toBeTruthy()
   })
@@ -79,5 +90,46 @@ describe('NeedsReviewList', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open invoice for PRO 14433' }))
     expect(onOpenInvoice).toHaveBeenCalledWith(invoice)
     expect(screen.getByRole('link', { name: '13823' })).toBeTruthy()
+  })
+
+  // Ryne 2026-11-16: the open questions moved into Needs review.
+  const q = (id: string, area: OpenQuestion['details']['area'], status: OpenQuestion['status'], createdAt: string, question = `Question ${id}`): OpenQuestion => ({
+    id, question, status, notes: '', createdAt, updatedAt: createdAt,
+    details: { area, refs: [{ pro: '14521', party: 'ARCTIC HORIZON', shipmentId: 'shp-9' }], aljex: 'Aljex open $100', bcat: 'BCAT PARTIAL' },
+  })
+  const questions = [
+    q('oq-ar', 'AR', 'OPEN', '2026-11-15T10:00:00Z'),
+    q('oq-ap', 'AP', 'OPEN', '2026-11-15T09:00:00Z'),
+    q('oq-docs', 'DOCS', 'OPEN', '2026-11-15T08:00:00Z'),
+    q('oq-done', 'AR', 'RESOLVED', '2026-11-14T08:00:00Z'),
+  ]
+
+  it('puts each side’s questions with the shipment flags; document questions on both sides', () => {
+    const ar = reviewItems(rows, questions, 'AR', 'OPEN', '').map((it) => it.key)
+    const ap = reviewItems(rows, questions, 'AP', 'OPEN', '').map((it) => it.key)
+    expect(ar).toEqual(['flag:shp-1', 'flag:shp-2', 'q:oq-docs', 'q:oq-ar'])
+    expect(ap).toEqual(['flag:shp-1', 'flag:shp-2', 'q:oq-docs', 'q:oq-ap'])
+    expect(reviewItems(rows, questions, 'AR', 'RESOLVED', '').map((it) => it.key)).toEqual(['q:oq-done'])
+    expect(reviewItems(rows, questions, 'AR', 'ALL', '').at(-1)?.key).toBe('q:oq-done')
+  })
+
+  it('counts open flags plus that side’s open questions for the tab badge', () => {
+    expect(openReviewCount(rows, questions, 'AR')).toBe(4)
+    expect(openReviewCount(rows, questions, 'AP')).toBe(4)
+    expect(openReviewCount([], questions, 'AR')).toBe(2)
+  })
+
+  it('opens a question to answer and resolve it', async () => {
+    const one = q('oq-ar', 'AR', 'OPEN', '2026-11-15T10:00:00Z', 'Is the $100 owed to N VISION?')
+    updateOpenQuestionRow.mockResolvedValue({ id: 'oq-ar', page: 'accounting-open-question', summary: one.question, details: JSON.stringify(one.details), status: 'DONE', adminNotes: '2026-11-16 · Ryne: yes', createdAt: one.createdAt, updatedAt: one.createdAt })
+    const onQuestionSaved = vi.fn()
+    render(<MemoryRouter><NeedsReviewList side="AR" rows={[]} error={null} onCleared={() => {}} questions={[one]} onQuestionSaved={onQuestionSaved} /></MemoryRouter>)
+    expect(screen.getByText('Is the $100 owed to N VISION?')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Answer' }))
+    fireEvent.change(await screen.findByPlaceholderText('What should happen here?'), { target: { value: 'yes' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save and resolve' }))
+    await waitFor(() => expect(onQuestionSaved).toHaveBeenCalled())
+    expect(updateOpenQuestionRow).toHaveBeenCalledWith('oq-ar', expect.objectContaining({ status: 'DONE' }))
+    expect(onQuestionSaved.mock.calls[0][0].status).toBe('RESOLVED')
   })
 })
