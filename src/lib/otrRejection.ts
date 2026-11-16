@@ -89,3 +89,30 @@ export function otrRejectionReason(item: Parameters<typeof otrRejection>[0]): st
 export function inOtrRejectedTab(item: Parameters<typeof otrRejection>[0]): boolean {
   return isOtrRejected(item) || item.status === 'MANUAL_INVOICE'
 }
+
+/**
+ * Everything we know about why OTR turned a row down, in plain English (Ryne 2026-11-15: "it should say why").
+ * OTR's API gives a status code and, on a refusal, an error message; it gives no free-text reason for Dead,
+ * so the lines say that and point at OTR's own invoice for the rest. Null when OTR did not reject the row.
+ */
+export function otrRejectionDetails(
+  item: Parameters<typeof otrRejection>[0] & Pick<FactoringItem, 'otrInvoiceId' | 'otrStatusSyncedAt'>,
+): { headline: string; lines: string[] } | null {
+  const reason = otrRejectionReason(item)
+  if (!reason) return null
+  const lines: string[] = []
+  const status = otrStatusMeta(item.otrStatus)
+  const { noBuy } = noBuyInfo(item)
+  if (noBuy) {
+    lines.push(item.brokerCheckResult === 'NO_BUY'
+      ? `OTR's broker check said No buy${item.brokerMcChecked?.trim() ? ` for MC ${item.brokerMcChecked.trim()}` : ''}: OTR will not buy invoices on this customer.`
+      : 'Marked No buy from OTR’s refusal.')
+  }
+  if (status?.code === 4) lines.push('OTR status Dead: OTR will not fund this invoice and will not work it further. OTR’s system gives no written reason for Dead; the OTR portal or your OTR rep has it.')
+  else if (status) lines.push(`OTR status: ${status.label}.`)
+  const error = item.otrError?.trim()
+  if (error && !OWN_FAILURE.test(error)) lines.push(`OTR’s message: ${error}`)
+  if (item.otrInvoiceId) lines.push(`OTR invoice #${item.otrInvoiceId}${item.otrStatusSyncedAt ? ` · last checked ${item.otrStatusSyncedAt.slice(0, 10)}` : ''}.`)
+  const headline = noBuy ? `OTR: No buy — ${reason}` : status?.code === 4 ? 'OTR: Dead — this invoice will not be funded' : `OTR: ${reason}`
+  return { headline, lines }
+}
