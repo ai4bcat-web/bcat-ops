@@ -28,6 +28,7 @@ import { CARD_COMPONENTS, MORE_TAB_COMPONENTS, RAIL_RATE_HISTORY, RAIL_ROLES } f
 import { notDeliveredBlock } from './loadReviewDelivered'
 import { ActionBar } from './ActionBar'
 import { DuplicateDialog } from './DuplicateDialog'
+import { EditCustomerBillingDialog } from './EditCustomerBillingDialog'
 import { FormHeader } from './FormHeader'
 import { FormSection } from './FormSection'
 import { sectionState, type SectionState } from './sectionSaved'
@@ -134,7 +135,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     onNotice: (msg: string) => { toast.message(msg) },
   }), [directory, locations, loadLocations, settings, email, ownFleetRoster])
 
-  // Scroll to and focus the control whose `data-testid` is `fieldKey`, opening its More tab first.
+  // Scroll to and focus the control whose `data-testid` is `fieldKey`, opening its More tab first; the field flashes for 1.5 s.
   const focusField = useCallback((fieldKey: string) => {
     const find = () => [...(rootRef.current?.querySelectorAll<HTMLElement>('[data-testid]') ?? [])].find((n) => n.dataset.testid === fieldKey)
     const tab = find()?.closest<HTMLElement>('[data-more-tab]')?.dataset.moreTab
@@ -146,8 +147,24 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
       const target = el && !el.matches('input, select, textarea, button, a[href], [tabindex]') ? (el.querySelector<HTMLElement>('input, select, textarea, button') ?? el) : el
       target?.scrollIntoView?.({ block: 'center' })
       target?.focus()
+      const box = target?.closest<HTMLElement>('.tms-field-dense, .tms-field') ?? target
+      if (box) {
+        box.classList.remove('tms-fix-flash')
+        void box.offsetWidth
+        box.classList.add('tms-fix-flash')
+        setTimeout(() => box.classList.remove('tms-fix-flash'), 1600)
+      }
     }, 0)
   }, [])
+  const [editCustomerOpen, setEditCustomerOpen] = useState(false)
+  /** A What's missing item was clicked: its field (the first of its fallbacks that is on screen), or the customer dialog. */
+  const fixMissing = useCallback((issue: FormIssue) => {
+    if (issue.action === 'editCustomer') { setEditCustomerOpen(true); return }
+    const keys = [issue.fieldKey, ...(issue.fallbackKeys ?? [])].filter(Boolean)
+    const onScreen = (k: string) => [...(rootRef.current?.querySelectorAll<HTMLElement>('[data-testid]') ?? [])].some((n) => n.dataset.testid === k)
+    const key = keys.find(onScreen) ?? keys[0]
+    if (key) focusField(key)
+  }, [focusField])
 
   /** Tie the intake row this shipment was pre-filled from to it (moves the row out of Intake). Best-effort: the shipment exists either way; the server call is idempotent. */
   const linkIntake = (b: ShipmentBundle) => {
@@ -513,7 +530,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
               })}
             </div>
             <SummaryRail
-              common={common} summary={summary} rows={rows} attempted={attempted} missing={missingOnLoad}
+              common={common} summary={summary} rows={rows} attempted={attempted} missing={missingOnLoad} onFix={fixMissing}
               Roles={RAIL_ROLES} RateHistory={RAIL_RATE_HISTORY} intakeId={intakeId} intake={intake.row}
             />
           </div>
@@ -527,6 +544,12 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
         submitReviewBlocked={submitReviewBlocked}
         onDuplicate={mode === 'edit' && bundle ? () => setDuplicating(true) : undefined}
       />
+      {editCustomerOpen && form.customer ? (
+        <EditCustomerBillingDialog
+          customer={form.customer} onClose={() => setEditCustomerOpen(false)}
+          onSaved={() => { void directory.refresh(); void refreshBundle() }}
+        />
+      ) : null}
       {duplicating && bundle ? (
         <DuplicateDialog
           shipmentId={bundle.shipment.id} number={bundle.shipment.number ?? bundle.shipment.id} onClose={() => setDuplicating(false)}

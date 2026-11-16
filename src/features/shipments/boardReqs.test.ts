@@ -96,9 +96,25 @@ describe('the chip count is the rail list (Ryne 2026-11-16: "14904 says need 1 b
     expect(reqsAsIssues(reqs, [], [], 'cus-1')[0]).toMatchObject({ section: 'documents', fieldKey: 'card-documents-slot-POD' })
   })
 
-  it('a customer setting links to the customer profile', () => {
+  it('a customer setting opens the customer editor on the shipment', () => {
     const reqs = boardReqsOf(row({ customerBillingGaps: ['CUSTOMER_AP_EMAIL'] }), SRC, NOW)
-    expect(reqsAsIssues(reqs, [], [], 'cus-1')[0]).toMatchObject({ href: '/tms/customers/cus-1', fieldKey: '' })
+    expect(reqsAsIssues(reqs, [], [], 'cus-1')[0]).toMatchObject({ action: 'editCustomer', fieldKey: '' })
+  })
+
+  it('a customer setting with no customer linked points at the Link customer control', () => {
+    const reqs = boardReqsOf(row({ customerBillingGaps: ['CUSTOMER_AP_EMAIL'] }), SRC, NOW)
+    expect(reqsAsIssues(reqs, [], [], null)[0]).toMatchObject({ fieldKey: 'f-customer-change' })
+  })
+
+  it('every item in the list has a place to click through to', () => {
+    const reqs = boardReqsOf(row({
+      salesRepId: null, revDivision: null, revenueCents: 0, customerFactors: true,
+      factorGaps: ['PICKUP_ZIP', 'DELIVERY_STATE', 'CUSTOMER_MC', 'BILLING_METHOD'], customerBillingGaps: ['CUSTOMER_AP_EMAIL'],
+      docsPresent: [], docsMissing: ['POD'],
+    }), SRC, NOW)
+    const rail = reqsAsIssues(reqs, [], [], 'cus-1')
+    expect(rail.length).toBeGreaterThan(5)
+    for (const i of rail) expect(Boolean(i.fieldKey) || i.action === 'editCustomer').toBe(true)
   })
 })
 

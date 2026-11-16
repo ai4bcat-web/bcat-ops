@@ -35,11 +35,13 @@ export interface SummaryRailProps {
   intake?: IntakeLoadRecord | null
   /** What the board's MISSING chip counts (missingOnLoad): listed at the top of the rail, each a link to its field. */
   missing?: readonly FormIssue[]
+  /** A What's missing item was clicked: the page scrolls to and highlights its field, or opens the customer dialog. */
+  onFix?: (issue: FormIssue) => void
 }
 
 const TONE_WORD = { green: 'On target', amber: 'Near target', red: 'Below target' } as const
 
-function SummaryRailImpl({ common, summary, rows, attempted, Roles, RateHistory, intakeId, intake, missing = [] }: SummaryRailProps) {
+function SummaryRailImpl({ common, summary, rows, attempted, Roles, RateHistory, intakeId, intake, missing = [], onFix }: SummaryRailProps) {
   const [sheetOpen, setSheetOpen] = useState(false)
   const { values, update, ctx, form } = common
   const { money } = summary
@@ -77,9 +79,13 @@ function SummaryRailImpl({ common, summary, rows, attempted, Roles, RateHistory,
                       <span>{i.label}</span>
                     </Link>
                   ) : (
-                    <button type="button" className="tms-rail-req" data-testid={`rail-missing-${i.id}`} data-done="false" data-missing="true" title={i.message} onClick={() => { if (i.fieldKey) form.focusField(i.fieldKey) }}>
+                    <button
+                      type="button" className="tms-rail-req tms-rail-req-fix" data-testid={`rail-missing-${i.id}`} data-done="false" data-missing="true"
+                      title={`${i.message} — click to fix`} onClick={() => { if (onFix) onFix(i); else if (i.fieldKey) form.focusField(i.fieldKey) }}
+                    >
                       <AlertCircle size={12} aria-hidden="true" />
                       <span>{i.label}</span>
+                      <span className="tms-rail-req-go" aria-hidden="true">Fix →</span>
                     </button>
                   )}
                   {i.hint ? <span className="tms-rail-req-hint" data-testid={`rail-missing-hint-${i.id}`}>{i.hint}</span> : null}

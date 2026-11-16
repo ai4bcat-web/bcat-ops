@@ -20,6 +20,7 @@ import { hasLeftOperations } from '@/lib/shipmentLists'
 import { pastDeliveryOf, registerReadyForReview } from './boardChips'
 import { pushRefusals, requirementsForRow, reviewFactsOfRow } from './batchReview'
 import type { FormIssue, SectionKey } from './form/sectionProps'
+import { missingTargetOf } from './form/missingTargets'
 import { MISSING_DOC_LABEL, docCellOf, openFactorGaps, openMissingDocs, registerRowText, type ShipmentRow } from './shipmentViews'
 
 export interface BoardReq {
@@ -149,7 +150,12 @@ export function boardReqsText(reqs: readonly BoardReq[]): string {
 /** Which card an item the form cannot point at belongs to, so the card's badge counts it. */
 function sectionOfReq(key: string): SectionKey {
   if (key === 'salesRep' || key === 'revDivision') return 'roles'
-  if (key.startsWith('customer:')) return 'customer'
+  if (key.startsWith('doc:')) return 'documents'
+  if (key === 'po' || key.startsWith('customer:')) return 'customer'
+  if (key.startsWith('factor:')) {
+    const code = key.slice(7)
+    return code.startsWith('DELIVERY') ? 'consignee' : code.startsWith('PICKUP') ? 'pickup' : 'customer'
+  }
   return 'rates'
 }
 
@@ -171,6 +177,8 @@ export function reqsAsIssues(
     return [...formSees, ...allIssues].find((i) => i.label.trim().toLowerCase() === want)
   }
   return reqs.map((req): FormIssue => {
+    // What lives on the customer is fixed in the customer dialog, not on a field of the load.
+    if (req.key.startsWith('customer:') || req.key === 'factor:CUSTOMER_MC' || req.key === 'factor:BILLING_METHOD') return fallbackIssue(req, customerId)
     const match = req.key.startsWith('doc:')
       ? formSees.find((i) => i.id === `documents:${req.key.slice(4)}`)
       : req.key === 'po'
@@ -184,25 +192,13 @@ export function reqsAsIssues(
 /** An item the form has no issue for: still listed, pointing at the closest place to fix it. */
 function fallbackIssue(req: BoardReq, customerId?: string | null): FormIssue {
   const base = { id: `req:${req.key}`, label: req.label, message: req.label, severity: 'warn' as const }
-  if (req.key.startsWith('doc:')) {
-    const type = req.key.slice(4)
-    return { ...base, section: 'documents', fieldKey: `card-documents-slot-${type}`, hint: 'Upload it in Documents below.' }
-  }
-  if (req.key === 'po') return { ...base, section: 'customer', fieldKey: 'f-customer-refNo', hint: 'Enter the customer ref (PO) at the top.' }
-  if (req.key.startsWith('customer:')) {
+  const target = missingTargetOf(req.key, Boolean(customerId))
+  if (target) {
     return {
-      ...base, section: 'customer', fieldKey: '',
-      href: customerId ? `/tms/customers/${customerId}` : undefined,
-      hint: customerId ? 'Fix it on the customer profile.' : 'Link a customer first.',
+      ...base, section: sectionOfReq(req.key), fieldKey: target.fieldKey, hint: target.hint,
+      ...(target.fallbackKeys ? { fallbackKeys: target.fallbackKeys } : {}),
+      ...(target.action ? { action: target.action } : {}),
     }
   }
-  if (req.key.startsWith('factor:')) {
-    const code = req.key.slice(7)
-    const section: SectionKey = code.startsWith('DELIVERY') ? 'consignee' : code.startsWith('PICKUP') ? 'pickup' : 'customer'
-    return { ...base, section, fieldKey: '', hint: 'OTR needs it to factor the load.' }
-  }
-  const hint = req.key === 'salesRep' || req.key === 'revDivision' ? 'Set it under Roles.'
-    : req.key === 'customerRate' || req.key === 'expense' || req.key === 'profit' ? 'Enter it under Rates.'
-      : undefined
-  return { ...base, section: sectionOfReq(req.key), fieldKey: '', hint }
+  return { ...base, section: sectionOfReq(req.key), fieldKey: '', hint: undefined }
 }
