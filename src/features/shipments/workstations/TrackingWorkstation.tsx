@@ -287,7 +287,6 @@ export function TrackingWorkstation() {
           favorites={favorites}
           onToggleFavorite={toggleFavorite}
           onOpenShipment={openShipment}
-          onOpenShipmentPage={(id) => navigate(`/tms/shipments/${id}`)}
           onCreateShipment={() => navigate('/tms/shipments/new')}
           focus={focus}
           onFocus={selectFocus}

@@ -233,17 +233,16 @@ describe('row actions', () => {
     expect(screen.getByTestId('tracking-drawer')).toHaveTextContent('S-ANN')
   })
 
-  it('the shipment number opens the shipment page; the pin beside it and a click on the row open the tracking info', async () => {
+  it('the PRO is plain text: only the row opens the tracking info (Enter on the row too)', async () => {
     renderPage('/tms/tracking?assignee=all')
     await waitFor(() => expect(ids().length).toBeGreaterThan(0))
-    fireEvent.click(within(trackingRow('S-ANN')).getByTestId('tracking-open-tracking'))
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/tms/tracking?assignee=all&shipment=S-ANN'))
-    expect(screen.getByTestId('tracking-drawer')).toHaveTextContent('S-ANN')
-    cleanup()
-    renderPage('/tms/tracking?assignee=all')
-    await waitFor(() => expect(ids().length).toBeGreaterThan(0))
-    fireEvent.click(within(trackingRow('S-LOOSE')).getByTestId('tracking-open-shipment'))
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/tms\/shipments\/S-LOOSE$/))
+    const pro = within(trackingRow('S-LOOSE')).getByTestId('tracking-pro')
+    expect(pro.tagName).toBe('SPAN')
+    expect(within(trackingRow('S-LOOSE')).queryByTestId('tracking-open-shipment')).toBeNull()
+    expect(within(trackingRow('S-LOOSE')).queryByTestId('tracking-open-tracking')).toBeNull()
+    fireEvent.keyDown(trackingRow('S-LOOSE'), { key: 'Enter' })
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/tms/tracking?assignee=all&shipment=S-LOOSE'))
+    expect(screen.getByTestId('location')).not.toHaveTextContent('/tms/shipments/')
   })
 
   it('reassigns the selected rows of a section in one call', async () => {

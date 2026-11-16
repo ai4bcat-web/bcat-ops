@@ -372,6 +372,24 @@
 .tms-portal.tms-tracking-drawer .tms-drawer-body { padding: 8px 12px; }
 .tms-portal .tms-tracking-drawer-body > .tms-tracking-view { flex: 1 1 auto; }
 
+/* The tracking view's POD box: On file / Driver sent · review / NEED, with an upload (Ryne 2026-11-16). */
+.tms-shell .tms-tracking-pod,
+.tms-portal .tms-tracking-pod {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; flex: 0 0 auto;
+  padding: 6px 10px; font-size: 12px;
+  background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius);
+}
+.tms-shell .tms-tracking-pod[data-presence="MISSING"],
+.tms-portal .tms-tracking-pod[data-presence="MISSING"] { border-color: var(--tms-badge-red); }
+.tms-shell .tms-tracking-pod-head,
+.tms-portal .tms-tracking-pod-head { display: flex; align-items: center; gap: 6px; }
+.tms-shell .tms-tracking-pod-need,
+.tms-portal .tms-tracking-pod-need { color: var(--tms-badge-red); font-weight: 600; }
+.tms-shell .tms-tracking-pod-list,
+.tms-portal .tms-tracking-pod-list { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; padding: 0; list-style: none; flex-basis: 100%; }
+.tms-shell .tms-tracking-pod p,
+.tms-portal .tms-tracking-pod p { margin: 0; }
+
 /* Summary strip card: the one-line facts, then (optionally) the inline tracking-prefs row. */
 .tms-shell .tms-strip,
 .tms-portal .tms-strip {

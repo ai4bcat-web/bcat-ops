@@ -28,6 +28,7 @@ import { RecentCheckCalls } from './RecentCheckCalls'
 import { TrackingConversation } from './TrackingConversation'
 import { TrackingMapPanel } from './map/TrackingMapPanel'
 import { TrackingPrefsRow } from './TrackingPrefsRow'
+import { TrackingPodBox } from './TrackingPodBox'
 import { TrackingSummaryStrip } from './TrackingSummaryStrip'
 import { summaryOf } from './trackingSummary'
 
@@ -150,6 +151,8 @@ export function ShipmentTrackingView({ bundle, customer, catalog = [], actions, 
         onSetNextCheck={(iso) => { void actions.tracking.setNextCheckCall(iso).catch(() => { /* reported */ }) }}
         prefs={<TrackingPrefsRow key={JSON.stringify(shipment.trackingPrefs ?? null)} shipment={shipment} customer={customer} hasCarrier={Boolean(loadCarrier)} onSaved={() => actions.reload()} />}
       />
+
+      <TrackingPodBox bundle={bundle} onUploaded={() => { void actions.reload() }} />
 
       <TrackingMapPanel
         bundle={bundle} tracking={tracking} summary={summary} links={tracking.links}
