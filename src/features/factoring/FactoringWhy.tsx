@@ -24,8 +24,9 @@ export function FactoringWhy({ proNumber, reason, invoice }: { proNumber: string
       <span className="flex flex-col gap-1 items-start" style={{ minWidth: 0 }}>
         <button
           type="button"
-          className="text-xs text-left whitespace-normal"
-          style={{ color, fontWeight: reason.tone === 'red' ? 600 : undefined, background: 'none', border: 0, padding: 0, cursor: 'pointer', overflowWrap: 'anywhere' }}
+          className="text-xs text-left"
+          style={{ color, fontWeight: reason.tone === 'red' ? 600 : undefined, background: 'none', border: 0, padding: 0, cursor: 'pointer', display: 'block', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          title={reason.short}
           aria-label={`Why PRO ${proNumber} is here`}
           data-testid={`factoring-why-${proNumber}`}
           onClick={() => setOpen(true)}
