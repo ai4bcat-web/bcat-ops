@@ -570,7 +570,8 @@ async function findPod(loadId: string, proNumber = '', shipmentId = ''): Promise
  */
 async function findRatecon(load: Row, proNumber = ''): Promise<Row | null> {
   const onLoad = trim(load.rateConfirmKey)
-  if (onLoad) {
+  // A confirmation BCAT generated for a carrier is never the customer's: only an outside one goes to OTR.
+  if (onLoad && !onLoad.startsWith('rate-confirms/carrier/')) {
     return {
       id: `load:${load.id}`,
       loadId: load.id,

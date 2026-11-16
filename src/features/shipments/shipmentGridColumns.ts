@@ -7,7 +7,7 @@ import { optionsOfRow, type DenseColumn, type DenseOption } from '@/features/tms
 import { customerDisplayName } from '@/lib/customerResolution'
 import { LADDER_FILTER_OPTIONS, assignmentChipText } from './carrierLadder'
 import { boardStatusOf } from '@/lib/shipmentViewDefs'
-import { BOARD_COLUMNS, displayStatusOf, carrierSortKey, factorInfoText, invoiceStatusOfRow, openFactorGaps, rowShipmentType, type ShipmentRow } from './shipmentViews'
+import { BOARD_COLUMNS, displayStatusOf, carrierSortKey, factorInfoText, invoiceStatusOfRow, missingCountOf, rowShipmentType, type ShipmentRow } from './shipmentViews'
 import type { IntroducedColumn } from './teamColumnLayout'
 import { LOAD_INVOICE_STATUS_LABEL, LOAD_INVOICE_STATUS_ORDER } from '@/lib/loadInvoiceStatus'
 import { SHIPMENT_TYPES, shipmentTypeLabel } from '@/lib/shipmentTypes'
@@ -128,8 +128,8 @@ export const SHIPMENT_GRID_COLUMNS: DenseColumn<ShipmentRow>[] = BOARD_COLUMNS.m
       filter: 'multi',
       text: factorInfoText,
       fixedOptions: FACTOR_INFO_OPTIONS,
-      optionsOf: (row) => [openFactorGaps(row).length > 0 ? FACTOR_INFO_OPTIONS[0] : FACTOR_INFO_OPTIONS[1]],
-      sortValue: (row) => openFactorGaps(row).length,
+      optionsOf: (row) => [missingCountOf(row) > 0 ? FACTOR_INFO_OPTIONS[0] : FACTOR_INFO_OPTIONS[1]],
+      sortValue: (row) => missingCountOf(row),
     }
   }
   if (col.key === 'carrierAssignment') {

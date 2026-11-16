@@ -23,7 +23,7 @@ import {
   queryShipmentDocuments,
   type Row,
 } from './shipmentStore'
-import { gateLoadIds, requiredDocTypesFor } from '../../../src/lib/shipmentDocuments'
+import { gateLoadIds, isOutsideRateConKey, isOwnFleetLoad, requiredDocTypesFor } from '../../../src/lib/shipmentDocuments'
 import { customerDocsNotRequired } from '../../../src/lib/reviewRequirements'
 import { loadExtraDocTypes } from '../../../src/lib/loadRequiredDocs'
 import type {
@@ -216,7 +216,16 @@ export async function loadReleaseGateInput(
 
   const { codes, labels } = requiredReferences(customer, settings)
 
+  // Own fleet: the customer's tender on the load is the outside rate confirmation (Ryne 2026-11-16).
+  const ownFleet = isOwnFleetLoad(
+    shipment as { revDivision?: string | null },
+    legRows as unknown as { status?: string | null; kind?: string | null }[],
+  )
+  const ownFleetTenderOnLoad = ownFleet && orderLoads.some((load) => isOutsideRateConKey(load.rateConfirmKey as string | null | undefined))
+
   return {
+    ownFleet,
+    ownFleetTenderOnLoad,
     shipment: {
       status: shipment.status == null ? null : String(shipment.status),
       voidedAt: shipment.voidedAt == null ? null : String(shipment.voidedAt),
