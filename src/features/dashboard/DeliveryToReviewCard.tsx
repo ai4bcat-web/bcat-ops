@@ -49,11 +49,11 @@ export function DeliveryToReviewCard() {
   const shown = weeks.filter((w) => w.avgDays != null)
   const maxDays = Math.max(1, ...shown.map((w) => w.avgDays ?? 0))
   const bars = shown.length < 2 ? null : (
-    <div data-testid="review-lag-weeks" style={{ marginTop: 12 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)', marginBottom: 6 }}>
+    <div data-testid="review-lag-weeks" style={{ marginTop: 'auto' }}>
+      <div style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)', marginBottom: 6 }}>
         Weekly average
       </div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 40 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 36 }}>
         {shown.map((w, i) => {
           const last = i === shown.length - 1
           return (

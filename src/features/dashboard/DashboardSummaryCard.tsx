@@ -27,25 +27,12 @@ export interface DashboardSummaryGroup {
   rows: DashboardSummaryRow[]
 }
 
-function cents(n: number): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n / 100)
-}
+import { DashCard, DashRow, Headline } from './DashCard'
+import { dashCents } from './dashFormat'
 
 function Row({ row }: { row: DashboardSummaryRow }) {
-  const inner = (
-    <>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--tms-text-2)', minWidth: 0 }}>
-        <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: row.color, flexShrink: 0 }} />
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.label}</span>
-        {row.count != null && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--tms-muted)' }}>{row.count}</span>}
-      </span>
-      <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
-        {row.valueText ?? (row.cents == null ? '—' : cents(row.cents))}
-      </span>
-    </>
-  )
-  const style: React.CSSProperties = { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }
-  if (!row.onOpen) return <div style={style} title={row.title} data-testid={`summary-row-${row.key}`}>{inner}</div>
+  const inner = <DashRow color={row.color} label={row.label} count={row.count} value={row.valueText ?? (row.cents == null ? '—' : dashCents(row.cents))} />
+  if (!row.onOpen) return <div title={row.title} data-testid={`summary-row-${row.key}`}>{inner}</div>
   const open = row.onOpen
   return (
     <button
@@ -53,14 +40,16 @@ function Row({ row }: { row: DashboardSummaryRow }) {
       title={row.title}
       data-testid={`summary-row-${row.key}`}
       onClick={(e) => { e.stopPropagation(); open() }}
-      style={{ ...style, width: '100%', padding: 0, border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}
+      style={{ display: 'block', width: '100%', padding: 0, border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}
     >
       {inner}
     </button>
   )
 }
 
-export function DashboardSummaryCard({ title, icon, headline, headlineText, sublabel, rows, groups = [], groupsBeside = false, extra, accent = 'var(--tms-primary)', note, onOpen, testId }: {
+const GROUP_LABEL = { fontSize: 11.5, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)', marginBottom: 7 } as const
+
+export function DashboardSummaryCard({ title, icon, headline, headlineText, sublabel, rows, groups = [], groupsBeside = false, extra, note, onOpen, testId }: {
   title: string
   icon: ReactNode
   /** Cents; null while loading. */
@@ -74,68 +63,35 @@ export function DashboardSummaryCard({ title, icon, headline, headlineText, subl
   groupsBeside?: boolean
   /** Anything else under the rows (e.g. a small chart). */
   extra?: ReactNode
+  /** Kept for callers; the card no longer tints itself. */
   accent?: string
   note?: ReactNode
   onOpen: () => void
   testId?: string
 }) {
   return (
-    <div
-      onClick={onOpen}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) onOpen() }}
-      className="tms-card"
-      data-testid={testId}
-      style={{ position: 'relative', cursor: 'pointer', minWidth: 0, height: '100%', boxSizing: 'border-box' }}
-    >
-      <div style={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%',
-        background: accent, filter: 'blur(60px)', opacity: 0.18, pointerEvents: 'none' }} />
-      <div style={{ padding: '16px 18px', position: 'relative' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>
-            {title}
-          </div>
-          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tms-text-2)' }}>
-            {icon}
-          </div>
+    <DashCard label={title} icon={icon} onOpen={onOpen} testId={testId}>
+      <Headline value={headlineText ?? (headline == null ? '—' : dashCents(headline))} caption={sublabel} />
+      <div
+        data-testid={testId ? `${testId}-body` : undefined}
+        style={groupsBeside && groups.length > 0
+          ? { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', columnGap: 32, rowGap: 14, alignItems: 'start' }
+          : { display: 'flex', flexDirection: 'column', gap: 14 }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7, minWidth: 0 }}>
+          {rows.map((r) => <Row key={r.key} row={r} />)}
         </div>
-
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
-          <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1.1,
-            color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>
-            {headlineText ?? (headline == null ? '—' : cents(headline))}
-          </div>
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginBottom: 12 }}>{sublabel}</div>
-
-        <div
-          data-testid={testId ? `${testId}-body` : undefined}
-          style={groupsBeside && groups.length > 0
-            ? { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', columnGap: 24, rowGap: 12, alignItems: 'start' }
-            : { display: 'flex', flexDirection: 'column', gap: 12 }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-            {rows.map((r) => <Row key={r.key} row={r} />)}
-          </div>
-
-          {groups.map((g) => (
-            <div key={g.key} style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)', marginBottom: 6 }}>
-                {g.label}
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {g.rows.map((r) => <Row key={r.key} row={r} />)}
-              </div>
+        {groups.map((g) => (
+          <div key={g.key} style={{ minWidth: 0 }}>
+            <div style={GROUP_LABEL}>{g.label}</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {g.rows.map((r) => <Row key={r.key} row={r} />)}
             </div>
-          ))}
-        </div>
-
-        {extra}
-
-        {note && <div style={{ marginTop: 10, fontSize: 11, color: 'var(--tms-badge-orange)' }}>{note}</div>}
+          </div>
+        ))}
       </div>
-    </div>
+      {extra}
+      {note && <div style={{ fontSize: 11.5, color: 'var(--tms-badge-orange)' }}>{note}</div>}
+    </DashCard>
   )
 }
