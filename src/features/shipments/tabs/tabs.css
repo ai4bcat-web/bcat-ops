@@ -54,3 +54,12 @@
 }
 .tms-shell .tms-ship-tab-count { margin-left: 6px; min-width: 20px; padding: 1px 6px; border-radius: var(--tms-radius-pill); background: color-mix(in srgb, var(--tms-text) 10%, transparent); color: var(--tms-text); font-size: 11px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }
 .tms-shell .tms-ship-tab-on .tms-ship-tab-count { background: var(--tms-primary); color: var(--tms-on-primary); }
+/* Close all: at the end of the row, outside the scrolling tabs so it is always reachable. */
+.tms-shell .tms-ship-tabs-closeall {
+  flex: none; align-self: center; display: inline-flex; align-items: center; gap: 4px;
+  margin: 2px 8px 0 4px; padding: 0 10px; min-height: 26px;
+  border: 1px solid var(--tms-border); border-radius: var(--tms-radius); background: var(--tms-card);
+  color: var(--tms-text-2); font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer;
+}
+.tms-shell .tms-ship-tabs-closeall:hover { background: var(--tms-surface-hover); color: var(--tms-text); }
+@media (pointer: coarse) { .tms-shell .tms-ship-tabs-closeall { min-height: 44px; } }

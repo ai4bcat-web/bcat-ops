@@ -19,6 +19,8 @@ const SECTIONS = [
  * opened for editing is another. Each open shipment keeps its form (and so its draft and its edit lock) until its tab is closed, it is
  * saved and exited, or discarded. Middle-click closes a tab; a dot marks unsaved edits. Create shipment is in the board toolbar.
  * The strip belongs to View only (Ryne 2026-11-12): Intake is the whole Build page, with no tabs of its own.
+ * With two or more shipments open, "Close all" closes every one in a click (Ryne 2026-11-16) so forgotten tabs stop holding edit locks;
+ * unsaved edits are listed first and closed only on "Close anyway".
  */
 export function ShipmentTabStrip() {
   const tabsApi = useShipmentTabs()
@@ -27,13 +29,14 @@ export function ShipmentTabStrip() {
   const editMatch = useMatch('/tms/shipments/:id/edit')
   const [params] = useSearchParams()
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [confirmAll, setConfirmAll] = useState(false)
   if (!tabsApi) return null
   const path = pathname.replace(/\/+$/, '')
   const onBoard = path === BOARD
   if (!onBoard && !editMatch) return null
   const section = onBoard ? parseShipmentList(params.get('list')) : null
   const activeId = editMatch?.params.id ?? null
-  const { tabs, dirty, close } = tabsApi
+  const { tabs, dirty, close, closeAll } = tabsApi
 
   const closeNow = (id: string) => {
     const next = id === activeId ? neighbourAfterClose(tabs, id) : activeId
@@ -43,6 +46,10 @@ export function ShipmentTabStrip() {
   const requestClose = (id: string) => (dirty.has(id) ? setConfirmId(id) : closeNow(id))
   const aux = (e: MouseEvent, id: string) => { if (e.button === 1) { e.preventDefault(); requestClose(id) } }
   const confirming = tabs.find((t) => t.id === confirmId) ?? null
+  const dirtyTabs = tabs.filter((t) => dirty.has(t.id))
+  // Every form unmounts with its tab, and unmounting is what lets each edit lock go. Back to Active, which restores the saved filters.
+  const closeAllNow = () => { setConfirmAll(false); closeAll(); navigate(BOARD) }
+  const requestCloseAll = () => (dirtyTabs.length ? setConfirmAll(true) : closeAllNow())
 
   return (
     <>
@@ -72,6 +79,11 @@ export function ShipmentTabStrip() {
             )
           })}
         </div>
+        {tabs.length >= 2 ? (
+          <button type="button" className="tms-ship-tabs-closeall" data-testid="ship-tabs-close-all" title="Close every open shipment and let go of their edit locks" onClick={requestCloseAll}>
+            <X size={12} aria-hidden="true" /> Close all ({tabs.length})
+          </button>
+        ) : null}
       </div>
       <TmsDialog
         open={confirming != null}
@@ -86,6 +98,22 @@ export function ShipmentTabStrip() {
         )}
       >
         <p className="text-sm">Save it first if you want to keep your edits.</p>
+      </TmsDialog>
+      <TmsDialog
+        open={confirmAll}
+        onOpenChange={(open) => { if (!open) setConfirmAll(false) }}
+        title={`Close all ${tabs.length} shipments?`}
+        description={dirtyTabs.length === 1 ? 'One open shipment has unsaved changes. Closing throws them away.' : `${dirtyTabs.length} open shipments have unsaved changes. Closing throws them away.`}
+        footer={(
+          <>
+            <TmsButton variant="ghost" data-testid="ship-tabs-close-all-cancel" onClick={() => setConfirmAll(false)}>Cancel</TmsButton>
+            <TmsButton variant="primary" data-testid="ship-tabs-close-all-confirm" onClick={closeAllNow}>Close anyway</TmsButton>
+          </>
+        )}
+      >
+        <ul className="text-sm" data-testid="ship-tabs-close-all-dirty">
+          {dirtyTabs.map((t) => <li key={t.id}>{tabLabel(t)}</li>)}
+        </ul>
       </TmsDialog>
     </>
   )

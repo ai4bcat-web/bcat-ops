@@ -19,6 +19,10 @@ export function ShipmentTabsProvider({ children }: { children: ReactNode }) {
     setTabs((t) => removeTab(t, id))
     setDirtyState((d) => { if (!d.has(id)) return d; const n = new Set(d); n.delete(id); return n })
   }, [])
+  const closeAll = useCallback<ShipmentTabsApi['closeAll']>(() => {
+    setTabs([])
+    setDirtyState((d) => (d.size ? new Set() : d))
+  }, [])
   const setMeta = useCallback<ShipmentTabsApi['setMeta']>((id, meta) => setTabs((t) => setTabMeta(t, id, meta)), [])
   const setDirty = useCallback<ShipmentTabsApi['setDirty']>((id, value) => {
     setDirtyState((d) => {
@@ -28,6 +32,6 @@ export function ShipmentTabsProvider({ children }: { children: ReactNode }) {
       return n
     })
   }, [])
-  const api = useMemo<ShipmentTabsApi>(() => ({ tabs, dirty, open, close, setMeta, setDirty }), [tabs, dirty, open, close, setMeta, setDirty])
+  const api = useMemo<ShipmentTabsApi>(() => ({ tabs, dirty, open, close, closeAll, setMeta, setDirty }), [tabs, dirty, open, close, closeAll, setMeta, setDirty])
   return <ShipmentTabsContext.Provider value={api}>{children}</ShipmentTabsContext.Provider>
 }

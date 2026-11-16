@@ -1,13 +1,14 @@
 /**
  * The edit-form side of the 10-minute shipment lock: take it when the form opens on an existing shipment and refresh it while the person
  * is working in it. A plain Save keeps it while the form stays open. Leaving the form in any way (Save & exit, Discard, back, another page)
- * or closing the tab lets go at once. A form left open and untouched for LOCK_IDLE_MS lets go too (the next refresh tick releases instead
+ * or closing the tab lets go at once; closing the browser tab or reloading sends a keepalive release that outlives the page. A form left open and untouched for LOCK_IDLE_MS lets go too (the next refresh tick releases instead
  * of renewing), so a forgotten tab cannot hold a shipment; coming back to it takes the lock again. Someone else holding it comes back
  * as `heldBy`.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { lockShipment, unlockShipment } from '@/lib/apiClient'
 import { LOCK_IDLE_MS, LOCK_REFRESH_MS } from '@/lib/shipmentLock'
+import { primeLockBeacon, unlockShipmentBeacon } from '@/lib/shipmentLockBeacon'
 
 const ACTIVITY_EVENTS = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const
 
@@ -24,6 +25,7 @@ export function useShipmentLock(shipmentId: string | null | undefined): { heldBy
         if (!alive) return
         mineRef.current = r.locked
         setHeldBy(r.locked ? null : { by: r.lockedBy ?? 'Someone', until: r.expiresAt ?? '' })
+        if (r.locked) void primeLockBeacon()
       })
       .catch(() => { /* a lock that cannot be taken must never stop the person working */ })
     void take()
@@ -43,13 +45,20 @@ export function useShipmentLock(shipmentId: string | null | undefined): { heldBy
     for (const name of ACTIVITY_EVENTS) window.addEventListener(name, onActivity, { passive: true })
     document.addEventListener('visibilitychange', onActivity)
     const release = () => { if (mineRef.current) void unlockShipment(shipmentId).catch(() => undefined) }
-    window.addEventListener('pagehide', release)
+    // The page is going away: an ordinary call would be cancelled with it, so send a keepalive request that outlives the page.
+    const releaseOnExit = () => {
+      if (!mineRef.current) return
+      mineRef.current = false
+      idleReleased = true // back from the browser's page cache: the next touch takes it again
+      if (!unlockShipmentBeacon(shipmentId)) void unlockShipment(shipmentId).catch(() => undefined)
+    }
+    window.addEventListener('pagehide', releaseOnExit)
     return () => {
       alive = false
       clearInterval(timer)
       for (const name of ACTIVITY_EVENTS) window.removeEventListener(name, onActivity)
       document.removeEventListener('visibilitychange', onActivity)
-      window.removeEventListener('pagehide', release)
+      window.removeEventListener('pagehide', releaseOnExit)
       // Leaving the form (back, another page, another shipment) lets go: the timer is only for a form left open.
       release()
       mineRef.current = false
