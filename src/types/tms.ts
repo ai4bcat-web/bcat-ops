@@ -534,6 +534,10 @@ export interface TmsSettings {
   factorRemitTo?: RemitTo | null
   /** OTR's fee on a factored invoice in basis points (200 = 2%). Unset means 200. */
   factorFeeBps?: number | null
+  /** A payment difference (short or over) this many cents or smaller is accepted as paid in full without ticking it. Unset/0 = never. */
+  payDiffAutoAcceptCents?: number | null
+  /** Receiving a payment accepts the amount as entered (short pays closed, overpays accepted). Unset means on. */
+  payAcceptAsEntered?: boolean | null
   /** Void, payment, credit, write-off and reversal are owner/ADMIN when true. Default true. */
   arPostingAdminOnly?: boolean | null
   /** One e-mail per invoice, or one per customer + bill-to. Default PER_INVOICE. */
@@ -3282,6 +3286,8 @@ export interface ArSettings {
   invoiceAttachTypes?: string[] | null
   factorRemitTo?: RemitTo | null
   factorFeeBps?: number | null
+  payDiffAutoAcceptCents?: number | null
+  payAcceptAsEntered?: boolean | null
   arPostingAdminOnly?: boolean | null
   invoiceBatchEmail?: InvoiceBatchEmailMode | null
   defaultPaymentTermsDays?: number | null

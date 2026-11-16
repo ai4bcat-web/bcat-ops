@@ -188,3 +188,8 @@
 @media (max-width: 640px) {
   .tms-shell .pr-out-hint { margin-left: 0; flex-basis: 100%; }
 }
+
+/* "Paid in full" next to Amount paid (Ryne 2026-11-16). */
+.pr-out-amtcell { display: inline-flex; align-items: center; gap: 8px; }
+.pr-out-full { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; color: var(--tms-muted, inherit); cursor: pointer; }
+.pr-out-fullall { margin-inline: 4px; }

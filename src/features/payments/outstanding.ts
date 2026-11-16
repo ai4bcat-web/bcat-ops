@@ -14,11 +14,14 @@
  * Pure: the page loads the invoices and posts the payment; this groups, totals and validates.
  */
 import { customerRefOf } from '@/lib/customerRef'
+import { OVERPAY_REASON, SHORT_PAY_REASON, differenceReason, isShortPayNote } from '@/lib/paymentDifference'
 import type { ArPaymentMethod, InvoiceRecord, PaymentApplication } from '@/types/tms'
 
 export type OutstandingSectionKey = 'manual' | 'factored'
 
 export const DEFAULT_FACTOR_FEE_BPS = 200
+
+export { SHORT_PAY_REASON, OVERPAY_REASON, isShortPayNote, differenceReason }
 
 /** The write-off reason that marks OTR's fee, so reports can find it. */
 export const factorFeeReason = (bps: number) => `Factoring fee (OTR ${bps / 100}%)`
@@ -241,6 +244,8 @@ export interface ReceiveLine {
   row: OutstandingRow
   /** What was typed in Amount paid. */
   amount: string
+  /** Accept the payment as paid in full: a short pay is closed and an overpay is accepted, leaving no open balance or credit. */
+  accept?: boolean
 }
 
 export interface ReceiveDraft {
@@ -251,6 +256,12 @@ export interface ReceiveDraft {
   method: ArPaymentMethod
   /** OTR's fee in basis points, for factored lines. */
   feeBps: number
+  /** A difference this size or smaller (cents) is accepted without ticking "paid in full". 0/absent = never. */
+  autoAcceptCents?: number
+  /** Accept every amount as entered (default true): a short pay is closed and an overpay accepted, never an error. False restores ticking each line. */
+  acceptAsEntered?: boolean
+  /** The person's own words on the adjustment, after the standard reason. */
+  note?: string
 }
 
 export interface PlannedLine {
@@ -261,10 +272,20 @@ export interface PlannedLine {
   balanceCents: number
   /** Money received against the invoice. */
   paidCents: number
+  /** The part of it applied to the invoice (never more than the balance). */
+  appliedCents: number
   /** OTR's fee closed on the invoice after the payment posts (0 on a manual invoice). */
   feeCents: number
-  /** What stays open afterwards (a short pay beyond the fee). */
+  /** What stays open afterwards (a short pay beyond the fee). Always 0 when the difference was accepted. */
   leftCents: number
+  /** Short pay closed as an adjustment because it was accepted as paid in full. */
+  shortCents: number
+  /** Overpay accepted as paid in full: recorded on the payment, never kept as credit. */
+  overCents: number
+  /** The difference was accepted (ticked, or small enough to auto-accept). */
+  accepted: boolean
+  /** Accepted by the "auto-accept differences under $X" setting rather than ticked. */
+  auto: boolean
 }
 
 export interface ReceivePlan {
@@ -276,8 +297,12 @@ export interface ReceivePlan {
   feeCents: number
   /** Σ invoice balances covered. */
   invoiceCents: number
+  /** Σ short pays accepted as paid in full. */
+  shortCents: number
+  /** Σ overpays accepted as paid in full. */
+  overCents: number
   /** One RECORD_PAYMENT per customer. */
-  payments: Array<{ customerId: string; amountCents: number; applications: PaymentApplication[] }>
+  payments: Array<{ customerId: string; amountCents: number; applications: PaymentApplication[]; overCents: number }>
 }
 
 /**
@@ -287,27 +312,45 @@ export interface ReceivePlan {
 export function planReceive(d: ReceiveDraft): ReceivePlan {
   const errors: string[] = []
   const lines: PlannedLine[] = []
-  for (const { row, amount } of d.lines) {
+  const auto = Math.max(0, Math.round(d.autoAcceptCents ?? 0))
+  for (const { row, amount, accept } of d.lines) {
     const cents = parseDollars(amount)
     if (cents == null || cents <= 0) { errors.push(`Enter the amount paid on ${row.pro}.`); continue }
-    if (cents > row.balanceCents) {
-      errors.push(`${row.pro}: $${(cents / 100).toFixed(2)} is more than the $${(row.balanceCents / 100).toFixed(2)} balance.`)
+    const over = Math.max(0, cents - row.balanceCents)
+    const applied = Math.min(cents, row.balanceCents)
+    const fee = row.factored ? Math.min(factorFeeCents(row.balanceCents, d.feeBps), row.balanceCents - applied) : 0
+    const short = row.balanceCents - applied - fee
+    const gap = Math.max(short, over)
+    const asEntered = d.acceptAsEntered !== false
+    const autoAccepted = !accept && !asEntered && gap > 0 && auto > 0 && gap <= auto
+    const accepted = Boolean(accept) || asEntered || autoAccepted
+    if (over > 0 && !accepted) {
+      errors.push(`${row.pro}: $${(cents / 100).toFixed(2)} is more than the $${(row.balanceCents / 100).toFixed(2)} balance. Tick "Paid in full" to accept the extra.`)
       continue
     }
-    const fee = row.factored ? Math.min(factorFeeCents(row.balanceCents, d.feeBps), row.balanceCents - cents) : 0
     lines.push({
       invoiceId: row.invoiceId, pro: row.pro, customerId: row.customerId, factored: row.factored, balanceCents: row.balanceCents,
-      paidCents: cents, feeCents: fee, leftCents: row.balanceCents - cents - fee,
+      paidCents: cents, appliedCents: applied, feeCents: fee,
+      leftCents: accepted ? 0 : short,
+      shortCents: accepted ? short : 0,
+      overCents: accepted ? over : 0,
+      accepted: accepted && gap > 0,
+      auto: autoAccepted || (asEntered && !accept && gap > 0),
     })
   }
   if (d.lines.length === 0) errors.push('Tick at least one invoice.')
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d.receivedAt)) errors.push('Enter the payment date.')
   if (d.method === 'CHECK' && !d.reference.trim()) errors.push('Enter the check number.')
-  const byCustomer = new Map<string, PaymentApplication[]>()
-  for (const l of lines) byCustomer.set(l.customerId, [...(byCustomer.get(l.customerId) ?? []), { invoiceId: l.invoiceId, amountCents: l.paidCents }])
-  const payments = [...byCustomer].map(([customerId, applications]) => ({
-    customerId, applications, amountCents: applications.reduce((s, a) => s + a.amountCents, 0),
-  }))
+  const byCustomer = new Map<string, { applications: PaymentApplication[]; paid: number; over: number }>()
+  for (const l of lines) {
+    const g = byCustomer.get(l.customerId) ?? { applications: [], paid: 0, over: 0 }
+    g.applications.push({ invoiceId: l.invoiceId, amountCents: l.appliedCents })
+    g.paid += l.paidCents
+    g.over += l.overCents
+    byCustomer.set(l.customerId, g)
+  }
+  // The payment's amount is the money received, overpay included; its applications are what the invoices took.
+  const payments = [...byCustomer].map(([customerId, g]) => ({ customerId, applications: g.applications, amountCents: g.paid, overCents: g.over }))
   return {
     ok: errors.length === 0 && lines.length > 0,
     errors,
@@ -315,6 +358,8 @@ export function planReceive(d: ReceiveDraft): ReceivePlan {
     receivedCents: lines.reduce((s, l) => s + l.paidCents, 0),
     feeCents: lines.reduce((s, l) => s + l.feeCents, 0),
     invoiceCents: lines.reduce((s, l) => s + l.balanceCents, 0),
+    shortCents: lines.reduce((s, l) => s + l.shortCents, 0),
+    overCents: lines.reduce((s, l) => s + l.overCents, 0),
     payments,
   }
 }
@@ -330,5 +375,7 @@ export function recordPaymentInput(d: ReceiveDraft, payment: ReceivePlan['paymen
     applications: payment.applications,
     creditApplications: [],
     clientRequestId,
+    // An overpay accepted as paid in full is recorded on the payment, never kept as customer credit.
+    ...(payment.overCents > 0 ? { acceptOverage: true, overageReason: differenceReason(OVERPAY_REASON, d.note) } : {}),
   }
 }

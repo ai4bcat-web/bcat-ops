@@ -16,13 +16,15 @@ globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObse
 if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = () => false
 if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {}
 
-const { listInvoicesByCustomer, listArPaymentsByCustomer, recordPayment, writeOffInvoice } = vi.hoisted(() => ({
+const { listInvoicesByCustomer, listArPaymentsByCustomer, recordPayment, writeOffInvoice, getTmsSettings } = vi.hoisted(() => ({
+  getTmsSettings: vi.fn(async () => ({ payDiffAutoAcceptCents: 0, payAcceptAsEntered: false })),
   listInvoicesByCustomer: vi.fn(),
   listArPaymentsByCustomer: vi.fn(),
   recordPayment: vi.fn(),
   writeOffInvoice: vi.fn(),
 }))
 vi.mock('@/lib/apiClient', () => ({
+  getTmsSettings,
   listInvoicesByCustomer,
   listArPaymentsByCustomer,
   recordPayment,
@@ -248,6 +250,34 @@ describe('ReceivePaymentDialog', () => {
     await waitFor(() => expect(writeOffInvoice).toHaveBeenCalled())
     expect(recordPayment.mock.calls[0][0].acceptOverage).toBeUndefined()
     expect(writeOffInvoice.mock.calls[0][0]).toMatchObject({ invoiceId: 'inv-2', amountCents: 50_000, reason: 'disputed lumper' })
+  })
+
+  it('"Accept this payment as paid in full" closes a short pay with the standard reason and no typing', async () => {
+    recordPayment.mockResolvedValue({ payment: { amountCents: 249_900 }, invoices: [], duplicate: false })
+    writeOffInvoice.mockResolvedValue({ payment: {}, invoices: [], duplicate: false })
+    renderDialog()
+    await openForm()
+    type('Payment amount', '2499.00')
+    type('Apply to invoice INV-000002', '2499.00')
+    fireEvent.click(await screen.findByLabelText('Accept this payment as paid in full'))
+    await waitFor(() => expect(postButton().disabled).toBe(false))
+    post()
+    await waitFor(() => expect(writeOffInvoice).toHaveBeenCalled())
+    expect(recordPayment.mock.calls.at(-1)?.[0].acceptOverage).toBeUndefined()
+    expect(writeOffInvoice.mock.calls.at(-1)?.[0]).toMatchObject({ invoiceId: 'inv-2', amountCents: 100, reason: 'Short pay accepted as paid in full' })
+  })
+
+  it('accepting the payment as paid in full also accepts an overpayment, with no credit kept', async () => {
+    recordPayment.mockResolvedValue({ payment: { amountCents: 300_000 }, invoices: [], duplicate: false })
+    renderDialog()
+    await openForm()
+    type('Payment amount', '3000.00')
+    type('Apply to invoice INV-000002', '2500.00')
+    await waitFor(() => expect(total('Unapplied total')).toBe('$500.00'))
+    fireEvent.click(screen.getByLabelText('Accept this payment as paid in full'))
+    post()
+    await waitFor(() => expect(recordPayment).toHaveBeenCalled())
+    expect(recordPayment.mock.calls.at(-1)?.[0]).toMatchObject({ acceptOverage: true, overageReason: 'Overpay accepted as paid in full' })
   })
 
   it('opens with the handed-over invoices ticked and paid in full, and reads the payment back before saving', async () => {

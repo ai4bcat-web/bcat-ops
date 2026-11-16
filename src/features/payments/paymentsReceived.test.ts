@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { computeArSummary } from '@/features/ar/arSummary'
 import type { ArPaymentRecord, InvoiceRecord } from '@/types/tms'
 import {
-  aljexDate, filterReceived, fromAljexMemo, fromArPayment, hideReversed, inView, monthBounds, receivedCsv, receivedTotals, withRunningTotal,
+  aljexDate, filterReceived, fromAljexMemo, fromArPayment, hideReversed, inView, isAcceptedDifference, monthBounds, receivedCsv, receivedTotals, withRunningTotal,
   type ReceivedFilter,
 } from './paymentsReceived'
 
@@ -143,4 +143,20 @@ describe('reversed pairs and views', () => {
     expect(rows.filter((r) => inView(r, 'adjustments')).map((r) => r.id)).toEqual(['cm'])
   })
 })
+})
+
+describe('accepted short pays and overpays (reporting)', () => {
+  const shortWriteOff = fromArPayment(pay({ id: 'wo1', kind: 'WRITE_OFF', amountCents: 120, appliedCents: 120, unappliedCents: 0, note: 'Short pay accepted as paid in full: dispute', applications: [{ invoiceId: '14296', amountCents: 120 }] }), names)
+  const feeWriteOff = fromArPayment(pay({ id: 'wo2', kind: 'WRITE_OFF', amountCents: 1000, appliedCents: 1000, unappliedCents: 0, note: 'Factoring fee (OTR 2%)' }), names)
+  const overPay = fromArPayment(pay({ id: 'p9', amountCents: 10_150, appliedCents: 10_000, unappliedCents: 0, overageAcceptedCents: 150, overageReason: 'Overpay accepted as paid in full' }), names)
+  const plain = fromArPayment(pay({ id: 'p10' }), names)
+
+  it('finds a short pay closed as paid in full and an accepted overpay, and nothing else', () => {
+    expect([shortWriteOff, feeWriteOff, overPay, plain].map(isAcceptedDifference)).toEqual([true, false, true, false])
+    const found = filterReceived([shortWriteOff, feeWriteOff, overPay, plain], { ...ALL, diffsOnly: true }, () => [])
+    expect(found.map((r) => r.id)).toEqual(['wo1', 'p9'])
+    expect(overPay.overAcceptedCents).toBe(150)
+    // Without the filter, everything is listed.
+    expect(filterReceived([shortWriteOff, feeWriteOff, overPay, plain], ALL, () => [])).toHaveLength(4)
+  })
 })

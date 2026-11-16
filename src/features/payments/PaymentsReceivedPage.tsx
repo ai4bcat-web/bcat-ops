@@ -29,6 +29,7 @@ import { formatDay, lastMonths, PAID_LOOKBACK_MONTHS } from '@/features/ar/arVie
 import { useDirectory } from '@/hooks/useDirectory'
 import { useOpenInvoices } from '@/hooks/useOpenInvoices'
 import { OutstandingView } from './OutstandingView'
+import { isShortPayNote } from '@/lib/paymentDifference'
 import { CustomerSearch } from './CustomerSearch'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { graphqlErrorText, listArPayments, listInvoicesByMonth, listShipmentsByNumber, reversePayment } from '@/lib/apiClient'
@@ -105,6 +106,7 @@ export function PaymentsReceivedPage() {
     methods: [],
     divisions: [],
     unappliedOnly: false,
+    diffsOnly: false,
   }))
   // The picked customer lives in the URL (`?customer=`), so a link, a reload and the search box all agree.
   const urlCustomer = searchParams.get('customer')
@@ -176,7 +178,7 @@ export function PaymentsReceivedPage() {
   const [shipmentsByPro, setShipmentsByPro] = useState<ReadonlyMap<string, ShipmentRef | null>>(() => new Map())
   const asked = useRef(new Set<string>())
   const inRange = useMemo(
-    () => filterReceived(rows, { ...filter, types: [], methods: [], divisions: [], unappliedOnly: false }, () => []),
+    () => filterReceived(rows, { ...filter, types: [], methods: [], divisions: [], unappliedOnly: false, diffsOnly: false }, () => []),
     [rows, filter],
   )
   useEffect(() => {
@@ -318,9 +320,20 @@ export function PaymentsReceivedPage() {
   const renderCell = (r: ReceivedRow, key: string): ReactNode => {
     const struck = r.reversed ? 'pr-reversed' : undefined
     if (key === 'invoices') return invoiceChips(r)
-    if (key === 'type') return <TmsBadge tone={r.type === 'debit' ? 'orange' : r.type === 'reversal' ? 'red' : r.type === 'payment' ? 'green' : 'gray'}>{RECEIVED_TYPE_LABEL[r.type]}</TmsBadge>
+    if (key === 'type') {
+      const badge = <TmsBadge tone={r.type === 'debit' ? 'orange' : r.type === 'reversal' ? 'red' : r.type === 'payment' ? 'green' : 'gray'}>{RECEIVED_TYPE_LABEL[r.type]}</TmsBadge>
+      if (r.type === 'write-off' && isShortPayNote(r.note)) return <span className="flex items-center gap-1">{badge}<TmsBadge tone="orange">Short pay</TmsBadge></span>
+      return badge
+    }
     if (key === 'unapplied') return r.unappliedCents > 0 && !r.reversed ? <TmsBadge tone="orange">{formatCents(r.unappliedCents)}</TmsBadge> : null
-    if (key === 'amount') return <span className={struck}>{formatCents(r.amountCents)}</span>
+    if (key === 'amount') {
+      return (
+        <span className={struck}>
+          {formatCents(r.amountCents)}
+          {(r.overAcceptedCents ?? 0) > 0 && !r.reversed ? <TmsBadge tone="orange" title="Overpay accepted as paid in full: recorded, not kept as credit.">Over {formatCents(r.overAcceptedCents ?? 0)}</TmsBadge> : null}
+        </span>
+      )
+    }
     if (key === 'reference' && r.reversed) {
       return (
         <span className="flex flex-col">
@@ -333,7 +346,7 @@ export function PaymentsReceivedPage() {
     return undefined
   }
 
-  const filterCount = (filter.customers.length ? 1 : 0) + (filter.methods.length ? 1 : 0) + (filter.divisions.length ? 1 : 0) + (filter.unappliedOnly ? 1 : 0)
+  const filterCount = (filter.customers.length ? 1 : 0) + (filter.methods.length ? 1 : 0) + (filter.divisions.length ? 1 : 0) + (filter.unappliedOnly ? 1 : 0) + (filter.diffsOnly ? 1 : 0)
 
   return (
     <>
@@ -388,6 +401,11 @@ export function PaymentsReceivedPage() {
           <button type="button" className="pr-toggle" aria-pressed={filter.unappliedOnly} onClick={() => setFilter((f) => ({ ...f, unappliedOnly: !f.unappliedOnly }))}>
             Unapplied only
           </button>
+          <button type="button" className="pr-toggle" aria-pressed={filter.diffsOnly === true} data-testid="diffs-only"
+            title="Short pays closed as paid in full, and overpays accepted as paid in full."
+            onClick={() => setFilter((f) => ({ ...f, diffsOnly: !f.diffsOnly }))}>
+            Short pay / overpay adjustments
+          </button>
           {(reversedCount > 0 || showReversed) && (
             <button type="button" className="pr-toggle pr-toggle-muted" aria-pressed={showReversed} onClick={() => setShowReversed((v) => !v)}
               title="A reversed payment and the reversal that undid it cancel out; they are hidden and never counted.">
@@ -418,7 +436,7 @@ export function PaymentsReceivedPage() {
           }}
           pageFilters={{
             count: filterCount,
-            onClear: () => { setCustomer(null); setFilter((f) => ({ ...f, customers: [], methods: [], divisions: [], unappliedOnly: false })) },
+            onClear: () => { setCustomer(null); setFilter((f) => ({ ...f, customers: [], methods: [], divisions: [], unappliedOnly: false, diffsOnly: false })) },
           }}
         />
         )}
