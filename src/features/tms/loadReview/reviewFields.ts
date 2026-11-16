@@ -2,7 +2,21 @@ import type { ShipmentListRow } from '@/hooks/useShipments'
 import { docCellOf } from '@/features/shipments/shipmentViews'
 import { formatCents } from '@/lib/invoiceBuild'
 import { failingReasons, isOwnFleetReviewLoad, loadReviewFieldReasons, loadReviewNeeds, type LoadReviewFieldKey, type LoadReviewVerdict } from '@/lib/loadReview'
+import { isCarShippingLoad } from '@/lib/reviewRequirements'
 import { deliveredText } from './reviewStatus'
+
+/**
+ * The review columns a car-shipping load skips (Ryne 2026-11-16, reviewRequirements.ts): the carrier is never checked;
+ * the PO, POD, RC and stops only when the customer factors (OTR needs them).
+ */
+export function carShippingSkips(row: ShipmentListRow, key: LoadReviewFieldKey): boolean {
+  if (!isCarShippingLoad(row)) return false
+  if (key === 'carrier') return true
+  if (row.customerFactors === true) return false
+  return key === 'customerRef' || key === 'pod' || key === 'rateCon' || key === 'stops' || key === 'other'
+}
+
+export const CAR_SHIPPING_NA_TEXT = 'N/A (car shipping)'
 
 /** The customer's rate as the review check reads it (order revenue, else the shipment's). */
 export function customerRateCents(row: ShipmentListRow): number | null {
@@ -40,6 +54,7 @@ function carrierNames(row: ShipmentListRow): string {
 
 /** What a review column shows for a load: the actual value, or '' when there is none. */
 export function reviewFieldText(row: ShipmentListRow, key: LoadReviewFieldKey): string {
+  if (carShippingSkips(row, key)) return CAR_SHIPPING_NA_TEXT
   switch (key) {
     case 'customerRef': return row.customerReference ?? row.reference ?? ''
     case 'pod': return docBasisText(row, 'POD')
@@ -64,7 +79,7 @@ export function reviewFieldCell(row: ShipmentListRow, verdict: LoadReviewVerdict
   if (!verdict) return { text, ok: null, reasons: [] }
   const reasons = loadReviewFieldReasons(verdict)[key].map((r) => r.message)
   // A failing document has nothing on file to vouch for: the basis text would contradict the NEED.
-  return { text: reasons.length > 0 && (key === 'pod' || key === 'rateCon') ? '' : text, ok: reasons.length === 0, reasons }
+  return { text: reasons.length > 0 && (key === 'pod' || key === 'rateCon') && text !== CAR_SHIPPING_NA_TEXT ? '' : text, ok: reasons.length === 0, reasons }
 }
 
 /** The Ready column: "Ready" when every field passes, else "N to fix: <the columns that need something>". */

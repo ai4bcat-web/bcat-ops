@@ -236,8 +236,9 @@ export async function loadReleaseGateInput(
   return {
     ownFleet,
     ownFleetTenderOnLoad,
-    // Car shipping keeps the older rule (nothing added); everything else follows the one rule.
-    rateConRequired: isCarShipperLoad(shipment as { revDivision?: string | null }) ? undefined : rateConRequired({
+    // One rule for every load: car shipping needs none unless the customer factors (OTR), see rateConRequired.
+    customerFactors: customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null),
+    rateConRequired: rateConRequired({
       asset: ownFleet,
       carShipper: isCarShipperLoad(shipment as { revDivision?: string | null }),
       customerFactors: customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null),

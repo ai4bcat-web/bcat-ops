@@ -19,6 +19,7 @@
 
 import { isCarShipperLoad } from './carShipper'
 import { OWN_ASSET_MESSAGES } from './ownAssetDriver'
+import { carShippingKeepsReason } from './reviewRequirements'
 
 export type ReleaseGateReasonCode =
   | 'VOIDED'
@@ -128,6 +129,11 @@ export interface ReleaseGateInput {
    * board, Load Review and the document gate use. Absent = the older rule (always, except car shipping).
    */
   rateConRequired?: boolean
+  /**
+   * The bill-to customer factors through OTR (customerFactorsForOtr). On a car-shipping load it decides what the gate
+   * still asks for (Ryne 2026-11-16: only delivered there, plus OTR's POD and rate confirmation when factored).
+   */
+  customerFactors?: boolean
 }
 
 export interface ReleaseGateResult {
@@ -303,7 +309,11 @@ export function evaluateReleaseGate(input: ReleaseGateInput): ReleaseGateResult 
     missing.push(reason('OPEN_EXCEPTIONS', String(open), `${open} open exception${open === 1 ? '' : 's'}`))
   }
 
-  return { ok: missing.length === 0, missing }
+  // Car shipping (reviewRequirements.ts): the gate asks only that it delivered, plus OTR's documents when factored.
+  const kept = isCarShipperLoad(shipment)
+    ? missing.filter((item) => carShippingKeepsReason(item.code, { customerFactors: input.customerFactors === true, detail: item.detail ?? item.message }))
+    : missing
+  return { ok: kept.length === 0, missing: kept }
 }
 
 /**

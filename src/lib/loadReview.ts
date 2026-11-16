@@ -15,8 +15,11 @@
 import type { ApStatus, ArStatus, AssignmentType, LoadWorkflowStatus, ShipmentBuildState, ShipmentStatus } from '../types/tms'
 import {
   DEFAULT_REVIEW_REQUIREMENTS,
+  carShippingKeepsReason,
   evaluateReviewRequirements,
   isAssetLoad,
+  isCarShippingLoad,
+  reviewRequirementsForLoad,
   profitFromFacts,
   type ReviewFacts,
   type ReviewRequirement,
@@ -119,6 +122,20 @@ export interface LoadReviewRow {
   /** What the customer is missing to be billed (customerBillingGaps); null = not judged. */
   customerBillingGaps?: CustomerBillingGapCode[] | null
   customerBillingSummary?: string | null
+  /** The bill-to customer factors through OTR (customerFactorsForOtr); decides what a car-shipping load still needs. */
+  customerFactors?: boolean | null
+}
+
+/**
+ * The car-shipping profile (reviewRequirements.ts, Ryne 2026-11-16) applied to a list of reasons: a car-shipping load
+ * keeps only its nine requirements (plus OTR's set when the customer factors). Other loads are returned unchanged.
+ */
+export function carShippingReasons<T extends Pick<LoadReviewReason, 'code' | 'message'>>(
+  reasons: readonly T[],
+  load: { revDivision?: string | null; customerFactors?: boolean | null },
+): T[] {
+  if (!isCarShippingLoad(load)) return [...reasons]
+  return reasons.filter((r) => carShippingKeepsReason(r.code, { customerFactors: load.customerFactors, detail: r.message }))
 }
 
 /** Review reasons for the customer's billing gaps (Ryne 2026-11-16: billing method and AP e-mail, every customer). */
@@ -376,7 +393,7 @@ export function evaluateLoadReview(input: {
     reasons.push(...loadReviewExtras({
       shipment: { legacyImported: row.legacyImported, ownFleet: isOwnFleetReviewLoad(row) },
       facts: reviewFactsOfRow(row),
-      requirements: (input.requirements ?? DEFAULT_REVIEW_REQUIREMENTS).filter((key) => key !== 'podReceived'),
+      requirements: reviewRequirementsForLoad(input.requirements ?? DEFAULT_REVIEW_REQUIREMENTS, row).filter((key) => key !== 'podReceived'),
     }))
     // Ryne 2026-11-14: a factored load cannot leave Load Review without what OTR needs from booking. The server's
     // extras carry the same list (with its full sentences) once the drawer has read them.
@@ -391,6 +408,11 @@ export function evaluateLoadReview(input: {
   if (input.revDivisionActive === false && !blank(row.revDivision)) {
     reasons.push(reason('REV_DIVISION_INACTIVE', 'Revenue division is inactive', 'revDivision', { kind: 'SET_REV_DIVISION' }))
   }
+
+  // Car shipping (Ryne 2026-11-16): only its nine requirements (and OTR's set when the customer factors) count.
+  const kept = carShippingReasons(reasons, row)
+  reasons.length = 0
+  reasons.push(...kept)
 
   const checks = emptyChecks()
   for (const item of reasons) {

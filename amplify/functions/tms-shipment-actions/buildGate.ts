@@ -26,6 +26,7 @@ import {
   missingRequiredFields,
   needsLine,
   requiredFieldLabel,
+  requiredFieldsForLoad,
   resolveRequiredFields,
   type RequiredFieldSubject,
 } from '../../../src/lib/flowDefaults'
@@ -165,7 +166,8 @@ export async function evaluateBuild(
     resolveCustomer(deps, bundle),
   ])
 
-  const requiredFields = resolveRequiredFields(settings, customer)
+  // Car shipping keeps only sales rep, revenue division and customer rate (requiredFieldsForLoad, Ryne 2026-11-16).
+  const requiredFields = requiredFieldsForLoad(resolveRequiredFields(settings, customer), bundle.shipment as { revDivision?: string | null })
   const subject: RequiredFieldSubject = {
     ...buildSubject(bundle),
     billToApplicable: customer ? hasBillToParties(customer.billToParties) : undefined,
@@ -261,6 +263,9 @@ export async function completeBuild(
  */
 export function assertBuilt(shipment: Row): void {
   if (effectiveBuildState(shipment) !== 'BUILDING') return
-  const missing = Array.isArray(shipment.missingFields) ? (shipment.missingFields as string[]) : []
+  const cached = Array.isArray(shipment.missingFields) ? (shipment.missingFields as string[]) : []
+  // A car-shipping load is held only on its own required fields, even on a cache written before the rule.
+  const missing = requiredFieldsForLoad(cached, shipment as { revDivision?: string | null })
+  if (missing.length === 0 && cached.length > 0) return
   throw new Error(buildRefusal(missing))
 }

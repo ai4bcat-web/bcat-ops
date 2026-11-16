@@ -179,6 +179,7 @@ import { salesRepForDivision } from '../../../src/lib/divisionSalesRep'
 import { parseRateConSnapshot, rateConThreadHeaders, revisedRateConSubject } from '../../../src/lib/rateConRevision'
 import { buildAddressDetailsEmail, type AddressDetailsStopInput } from '../../../src/lib/addressDetailsEmail'
 import { factorGapsAtCreate, factorGapsError, orderPoNumber, routeEnds } from '../../../src/lib/factorReadyAtCreate'
+import { carShippingFactorGaps, customerFactorsForOtr, isCarShippingLoad } from '../../../src/lib/reviewRequirements'
 import { LEAD_STAGES, promotionFor } from '../../../src/lib/crm/promote'
 import { batchShipmentTask, BATCH_TASK_ACTIONS } from './batch'
 import { INTAKE_ACTIONS, reconcileOpenIntake, runIntakeAction, type IntakeAction, type IntakeDeps } from './intake'
@@ -2481,12 +2482,17 @@ interface SaveOrderFormOpts {
  * Ryne 2026-11-14: a load is built with everything OTR needs that is known at booking (PO, rate, both ends'
  * city/state/ZIP, the customer's billing method and MC) so it can be factored the day it reaches Ready to invoice.
  */
-function assertFactorReadyAtCreate(customer: Row | null, references: Row[], stops: Row[], revenueCents: number): void {
-  const message = factorGapsError(factorGapsAtCreate({
+function assertFactorReadyAtCreate(customer: Row | null, references: Row[], stops: Row[], revenueCents: number, shipment?: Row | null): void {
+  const gaps = factorGapsAtCreate({
     customer: customer as unknown as Parameters<typeof factorGapsAtCreate>[0]['customer'],
     poNumber: orderPoNumber(references as unknown as Parameters<typeof orderPoNumber>[0]),
     customerRateCents: revenueCents,
     ...routeEnds(stops as unknown as Parameters<typeof routeEnds>[0]),
+  })
+  // Car shipping (Ryne 2026-11-16): only the rate and the billing method, unless the customer factors.
+  const message = factorGapsError(carShippingFactorGaps(gaps, {
+    revDivision: shipment?.revDivision as string | null | undefined,
+    customerFactors: customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null),
   }))
   if (message) throw new Error(message)
 }
@@ -2526,10 +2532,13 @@ async function saveOrderForm(input: Row, caller: Caller, opts: SaveOrderFormOpts
     ? (Array.isArray(order.freight) ? (order.freight as Row[]) : [])
     : assertArrayOf(orderInput.freight, 'order.freight', validateFreightItem)
   assertWeightUnitsAgree(freight)
-  if (!draftSave) assertRequiredReferences(customer, references)
+  // Car shipping skips the customer's required references and the equipment type (Ryne 2026-11-16), unless it factors.
+  const carShipRelaxed = isCarShippingLoad(shipment as { revDivision?: string | null })
+    && !customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null)
+  if (!draftSave && !carShipRelaxed) assertRequiredReferences(customer, references)
 
   const equipmentType = optionalString(orderInput.equipmentType, 80) ?? optionalString(order.equipmentType, 80)
-  if (!draftSave && isTruckloadMode(mode) && !equipmentType) {
+  if (!draftSave && !carShipRelaxed && isTruckloadMode(mode) && !equipmentType) {
     throw new Error('A truckload order needs an equipment type')
   }
 
@@ -2560,7 +2569,7 @@ async function saveOrderForm(input: Row, caller: Caller, opts: SaveOrderFormOpts
     pricingDefaultsOf(customer),
     marginFloorBpsOf(settings),
   )
-  if (!draftSave && opts.factorCheck !== false) assertFactorReadyAtCreate(customer, references, stops, totals.revenueCents)
+  if (!draftSave && opts.factorCheck !== false) assertFactorReadyAtCreate(customer, references, stops, totals.revenueCents, shipment)
 
   const now = nowIso()
   const orderIdValue = String(order.id)

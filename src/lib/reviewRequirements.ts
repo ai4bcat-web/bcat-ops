@@ -120,7 +120,7 @@ export function isAssetLoad(row: AssetLoadFacts | null | undefined): boolean {
 /**
  * Does this load need an outside rate confirmation, the customer's or broker's own (Ryne 2026-11-16)? The ONE rule
  * behind the board's RC column, the MISSING chip, Load Review, What to fix, the document gate and the release gate:
- *   - car shipping (AUTO SHIPPER work): no
+ *   - car shipping (AUTO SHIPPER work): no, unless the customer factors (OTR needs it)
  *   - a customer whose Load Review list unticks "RC received" (Batory, Carlyn, Bulk Systems, Rojac): no
  *   - an asset load (isAssetLoad: ASSETS, or our own trucks / Ivan Cartage): yes
  *   - a brokered load: no, unless the customer factors, because OTR will not buy an invoice without one
@@ -132,7 +132,8 @@ export function rateConRequired(facts: {
   customerFactors?: boolean | null
   customerWaivesRateCon?: boolean | null
 }): boolean {
-  if (facts.carShipper === true) return false
+  // Car shipping needs no rate confirmation, unless the customer factors: OTR will not buy an invoice without one.
+  if (facts.carShipper === true) return facts.customerFactors === true
   if (facts.customerWaivesRateCon === true && facts.customerFactors !== true) return false
   if (facts.asset) return true
   return facts.customerFactors === true
@@ -276,4 +277,103 @@ export function customerApEmailRequired(
   const own = Array.isArray(customer.reviewRequirements) ? customer.reviewRequirements.filter((v): v is string => typeof v === 'string') : null
   const org = Array.isArray(settings?.reviewRequirements) ? (settings.reviewRequirements.filter((v): v is string => typeof v === 'string')) : null
   return resolveReviewRequirements(own, org).includes('apEmail')
+}
+
+// ── Car shipping profile (Ryne 2026-11-16) ──────────────────────────────────────────────────────────────────────
+//
+// A car-shipping load (revenue division CAR_SHIPPING, carShipper.ts) has exactly nine requirements:
+//   1 delivered · 2 customer linked · 3 revenue division · 4 sales rep · 5 customer rate · 6 carrier cost (expense)
+//   7 profit · 8 customer billing method · 9 customer AP e-mail (the customer's own waiver still applies)
+// Nothing else blocks or flags it: no reference # / PO, no stop city/state/appointment, no form red fields, no
+// factor-ready-at-booking fields, no carrier/driver assignment or per-leg carrier rate, no open exceptions, no
+// customer-required references or documents, no POD / RC.
+// Except: when the customer FACTORS, what OTR needs still applies (PO, MC, pickup/consignee city/state/ZIP, POD and the
+// rate confirmation), because OTR rejects the invoice otherwise.
+//
+// Every surface reads these three exports: the board push and REQS column, the server push / REVIEW_LOAD / release
+// gate, Load Review, and the shipment form and its server save. Import-free so the Lambda bundles it.
+
+const CAR_SHIPPING_DIVISION_KEY = 'CAR_SHIPPING'
+
+/** Is the car-shipping profile in force for this load? (division CAR_SHIPPING; carShipper.ts restated, import-free.) */
+export function isCarShippingLoad(row: { revDivision?: string | null } | null | undefined): boolean {
+  return String(row?.revDivision ?? '').trim().toUpperCase() === CAR_SHIPPING_DIVISION_KEY
+}
+
+/** The review requirements of a car-shipping load: the nine minus the four that are not review requirements. */
+export const CAR_SHIPPING_REVIEW_REQUIREMENTS: readonly ReviewRequirement[] = [
+  'revDivision',
+  'salesRep',
+  'revenueEntered',
+  'expenseEntered',
+  'profitEntered',
+]
+
+/**
+ * The Load Review requirement list for one load: the customer's (or org) list, or, on a car-shipping load, exactly
+ * CAR_SHIPPING_REVIEW_REQUIREMENTS (plus the POD when the customer factors, for OTR).
+ */
+export function reviewRequirementsForLoad(
+  base: readonly ReviewRequirement[],
+  load: { revDivision?: string | null; customerFactors?: boolean | null },
+): ReviewRequirement[] {
+  if (!isCarShippingLoad(load)) return [...base]
+  const list: ReviewRequirement[] = [...CAR_SHIPPING_REVIEW_REQUIREMENTS]
+  // The AP e-mail (requirement 9) keeps the customer's own waiver (customerApEmailRequired).
+  if (base.includes('apEmail')) list.push('apEmail')
+  if (load.customerFactors === true) list.push('podReceived', 'rateConReceived')
+  return normalizeReviewRequirements(list)
+}
+
+/** Reason codes a car-shipping load can still fail on, whatever the customer's billing. */
+export const CAR_SHIPPING_KEPT_CODES: readonly string[] = [
+  'VOIDED',
+  'CANCELED',
+  'NOT_DELIVERED',
+  'NO_CUSTOMER',
+  'NO_ORDER',
+  'REV_DIVISION_MISSING',
+  'REV_DIVISION_INACTIVE',
+  'SALES_REP_MISSING',
+  'NO_CUSTOMER_CHARGES',
+  'EXPENSE_MISSING',
+  'PROFIT_MISSING',
+  'CUSTOMER_BILLING_METHOD',
+  'CUSTOMER_AP_EMAIL',
+]
+
+/** What OTR needs, kept on a factored car-shipping load: the factoring gaps and the POD / rate confirmation. */
+function otrCode(code: string, detail: string | null | undefined): boolean {
+  if (code.startsWith('FACTOR_')) return true
+  if (code === 'POD_MISSING' || code === 'DOCS_UNCHECKED') return true
+  if (code === 'DOC_MISSING') {
+    const d = String(detail ?? '')
+    return /\bPOD\b/.test(d) || /RATE_CON|rate con/i.test(d)
+  }
+  return false
+}
+
+/**
+ * Does a car-shipping load still fail on this reason? `detail` is the document type (or the reason's sentence) for
+ * DOC_MISSING. Non-car-shipping loads are never filtered: callers check isCarShippingLoad first.
+ */
+export function carShippingKeepsReason(code: string, opts: { customerFactors?: boolean | null; detail?: string | null } = {}): boolean {
+  if (CAR_SHIPPING_KEPT_CODES.includes(code)) return true
+  return opts.customerFactors === true && otrCode(code, opts.detail)
+}
+
+/** The hover text for a check a car-shipping load skips. */
+export const CAR_SHIPPING_NA_TIP = 'Not required for car shipping (still required when the customer factors, for OTR)'
+
+/**
+ * The factor-ready-at-booking gaps (factorReadyAtCreate.ts) a car-shipping load still answers for: the customer rate and
+ * the customer's billing method (requirements 5 and 8), or all of them when the customer factors (OTR). Other loads keep
+ * every gap. Generic over the gap shape so this module stays import-free.
+ */
+export function carShippingFactorGaps<T extends { code: string }>(
+  gaps: readonly T[],
+  load: { revDivision?: string | null; customerFactors?: boolean | null },
+): T[] {
+  if (!isCarShippingLoad(load) || load.customerFactors === true) return [...gaps]
+  return gaps.filter((g) => g.code === 'RATE_MISSING' || g.code === 'BILLING_METHOD')
 }
