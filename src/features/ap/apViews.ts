@@ -41,7 +41,7 @@ export const AP_TABS: { key: ApTabKey; label: string }[] = [
   { key: 'selected', label: 'Selected' },
   { key: 'paid', label: 'Paid' },
   { key: 'payments', label: 'Payments & credits' },
-  { key: 'report', label: 'Aging report' },
+  { key: 'report', label: 'Aging by carrier' },
   { key: 'inbox', label: 'AP inbox' },
   { key: 'review', label: 'Needs review' },
 ]
