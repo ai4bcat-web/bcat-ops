@@ -5017,7 +5017,11 @@ async function afterPodFiled(result: Row, input: Row, caller: Caller): Promise<R
   if (type !== 'POD' || !shipmentId) return result
   if (doc && (doc.status === 'VOID' || doc.status === 'DELETED')) return result
   try {
-    const delivered = await deliverOwnerOperatorOnPod(shipmentId, String(doc?.createdAt ?? nowIso()), caller)
+    // A driver's POD filed later (recovered, linked by hand) was delivered when the driver sent it, not when it was filed.
+    const submissionId = optionalString(input.submissionId, 100) ?? optionalString(doc?.submissionId, 100)
+    const submission = submissionId && DRIVER_SUBMISSION_TABLE_NAME ? await getById(DRIVER_SUBMISSION_TABLE_NAME, submissionId) : null
+    const podAt = String(submission?.createdAt ?? doc?.createdAt ?? nowIso())
+    const delivered = await deliverOwnerOperatorOnPod(shipmentId, podAt, caller)
     if (delivered.length === 0) return result
     return { ...result, bundle: await readBundle(shipmentId) } as Row
   } catch (err) {
