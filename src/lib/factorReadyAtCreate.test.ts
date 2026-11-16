@@ -26,7 +26,8 @@ describe('factorGapsAtCreate', () => {
       pickup: { city: 'Chicago', state: 'Illinois', zip: '' },
       delivery: null,
     }).map((g) => g.code)
-    expect(codes).toEqual(['CUSTOMER_MC', 'PO_MISSING', 'RATE_MISSING', 'PICKUP_STATE', 'PICKUP_ZIP', 'DELIVERY_CITY', 'DELIVERY_STATE', 'DELIVERY_ZIP'])
+    // No ZIPs (Ryne 2026-11-16): OTR's v2 create takes city and state only.
+    expect(codes).toEqual(['CUSTOMER_MC', 'PO_MISSING', 'RATE_MISSING', 'PICKUP_STATE', 'DELIVERY_CITY', 'DELIVERY_STATE'])
   })
 
   it('a manually billed customer needs no MC; an unset billing method is a gap', () => {
@@ -83,8 +84,8 @@ describe('orderPoNumber / routeEnds', () => {
 describe('factor gaps after booking (Ryne 2026-11-14)', () => {
   it('flags only a factor-billed load, with a short summary', () => {
     const gaps = factorGapsForLoad({ ...full, poNumber: '', pickup: { ...full.pickup, zip: '' } })
-    expect(gaps.map((g) => g.code)).toEqual(['PO_MISSING', 'PICKUP_ZIP'])
-    expect(factorGapSummary(gaps.map((g) => g.code))).toBe('Missing for factoring: PO, Pick Up ZIP')
+    expect(gaps.map((g) => g.code)).toEqual(['PO_MISSING'])
+    expect(factorGapSummary(['PO_MISSING', 'PICKUP_ZIP'])).toBe('Missing for factoring: PO, Pick Up ZIP')
     expect(factorGapSummary([])).toBe('')
     expect(factorGapsForLoad({ ...full, poNumber: '', customer: { ...full.customer, billingMethod: 'MANUAL' } })).toEqual([])
     expect(factorGapsForLoad({ ...full, poNumber: '', customer: null })).toEqual([])

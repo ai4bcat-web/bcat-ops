@@ -61,12 +61,11 @@ describe('ReviewFixPanel', () => {
     expect(mocks.stop.mock.calls[0][0]).toMatchObject({ op: 'SET_LOCATION', stopId: 's2', patch: { name: 'CONSIGNEE', city: 'NEWTON, IA', address: { city: 'NEWTON', state: 'IA', zip: '50208' } } })
   })
 
-  it('shows the OTR checklist for a factored customer, flagging the consignee ZIP and the POD', async () => {
+  it('shows the OTR checklist for a factored customer, flagging the POD and asking no ZIP (OTR v2 takes none)', async () => {
     render(<ReviewFixPanel shipmentId="shp-20002" readOnly={false} busy={false} failing={new Set()} onSaved={vi.fn()} />)
     const list = await screen.findByTestId('otr-checklist')
-    expect(list.textContent).toContain('Consignee ZIP')
-    expect(list.querySelectorAll('.lr-chip-bad')).toHaveLength(2)
-    expect([...list.querySelectorAll('.lr-chip-bad')].map((li) => li.textContent)).toEqual(['Consignee ZIPFix', 'POD on fileFix'])
+    expect(list.textContent).not.toContain('ZIP')
+    expect([...list.querySelectorAll('.lr-chip-bad')].map((li) => li.textContent)).toEqual(['POD on fileFix'])
   })
 
   it('writes the PO as a customer-visible order reference', async () => {
