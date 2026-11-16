@@ -4,7 +4,6 @@ import {
   Package, DollarSign, CalendarClock,
   RefreshCw, Plus, Handshake, Sparkles,
 } from 'lucide-react'
-import { KpiCard } from '@/components/ui/kpi-card'
 import type { RevenueSplit, LoadsSplit } from '@/lib/revenueByFleet'
 import { TZ } from '@/lib/date'
 import { ComplianceAlertsWidget } from './ComplianceAlertsWidget'
@@ -15,7 +14,6 @@ import { YearProfitWidget } from './YearProfitWidget'
 import { DieselPriceWidget } from './DieselPriceWidget'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useAuth } from '@/hooks/useAuth'
-import { useTmsTokens } from '@/features/tms/tmsTokens'
 import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { useLegacyDashboardKpis, type DateRangeKey } from './useLegacyDashboardKpis'
 import { useBatoryApptCount } from './useBatoryApptCount'
@@ -24,54 +22,28 @@ import { LazyWidget } from './LazyWidget'
 import { PayablesCard, ReceivablesCard } from './AccountingSection'
 import './dashboardGrid.css'
 import { DeliveryToReviewCard } from './DeliveryToReviewCard'
+import { DashCard, DashRow, DashRows, Headline, SplitBar } from './DashCard'
+import { dashCents } from './dashFormat'
 import { AssistantChat } from '@/features/dashboards/assistant/AssistantChat'
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+const cents = dashCents
 
-function cents(n: number): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n / 100)
-}
+const sinceLabel = (rangeKey: DateRangeKey) => `vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}`
+const signed = (n: number, fmt: (v: number) => string) => `${n >= 0 ? '+' : '−'}${fmt(Math.abs(n))}`
+const dirOf = (n: number): 'up' | 'down' | 'neutral' => (n > 0 ? 'up' : n < 0 ? 'down' : 'neutral')
 
-// ── Internal primitives ───────────────────────────────────────────────────────
-
-function DualDeltaBadge({ delta, dir }: { delta: string; dir: 'up' | 'down' | 'neutral' }) {
-  const color = dir === 'up' ? 'var(--tms-badge-green)' : dir === 'down' ? 'var(--tms-badge-red)' : 'var(--tms-text-2)'
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11.5, color, fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
-      {dir === 'up' ? '▲' : dir === 'down' ? '▼' : ''} {delta}
-    </span>
-  )
-}
-
-function BrokerCoveredCard({ count, countDelta, revenue, revenueDelta, sublabel, accent = 'var(--tms-badge-purple)' }: {
-  count: number; countDelta: number; revenue: number; revenueDelta: number; sublabel: string; accent?: string
+function BrokerCoveredCard({ count, countDelta, revenue, revenueDelta, sublabel }: {
+  count: number; countDelta: number; revenue: number; revenueDelta: number; sublabel: string
 }) {
-  const dir = (n: number): 'up' | 'down' | 'neutral' => (n > 0 ? 'up' : n < 0 ? 'down' : 'neutral')
-  const signed = (n: number, fmt: (v: number) => string) => `${n >= 0 ? '+' : '−'}${fmt(Math.abs(n))}`
   return (
-    <div className="tms-card" style={{ position: 'relative' }}>
-      <div style={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%', background: accent, filter: 'blur(60px)', opacity: 0.18, pointerEvents: 'none' }} />
-      <div style={{ padding: '16px 18px', position: 'relative' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>Broker Covered</div>
-          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tms-text-2)' }}>
-            <Handshake size={15} />
-          </div>
-        </div>
-        {/* Load count */}
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
-          <div style={{ fontSize: 30, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1.1, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>{count}</div>
-          <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>loads</div>
-          <DualDeltaBadge delta={signed(countDelta, (v) => String(v))} dir={dir(countDelta)} />
-        </div>
-        {/* Revenue */}
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
-          <div style={{ fontSize: 17, fontWeight: 600, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>{cents(revenue)}</div>
-          <DualDeltaBadge delta={signed(revenueDelta, cents)} dir={dir(revenueDelta)} />
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>{sublabel}</div>
-      </div>
-    </div>
+    <DashCard label="Broker covered" icon={<Handshake size={15} />}>
+      <Headline value={<>{count} <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--tms-muted)' }}>loads</span></>} delta={signed(countDelta, String)} deltaDir={dirOf(countDelta)} />
+      <DashRows>
+        <DashRow color="var(--tms-badge-purple)" label="Revenue" value={cents(revenue)} />
+        <DashRow color="var(--tms-chart-9)" label="Change" value={<span style={{ color: revenueDelta > 0 ? 'var(--tms-badge-green)' : revenueDelta < 0 ? 'var(--tms-badge-red)' : undefined }}>{signed(revenueDelta, cents)}</span>} />
+      </DashRows>
+      <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>{sublabel}</div>
+    </DashCard>
   )
 }
 
@@ -81,15 +53,8 @@ const FLEET_COLORS: Record<string, string> = {
 }
 
 /**
- * Revenue, and which fleet earned it.
- *
- * One total answers "how did we do" and nothing else. Owner operators settle a percentage
- * off brokerage loads, Ivan's drivers are on the payroll and box trucks are their own line,
- * so the single figure could not say which part of the business actually moved.
- *
- * The bar is the shape of the month at a glance; the rows underneath are the numbers for
- * when a glance is not enough. Broker-covered and driverless loads keep their own rows so
- * the parts visibly add up to the headline.
+ * Revenue, and which fleet earned it. One total answers "how did we do"; the bar is the shape of the month and the
+ * rows are the numbers. Broker-covered and driverless loads keep their own rows so the parts add up to the headline.
  */
 function RevenueCard({ split, delta, deltaDir, sublabel, connected }: {
   split: RevenueSplit
@@ -100,75 +65,26 @@ function RevenueCard({ split, delta, deltaDir, sublabel, connected }: {
 }) {
   const shown = split.byBucket.filter((b) => b.revenue > 0)
   return (
-    <div className="tms-card" style={{ position: 'relative' }}>
-      <div style={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%',
-        background: 'var(--tms-primary)', filter: 'blur(60px)', opacity: 0.18, pointerEvents: 'none' }} />
-      <div style={{ padding: '16px 18px', position: 'relative' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>
-            Revenue
-          </div>
-          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tms-text-2)' }}>
-            <DollarSign size={15} />
-          </div>
+    <DashCard label="Revenue" icon={<DollarSign size={15} />}>
+      <Headline value={connected ? cents(split.total) : '$0'} delta={connected ? delta : undefined} deltaDir={deltaDir} caption={sublabel} />
+      <SplitBar parts={shown.map((b) => ({ key: b.bucket, value: b.revenue, color: FLEET_COLORS[b.bucket], title: `${b.label}: ${cents(b.revenue)}` }))} />
+      <DashRows>
+        {shown.map((b) => (
+          <DashRow key={b.bucket} color={FLEET_COLORS[b.bucket]} label={b.label} count={b.loads} value={cents(b.revenue)} />
+        ))}
+      </DashRows>
+      {split.unrated > 0 && (
+        <div style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>
+          {split.unrated} load{split.unrated === 1 ? '' : 's'} with no rate — not counted
         </div>
-
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
-          <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1.1,
-            color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>
-            {connected ? cents(split.total) : '$0'}
-          </div>
-          {connected && delta && <DualDeltaBadge delta={delta} dir={deltaDir} />}
-        </div>
-
-        {/* The shape of the month. Hidden when there is nothing to shape. */}
-        {split.total > 0 && (
-          <div style={{ display: 'flex', height: 6, borderRadius: 999, overflow: 'hidden', marginBottom: 10 }}>
-            {shown.map((b) => (
-              <div
-                key={b.bucket}
-                title={`${b.label}: ${cents(b.revenue)}`}
-                style={{ width: `${(b.revenue / split.total) * 100}%`, background: FLEET_COLORS[b.bucket] }}
-              />
-            ))}
-          </div>
-        )}
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-          {shown.length === 0 && (
-            <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>{sublabel}</div>
-          )}
-          {shown.map((b) => (
-            <div key={b.bucket} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--tms-text-2)', whiteSpace: 'nowrap' }}>
-                <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: FLEET_COLORS[b.bucket], flexShrink: 0 }} />
-                {b.label}
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--tms-muted)' }}>{b.loads}</span>
-              </span>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>
-                {cents(b.revenue)}
-              </span>
-            </div>
-          ))}
-        </div>
-
-        {split.unrated > 0 && (
-          <div style={{ marginTop: 9, fontSize: 11, color: 'var(--tms-muted)' }}>
-            {split.unrated} load{split.unrated === 1 ? '' : 's'} with no rate — not counted
-          </div>
-        )}
-      </div>
-    </div>
+      )}
+    </DashCard>
   )
 }
 
 /**
- * Total loads, and which fleet ran them — the same shape as the revenue card beside it,
- * so the two read as one picture. A count of 60 says nothing about whether the owner
- * operators carried the month or Ivan's drivers did; the rows do.
- *
- * The breakdown counts every load, rated or not, so it always adds to the headline.
+ * Total loads, and which fleet ran them — the same shape as the revenue card beside it. The breakdown counts every
+ * load, rated or not, so it always adds to the headline.
  */
 function LoadsCard({ split, delta, deltaDir, sublabel }: {
   split: LoadsSplit
@@ -178,76 +94,43 @@ function LoadsCard({ split, delta, deltaDir, sublabel }: {
 }) {
   const shown = split.byBucket.filter((b) => b.loads > 0)
   return (
-    <div className="tms-card" style={{ position: 'relative' }}>
-      <div style={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%',
-        background: 'var(--tms-primary)', filter: 'blur(60px)', opacity: 0.18, pointerEvents: 'none' }} />
-      <div style={{ padding: '16px 18px', position: 'relative' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>
-            Total Loads
-          </div>
-          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tms-text-2)' }}>
-            <Package size={15} />
-          </div>
-        </div>
+    <DashCard label="Total loads" icon={<Package size={15} />}>
+      <Headline value={split.total} delta={delta} deltaDir={deltaDir} caption={sublabel} />
+      <SplitBar parts={shown.map((b) => ({ key: b.bucket, value: b.loads, color: FLEET_COLORS[b.bucket], title: `${b.label}: ${b.loads}` }))} />
+      <DashRows>
+        {shown.map((b) => <DashRow key={b.bucket} color={FLEET_COLORS[b.bucket]} label={b.label} value={b.loads} />)}
+      </DashRows>
+    </DashCard>
+  )
+}
 
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
-          <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1.1,
-            color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>
-            {split.total}
-          </div>
-          <DualDeltaBadge delta={delta} dir={deltaDir} />
-        </div>
-
-        {split.total > 0 && (
-          <div style={{ display: 'flex', height: 6, borderRadius: 999, overflow: 'hidden', marginBottom: 10 }}>
-            {shown.map((b) => (
-              <div
-                key={b.bucket}
-                title={`${b.label}: ${b.loads}`}
-                style={{ width: `${(b.loads / split.total) * 100}%`, background: FLEET_COLORS[b.bucket] }}
-              />
-            ))}
-          </div>
-        )}
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-          {shown.length === 0 && <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>{sublabel}</div>}
-          {shown.map((b) => (
-            <div key={b.bucket} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--tms-text-2)', whiteSpace: 'nowrap' }}>
-                <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: FLEET_COLORS[b.bucket], flexShrink: 0 }} />
-                {b.label}
-              </span>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>
-                {b.loads}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
+/** Batory stops still on the appointment ladder: a count and one line, the same shell as its neighbours. */
+function BatoryCard({ count }: { count: number | null }) {
+  if (count === null) return <KpiSkeleton label="Batory appts to book" />
+  return (
+    <DashCard label="Batory appts to book" icon={<CalendarClock size={15} />}>
+      <Headline value={count} caption={count > 0 ? 'Stops still on the Batory ladder' : 'All booked'} />
+    </DashCard>
   )
 }
 
 /** Placeholder with the card's footprint while its figures are unknown: no numbers, never a zero. */
 function KpiSkeleton({ label }: { label: string }) {
+  const bar = (w: string, h: number): React.CSSProperties => ({ height: h, width: w, borderRadius: 6, background: 'var(--tms-bg)' })
   return (
-    <div className="tms-card" aria-busy="true" aria-label={`${label} loading`} style={{ position: 'relative' }}>
-      <div style={{ padding: '16px 18px' }}>
-        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)', marginBottom: 14 }}>{label}</div>
-        <div style={{ height: 30, width: '45%', borderRadius: 6, background: 'var(--tms-bg)', marginBottom: 12 }} />
-        <div style={{ height: 6, borderRadius: 999, background: 'var(--tms-bg)', marginBottom: 12 }} />
-        <div style={{ height: 12, width: '70%', borderRadius: 4, background: 'var(--tms-bg)', marginBottom: 6 }} />
-        <div style={{ height: 12, width: '55%', borderRadius: 4, background: 'var(--tms-bg)' }} />
+    <DashCard label={label} icon={<span />} ariaBusy>
+      <div aria-label={`${label} loading`} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={bar('45%', 30)} />
+        <div style={bar('100%', 6)} />
+        <div style={bar('70%', 12)} />
+        <div style={bar('55%', 12)} />
       </div>
-    </div>
+    </DashCard>
   )
 }
 
 /** A grid cell: keeps the visual order while the DOM groups the three rollup cards; `size` sets its span (dashboardGrid.css). */
-function Cell({ order, size, children }: { order: number; size?: 's3' | 'half' | 'wide'; children: React.ReactNode }) {
+function Cell({ order, size, children }: { order: number; size?: 's2' | 's3' | 's6'; children: React.ReactNode }) {
   return <div className={`dash-cell${size ? ` dash-${size}` : ''}`} style={{ order }}>{children}</div>
 }
 
@@ -292,8 +175,6 @@ export function DashboardPage() {
   const [askOpen, setAskOpen] = useState(false)
   const isMobile = useIsMobile()
   const col1 = isMobile ? '1fr' : undefined   // stack any multi-col row on mobile
-  // Sparkline paints an SVG stroke from a JS string, so the token is resolved to its value.
-  const { '--tms-badge-orange': orange } = useTmsTokens(['--tms-badge-orange'])
 
   const now = new Date()
   const dateLabel = now.toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })
@@ -389,13 +270,13 @@ export function DashboardPage() {
               data-kpi-flips={kpi.flips}
               style={{ display: 'contents' }}
             >
-              <Cell order={1}>
+              <Cell order={1} size="s2">
                 {metrics ? (
                   <LoadsCard
                     split={metrics.loadsSplit}
                     delta={metrics.totalLoadsDelta > 0 ? `+${metrics.totalLoadsDelta}` : String(metrics.totalLoadsDelta)}
                     deltaDir={metrics.totalLoadsDelta > 0 ? 'up' : metrics.totalLoadsDelta < 0 ? 'down' : 'neutral'}
-                    sublabel={`vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}`}
+                    sublabel={sinceLabel(rangeKey)}
                   />
                 ) : <KpiSkeleton label="Total Loads" />}
               </Cell>
@@ -406,34 +287,23 @@ export function DashboardPage() {
                     connected={metrics.revenueConnected}
                     delta={metrics.revenueConnected ? `${metrics.revenueDelta >= 0 ? '+' : '−'}${cents(Math.abs(metrics.revenueDelta))}` : undefined}
                     deltaDir={metrics.revenueDelta > 0 ? 'up' : metrics.revenueDelta < 0 ? 'down' : 'neutral'}
-                    sublabel={metrics.revenueConnected ? `vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}` : 'Connect rates to loads'}
+                    sublabel={metrics.revenueConnected ? sinceLabel(rangeKey) : 'Connect rates to loads'}
                   />
                 ) : <KpiSkeleton label="Revenue" />}
               </Cell>
-              <Cell order={3}>
+              <Cell order={3} size="s2">
                 {metrics ? (
                   <BrokerCoveredCard
                     count={metrics.brokerLoads}
                     countDelta={metrics.brokerLoadsDelta}
                     revenue={metrics.brokerRevenue}
                     revenueDelta={metrics.brokerRevenueDelta}
-                    sublabel={`vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}`}
+                    sublabel={sinceLabel(rangeKey)}
                   />
                 ) : <KpiSkeleton label="Broker Covered" />}
               </Cell>
             </div>
-            <Cell order={4}>
-              {needsAppt === null ? <KpiSkeleton label="Batory Appts to Book" /> : (
-                <KpiCard
-                  label="Batory Appts to Book"
-                  value={needsAppt}
-                  sublabel={needsAppt > 0 ? 'Stops still on the Batory ladder' : 'All booked'}
-                  accent={needsAppt > 0 ? 'var(--tms-badge-orange)' : undefined}
-                  sparkColor={orange}
-                  icon={<CalendarClock size={15} />}
-                />
-              )}
-            </Cell>
+            <Cell order={4} size="s2"><BatoryCard count={needsAppt} /></Cell>
             {/* Delivery → Load review, week over week (Ryne 2026-11-15); anyone who works loads. */}
             {(hasPageAccess('loads') || hasPageAccess('tms')) && (
               <Cell order={5} size="s3">
@@ -442,17 +312,17 @@ export function DashboardPage() {
             )}
             {/* Accounts receivable (with Factoring) and Accounts payable, each on its own accounting grant. */}
             {hasPageAccess('invoicing') && (
-              <Cell order={6} size="wide">
+              <Cell order={6} size="s6">
                 <LazyWidget enabled={kpiFinal} minHeight={240} label="accounting-ar"><ReceivablesCard /></LazyWidget>
               </Cell>
             )}
             {hasPageAccess('carrierPay') && (
-              <Cell order={7} size="half">
+              <Cell order={7} size="s3">
                 <LazyWidget enabled={kpiFinal} minHeight={240} label="accounting-ap"><PayablesCard /></LazyWidget>
               </Cell>
             )}
             {/* Vendor (non-carrier) bills, next to carrier AP. */}
-            <Cell order={8} size="half">
+            <Cell order={8} size="s3">
               <VendorApCard onOpen={() => navigate('/tms/vendors')} />
             </Cell>
           </div>

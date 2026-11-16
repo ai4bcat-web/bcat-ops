@@ -60,10 +60,13 @@ export function BrokerageSection() {
           <span style={{ fontSize: 12.5, color: 'var(--tms-muted)' }}>
             {`BCAT Logistics${own ? ' · your loads' : ''}${data.asOf ? ` · as of ${asOfLabel(data.asOf)}` : ''}`}
           </span>
-        </div>
-        <details className="tms-card" data-testid="brokerage-help" style={{ padding: '10px 16px', fontSize: 12.5, color: 'var(--tms-text-2)' }}>
-          <summary style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--tms-text)' }}>How these figures are counted</summary>
-          <ul style={{ margin: '8px 0 0', paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <details data-testid="brokerage-help" style={{ position: 'relative', marginLeft: 'auto' }}>
+            <summary style={{ cursor: 'pointer', fontSize: 12.5, color: 'var(--tms-muted)', listStyle: 'none', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <span aria-hidden style={{ width: 16, height: 16, borderRadius: '50%', border: '1px solid var(--tms-border)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10.5, fontWeight: 700 }}>i</span>
+              How these figures are counted
+            </summary>
+            <div className="tms-card" style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 20, width: 'min(560px, 86vw)', padding: '12px 16px', fontSize: 12.5, color: 'var(--tms-text-2)', boxShadow: 'var(--tms-shadow)' }}>
+              <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <li><b>Scope:</b> shipments whose revenue division is Brokerage (BCAT Logistics) and any division under it. Ivan Cartage, its subsidiaries and untagged shipments are not here. Voided and canceled shipments, and loads whose carrier was TONU'd, are not counted.</li>
             <li><b>Month:</b> the month a load was delivered (its delivery appointment, else the day it was marked delivered), the same date the Company strips and the lane history use. A load is counted once it is delivered and priced.</li>
             <li><b>Revenue:</b> what the customer is charged for the load (the sum of its customer charge lines: line haul, fuel and accessorials), the same figure the TMS revenue and margin cards use.</li>
@@ -72,15 +75,19 @@ export function BrokerageSection() {
             <li><b>Sales rep:</b> the rep on the load or shipment (profile name, group reps such as Ivan Cartage, BCAT and Owner Operators as their own rows, or the typed rep name when there is no login). Loads with no rep are the &quot;No sales rep&quot; row, so the rep total equals the month total.</li>
             <li>Figures come from the dashboard rollup and are recomputed within minutes of a change; they are not a general-ledger close (an uninvoiced load counts at its customer rate, and a later invoice adjustment moves it).</li>
           </ul>
-        </details>
+            </div>
+          </details>
+        </div>
+
 
         {(monthRange.from <= FIRST_MONTH || repRange.from <= FIRST_MONTH) && (
           <div data-testid="brokerage-data-start" style={{ fontSize: 12, color: 'var(--tms-muted)' }}>Data starts October 2026</div>
         )}
 
         {data.state === 'unavailable' && (
-          <div role="status" data-testid="brokerage-unavailable" className="tms-card" style={{ padding: 16, fontSize: 13, color: 'var(--tms-badge-orange)' }}>
-            The dashboard rollup is not ready for these months (a month is missing or still being recomputed). Try again in a few minutes.
+          <div role="status" data-testid="brokerage-unavailable" className="tms-card" style={{ padding: '10px 14px', fontSize: 12.5, color: 'var(--tms-text-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <span>Brokerage figures are still being recomputed for these months.</span>
+            <button type="button" onClick={data.retry} style={{ padding: '4px 12px', borderRadius: 7, border: '1px solid var(--tms-border)', background: 'var(--tms-bg)', color: 'var(--tms-text)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Retry</button>
           </div>
         )}
         {data.state === 'error' && (

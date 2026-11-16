@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { listOwnershipDivisions, listUserProfiles } from '@/lib/apiClient'
 import { fetchRollup } from '@/lib/dashboardRollupClient'
 import { fetchBrokerageRepRollup } from '@/lib/brokerageRepRollupClient'
@@ -21,6 +21,8 @@ export interface BrokerageData {
   names: RepNames
   /** ISO time of the oldest hot row behind the figures. */
   asOf: string | null
+  /** Read the rollup again (the notice's Retry). */
+  retry: () => void
 }
 
 const EMPTY_NAMES: RepNames = { byId: new Map() }
@@ -45,7 +47,8 @@ export function useBrokerageDashboard(from: string, to: string): BrokerageData {
   const [result, setResult] = useState<Loaded | null>(null)
   const [divisions, setDivisions] = useState<DivisionShape[]>(SEED_DIVISIONS)
   const [names, setNames] = useState<RepNames>(EMPTY_NAMES)
-  const key = `${from}|${to}`
+  const [attempt, setAttempt] = useState(0)
+  const key = `${from}|${to}|${attempt}`
 
   useEffect(() => {
     let alive = true
@@ -63,6 +66,7 @@ export function useBrokerageDashboard(from: string, to: string): BrokerageData {
       .catch(() => done({ state: 'error', scope: 'ALL', rows: [], repMonths: [], asOf: null }))
     return () => { alive = false }
   }, [from, to, key])
+  const retry = useCallback(() => setAttempt((n) => n + 1), [])
 
   useEffect(() => {
     let alive = true
@@ -79,7 +83,7 @@ export function useBrokerageDashboard(from: string, to: string): BrokerageData {
     const current = result && result.key === key ? result : null
     return {
       state: current?.state ?? 'loading', scope: current?.scope ?? 'ALL', rows: current?.rows ?? [],
-      repMonths: current?.repMonths ?? [], divisions, names, asOf: current?.asOf ?? null,
+      repMonths: current?.repMonths ?? [], divisions, names, asOf: current?.asOf ?? null, retry,
     }
-  }, [result, key, divisions, names])
+  }, [result, key, divisions, names, retry])
 }
