@@ -7,6 +7,8 @@ export interface ShipmentTabsApi {
   dirty: ReadonlySet<string>
   open: (id: string, meta?: Partial<Pick<ShipmentTab, 'number' | 'customer'>>) => void
   close: (id: string) => void
+  /** Closes every open shipment tab at once; each form unmounts and lets go of its edit lock. */
+  closeAll: () => void
   setMeta: (id: string, meta: Partial<Pick<ShipmentTab, 'number' | 'customer'>>) => void
   setDirty: (id: string, dirty: boolean) => void
 }

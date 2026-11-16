@@ -7,6 +7,8 @@ import { useState } from 'react'
 
 const api = vi.hoisted(() => ({ lockShipment: vi.fn(), unlockShipment: vi.fn() }))
 vi.mock('@/lib/apiClient', () => ({ ...api, countOpenIntakeLoads: async () => 0 }))
+const beacon = vi.hoisted(() => ({ primeLockBeacon: vi.fn(async () => undefined), unlockShipmentBeacon: vi.fn(() => true) }))
+vi.mock('@/lib/shipmentLockBeacon', () => beacon)
 
 import { useShipmentLock } from '@/features/shipments/form/useShipmentLock'
 import { useShipmentTabs } from './shipmentTabsContext'
@@ -36,7 +38,7 @@ function FakeForm({ id }: { id: string }) {
 
 function Board() {
   const nav = useNavigate()
-  return <div data-testid="board"><button onClick={() => nav('/tms/shipments/s1/edit')}>open s1</button><button onClick={() => nav('/tms/shipments/s2/edit')}>open s2</button></div>
+  return <div data-testid="board"><button onClick={() => nav('/tms/shipments/s1/edit')}>open s1</button><button onClick={() => nav('/tms/shipments/s2/edit')}>open s2</button><button onClick={() => nav('/tms/shipments/s3/edit')}>open s3</button></div>
 }
 
 function app(start = '/tms/shipments') {
@@ -168,5 +170,64 @@ describe('shipment tabs', () => {
     fireEvent.click(screen.getByText('open s1'))
     await screen.findByTestId('ship-tab-s1')
     expect(screen.queryByTestId('create-shipment')).toBeNull()
+  })
+
+  async function openThree() {
+    app()
+    for (const id of ['s1', 's2', 's3']) {
+      if (id !== 's1') fireEvent.click(screen.getByTestId('ship-tab-section-active'))
+      fireEvent.click(screen.getByText(`open ${id}`))
+      await waitFor(() => expect(api.lockShipment).toHaveBeenCalledWith(id))
+    }
+  }
+
+  it('Close all appears only with two or more shipments open', async () => {
+    app()
+    fireEvent.click(screen.getByText('open s1'))
+    await screen.findByTestId('ship-tab-s1')
+    expect(screen.queryByTestId('ship-tabs-close-all')).toBeNull()
+    fireEvent.click(screen.getByTestId('ship-tab-section-active'))
+    fireEvent.click(screen.getByText('open s2'))
+    expect(await screen.findByTestId('ship-tabs-close-all')).toHaveTextContent('Close all (2)')
+  })
+
+  it('Close all closes every tab, lets go of every edit lock and returns to the board', async () => {
+    await openThree()
+    expect(api.unlockShipment).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('ship-tabs-close-all'))
+    await waitFor(() => expect(api.unlockShipment).toHaveBeenCalledTimes(3))
+    for (const id of ['s1', 's2', 's3']) {
+      expect(api.unlockShipment).toHaveBeenCalledWith(id)
+      expect(screen.queryByTestId(`ship-tab-${id}`)).toBeNull()
+    }
+    expect(screen.getByTestId('board')).toBeInTheDocument()
+    expect(screen.queryByTestId('ship-tabs-close-all')).toBeNull()
+    expect(sessionStorage.getItem(SHIPMENT_TABS_KEY)).toBe('[]')
+  })
+
+  it('Close all lists the tabs with unsaved edits first; Cancel keeps them all, Close anyway closes them all', async () => {
+    await openThree()
+    fireEvent.click(screen.getByText('load s2'))
+    fireEvent.change(screen.getByLabelText('draft s2'), { target: { value: 'half typed' } })
+    await screen.findByTestId('ship-tab-dirty-s2')
+    fireEvent.click(screen.getByTestId('ship-tabs-close-all'))
+    const list = await screen.findByTestId('ship-tabs-close-all-dirty')
+    expect(list).toHaveTextContent('PRO Ps2 · ACME')
+    expect(list.querySelectorAll('li')).toHaveLength(1)
+    fireEvent.click(screen.getByTestId('ship-tabs-close-all-cancel'))
+    expect(screen.getByTestId('ship-tab-s1')).toBeInTheDocument()
+    expect(api.unlockShipment).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('ship-tabs-close-all'))
+    fireEvent.click(await screen.findByTestId('ship-tabs-close-all-confirm'))
+    await waitFor(() => expect(api.unlockShipment).toHaveBeenCalledTimes(3))
+    expect(screen.queryByTestId('ship-tab-s2')).toBeNull()
+  })
+
+  it('leaving the page sends a keepalive release for each lock held, not an ordinary call that dies with the page', async () => {
+    await openThree()
+    await waitFor(() => expect(beacon.primeLockBeacon).toHaveBeenCalled())
+    window.dispatchEvent(new Event('pagehide'))
+    for (const id of ['s1', 's2', 's3']) expect(beacon.unlockShipmentBeacon).toHaveBeenCalledWith(id)
+    expect(api.unlockShipment).not.toHaveBeenCalled()
   })
 })
