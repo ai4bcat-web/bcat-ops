@@ -150,7 +150,7 @@ describe('shipment tabs', () => {
     await waitFor(() => expect(screen.queryByTestId('ship-tab-s2')).toBeNull())
     expect(api.unlockShipment).toHaveBeenCalledWith('s2')
     expect(screen.getByTestId('ship-tab-s1')).toBeInTheDocument()
-    expect(screen.getByTestId('board')).toBeInTheDocument()
+    expect(await screen.findByTestId('board')).toBeInTheDocument()
   })
 
   it('the tabs survive a reload of the page (sessionStorage) and reopen their forms', async () => {
@@ -200,7 +200,7 @@ describe('shipment tabs', () => {
       expect(api.unlockShipment).toHaveBeenCalledWith(id)
       expect(screen.queryByTestId(`ship-tab-${id}`)).toBeNull()
     }
-    expect(screen.getByTestId('board')).toBeInTheDocument()
+    expect(await screen.findByTestId('board')).toBeInTheDocument()
     expect(screen.queryByTestId('ship-tabs-close-all')).toBeNull()
     expect(sessionStorage.getItem(SHIPMENT_TABS_KEY)).toBe('[]')
   })
