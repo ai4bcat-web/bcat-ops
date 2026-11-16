@@ -30,6 +30,10 @@ export interface FormIssue {
   href?: string
   /** One plain line under the label saying how to fix it (items the form cannot point at). */
   hint?: string
+  /** Tried, in order, when `fieldKey` is not on screen (e.g. the carrier rate before a carrier is booked). */
+  fallbackKeys?: readonly string[]
+  /** Fixed in a dialog on the shipment instead of a field: the customer's billing settings. */
+  action?: 'editCustomer'
   /**
    * A `warn` the field still shows as required: a factored load past draft missing what OTR needs (Ryne 2026-11-14).
    * It never blocks a save; it blocks the push into Load Review, server-side.

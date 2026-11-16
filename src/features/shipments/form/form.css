@@ -657,6 +657,29 @@
   background: var(--tms-surface-hover);
 }
 
+/* A What's missing item is a button: it jumps to its field (Ryne 2026-11-16). */
+.tms-shell .tms-rail-req-fix { cursor: pointer; }
+.tms-shell .tms-rail-req-go {
+  font-weight: 600;
+  opacity: 0.75;
+}
+.tms-shell .tms-rail-req-fix:hover .tms-rail-req-go,
+.tms-shell .tms-rail-req-fix:focus-visible .tms-rail-req-go { opacity: 1; text-decoration: underline; }
+.tms-shell .tms-rail-req-fix:focus-visible { outline: 2px solid var(--tms-focus, var(--tms-badge-orange)); outline-offset: 1px; }
+
+/* The field a What's missing click lands on flashes for a moment. */
+@keyframes tms-fix-flash {
+  0% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--tms-badge-orange) 70%, transparent); }
+  100% { box-shadow: 0 0 0 3px transparent; }
+}
+.tms-shell .tms-fix-flash {
+  border-radius: var(--tms-radius, 6px);
+  animation: tms-fix-flash 1.5s ease-out 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tms-shell .tms-fix-flash { animation: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--tms-badge-orange) 70%, transparent); }
+}
+
 .tms-shell .tms-rail-roles .ship-body {
   gap: 8px;
 }
