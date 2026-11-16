@@ -240,7 +240,7 @@ describe('the AR board', () => {
     expect(screen.queryByRole('tab', { name: /^Payments & credits/ })).toBeNull()
     // Paid moved to Payments received too (Ryne 2026-11-16).
     expect(screen.queryByRole('tab', { name: /^Paid/ })).toBeNull()
-    for (const label of ['Ready to invoice', 'Invoiced', 'Aging']) {
+    for (const label of ['Ready to Invoice', 'Invoiced', 'Aging']) {
       const tab = screen.getByRole('tab', { name: new RegExp(`^${label}`) })
       fireEvent.click(tab)
       await settle()
@@ -384,7 +384,7 @@ describe('owed by customer or division', () => {
     expect(strip.getByText('Pending with shippers').closest('.tms-list-row')?.querySelector('.tms-list-row-value')?.textContent).toBe('$0.00')
     fireEvent.click(screen.getByRole('tab', { name: /^Invoiced/ }))
     await settle()
-    expect(screen.getByRole('tab', { name: /^Invoiced/ }).textContent).toContain('$0.00')
+    expect(screen.getByRole('tab', { name: /^Invoiced/ }).getAttribute('title')).toContain('$0.00 open')
   })
 
   it('Clear filters clears the customer filter too', async () => {
