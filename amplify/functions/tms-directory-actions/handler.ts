@@ -1202,7 +1202,10 @@ async function upsertCustomer(
 ): Promise<Record<string, unknown>> {
   // A patch (Load Review's rail) carries only the fields it changes. Every other field keeps what is
   // stored (see the overlay after `item` is built); the name is the stored one unless the patch renames.
-  const patchKeys = rawInput.patch === true ? new Set(Object.keys(rawInput)) : null
+  // An edit of an existing customer that carries no name can only be a partial change: it is treated as a patch, so a
+  // caller that forgets the flag gets "keep everything not sent" instead of a refusal ("name must be a string").
+  const isPartialEdit = rawInput.patch !== true && typeof rawInput.id === 'string' && rawInput.id !== '' && !('name' in rawInput)
+  const patchKeys = rawInput.patch === true || isPartialEdit ? new Set(Object.keys(rawInput)) : null
   let patchBase: Record<string, unknown> | null = null
   if (patchKeys) {
     if (typeof rawInput.id !== 'string' || !rawInput.id) throw new Error('A customer patch needs the customer id')

@@ -969,9 +969,31 @@ describe('UPSERT_CUSTOMER', () => {
     expect(values[':aliases']).toEqual({ L: [{ S: 'ICAT' }] })
   })
 
-  it('a full save without a name is still refused', async () => {
+  it('an edit of an existing customer that carries no name is a patch, even without the flag (Fix & invoice manually, 20048)', async () => {
+    const existing = makeDynamoItem({
+      id: 'c-k1', name: 'K1 GROUP LLC', normalizedName: 'k1 group', active: true,
+      billingMethod: 'FACTOR', mcNumber: '1092343', apEmail: 'old@k1group.net', paymentTermsDays: 30, contactName: 'Pat',
+      createdAt: '2025-01-01', createdBy: 'someone@bcatcorp.com', updatedAt: '2025-01-02',
+    })
+    let update: MockCommand | undefined
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [existing], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Update') { update = cmd; return Promise.resolve({ Attributes: existing }) }
+      if (cmd.__type === 'Put') return Promise.resolve({})
+      throw new Error('unexpected')
+    })
+    await handler(event('UPSERT_CUSTOMER', { id: 'c-k1', expectedUpdatedAt: '2025-01-02', apEmail: 'ap@k1group.net', paymentTermsDays: 30, changeReason: 'OTR rejected', changeSource: 'Factoring · OTR rejected' }))
+    const values = (update?.input as { ExpressionAttributeValues: Record<string, unknown> }).ExpressionAttributeValues
+    expect(values).toMatchObject({
+      ':name': { S: 'K1 GROUP LLC' }, ':apEmail': { S: 'ap@k1group.net' }, ':mcNumber': { S: '1092343' },
+      ':billingMethod': { S: 'FACTOR' }, ':contactName': { S: 'Pat' },
+    })
+  })
+
+  it('a create without a name is still refused', async () => {
     send.mockImplementation(() => Promise.resolve({}))
-    await expect(handler(event('UPSERT_CUSTOMER', { id: 'c-icat', expectedUpdatedAt: '2025-01-02', billingMethod: 'FACTOR' }))).rejects.toThrow('name must be a string')
+    await expect(handler(event('UPSERT_CUSTOMER', { billingMethod: 'FACTOR' }))).rejects.toThrow('name must be a string')
   })
 
   describe('billing method (Step AW)', () => {

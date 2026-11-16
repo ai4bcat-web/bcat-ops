@@ -8,7 +8,7 @@ import { toast } from 'sonner'
 import { TmsButton, TmsDialog, TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { EmailChipsInput } from '@/features/directory/components/EmailChipsInput'
 import { apEmailList, apEmailTokens } from '@/lib/apEmails'
-import { patchCustomer } from '@/lib/apiClient'
+import { patchCustomer, plainSaveError } from '@/lib/apiClient'
 import type { CustomerRecord } from '@/types/tms'
 
 type Billing = NonNullable<CustomerRecord['billingMethod']> | ''
@@ -44,7 +44,7 @@ export function EditCustomerBillingDialog({ customer, onClose, onSaved }: {
       onSaved()
       onClose()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save the customer')
+      setError(plainSaveError(err, 'Could not save the customer'))
       setBusy(false)
     }
   }

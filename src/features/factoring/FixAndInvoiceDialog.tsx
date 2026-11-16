@@ -13,7 +13,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Check, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsButton, TmsDialog, TmsInput } from '@/features/tms/kit'
-import { generateInvoice, getLoads, getShipment, graphqlErrorText, moveToManualInvoice, updateCustomer } from '@/lib/apiClient'
+import { generateInvoice, getLoads, getShipment, graphqlErrorText, moveToManualInvoice, patchCustomer, plainSaveError } from '@/lib/apiClient'
 import { isValidEmail } from '@/lib/billingMethod'
 import { apEmailStorage, apEmailTokens } from '@/lib/apEmails'
 import { EmailChipsInput } from '@/features/directory/components/EmailChipsInput'
@@ -235,7 +235,8 @@ function CustomerForm({ customer, itemId, proNumber, reasonText, state, setState
     if (!changed) { setState('done'); return }
     setState('busy')
     try {
-      const next = await updateCustomer(customer.id, {
+      // A patch: the name and every field not shown here keep what is stored (a full save needs the name and blanks the rest).
+      const next = await patchCustomer(customer.id, {
         apEmail,
         apEmailsExtra: extraList,
         paymentTermsDays: termsDays,
@@ -247,7 +248,7 @@ function CustomerForm({ customer, itemId, proNumber, reasonText, state, setState
       onSaved(next)
     } catch (e) {
       setState('todo')
-      setError(graphqlErrorText(e) || 'Could not save the customer')
+      setError(plainSaveError(e, 'Could not save the customer'))
     }
   }
 

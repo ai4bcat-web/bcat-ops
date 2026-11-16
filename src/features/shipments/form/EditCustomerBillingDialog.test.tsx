@@ -5,7 +5,10 @@ import type { CustomerRecord } from '@/types/tms'
 import { EditCustomerBillingDialog } from './EditCustomerBillingDialog'
 
 const h = vi.hoisted(() => ({ patchCustomer: vi.fn(async () => ({})) }))
-vi.mock('@/lib/apiClient', () => ({ patchCustomer: h.patchCustomer }))
+vi.mock('@/lib/apiClient', () => ({
+  patchCustomer: h.patchCustomer,
+  plainSaveError: (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback),
+}))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 const customer = { id: 'cus-1', name: 'ACME FREIGHT', billingMethod: null, apEmail: null, apEmailsExtra: null, mcNumber: '123456', paymentTermsDays: 30, updatedAt: '2026-11-16T10:00:00.000Z' } as unknown as CustomerRecord
