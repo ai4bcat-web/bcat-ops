@@ -2,7 +2,7 @@
  * Shipments › Intake: the tender e-mails that arrived at a division's intake address and became
  * partially built loads. Opens on All loads; "By rev division" / "By customer" section the table into collapsible groups
  * (?view=), a table; a row opens the review page. Only open loads are listed (Ryne 2026-11-12): moved
- * and dismissed ones simply leave. Rows stay one line; duplicate / already-built flags and team notes open in a dialog.
+ * and dismissed ones simply leave ("Already built" links a row to a PRO built elsewhere; "Marked built" lists recent links to undo). Rows stay one line; duplicate / already-built flags and team notes open in a dialog.
  */
 import { BatchActionBar } from '../board/BatchActionBar'
 import { outcomesFromServer, selectAllUpToCap, toggleSelection, type BatchOutcome } from '../batchReview'
@@ -51,6 +51,8 @@ import {
 } from './intakeGroups'
 import { useIntakeLoads } from './useIntakeLoads'
 import { useIntakePermissions } from './useIntakePermissions'
+import { MarkBuiltDialog } from './MarkBuiltDialog'
+import { RecentlyBuiltPanel } from './RecentlyBuiltPanel'
 import './intake.css'
 
 
@@ -125,6 +127,8 @@ export function IntakeBoard() {
   const [deleting, setDeleting] = useState<IntakeLoadRecord | null>(null)
   const [itemId, setItemId] = useState<string | null>(null)
   const [hideBanner, setHideBanner] = useState(bannerHidden)
+  const [markingBuilt, setMarkingBuilt] = useState<IntakeLoadRecord | null>(null)
+  const [showBuilt, setShowBuilt] = useState(false)
 
   const open = useIntakeLoads({ status: 'OPEN' })
 
@@ -339,6 +343,17 @@ export function IntakeBoard() {
           {row.status === 'OPEN' ? (
             <TmsButton
               size="sm"
+              variant="ghost"
+              data-testid="intake-mark-built"
+              title="Built it outside Build? Enter the PRO"
+              onClick={(e) => { e.stopPropagation(); setMarkingBuilt(row) }}
+            >
+              Already built
+            </TmsButton>
+          ) : null}
+          {row.status === 'OPEN' ? (
+            <TmsButton
+              size="sm"
               data-testid="intake-create-shipment"
               onClick={(e) => { e.stopPropagation(); navigate(`/tms/shipments/intake/${encodeURIComponent(row.id)}`) }}
             >
@@ -418,8 +433,12 @@ export function IntakeBoard() {
           pinned={prefs.pinned}
           onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })}
         />
+        <TmsButton size="sm" variant={showBuilt ? 'primary' : 'secondary'} data-testid="intake-show-built" onClick={() => setShowBuilt((v) => !v)}>
+          Marked built
+        </TmsButton>
         <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
       </div>
+      {showBuilt ? <RecentlyBuiltPanel onUnlinked={() => open.refresh()} /> : null}
       {isOwnerOrAdmin && missingAddress.length > 0 && !hideBanner ? (
         <p className="tms-intake-banner-compact" data-testid="intake-divisions-banner">
           <span>No intake e-mail yet: {missingAddress.map((d) => d.name).join(', ')}.</span>{' '}
@@ -498,6 +517,14 @@ export function IntakeBoard() {
           />
         ) : null
       })() : null}
+      {markingBuilt ? (
+        <MarkBuiltDialog
+          row={markingBuilt}
+          open
+          onOpenChange={(o) => { if (!o) setMarkingBuilt(null) }}
+          onLinked={() => { setMarkingBuilt(null); open.refresh() }}
+        />
+      ) : null}
       {deleting ? (
         <DeleteIntakeDialog
           row={deleting}

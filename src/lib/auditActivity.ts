@@ -103,6 +103,7 @@ export const ACTION_SENTENCE: Record<string, string> = {
   INTAKE_MARK_REVIEWED: 'marked the intake reviewed',
   INTAKE_MOVE_TO_ACTIVE: 'moved the intake load to Active',
   INTAKE_LINK_SHIPMENT: 'linked the intake load to the shipment',
+  INTAKE_UNLINK_SHIPMENT: 'unlinked the intake load from the shipment',
   INTAKE_DISMISS: 'dismissed the intake load',
   // Browser writers
   create: 'created',

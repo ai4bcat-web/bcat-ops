@@ -58,3 +58,18 @@
 .tms-intake-group-toggle:focus-visible { outline: 2px solid var(--tms-accent, currentColor); outline-offset: 2px; border-radius: 4px; }
 .tms-intake-group-count { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--tms-surface); border: 1px solid var(--tms-border); font-size: 12px; font-weight: 600; text-align: center; font-variant-numeric: tabular-nums; }
 @media (max-width: 640px) { .tms-intake-group-toggle { min-height: 44px; } }
+
+/* "Already built" dialog and "Marked built" panel (Ryne 2026-11-16) */
+.tms-intake-markbuilt { display: flex; flex-direction: column; gap: 8px; }
+.tms-intake-markbuilt-label { font-size: 12px; font-weight: 600; color: var(--tms-text-muted); }
+.tms-intake-markbuilt-hint { margin: 0; font-size: 12px; color: var(--tms-text-muted); }
+.tms-intake-markbuilt-hint.is-bad { color: var(--tms-red-text); }
+.tms-intake-markbuilt-match { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px solid var(--tms-border); border-radius: 8px; font-size: 13px; }
+.tms-intake-built-panel { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--tms-border); border-radius: 8px; background: var(--tms-surface); }
+.tms-intake-built-head { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
+.tms-intake-built-empty { margin: 0; font-size: 13px; color: var(--tms-text-muted); }
+.tms-intake-built-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.tms-intake-built-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 13px; padding: 4px 0; border-top: 1px solid var(--tms-border); min-height: 44px; }
+.tms-intake-built-subject { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.tms-intake-built-when { color: var(--tms-text-muted); font-size: 12px; }
+.tms-intake-built-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
