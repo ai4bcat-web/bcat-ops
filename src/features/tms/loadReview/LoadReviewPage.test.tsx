@@ -127,6 +127,12 @@ describe('LoadReviewPage', () => {
     expect(screen.queryByRole('button', { name: /Select all looks ready/ })).toBeNull()
   })
 
+  it('opens on All in review when the link names no tab (Ryne 2026-11-16)', () => {
+    renderPage('/tms/load-review')
+    const strip = screen.getByRole('tablist', { name: 'Load review filters' })
+    expect(within(strip).getByRole('tab', { name: /All in review/ }).getAttribute('aria-selected')).toBe('true')
+  })
+
   it('Looks ready shows every checked field with its value and a Ready column (Ryne 2026-11-15)', () => {
     window.localStorage.clear()
     renderPage('/tms/load-review?tab=ready')
@@ -195,8 +201,9 @@ describe('LoadReviewPage', () => {
     expect(screen.queryByText('POD before delivery')).toBeNull()
     cleanup()
     renderPage('/tms/load-review?shipment=s-8')
-    expect(await screen.findByText(/Delivered \(no time recorded\)/)).toBeTruthy()
-    expect(screen.getByTitle(/days in review can't be counted/)).toBeTruthy()
+    // The page now opens on All in review, so the row and the drawer both say it.
+    expect((await screen.findAllByText(/Delivered \(no time recorded\)/)).length).toBeGreaterThan(0)
+    expect(screen.getAllByTitle(/days in review can't be counted/).length).toBeGreaterThan(0)
     expect(screen.getAllByText('DELIVERED').length).toBeGreaterThan(0)
   })
 

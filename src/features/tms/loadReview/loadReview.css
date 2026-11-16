@@ -91,3 +91,19 @@
   .tms-portal .lr-fix-grid { grid-template-columns: 1fr 1fr; }
   .tms-portal .lr-fix button, .tms-portal .lr-fix input, .tms-portal .lr-fix select { min-height: 44px; }
 }
+
+/* "+N more" after the What to fix chips that fit; the tooltip and the rail list them all. */
+.tms-shell .aa-fix-item.aa-fix-more { color: var(--tms-muted); background: color-mix(in srgb, var(--tms-muted) 12%, transparent); }
+
+/*
+ * Scrolling (Ryne 2026-11-16: "it doesnt let me scroll in the review tab"). On desktop the Review page sits in the
+ * scrolling content column, so the page grew to the full height of the table and the grid's own scroller never moved:
+ * the grid only draws the rows in view of that scroller, so everything past the first screen came up blank. Bounding
+ * the page to the column makes the grid body scroll under its sticky header, the same as the Shipments board.
+ */
+@media (min-width: 901px) {
+  .tms-shell.tms-scroll-main .aa-load-review { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+  .tms-shell.tms-scroll-main .aa-load-review > * { flex: none; }
+  .tms-shell.tms-scroll-main .aa-load-review > .tms-dense-page { flex: 1 1 auto; min-height: 0; }
+  .tms-shell.tms-scroll-main .aa-load-review .tms-dense-body { min-height: 280px; }
+}
