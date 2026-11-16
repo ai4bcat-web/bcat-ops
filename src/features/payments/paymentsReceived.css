@@ -114,7 +114,7 @@
 /* Outstanding: open invoices by customer, ticked and received in bulk. */
 .tms-shell .pr-out { display: flex; flex-direction: column; gap: 10px; }
 .tms-shell .pr-out-sum { margin: 0; }
-.tms-shell .pr-out-group { border: 1px solid var(--tms-border); border-radius: 8px; background: var(--tms-card); overflow: hidden; }
+.tms-shell .pr-out-group { border: 1px solid var(--tms-border); border-radius: 8px; background: var(--tms-card); overflow: clip; }
 .tms-shell .pr-out-otr { border-style: dashed; }
 .tms-shell .pr-out-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 12px; background: var(--tms-surface-2, var(--tms-bg)); }
 .tms-shell .pr-out-twisty { border: 0; background: none; cursor: pointer; color: inherit; padding: 4px; min-width: 28px; min-height: 28px; }
