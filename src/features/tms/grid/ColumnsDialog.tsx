@@ -47,6 +47,8 @@ export interface ColumnsDialogProps<T> {
   onDeleteTemplate?: () => void
   /** Dialog title; defaults to "Columns". */
   title?: string
+  /** A line under the description, e.g. that the owner's changes apply to all users. */
+  note?: string
 }
 
 const DEFAULT_GROUP = 'Columns'
@@ -62,6 +64,7 @@ export function ColumnsDialog<T>({
   onSaveTemplate,
   onDeleteTemplate,
   title = 'Columns',
+  note,
 }: ColumnsDialogProps<T>) {
   const [chosen, setChosen] = useState<string[]>(columns)
   const [widthMap, setWidthMap] = useState<Record<string, number>>({ ...(widths ?? {}) })
@@ -163,7 +166,7 @@ export function ColumnsDialog<T>({
       open={open}
       onOpenChange={onOpenChange}
       title={title}
-      description="Check the fields to show, drag them into order, pin the ones that stay left and set their widths."
+      description={`Check the fields to show, drag them into order, pin the ones that stay left and set their widths.${note ? ` ${note}` : ''}`}
       className="tms-columns-dialog"
       footer={
         <>

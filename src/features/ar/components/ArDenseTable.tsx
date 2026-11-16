@@ -104,7 +104,7 @@ export function ArDenseTable<T>({ grid, pageFilters }: {
           onClear={() => { setFilters({}); pageFilters?.onClear() }}
         />
         <span className="tms-dense-spacer" />
-        <ColumnsButton
+        <ColumnsButton sharedWithAll={prefs.layoutSharedWithAll}
           catalog={movable}
           columns={prefs.columns}
           widths={prefs.widths}

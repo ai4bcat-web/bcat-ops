@@ -442,7 +442,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
         <TmsButton size="sm" variant="primary" onClick={onCreateShipment}>
           <Plus size={14} /> Create Shipment
         </TmsButton>
-        <ColumnsButton
+        <ColumnsButton sharedWithAll={prefs.layoutSharedWithAll}
           catalog={allColumns}
           columns={prefs.columns}
           widths={prefs.widths}

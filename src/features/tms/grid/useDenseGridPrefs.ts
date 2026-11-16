@@ -4,8 +4,10 @@
  * summary strip is open. The Shipments board's column templates (server side, shareable) feed
  * the same state through `applyLayout`, so a template and a hand-made layout are one thing.
  */
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { isOwnerEmail } from '@/lib/auth/admin'
 import type { DenseDensity, DenseSort } from './denseGridModel'
+import { publishOrgGridDefault, useOrgGridDefault, type OrgGridLayout } from './orgGridDefault'
 
 export interface DensePrefs {
   /** Visible column keys, in order. */
@@ -19,6 +21,8 @@ export interface DensePrefs {
   kpiOpen: boolean
   /** Which width rule the saved `widths` were made under; older ones are dropped once so every column starts fitted again. */
   widthsFit?: number
+  /** updatedAt of the owner's shared layout this person last took; a newer one replaces their columns once. */
+  orgSeenAt?: string | null
 }
 
 export interface UseDensePrefsOptions {
@@ -30,6 +34,11 @@ export interface UseDensePrefsOptions {
   validKeys: readonly string[]
   defaultSort: DenseSort | null
   defaultGroupBy?: string | null
+  /**
+   * Whether this grid takes part in the owner's shared layout (default true). The Shipments board
+   * has its own team layout (teamColumnLayout.ts) and opts out.
+   */
+  shareLayout?: boolean
 }
 
 export interface UseDensePrefsResult extends DensePrefs {
@@ -46,6 +55,8 @@ export interface UseDensePrefsResult extends DensePrefs {
   setGroupBy: (groupBy: string | null) => void
   setKpiOpen: (open: boolean) => void
   resetColumns: () => void
+  /** True when this user's column changes become everyone's layout (the owner on a shared grid). */
+  layoutSharedWithAll: boolean
 }
 
 const VERSION = 1
@@ -82,10 +93,31 @@ function read(key: string, opts: UseDensePrefsOptions): DensePrefs {
       sort: stored.sort === undefined ? defaults.sort : stored.sort,
       groupBy: stored.groupBy === undefined ? defaults.groupBy : stored.groupBy,
       kpiOpen: stored.kpiOpen === true,
+      orgSeenAt: typeof stored.orgSeenAt === 'string' ? stored.orgSeenAt : null,
     }
   } catch {
     return defaults
   }
+}
+
+/**
+ * Whether `prefs` should take the owner's shared layout now. Everyone takes a layout newer than the
+ * one they last took. The owner's own grid is the source, so it only takes the shared layout on a
+ * device that never synced (otherwise a slow save could land on top of newer edits).
+ */
+export function shouldTakeOrgLayout(prefs: Pick<DensePrefs, 'orgSeenAt'>, org: OrgGridLayout | null, owner: boolean): boolean {
+  if (!org || !org.updatedAt) return false
+  if (owner) return !prefs.orgSeenAt
+  return prefs.orgSeenAt !== org.updatedAt
+}
+
+/** `prefs` with the shared layout's columns, widths and pins (keys the grid no longer has are dropped). */
+export function withOrgLayout(prefs: DensePrefs, org: OrgGridLayout, validKeys: readonly string[]): DensePrefs {
+  const valid = new Set(validKeys)
+  const columns = org.columns.filter((k) => valid.has(k))
+  if (columns.length === 0) return { ...prefs, orgSeenAt: org.updatedAt }
+  const widths = Object.fromEntries(Object.entries(org.widths).filter(([k]) => columns.includes(k)))
+  return { ...prefs, columns, widths, pinned: org.pinned.filter((k) => columns.includes(k)), widthsFit: WIDTHS_FIT, orgSeenAt: org.updatedAt }
 }
 
 export function useDenseGridPrefs(opts: UseDensePrefsOptions): UseDensePrefsResult {
@@ -113,28 +145,62 @@ export function useDenseGridPrefs(opts: UseDensePrefsOptions): UseDensePrefsResu
     [],
   )
 
+  // The owner's shared layout: take a newer one, and publish the owner's own column changes.
+  const share = opts.shareLayout !== false
+  const owner = share && isOwnerEmail(opts.email)
+  const org = useOrgGridDefault(opts.gridId)
+  // Taken during render, like the user switch above, so the grid never paints the stale layout first.
+  if (share && org && shouldTakeOrgLayout(current.prefs, org, owner)) {
+    current = { key: current.key, prefs: withOrgLayout(current.prefs, org, opts.validKeys) }
+    setState(current)
+    try {
+      window.localStorage.setItem(current.key, JSON.stringify(current.prefs))
+    } catch {
+      /* private mode */
+    }
+  }
+
+  const layoutDirty = useRef(false)
+  const layoutUpdate = useCallback(
+    (patch: (prev: DensePrefs) => DensePrefs) => {
+      if (owner) layoutDirty.current = true
+      update(patch)
+    },
+    [owner, update],
+  )
+  const gridId = opts.gridId
+  const { columns: curColumns, widths: curWidths, pinned: curPinned } = current.prefs
+  useEffect(() => {
+    if (!owner || !layoutDirty.current) return
+    layoutDirty.current = false
+    publishOrgGridDefault(gridId, { columns: curColumns, widths: curWidths, pinned: curPinned }, (updatedAt) =>
+      update((p) => ({ ...p, orgSeenAt: updatedAt })),
+    )
+  }, [owner, gridId, curColumns, curWidths, curPinned, update])
+
   const defaultColumns = opts.defaultColumns
   return {
     ...current.prefs,
-    setColumns: useCallback((columns) => update((p) => ({ ...p, columns, pinned: p.pinned.filter((k) => columns.includes(k)) })), [update]),
-    setWidth: useCallback((k, width) => update((p) => ({ ...p, widths: { ...p.widths, [k]: width } })), [update]),
+    layoutSharedWithAll: owner,
+    setColumns: useCallback((columns) => layoutUpdate((p) => ({ ...p, columns, pinned: p.pinned.filter((k) => columns.includes(k)) })), [layoutUpdate]),
+    setWidth: useCallback((k, width) => layoutUpdate((p) => ({ ...p, widths: { ...p.widths, [k]: width } })), [layoutUpdate]),
     applyLayout: useCallback(
       (layout) =>
-        update((p) => ({
+        layoutUpdate((p) => ({
           ...p,
           columns: layout.columns,
           pinned: layout.pinned,
           widths: layout.replaceWidths ? { ...layout.widths } : { ...p.widths, ...layout.widths },
         })),
-      [update],
+      [layoutUpdate],
     ),
     setDensity: useCallback((density) => update((p) => ({ ...p, density })), [update]),
     setSort: useCallback((sort) => update((p) => ({ ...p, sort })), [update]),
     setGroupBy: useCallback((groupBy) => update((p) => ({ ...p, groupBy })), [update]),
     setKpiOpen: useCallback((kpiOpen) => update((p) => ({ ...p, kpiOpen })), [update]),
     resetColumns: useCallback(
-      () => update((p) => ({ ...p, columns: [...defaultColumns], widths: {}, pinned: [] })),
-      [update, defaultColumns],
+      () => layoutUpdate((p) => ({ ...p, columns: [...defaultColumns], widths: {}, pinned: [] })),
+      [layoutUpdate, defaultColumns],
     ),
   }
 }

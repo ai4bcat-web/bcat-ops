@@ -134,6 +134,7 @@ import {
   teamTemplateNameFor,
   type TeamColumnLayout,
 } from './teamColumnLayout'
+import { GRID_DEFAULT_PREFIX } from '@/features/tms/grid/orgGridDefault'
 import type { BatchShipmentTask, CustomerRecord, LocationRecord, ShipmentColumnTemplateRecord, TmsSettings, UserProfileRecord } from '@/types/tms'
 import { REVIEW_BILLING_LABEL, needsBillingReview, reviewBillingNote } from '@/lib/reviewBilling'
 import { matchesFlags, pastDeliveryOf, type BoardFlag } from './boardChips'
@@ -399,7 +400,8 @@ export function ShipmentsBoard() {
 
   const loadTemplates = useCallback(() => {
     listShipmentColumnTemplates()
-      .then((rows) => setColumnTemplates(rows))
+      // Grid defaults (the owner's layouts for other lists) share the table but are not board templates.
+      .then((rows) => setColumnTemplates(rows.filter((r) => !String(r.id ?? '').startsWith(GRID_DEFAULT_PREFIX))))
       .catch(() => {})
   }, [])
 
@@ -648,6 +650,8 @@ function BoardPane({
     defaultColumns: SHIPMENT_DEFAULT_COLUMNS,
     validKeys: SHIPMENT_COLUMN_KEYS,
     defaultSort: DEFAULT_SORT,
+    // The board's columns come from its own team layout (Edit layout), not the shared grid default.
+    shareLayout: false,
   })
   // Active, All and Voided each have their own team layout (an Active search across all years still uses Active's).
   const teamLayout = useMemo(

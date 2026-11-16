@@ -182,7 +182,7 @@ export function ApDenseList<T>({ config, email, onRefresh, pageFilters }: {
         <span className="tms-muted" data-testid="ap-count">
           {shown.length === rows.length ? `${rows.length} items` : `${shown.length} of ${rows.length} items`}
         </span>
-        <ColumnsButton
+        <ColumnsButton sharedWithAll={prefs.layoutSharedWithAll}
           catalog={catalog}
           columns={prefs.columns}
           widths={prefs.widths}

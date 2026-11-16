@@ -174,7 +174,7 @@ export function CarriersPage() {
           <TmsButton size="sm" disabled={missingRemitCount === null} onClick={() => { setTab('all'); setColumnFilter('remitEmail', { values: ['MISSING', 'INVALID'] }) }}>Missing remit e-mail ({missingRemitCount ?? '…'})</TmsButton>
           <ClearFiltersButton count={filterCount} onClear={() => setFilters({})} />
           <span className="tms-dense-spacer" />
-          <ColumnsButton
+          <ColumnsButton sharedWithAll={prefs.layoutSharedWithAll}
             catalog={catalog}
             columns={prefs.columns}
             widths={prefs.widths}

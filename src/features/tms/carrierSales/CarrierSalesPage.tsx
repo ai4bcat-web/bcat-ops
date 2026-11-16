@@ -252,7 +252,7 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
           <TmsButton size="sm" variant="secondary" onClick={onRefresh}>Refresh</TmsButton>
           {gridTab && (
             <>
-              <ColumnsButton catalog={catalog} columns={prefs.columns} widths={prefs.widths} pinned={prefs.pinned} onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })} />
+              <ColumnsButton sharedWithAll={prefs.layoutSharedWithAll} catalog={catalog} columns={prefs.columns} widths={prefs.widths} pinned={prefs.pinned} onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })} />
               <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
             </>
           )}

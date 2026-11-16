@@ -550,7 +550,7 @@ export function CustomersPage() {
           <ClearFiltersButton count={activeFilterCount(filters)} onClear={() => { setFilters({}); setPageSize(PAGE_SIZE) }} />
           <span className="tms-dense-spacer" />
           <TmsButton size="sm" variant="secondary" onClick={() => void dir.refresh()}>Refresh</TmsButton>
-          <ColumnsButton
+          <ColumnsButton sharedWithAll={prefs.layoutSharedWithAll}
             catalog={gridCatalog}
             columns={prefs.columns}
             widths={prefs.widths}
@@ -877,7 +877,7 @@ export function LocationsPage() {
           <ClearFiltersButton count={activeFilterCount(filters)} onClear={() => { setFilters({}); setQuery(''); setPageSize(PAGE_SIZE) }} />
           <span className="tms-dense-spacer" />
           <TmsButton size="sm" variant="secondary" onClick={() => void dir.refresh()}>Refresh</TmsButton>
-          <ColumnsButton catalog={catalog} columns={prefs.columns} widths={prefs.widths} pinned={prefs.pinned} onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })} />
+          <ColumnsButton sharedWithAll={prefs.layoutSharedWithAll} catalog={catalog} columns={prefs.columns} widths={prefs.widths} pinned={prefs.pinned} onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })} />
           <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
           <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} />
           {isAdmin && (
