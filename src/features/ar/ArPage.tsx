@@ -85,6 +85,9 @@ import type { FactoringItem } from '@/types'
 import { AccountingReportsDialog } from '@/features/finance/AccountingReportsDialog'
 import type { AccountingReportKind } from '@/features/finance/accountingReports'
 import { useDeliveredNotReady } from './useDeliveredNotReady'
+import { buildAgingReport, type AgingReport } from './agingReport'
+import { AgingReportTable } from './components/AgingReportTable'
+import { customerRefOf } from '@/lib/customerRef'
 import { ArInvoicedCard, ArPaidCard, ArReadyCard, ProfitCheckCard, ReviewReasonCard } from '@/features/finance/AccountingCards'
 import { arInvoicedStats, arPaidStats, arReadyStats, reviewReasonCounts } from '@/features/finance/accountingStats'
 import type { CustomerRecord, InvoiceRecord, ShipmentRecord } from '@/types/tms'
@@ -94,6 +97,7 @@ type ArDialog =
   | { kind: 'edit'; invoice: InvoiceRecord }
   | { kind: 'review'; invoices: InvoiceRecord[] }
   | { kind: 'statement'; customerId: string; customerName: string }
+  | { kind: 'statementPreview'; customerId: string; customerName: string }
   | { kind: 'bulkStatement'; customers: BulkStatementCustomer[] }
   | { kind: 'payment'; customerId: string; customerName: string; invoiceId?: string }
   | { kind: 'credit'; customerId: string; customerName: string }
@@ -118,6 +122,8 @@ interface ListView {
   actions?: ReactNode
   banner?: ReactNode
   grid: ArGrid<never>
+  /** A view that draws its own body (the Aging report) instead of the dense grid. */
+  body?: ReactNode
 }
 
 function view<T>(config: Omit<ListView, 'grid'> & { grid: ArGrid<T> }): ListView {
@@ -424,6 +430,18 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     : null
 
   const customerById = new Map(customers.map((c) => [c.id, c]))
+  // The Aging report: same invoices as Open AR, aged from the invoice date like the statement.
+  const lastPaidByCustomer = new Map<string, string>()
+  for (const inv of [...recentPaid, ...filteredOpen]) {
+    const at = inv.paidAt?.slice(0, 10)
+    if (at && at > (lastPaidByCustomer.get(inv.customerId) ?? '')) lastPaidByCustomer.set(inv.customerId, at)
+  }
+  const agingReport: AgingReport = buildAgingReport(filteredOpen, asOf, {
+    refOf: (inv) => customerRefOf(inv.references) ?? boardById.get(inv.shipmentId)?.customerReference ?? null,
+    termsOf: (id) => customerById.get(id)?.paymentTermsDays ?? null,
+    lastPaidOf: (id) => lastPaidByCustomer.get(id) ?? null,
+  })
+  const openInvoiceById = new Map(filteredOpen.map((inv) => [inv.id, inv]))
   // Bulk statements always preview and confirm first; nothing is mailed straight from the tick boxes.
   const runBulkStatements = () => {
     const names = new Map(aging.byCustomer.map((row) => [row.customerId, row.customerName]))
@@ -502,6 +520,12 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onStatement: (customerId, customerName) => setDialog({ kind: 'statement', customerId, customerName }),
       onBulkStatements: runBulkStatements,
       busy,
+      report: agingReport,
+      onPreview: (customerId, customerName) => setDialog({ kind: 'statementPreview', customerId, customerName }),
+      onOpenInvoice: (id) => {
+        const inv = openInvoiceById.get(id)
+        if (inv) setDialog({ kind: 'edit', invoice: inv })
+      },
     })
 
   const onParty = (id: string | null) => setOwed({ ...owed, parties: id ? [id] : [] })
@@ -580,7 +604,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         ) : (
           <>
             {current.banner}
-            <ArDenseTable<never> key={tab} grid={current.grid} pageFilters={{ count: owedFilterCount(owed), onClear: () => setOwed({ parties: [], divisions: [], due: null }) }} />
+            {current.body ?? <ArDenseTable<never> key={tab} grid={current.grid} pageFilters={{ count: owedFilterCount(owed), onClear: () => setOwed({ parties: [], divisions: [], due: null }) }} />}
           </>
         )}
       </div>
@@ -636,6 +660,14 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           customerName={dialog.customerName}
           onClose={() => setDialog(null)}
           onSent={() => { setDialog(null); void refreshAll() }}
+        />
+      )}
+      {dialog?.kind === 'statementPreview' && (
+        <AgingStatementDialog
+          previewOnly
+          customerId={dialog.customerId}
+          customerName={dialog.customerName}
+          onClose={() => setDialog(null)}
         />
       )}
       {dialog?.kind === 'bulkStatement' && (
@@ -1242,6 +1274,7 @@ function queueView({
 
 function agingView({
   errorBanner, aging, onCsv, customerById, statementSelected, onStatementSelect, onStatement, onBulkStatements, busy,
+  report, onPreview, onOpenInvoice,
 }: {
   errorBanner: ReactNode
   aging: AgingSummary
@@ -1252,6 +1285,9 @@ function agingView({
   onStatement: (customerId: string, customerName: string) => void
   onBulkStatements: () => void
   busy: boolean
+  report: AgingReport
+  onPreview: (customerId: string, customerName: string) => void
+  onOpenInvoice: (invoiceId: string) => void
 }): ListView {
   type Row = AgingSummary['byCustomer'][number]
   const columns: Array<Col<Row>> = [
@@ -1297,7 +1333,9 @@ function agingView({
         </TmsButton>
       )
     }
-    return undefined
+    // Every other column is plain text: DenseGrid draws what renderCell returns and does not fall
+    // back to the column's text, so returning undefined here left every cell blank.
+    return columns.find((c) => c.key === key)?.text(row) ?? null
   }
 
   return view<Row>({
@@ -1314,8 +1352,23 @@ function agingView({
     banner: (
       <>
         {errorBanner}
-        <p className="text-sm tms-muted">Aged from the invoice date. Email aging report previews the statement and the e-mail before anything is sent.</p>
+        <p className="text-sm tms-muted">
+          Aged from the invoice date, the same as the statement the customer receives. Past due counts from the due date.
+          Open a customer to see their invoices. Preview email shows exactly what would go out and sends nothing.
+          Factored (OTR) invoices are counted here but left off the customer's statement: OTR collects them.
+        </p>
       </>
+    ),
+    body: (
+      <AgingReportTable
+        report={report}
+        onOpenInvoice={onOpenInvoice}
+        onPreview={onPreview}
+        onStatement={onStatement}
+        selected={statementSelected}
+        onSelect={onStatementSelect}
+        busy={busy}
+      />
     ),
     grid: {
       gridId: 'ar-aging',

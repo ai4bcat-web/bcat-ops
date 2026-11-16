@@ -1,0 +1,50 @@
+/* Aging report: customer rows with a twisty, their invoices underneath; cards on phones and iPads. */
+.tms-aging { background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius-card); }
+.tms-aging-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--tms-border); }
+
+.tms-aging-table-wrap { overflow-x: auto; }
+.tms-aging-table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.tms-aging-table th, .tms-aging-table td { padding: 6px 10px; border-bottom: 1px solid var(--tms-border); text-align: left; white-space: nowrap; }
+.tms-aging-table thead th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--tms-text-2); background: var(--tms-surface); }
+.tms-aging-table .tms-dg-right { text-align: right; }
+.tms-aging-sort { all: unset; cursor: pointer; }
+.tms-aging-sort:focus-visible { outline: 2px solid var(--tms-primary); outline-offset: 2px; }
+.tms-aging-twisty-col, .tms-aging-check-col { width: 28px; padding-right: 0 !important; }
+.tms-aging-twisty { all: unset; cursor: pointer; display: inline-flex; padding: 2px; border-radius: var(--tms-radius-sm); }
+.tms-aging-twisty:hover { background: var(--tms-surface-hover); }
+.tms-aging-twisty:focus-visible { outline: 2px solid var(--tms-primary); }
+.tms-aging-name { all: unset; cursor: pointer; font-weight: 600; color: var(--tms-text); }
+.tms-aging-cust:hover { background: var(--tms-surface-hover); }
+.tms-aging-cust.tms-open { background: var(--tms-surface-selected); }
+.tms-aging-detail-row > td { padding: 0 0 8px 56px !important; background: var(--tms-surface); }
+.tms-aging-total th, .tms-aging-total td { font-weight: 700; border-top: 2px solid var(--tms-border); background: var(--tms-surface); }
+.tms-aging-late { color: var(--tms-badge-red); font-weight: 600; }
+.tms-aging-otr { display: inline-block; padding: 0 6px; border-radius: var(--tms-radius-pill); background: var(--tms-primary-tint); color: var(--tms-primary-ink); font-size: 11px; font-weight: 600; }
+.tms-aging-actions { text-align: right; }
+.tms-aging-btns { display: inline-flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+.tms-aging-inv { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; margin-top: 4px; }
+.tms-aging-inv th, .tms-aging-inv td { padding: 4px 8px; border-bottom: 1px solid var(--tms-border); text-align: left; white-space: nowrap; }
+.tms-aging-inv th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--tms-text-2); }
+.tms-aging-inv .tms-dg-right { text-align: right; }
+
+.tms-aging-cards { display: none; list-style: none; margin: 0; padding: 8px; gap: 8px; flex-direction: column; }
+.tms-aging-card { border: 1px solid var(--tms-border); border-radius: var(--tms-radius); background: var(--tms-card); padding: 10px 12px; min-width: 0; }
+.tms-aging-card-head { all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; }
+.tms-aging-card-name { flex: 1 1 auto; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.tms-aging-card-amt { flex: none; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tms-aging-card-buckets { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 4px 12px; margin: 4px 0 8px; font-size: 12px; }
+.tms-aging-card-buckets div { display: flex; justify-content: space-between; gap: 6px; min-width: 0; }
+.tms-aging-card-buckets dt { color: var(--tms-text-2); }
+.tms-aging-card-buckets dd { margin: 0; font-variant-numeric: tabular-nums; }
+.tms-aging-card-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.tms-aging-card-check { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 13px; }
+.tms-aging-card-invoices { list-style: none; margin: 8px 0 0; padding: 8px 0 0; border-top: 1px solid var(--tms-border); display: flex; flex-direction: column; gap: 8px; }
+.tms-aging-card-inv-top { display: flex; align-items: center; gap: 8px; }
+.tms-aging-card-inv-top .tms-aging-card-amt { margin-left: auto; }
+.tms-aging-card-total { background: var(--tms-surface); }
+
+@media (max-width: 1024px) {
+  .tms-aging-table-wrap { display: none; }
+  .tms-aging-cards { display: flex; }
+}
