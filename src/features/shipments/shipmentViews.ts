@@ -799,10 +799,12 @@ export type DocCellState = 'PRESENT' | 'MISSING' | 'NA' | ''
  * has neither, and Ivan Cartage's own fleet (ASSETS) has no carrier rate confirmation. '' = not known yet.
  */
 export function docCellOf(
-  row: Pick<ShipmentRow, 'status' | 'voidedAt' | 'deletedAt' | 'assignmentType' | 'revDivision' | 'docsMissing' | 'rateConSignedAt' | 'rateConStatus' | 'rateConOnFile'> & { docsRequired?: string[] | null; docsPresent?: string[] | null },
+  row: Pick<ShipmentRow, 'status' | 'voidedAt' | 'deletedAt' | 'assignmentType' | 'revDivision' | 'docsMissing' | 'rateConSignedAt' | 'rateConStatus' | 'rateConOnFile'> & { docsRequired?: string[] | null; docsPresent?: string[] | null; docsNotRequired?: string[] | null },
   docType: 'POD' | 'RATE_CON',
 ): DocCellState {
   if (row.revDivision === 'CAR_SHIPPING') return 'NA'
+  // The customer does not need this document to invoice (Ryne 2026-11-15: AUTO SHIPPER), unless it is on file anyway.
+  if (row.docsNotRequired?.includes(docType)) return docType === 'POD' && Array.isArray(row.docsPresent) && row.docsPresent.includes('POD') ? 'PRESENT' : 'NA'
   const delivered = boardStatusOf(row) === 'DELIVERED'
   if (docType === 'POD') {
     // What is on file wins, whether or not the customer's list requires a POD.

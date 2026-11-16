@@ -24,6 +24,7 @@ import {
   type Row,
 } from './shipmentStore'
 import { gateLoadIds, requiredDocTypesFor } from '../../../src/lib/shipmentDocuments'
+import { customerDocsNotRequired } from '../../../src/lib/reviewRequirements'
 import { loadExtraDocTypes } from '../../../src/lib/loadRequiredDocs'
 import type {
   ReleaseGateDocument,
@@ -232,6 +233,11 @@ export async function loadReleaseGateInput(
       customer as Pick<CustomerRecord, 'requiredDocsForInvoice'> | null,
       settings as Pick<TmsSettings, 'defaultRequiredDocs'> | null,
     ).types,
+    // POD / RC the customer does not need to invoice (its Load Review list), e.g. AUTO SHIPPER.
+    notRequiredDocTypes: customerDocsNotRequired(
+      customer as { reviewRequirements?: string[] | null } | null,
+      settings as { reviewRequirements?: string[] | null } | null,
+    ),
     // What this order's loads ask for on top of the customer's list (SET_LOAD_REQUIRED_DOCS).
     extraDocTypes: loadExtraDocTypes(orderLoads as { requiredDocTypes?: string[] | null }[]),
     requiredReferenceCodes: codes,

@@ -25,6 +25,7 @@
  * notifier Lambdas bundle this file by path, so a `@/` alias would break the
  * function build.
  */
+import { customerDocsNotRequired } from './reviewRequirements'
 import { NEVER_BLOCKING_DOC_TYPES } from './releaseGate'
 import type {
   CustomerRecord,
@@ -492,6 +493,12 @@ export function evaluateDocGate(input: DocGateInput): DocGateResult {
   const gated = input.scope === 'CARRIER' ? required : required.filter((type) => !NEVER_BLOCKING_DOC_TYPES.includes(type))
   if (input.scope !== 'CARRIER') {
     if (input.carShipper !== true && !gated.includes('RATE_CON')) gated.push('RATE_CON')
+    // POD / RC the customer does not need to invoice (its Load Review list), like the release gate.
+    const notRequired = customerDocsNotRequired(
+      input.customer as { reviewRequirements?: string[] | null } | null | undefined,
+      input.settings as { reviewRequirements?: string[] | null } | null | undefined,
+    )
+    for (let i = gated.length - 1; i >= 0; i--) if ((notRequired as string[]).includes(gated[i])) gated.splice(i, 1)
     for (const type of normalizeRequiredDocTypes(input.extraDocTypes ?? []).types) {
       if (!gated.includes(type)) gated.push(type)
     }

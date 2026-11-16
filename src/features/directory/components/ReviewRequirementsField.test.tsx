@@ -10,7 +10,7 @@ describe('ReviewRequirementsField', () => {
     expect(screen.getByRole('checkbox', { name: 'Use the organization default' })).toBeChecked()
     expect(screen.getByRole('checkbox', { name: 'Sales rep' })).toBeChecked()
     expect(screen.getByRole('checkbox', { name: 'Sales rep' })).toBeDisabled()
-    expect(screen.getByRole('checkbox', { name: 'POD received' })).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'POD' })).not.toBeChecked()
   })
 
   it('unticking the default starts the customer from the org list; a tick then saves an explicit list', () => {
@@ -19,7 +19,7 @@ describe('ReviewRequirementsField', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Use the organization default' }))
     expect(onChange).toHaveBeenLastCalledWith(['salesRep'])
     rerender(<ReviewRequirementsField value={['salesRep']} inheritFrom={['salesRep']} onChange={onChange} />)
-    fireEvent.click(screen.getByRole('checkbox', { name: 'POD received' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'POD' }))
     expect(onChange).toHaveBeenLastCalledWith(['podReceived', 'salesRep'])
   })
 
@@ -34,6 +34,6 @@ describe('ReviewRequirementsField', () => {
     render(<ReviewRequirementsField value={null} onChange={vi.fn()} />)
     expect(screen.queryByRole('checkbox', { name: 'Use the organization default' })).toBeNull()
     expect(screen.getAllByRole('checkbox').every((box) => (box as HTMLInputElement).checked)).toBe(true)
-    expect(screen.getAllByRole('checkbox')).toHaveLength(7)
+    expect(screen.getAllByRole('checkbox')).toHaveLength(8)
   })
 })

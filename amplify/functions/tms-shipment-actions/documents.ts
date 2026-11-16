@@ -77,7 +77,7 @@ import { planPendingCarrierBills, readPendingBillContext, writePendingBill } fro
 import { hasGap, isReleasedOrder, reconcileReleasedOrder, type ReconcileFinding } from '../../../src/lib/billingReconcile'
 import { evaluateReleaseGate, releaseGateError, type ReleaseGateResult } from '../../../src/lib/releaseGate'
 import { factorGapsForLoad, factoringPoNumber, routeEnds, type FactorReadyInput } from '../../../src/lib/factorReadyAtCreate'
-import { evaluateLoadReview, loadReviewExtras, loadReviewRefusal, type LoadReviewReason } from '../../../src/lib/loadReview'
+import { evaluateLoadReview, isOwnFleetReviewLoad, loadReviewExtras, loadReviewRefusal, type LoadReviewReason } from '../../../src/lib/loadReview'
 import { profitFromFacts, resolveReviewRequirements, type ReviewFacts, type ReviewRequirement } from '../../../src/lib/reviewRequirements'
 import {
   isCustomerUnresolved,
@@ -1350,7 +1350,14 @@ function reviewFacts(bundle: Bundle, order: Row): ReviewFacts {
 function reviewExtras(bundle: Bundle, order: Row, customer: Row | null, settings: Row | null, gateOwnsPod = true): LoadReviewReason[] {
   return [
     ...loadReviewExtras({
-      shipment: { legacyImported: bundle.shipment.legacyImported === true },
+      shipment: {
+        legacyImported: bundle.shipment.legacyImported === true,
+        // Own fleet (Ivan Cartage) by kind: an OWN_ASSET load or an active OWN_ASSET assignment needs no carrier rate.
+        ownFleet: isOwnFleetReviewLoad({
+          assignmentType: (bundle.loads as Row[]).some((l) => l.assignmentType === 'OWN_ASSET') ? 'OWN_ASSET' : null,
+          legKinds: (bundle.loadCarriers as Row[]).filter((l) => l.status === 'ACTIVE').map((l) => (l.kind == null ? null : String(l.kind))),
+        }),
+      },
       facts: reviewFacts(bundle, order),
       // The release gate already refuses on a missing POD (with its own sentence); a push has no gate.
       requirements: reviewRequirementsFor(customer, settings).filter((key) => !gateOwnsPod || key !== 'podReceived'),

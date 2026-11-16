@@ -6,6 +6,11 @@ import {
   type ReviewRequirement,
 } from '@/lib/reviewRequirements'
 
+const DOC_KEYS: { key: ReviewRequirement; label: string }[] = [
+  { key: 'podReceived', label: 'POD' },
+  { key: 'rateConReceived', label: 'RC' },
+]
+
 /**
  * What a shipment must show before it can be pushed to Load Review (and what the Load Review
  * gate re-checks). One field serves both editors: the customer's profile passes
@@ -34,7 +39,22 @@ export function ReviewRequirementsField({ value, onChange, inheritFrom, disabled
           Use the organization default
         </label>
       )}
-      {REVIEW_REQUIREMENTS.map((key) => (
+      {/* Ryne 2026-11-15: which documents this customer needs before it can be invoiced (AUTO SHIPPER needs neither). */}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', fontSize: 13, flexWrap: 'wrap' }} role="group" aria-label="Documents required to invoice">
+        <span>Documents required to invoice:</span>
+        {DOC_KEYS.map(({ key, label }) => (
+          <label key={key} style={{ display: 'flex', gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={effective.includes(key)}
+              disabled={disabled || inherits}
+              onChange={(e) => onChange(normalizeReviewRequirements(e.target.checked ? [...effective, key] : effective.filter((k) => k !== key)))}
+            />
+            {label}
+          </label>
+        ))}
+      </div>
+      {REVIEW_REQUIREMENTS.filter((key) => !DOC_KEYS.some((d) => d.key === key)).map((key) => (
         <label key={key} style={{ display: 'flex', gap: 8, fontSize: 13 }}>
           <input
             type="checkbox"
@@ -49,6 +69,7 @@ export function ReviewRequirementsField({ value, onChange, inheritFrom, disabled
       ))}
       <p className="tms-muted" style={{ fontSize: 12, margin: 0 }}>
         A shipment cannot be pushed to Load Review until every ticked item is met. Load Review checks the same list again before release.
+        Unticking POD or RC means this customer's loads can be invoiced without it; OTR still requires both for a factored load.
       </p>
     </fieldset>
   )

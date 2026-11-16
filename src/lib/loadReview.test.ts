@@ -215,8 +215,14 @@ describe('evaluateLoadReview — cached row verdict', () => {
     expect(verdict.checks.salesRep.reasons.map((r) => r.message)).toEqual(['Missing sales rep'])
     expect(verdict.checks.revDivision.reasons.map((r) => r.message)).toEqual(['Missing revenue division'])
     expect(verdict.checks.documents.reasons.map((r) => r.message)).toEqual(['Missing document: POD'])
-    expect(verdict.checks.charges.reasons.map((r) => r.message)).toEqual(['No customer charges', 'Profit not available (needs revenue and expense)'])
+    // The fixture is an own-fleet load: no carrier rate, so no profit requirement (Ryne 2026-11-15).
+    expect(verdict.checks.charges.reasons.map((r) => r.message)).toEqual(['No customer charges'])
     expect(verdict.checks.details.ok).toBe(true)
+  })
+
+  it('a carrier load still needs its expense and profit', () => {
+    const verdict = evaluateLoadReview({ row: delivered({ assignmentType: 'CARRIER', orderRevenueCents: 0, costCents: null }) })
+    expect(verdict.checks.charges.reasons.map((r) => r.message)).toEqual(['No customer charges', 'No expense entered', 'Profit not available (needs revenue and expense)'])
   })
 
   it('fails Documents when docs have not been checked', () => {

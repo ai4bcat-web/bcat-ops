@@ -1,7 +1,7 @@
 import type { ShipmentListRow } from '@/hooks/useShipments'
 import { docCellOf } from '@/features/shipments/shipmentViews'
 import { formatCents } from '@/lib/invoiceBuild'
-import { failingReasons, loadReviewFieldReasons, loadReviewNeeds, type LoadReviewFieldKey, type LoadReviewVerdict } from '@/lib/loadReview'
+import { failingReasons, isOwnFleetReviewLoad, loadReviewFieldReasons, loadReviewNeeds, type LoadReviewFieldKey, type LoadReviewVerdict } from '@/lib/loadReview'
 import { deliveredText } from './reviewStatus'
 
 /** The customer's rate as the review check reads it (order revenue, else the shipment's). */
@@ -23,11 +23,11 @@ export function profitOf(row: ShipmentListRow): { cents: number; pct: number | n
  * not require this document, or the order's document check found nothing missing.
  */
 export function docBasisText(row: ShipmentListRow, docType: 'POD' | 'RATE_CON'): string {
+  if (row.docsNotRequired?.includes(docType) && docCellOf(row, docType) !== 'PRESENT') return 'Not required'
   const cell = docCellOf(row, docType)
   if (cell === 'PRESENT') return 'On file'
   if (cell === 'NA') return 'N/A'
   if (row.docsOverrideAt) return 'Signed off (no file seen)'
-  if (Array.isArray(row.docsRequired) && !row.docsRequired.includes(docType)) return 'Not required'
   if (Array.isArray(row.docsMissing) && !row.docsMissing.includes(docType)) return 'Doc check OK (file not seen)'
   return ''
 }
@@ -44,8 +44,9 @@ export function reviewFieldText(row: ShipmentListRow, key: LoadReviewFieldKey): 
     case 'pod': return docBasisText(row, 'POD')
     case 'rateCon': return docBasisText(row, 'RATE_CON')
     case 'customerRate': { const c = customerRateCents(row); return c == null ? '' : formatCents(c) }
-    case 'carrierRate': return row.costCents == null ? '' : formatCents(row.costCents)
-    case 'profit': { const p = profitOf(row); return p == null ? '' : formatCents(p.cents) } // dollars only (Ryne 2026-11-15: no GP %)
+    // Own fleet (Ivan Cartage) has no carrier rate to enter, so neither it nor profit is checked (Ryne 2026-11-15).
+    case 'carrierRate': return isOwnFleetReviewLoad(row) ? 'N/A (own fleet)' : row.costCents == null ? '' : formatCents(row.costCents)
+    case 'profit': { if (isOwnFleetReviewLoad(row)) return 'N/A (own fleet)'; const p = profitOf(row); return p == null ? '' : formatCents(p.cents) } // dollars only (Ryne 2026-11-15: no GP %)
     case 'salesRep': return row.salesRepName ?? ''
     case 'revDivision': return row.revDivision?.replace(/_/g, ' ') ?? ''
     case 'delivered': { const t = deliveredText(row); return t === '—' ? '' : t }

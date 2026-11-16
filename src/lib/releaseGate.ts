@@ -104,6 +104,8 @@ export interface ReleaseGateInput {
   order: ReleaseGateOrder
   /** The customer's list (or the org default); POD and RATE_CON are added here, BOL is dropped. */
   requiredDocTypes: string[]
+  /** Documents this customer does not need to invoice (customerDocsNotRequired): dropped unless a load asks for them. */
+  notRequiredDocTypes?: string[]
   /** Per-load additions (`Load.requiredDocTypes`): explicit, so they block as written. */
   extraDocTypes?: string[] | null
   requiredReferenceCodes: string[]
@@ -164,12 +166,15 @@ export function requiredDocTypesForRelease(
   requiredDocTypes: readonly string[],
   legs: readonly ReleaseGateLeg[],
   extraDocTypes: readonly string[] = [],
-  opts: { carShipper?: boolean } = {},
+  opts: { carShipper?: boolean; notRequired?: readonly string[] } = {},
 ): string[] {
   void legs
   const out: string[] = []
-  const add = (type: unknown) => {
+  // What the customer does not need to invoice (customerDocsNotRequired). Per-load extras are explicit and still count.
+  const skip = new Set(opts.notRequired ?? [])
+  const add = (type: unknown, explicit = false) => {
     const trimmed = typeof type === 'string' ? type.trim() : ''
+    if (!explicit && skip.has(trimmed)) return
     if (trimmed && !out.includes(trimmed)) out.push(trimmed)
   }
   for (const type of requiredDocTypes) {
@@ -178,7 +183,7 @@ export function requiredDocTypesForRelease(
   }
   for (const type of ALWAYS_REQUIRED_DOC_TYPES) add(type)
   if (!opts.carShipper) add('RATE_CON')
-  for (const type of extraDocTypes) add(type)
+  for (const type of extraDocTypes) add(type, true)
   return out
 }
 
@@ -219,7 +224,7 @@ export function evaluateReleaseGate(input: ReleaseGateInput): ReleaseGateResult 
     if (!perCarrierRateCon && carrierLegs.some((leg) => leg.rateConStatus === 'SIGNED')) {
       present.add('RATE_CON')
     }
-    for (const type of requiredDocTypesForRelease(input.requiredDocTypes, legs, input.extraDocTypes ?? [], { carShipper: isCarShipperLoad(shipment) })) {
+    for (const type of requiredDocTypesForRelease(input.requiredDocTypes, legs, input.extraDocTypes ?? [], { carShipper: isCarShipperLoad(shipment), notRequired: input.notRequiredDocTypes ?? [] })) {
       if (type === 'RATE_CON' && perCarrierRateCon) {
         const unsigned = carrierLegs.filter((leg) => leg.rateConStatus !== 'SIGNED')
         if (unsigned.length > 0) {
