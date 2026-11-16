@@ -536,9 +536,14 @@ async function findShipmentRatecon(
     const owner = trim(d.orderId)
     return !!owner && (!orderId || owner === orderId)
   }
+  // The editor's Rate confirmation box files the customer's rate con on the shipment itself (no order, load or assignment named):
+  // the rest of the app counts it for the shipment's order (presentDocTypes soleOrder), so the factor queue must too. A file BCAT
+  // generated or a carrier sent through the portal is never it (20031/20032/20035/20044/20047, Ryne 2026-11-16).
+  const shipmentLevel = (d: Row): boolean =>
+    !trim(d.orderId) && !trim(d.loadId) && !trim(d.loadCarrierId) && !['GENERATED', 'CARRIER_PORTAL'].includes(trim(d.source))
   const hit =
-    docs.find((d) => trim(d.type) === 'CUSTOMER_RATE_CON' && sendableDocument(d) && mine(d)) ??
-    docs.find((d) => trim(d.type) === 'RATE_CON' && sendableDocument(d) && mine(d))
+    docs.find((d) => trim(d.type) === 'CUSTOMER_RATE_CON' && sendableDocument(d) && (mine(d) || shipmentLevel(d))) ??
+    docs.find((d) => trim(d.type) === 'RATE_CON' && sendableDocument(d) && (mine(d) || shipmentLevel(d)))
   return hit ? shipmentDocRow(hit, loadId, 'RateCon') : null
 }
 

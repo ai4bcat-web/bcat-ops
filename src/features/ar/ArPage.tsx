@@ -40,7 +40,7 @@ import { toast } from 'sonner'
 import { BillingGapsPanel } from './components/BillingGapsPanel'
 import { Eye, RefreshCw } from 'lucide-react'
 import {
-  TmsBadge, TmsButton, TmsCard, TmsHeadBand, TmsSelect, TmsSummaryChips, TmsTabStrip, TmsTabs,
+  TmsBadge, TmsButton, TmsCard, TmsDialog, TmsHeadBand, TmsSelect, TmsSummaryChips, TmsTabStrip, TmsTabs,
   type TmsTabGroup,
 } from '@/features/tms/kit'
 import type { DenseColumn } from '@/features/tms/grid/denseGridModel'
@@ -105,6 +105,7 @@ type ArDialog =
   | { kind: 'batchFactor'; rows: ArQueueRow[] }
   | { kind: 'void'; invoice: InvoiceRecord }
   | { kind: 'changeCustomer'; invoice: InvoiceRecord }
+  | { kind: 'why'; pro: string; reason: string }
 
 /** One shipment the batch would not bill, and exactly what the release gate said. */
 interface BatchRefusal {
@@ -512,6 +513,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onBatchGenerate: runBatchGenerate,
       factorReadiness,
       onBatchFactor: (rows) => setDialog({ kind: 'batchFactor', rows }),
+      onWhy: (row: ArQueueRow, reason: string) => setDialog({ kind: 'why', pro: String(row.shipmentNumber ?? row.orderId), reason }),
       onReview: (invs) => setDialog({ kind: 'review', invoices: invs }),
       onEdit: (inv) => setDialog({ kind: 'edit', invoice: inv }),
       onStatement: (customerId, customerName) => setDialog({ kind: 'statement', customerId, customerName }),
@@ -633,6 +635,9 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           onVoid={(inv) => setDialog({ kind: 'void', invoice: inv })}
           onChangeCustomer={(inv) => setDialog({ kind: 'changeCustomer', invoice: inv })}
         />
+      )}
+      {dialog?.kind === 'why' && (
+        <TmsDialog open onOpenChange={(open) => { if (!open) setDialog(null) }} title={`Why ${dialog.pro} can't be picked`} description={dialog.reason} footer={<TmsButton variant="primary" onClick={() => setDialog(null)}>Close</TmsButton>} />
       )}
       {dialog?.kind === 'changeCustomer' && (
         <ChangeInvoiceCustomerDialog
@@ -812,7 +817,7 @@ function queueView({
   status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, factorByItemId, customerById,
   attachmentPlans, boardById, shipmentsById, months, month, paidLoading, onMonth, onSelect, invoiceErrors, invoicesRunning, onRetryInvoice, onBatchGenerate, onReview, onEdit,
   onStatement, paymentFacts,
-  factorReadiness, onBatchFactor,
+  factorReadiness, onBatchFactor, onWhy,
 }: {
   status: ArQueueStatus
   rows: ArQueueRow[]
@@ -842,6 +847,8 @@ function queueView({
   /** Ready to factor per row key (Ready to invoice only). */
   factorReadiness?: Map<string, FactorReadiness>
   onBatchFactor?: (rows: ArQueueRow[]) => void
+  /** Why a row's checkbox is disabled, said in a dialog (Ryne 2026-11-16). */
+  onWhy: (row: ArQueueRow, reason: string) => void
   onReview: (invoices: InvoiceRecord[]) => void
   onEdit: (invoice: InvoiceRecord) => void
   /** Invoiced, grouped by customer: e-mail that customer's aging report from the group header. */
@@ -889,7 +896,10 @@ function queueView({
     if (!r.factorBilled) return r.missing.length ? r.missing.join('; ') : '—'
     return r.ready ? '✓ Ready to factor' : `Missing: ${r.missing.join('; ')}`
   }
-  /** A factor-billed load is picked only when it is Ready to factor ✓; any other load keeps its own rule. */
+  /**
+   * A factor-billed load is picked only when it is Ready to factor ✓: the customer's rate confirmation and the POD, plus what OTR's
+   * API itself takes (Ryne 2026-11-16). Any other load keeps its own rule. The reason is shown beside the box, not only on hover.
+   */
   const selectBlocked = (row: ArQueueRow): string | null => {
     if (row.reasons.length > 0) return row.reasons.join('; ')
     const r = readinessOf(row)
@@ -922,7 +932,7 @@ function queueView({
   ]
 
   const columns: Array<Col<ArQueueRow>> = [
-    ...(ready ? [{ key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 40 } as Col<ArQueueRow>] : []),
+    ...(ready ? [{ key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 76 } as Col<ArQueueRow>] : []),
     { key: 'shipment', header: 'PRO', group: 'Shipment', text: (row) => row.shipmentNumber ?? row.shipmentId, extraPx: 16 },
     { key: 'invoice', header: 'Invoice #', group: 'Invoice', text: (row) => row.invoiceNumber ?? '—' },
     {
@@ -981,14 +991,19 @@ function queueView({
     switch (key) {
       case 'select':
         return (
-          <input
-            type="checkbox"
-            aria-label={`Select ${row.shipmentNumber ?? row.orderId}`}
-            checked={selected.includes(row.orderId)}
-            disabled={selectBlocked(row) != null}
-            title={selectBlocked(row) ?? undefined}
-            onChange={() => toggle(row.orderId)}
-          />
+          <span className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              aria-label={`Select ${row.shipmentNumber ?? row.orderId}`}
+              checked={selected.includes(row.orderId)}
+              disabled={selectBlocked(row) != null}
+              title={selectBlocked(row) ?? undefined}
+              onChange={() => toggle(row.orderId)}
+            />
+            {selectBlocked(row) != null && (
+              <button type="button" className="tms-badge tms-badge-orange" data-testid="ar-why" aria-label={`Why ${row.shipmentNumber ?? row.orderId} cannot be selected`} onClick={() => onWhy(row, selectBlocked(row) ?? '')}>Why?</button>
+            )}
+          </span>
         )
       // PRO and Invoice # open the invoice (Ryne, 2026-11-12) — never the shipment from here.
       case 'shipment': {

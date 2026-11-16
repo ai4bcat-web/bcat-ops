@@ -348,7 +348,14 @@ async function factorReadyFor(orderId: string, factorRemitToName: string | null)
   const release = evaluateReleaseGate(await loadReleaseGateInput(releaseGateDeps, {
     shipmentId, orderId, shipment: shipmentRow, order: orderRow, loads: loadRows, customer: customerRow,
   }))
-  for (const reason of release.missing) missing.push(reason.message)
+  // Factoring needs the rate confirmation and the POD (Ryne 2026-11-16) on a delivered load: the other release-gate reasons
+  // (carrier pay, driver, references, exceptions) are billing's, not OTR's, and no longer hold a factored invoice back.
+  const FACTOR_GATE_CODES = new Set(['VOIDED', 'CANCELED', 'NOT_DELIVERED', 'DOC_MISSING'])
+  for (const reason of release.missing) {
+    if (!FACTOR_GATE_CODES.has(reason.code)) continue
+    if (reason.code === 'DOC_MISSING' && reason.detail && !['POD', 'RATE_CON', 'CUSTOMER_RATE_CON'].includes(reason.detail)) continue
+    missing.push(reason.message)
+  }
   for (const gap of factorGapsAtCreate({
     customer,
     poNumber: factoringPoNumber(order.references, load?.tmsId as string | null | undefined),

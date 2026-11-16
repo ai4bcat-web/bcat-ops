@@ -575,4 +575,14 @@ describe('Ready to invoice: batch Factor', () => {
     expect((screen.getByTestId('batch-factor') as HTMLButtonElement).disabled).toBe(true)
     factorReady.current = {}
   })
+
+  it('a disabled box has a visible Why? chip that opens the reason (Ryne 2026-11-16)', async () => {
+    factorReady.current = { o1: { orderId: 'o1', factorBilled: true, ready: false, missing: ['Missing document: RATE_CON — Rate confirmation'] } }
+    await setup({ UNBILLED: [worklistRow()] })
+    await settle()
+    fireEvent.click(screen.getByTestId('ar-why'))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/Missing document: RATE_CON/)).toBeTruthy()
+    factorReady.current = {}
+  })
 })
