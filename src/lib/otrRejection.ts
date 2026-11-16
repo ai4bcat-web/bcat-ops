@@ -68,6 +68,11 @@ export function isOtrRejected(item: Parameters<typeof otrRejection>[0]): boolean
 
 const OWN_FAILURE = /auth failed|unauthori[sz]ed|timed? ?out|network|ECONN|fetch failed|not configured/i
 
+/** An error that is our own failure to reach OTR (a sign-in, timeout or connection problem), not OTR turning the invoice down. */
+export function isOwnFailure(error: string | null | undefined): boolean {
+  return OWN_FAILURE.test(error ?? '')
+}
+
 /**
  * Why OTR turned this load down, for the shipment page — whatever the row's status now, so the
  * reason is still there after the load was moved to manual invoice. Null when OTR never did.
@@ -82,12 +87,18 @@ export function otrRejectionReason(item: Parameters<typeof otrRejection>[0]): st
 }
 
 /**
- * The OTR rejected tab on the Factoring page (Ryne 2026-11-14: the manual tab is renamed OTR rejected):
- * every row OTR turned down, plus rows already parked to go out by hand (status MANUAL_INVOICE),
- * so nothing that still has to be invoiced by hand drops out of view.
+ * The OTR rejected tab on the Factoring page: only rows OTR itself turned down (No buy, Dead, or an
+ * error OTR sent back) that are still the office's work. Rows that were simply pulled out of the
+ * queue to be invoiced by hand are not rejections; they have their own tab (`inManualInvoiceTab`)
+ * so this tab and the "Rejected, in the queue" card always count the same rows (Ryne 2026-11-16).
  */
 export function inOtrRejectedTab(item: Parameters<typeof otrRejection>[0]): boolean {
-  return isOtrRejected(item) || item.status === 'MANUAL_INVOICE'
+  return isOtrRejected(item)
+}
+
+/** The Manual invoice tab: rows taken out of the OTR queue to be invoiced by hand that OTR did not reject. */
+export function inManualInvoiceTab(item: Parameters<typeof otrRejection>[0]): boolean {
+  return item.status === 'MANUAL_INVOICE' && !isOtrRejected(item)
 }
 
 /**
