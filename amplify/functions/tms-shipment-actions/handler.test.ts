@@ -5739,6 +5739,15 @@ describe('DUPLICATE_SHIPMENT', () => {
     expect(stops.map((s) => s.appt)).toEqual(['2026-03-09T13:00:00.000Z', '2026-03-10T13:00:00.000Z'])
     expect(stops.every((s) => s.driverId === null && s.arrivedAt === null)).toBe(true)
   })
+  it('a copy carries no void or delete markers at all, not even NULL ones (they hid live copies from the board)', async () => {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    const source = table(TABLES.shipment).get(ids.shipmentId)!
+    Object.assign(source, { voidedAt: null, voidedBy: null, voidReason: null, deletedAt: null, deletedBy: null })
+    const result = (await call('DUPLICATE_SHIPMENT', { shipmentId: ids.shipmentId, copies: [{}] })) as { created: string[] }
+    const copy = table(TABLES.shipment).get(result.created[0])!
+    for (const key of ['voidedAt', 'voidedBy', 'voidReason', 'deletedAt', 'deletedBy']) expect(copy).not.toHaveProperty(key)
+  })
   it('a copy with no new dates starts with blank appointments and none of the source booking', async () => {
     const ids = await createDraft()
     await saveForm(ids.shipmentId)

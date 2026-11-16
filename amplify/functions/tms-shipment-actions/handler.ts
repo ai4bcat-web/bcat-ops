@@ -3400,6 +3400,12 @@ async function autoPushToReview(shipmentId: string, caller: Caller): Promise<boo
   }
 }
 
+/** Void/delete markers: absent on a live row. A NULL-typed copy of one counts as absent too (see NOT_VOIDED_EXPR). */
+const VOID_MARKER_KEYS = ['deletedAt', 'deletedBy', 'voidedAt', 'voidedBy', 'voidReason'] as const
+
+/** "Not voided" in a DynamoDB filter: no `voidedAt`, or a NULL-typed one (old duplicates wrote `voidedAt: null`). Needs `:nullType` = { S: 'NULL' }. */
+export const NOT_VOIDED_EXPR = '(attribute_not_exists(voidedAt) OR attribute_type(voidedAt, :nullType))'
+
 /** PUSH_READY_TO_LOAD_REVIEW — sweep every delivered shipment not yet in Load Review and push the ones that pass the verdict. */
 async function pushReadyToReview(caller: Caller): Promise<Row> {
   let pushed = 0
@@ -3409,9 +3415,9 @@ async function pushReadyToReview(caller: Caller): Promise<Row> {
     const page = await dynamo.send(new ScanCommand({
       TableName: SHIPMENT_TABLE_NAME,
       ExclusiveStartKey: key,
-      FilterExpression: '#s = :d AND attribute_not_exists(loadReviewPushedAt) AND attribute_not_exists(voidedAt)',
+      FilterExpression: `#s = :d AND attribute_not_exists(loadReviewPushedAt) AND ${NOT_VOIDED_EXPR}`,
       ExpressionAttributeNames: { '#s': 'status' },
-      ExpressionAttributeValues: { ':d': { S: 'DELIVERED' } },
+      ExpressionAttributeValues: { ':d': { S: 'DELIVERED' }, ':nullType': { S: 'NULL' } },
       ProjectionExpression: 'id',
     }))
     for (const item of page.Items ?? []) {
@@ -4325,12 +4331,6 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
       datPostedAt: null,
       workflowRunId: null,
       parentShipmentId: null,
-      // Execution and accounting state never travel; the commercial division does.
-      deletedAt: null,
-      deletedBy: null,
-      voidedAt: null,
-      voidedBy: null,
-      voidReason: null,
       orderIds: [newOrderId],
       loadIds: [newLoadId],
       ...mirrors,
@@ -4341,6 +4341,10 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
       createdAt: now,
       updatedAt: now,
     }
+    // Execution and accounting state never travel; the commercial division does. The void and
+    // delete markers are left OFF the copy, never written as NULL: the board's server-side
+    // "not voided" filter is attribute_not_exists, so a NULL-typed `voidedAt` hid live copies.
+    for (const key of VOID_MARKER_KEYS) delete shipmentRow[key]
     // The copy keeps its source's tracker; a source with none falls back to the customer's default.
     shipmentRow.trackerId = optionalString(source.shipment.trackerId, 100)
       ?? (sourceCustomerId ? await activeProfileIdOrNull((await getById(CUSTOMER_TABLE_NAME, sourceCustomerId))?.defaultTrackerId) : null)
