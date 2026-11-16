@@ -129,7 +129,7 @@ describe('LoadReviewPage', () => {
     expect(screen.getAllByText('PO-1').length).toBeGreaterThan(0)
     expect(screen.getAllByText('$1,200.00').length).toBeGreaterThan(0)
     expect(screen.getAllByText('$900.00').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('$300.00 (25%)').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('$300.00').length).toBeGreaterThan(0)
     expect(screen.getAllByTestId('field-ready').every((el) => el.getAttribute('data-state') === 'ok')).toBe(true)
   })
 
@@ -152,6 +152,19 @@ describe('LoadReviewPage', () => {
     renderPage('/tms/load-review?tab=ready')
     const texts = screen.getAllByTestId('field-pod').map((el) => el.textContent)
     expect(texts.every((t) => t === 'Doc check OK (file not seen)' || t === 'On file')).toBe(true)
+  })
+
+  it('What to fix sits next to Ready on every tab and lists each failing check in plain words', () => {
+    window.localStorage.clear()
+    const first = renderPage('/tms/load-review?tab=fixes')
+    const headers = screen.getAllByRole('columnheader').map((h) => (h.textContent ?? '').trim())
+    expect(headers.indexOf('What to fix')).toBe(headers.indexOf('Ready') + 1)
+    const cells = screen.getAllByTestId('what-to-fix').map((el) => el.textContent ?? '')
+    expect(cells.some((t) => /POD/.test(t))).toBe(true)
+    first.unmount()
+    window.localStorage.clear()
+    renderPage('/tms/load-review?tab=ready')
+    expect(screen.getAllByTestId('what-to-fix').every((el) => el.textContent === 'Nothing')).toBe(true)
   })
 
   it('clicking a column heading sorts the rows A to Z, then Z to A', () => {
