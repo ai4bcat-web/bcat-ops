@@ -517,23 +517,12 @@ export function TmsShell({
     return () => window.removeEventListener('keydown', onKey)
   }, [navOpen, setNavOpen])
 
-  // The tab strip is one row on every width (oneRowTabs.ts): its own line when it does not fit beside the search box, then a
-  // sideways scroll. Set up before the effect below so the lit tab is scrolled into view on the strip's final width.
+  // The tab strip always has its own full-width line and shows every tab, compressing to fit (oneRowTabs.ts); no sideways scroll.
   const topbarRef = useRef<HTMLElement>(null)
   useEffect(() => {
     const topbar = topbarRef.current
     return topbar ? watchOneRowTabs(topbar) : undefined
   }, [activePath, activeSearch, sectionTabs?.label])
-
-  // When the row still overflows (narrow window, iPad, phone), bring the lit tab into view.
-  useEffect(() => {
-    const list = topbarRef.current?.querySelector<HTMLElement>('.tms-lifecycle-list')
-    const tab = list?.querySelector<HTMLElement>('.tms-lifecycle-tab.tms-active')
-    if (!list || !tab || list.scrollWidth <= list.clientWidth) return
-    const lr = list.getBoundingClientRect()
-    const tr = tab.getBoundingClientRect()
-    list.scrollLeft += tr.left - lr.left - (list.clientWidth - tr.width) / 2
-  }, [activePath, activeSearch])
 
   // Phones: plain tables anywhere on the page (and in dialogs) become label / value cards (phoneTables.ts + responsive.css).
   const phone = usePhoneWidth()
