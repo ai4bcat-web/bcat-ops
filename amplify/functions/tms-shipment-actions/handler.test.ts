@@ -560,6 +560,8 @@ function seedCustomer(extra: Row = {}): Row {
     active: true,
     // A strict save asks for a billing method (src/lib/factorReadyAtCreate); MANUAL needs no MC.
     billingMethod: 'MANUAL',
+    // Ryne 2026-11-16: every customer needs an AP e-mail before Load Review lets a load go.
+    apEmail: 'ap@batory.test',
     creditLimitCents: 10_000_00,
     defaultCharges: [{ code: 'LINEHAUL', amountCents: 250_000 }],
     pricingDefaults: { mode: 'MARGIN', defaultBps: 2000 },
@@ -5540,7 +5542,7 @@ describe('READY_TO_INVOICE', () => {
       })
 
       it('a factored load cannot go into or out of Load Review without what OTR needs from booking (Ryne 2026-11-14)', async () => {
-        const factoredBroker = { reviewRequirements: [], billingMethod: 'FACTOR', customerType: 'BROKER', mcNumber: '123456' }
+        const factoredBroker = { reviewRequirements: [], billingMethod: 'FACTOR', customerType: 'BROKER', mcNumber: '123456', apEmail: 'ap@broker.test' }
         const ids = await reviewable({ customer: factoredBroker })
         // Booked before the rule had its MC: take it away on the customer record, as an old customer would be.
         const customerId = String(table(TABLES.order).get(ids.orderId)!.customerId)
