@@ -268,7 +268,8 @@ export function columnWidths<T>(
   const font = headerFont()
   for (const col of columns) {
     const user = userWidths[col.key]
-    out[col.key] = col.width != null ? col.width : user != null ? clampWidth(user) : autoFitWidth(col, rows, defaultColumnWidth(col, font) * (factor > 1 ? 1.1 : 1), factor)
+    // A person's drag (or the team default's saved width) wins over a column's starting width; only a fixed column keeps its own.
+    out[col.key] = col.fixed && col.width != null ? col.width : user != null ? clampWidth(user) : col.width != null ? col.width : autoFitWidth(col, rows, defaultColumnWidth(col, font) * (factor > 1 ? 1.1 : 1), factor)
   }
   return out
 }

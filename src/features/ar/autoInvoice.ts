@@ -20,8 +20,13 @@ export function billsThroughOtr(row: Pick<ArQueueRow, 'factored'> & { revDivisio
  * The Sent column's words for a row with no e-mail on record. A factored row is never "Not sent": it is in the OTR
  * queue once it has a factoring row, and "Factored via OTR" (no e-mail needed) before that.
  */
+/** A factored invoice that was issued but never reached the OTR queue. */
+export const NOT_IN_OTR_QUEUE = 'Not in OTR queue — Send to factor'
+
 export function unsentLabel(row: Pick<ArQueueRow, 'invoiceId' | 'invoice' | 'factorItem'>, throughOtr: boolean): string {
-  if (throughOtr) return row.factorItem || row.invoice?.factoringItemId ? 'In OTR queue' : 'Factored via OTR'
+  // An issued factored invoice with no queue row means the hand-off to the factor failed after release (14928, Ryne 2026-11-16):
+  // say so, so it is fixed and sent with Send to Factor, instead of reading as if OTR already has it.
+  if (throughOtr) return row.factorItem || row.invoice?.factoringItemId ? 'In OTR queue' : row.invoiceId ? NOT_IN_OTR_QUEUE : 'Factored via OTR'
   return row.invoiceId ? 'Not sent' : '—'
 }
 

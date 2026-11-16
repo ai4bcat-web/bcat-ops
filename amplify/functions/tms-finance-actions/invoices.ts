@@ -56,6 +56,7 @@ import { isBrokerageRevDivision } from '../../../src/lib/reviewRequirements'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { isCustomerUnresolved, unresolvedCustomerMessage } from '../../../src/lib/customerResolution'
 import { assetRateConTenders, canEmailTo, evaluateDocGate, gateLoadIds, isOwnFleetLoad } from '../../../src/lib/shipmentDocuments'
+import { loadExtraDocTypes } from '../../../src/lib/loadRequiredDocs'
 import {
   assertNotSquareInvoiced,
   customerPacketIds,
@@ -298,6 +299,10 @@ function docGateFor(context: OrderContext): DocGateResult {
     documents: context.documents,
     order: context.order,
     loadIds: context.gateLoadIds,
+    // Same inputs as the shipment Lambda's gate (Load Review, the board, READY_TO_INVOICE), so invoicing can never refuse
+    // what review passed: a file filed on the shipment itself counts for its only order, and the loads' extra doc types apply.
+    soleOrder: context.orders.length === 1,
+    extraDocTypes: loadExtraDocTypes(context.loads as unknown as { requiredDocTypes?: string[] | null }[]),
     loadCarriers: context.loadCarriers,
     customer: context.customer,
     settings: context.settings,

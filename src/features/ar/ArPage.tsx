@@ -11,7 +11,7 @@
  * happen — a false "sent" here is a customer who never got their bill.
  */
 import { InvoiceEditDrawer } from './components/InvoiceEditDrawer'
-import { billsThroughOtr, ordersNeedingInvoice, unsentLabel } from './autoInvoice'
+import { NOT_IN_OTR_QUEUE, billsThroughOtr, ordersNeedingInvoice, unsentLabel } from './autoInvoice'
 import { isFactoredLoad } from '@/lib/factorBilling'
 import { ArSummaryStrip } from './ArSummaryStrip'
 import { readyQueueRows, receivablesSummary, useArSummaryModel } from './useArSummaryModel'
@@ -1039,7 +1039,7 @@ function queueView({
         if (!row.invoiceId) return <span className="tms-muted">—</span>
         if (row.sentAt) return <span title={row.sentTo ?? undefined}>✓ {formatDay(row.sentAt)}{row.sentCount > 1 ? ` (${row.sentCount}×)` : ''}</span>
         return throughOtr(row)
-          ? <TmsBadge tone="gray" title="Factored invoices are not e-mailed; OTR gets them through the queue">{unsentLabel(row, true)}</TmsBadge>
+          ? (() => { const label = unsentLabel(row, true); const stuck = label === NOT_IN_OTR_QUEUE; return <TmsBadge tone={stuck ? 'orange' : 'gray'} title={stuck ? 'The invoice was made but never reached the OTR queue. Open it, fix what the factor refused, and press Send to Factor.' : 'Factored invoices are not e-mailed; OTR gets them through the queue'}>{label}</TmsBadge> })()
           : <TmsBadge tone="orange">Not sent</TmsBadge>
       case 'pastDue': {
         if (!invoiced || !row.dueAt) return <span className="tms-muted">—</span>

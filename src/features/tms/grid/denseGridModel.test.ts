@@ -137,11 +137,16 @@ describe('widths', () => {
     expect(defaultColumnWidth(text)).toBe(columnWidths([text], {}).name)
   })
 
-  it("prefers the user's width (up to the drag limit) and a column's fixed width", () => {
-    const widths = columnWidths([text, { ...age, width: 40 }, carrier], { name: 5000, age: 500, carrier: 480 })
+  it("prefers the user's width (up to the drag limit); a fixed column keeps its own width", () => {
+    const widths = columnWidths([text, { ...age, width: 40, fixed: true }, carrier], { name: 5000, age: 500, carrier: 480 })
     expect(widths.name).toBe(800)
     expect(widths.age).toBe(40)
     expect(widths.carrier).toBe(480)
+  })
+
+  it('a dragged width beats a column\'s starting width (Load Review What to fix, Ryne 2026-11-16)', () => {
+    expect(columnWidths([{ ...age, width: 40 }], { age: 300 }).age).toBe(300)
+    expect(columnWidths([{ ...age, width: 40 }], {}).age).toBe(40)
   })
 })
 
