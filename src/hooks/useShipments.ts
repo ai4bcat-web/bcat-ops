@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { customerBillingGaps, customerBillingSummary, type CustomerBillingGapCode } from '@/lib/customerBillingReady'
+import { customerApEmailText, customerBillingGaps, customerBillingSummary, customerInvoiceMethodText, type CustomerBillingGapCode } from '@/lib/customerBillingReady'
 import { listCarriers, listCustomers, listDrivers, listQuotes, listUserProfiles } from '@/lib/apiClient'
 import type { LoadBoardSummary } from '@/lib/apiClient'
 import { loadBoardBundle, peekBoardBundle, type BoardBundle, type BoardView } from '@/lib/boardData'
@@ -143,6 +143,10 @@ export interface ShipmentListRow extends ShipmentRecord {
   customerBillingGaps: CustomerBillingGapCode[]
   /** "Factor · ap@x.com" for the review Customer column. */
   customerBillingSummary: string
+  /** Load Review's Invoice method column: Factor / Manual invoice, '' when unset. */
+  customerInvoiceMethod: string
+  /** Load Review's AP email column: the first AP address, "Not required" when waived, '' when missing. */
+  customerApEmail: string
   docsOverrideBy: string | null
   docsOverrideNote: string | null
   quoteNumber: string | null
@@ -856,6 +860,8 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         customerFactors: customerFactorsForOtr(customer ?? null),
         customerBillingGaps: customerBillingGaps(customer ?? null, { apEmailRequired: customerApEmailRequired(customer ?? null, null) }),
         customerBillingSummary: customerBillingSummary(customer ?? null, { apEmailRequired: customerApEmailRequired(customer ?? null, null) }),
+        customerInvoiceMethod: customerInvoiceMethodText(customer ?? null),
+        customerApEmail: customerApEmailText(customer ?? null, { apEmailRequired: customerApEmailRequired(customer ?? null, null) }),
         customerPaymentTermsDays: customer?.paymentTermsDays ?? null,
         creditLimitCents: customer?.creditLimitCents ?? null,
         creditHold: customer?.creditHoldFlag ?? null,

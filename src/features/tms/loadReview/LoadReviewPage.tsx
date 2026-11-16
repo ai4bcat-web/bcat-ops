@@ -35,10 +35,15 @@ const PAGE_STEP = 50
 const reviewRowTone = (entry: ReviewEntry): string => (entry.verdict?.ok ? 'ready' : '')
 /**
  * Every review tab opens on one column per checked field: the value with its own pass mark or NEED, then Ready
- * (Ryne 2026-11-15: "have the checkmarks sit in the same column as the check they are reviewing"). Released has no
- * verdict, so it keeps the plain columns.
+ * (Ryne 2026-11-15: "have the checkmarks sit in the same column as the check they are reviewing"). All four tabs share
+ * this one layout (Ryne 2026-11-16: "make sure all columns across the load review tabs are all the same"); the customer
+ * reads as three columns: name, invoice method, AP email. Released has no verdict, so its cells show values without marks.
  */
-const REVIEW_TAB_COLUMNS = ['shipment', 'loadStatus', 'age', ...LOAD_REVIEW_FIELDS.map((key) => `field-${key}`), 'ready', 'whatToFix']
+const REVIEW_TAB_COLUMNS = [
+  'shipment', 'field-customer', 'field-invoiceMethod', 'field-apEmail', 'loadStatus', 'age',
+  ...LOAD_REVIEW_FIELDS.filter((key) => key !== 'customer' && key !== 'invoiceMethod' && key !== 'apEmail').map((key) => `field-${key}`),
+  'ready', 'whatToFix',
+]
 /** What to fix wraps inside a fixed-width column; the rows grow to the longest list on the page so nothing is cut off. */
 const WHAT_TO_FIX_PX = 420
 function whatToFixLines(entries: readonly ReviewEntry[]): number {
@@ -50,7 +55,6 @@ function whatToFixLines(entries: readonly ReviewEntry[]): number {
   return most
 }
 
-const RELEASED_TAB_COLUMNS = ['shipment', 'customer', 'lane', 'delivered', 'rep', 'division', 'revenue', 'status', 'whatToFix']
 const fieldSort = (key: string) => (e: ReviewEntry): string | number => {
   if (key === 'customerRate') return customerRateCents(e.row) ?? -Infinity
   if (key === 'carrierRate') return e.row.costCents ?? -Infinity
@@ -110,11 +114,12 @@ export function LoadReviewPage() {
       { key: 'whatToFix', header: 'What to fix', group: 'Checked fields', text: (e) => whatToFixText(e.verdict), width: WHAT_TO_FIX_PX, filter: false, sortValue: (e) => (e.verdict ? failingReasons(e.verdict).length : -1) },
     ]
   }, [tab, now])
-  // Each tab keeps its own layout. The v3 ids start everyone once on the inline-check columns plus What to fix (layouts saved before then are not read).
+  // One layout for every tab, so a column change on one applies to all (Ryne 2026-11-16). The v4 id starts everyone once
+  // on the split customer columns (layouts saved before then are not read).
   const prefs = useDenseGridPrefs({
-    gridId: `load-review-v3-${tab}`,
+    gridId: 'load-review-v4',
     email,
-    defaultColumns: tab === 'released' ? RELEASED_TAB_COLUMNS : REVIEW_TAB_COLUMNS,
+    defaultColumns: REVIEW_TAB_COLUMNS,
     validKeys: denseCols.map((c) => c.key),
     defaultSort: null,
   })

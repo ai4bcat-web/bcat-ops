@@ -48,6 +48,17 @@ export function customerBillingGaps(
   return gaps
 }
 
+/** The Invoice method column: "Factor", "Manual invoice", or '' when the customer has none set. */
+export function customerInvoiceMethodText(customer: CustomerBillingFacts | null | undefined): string {
+  const method = customerBillingMethod(customer)
+  return method === 'FACTOR' ? 'Factor' : method === 'MANUAL' ? 'Manual invoice' : ''
+}
+
+/** The AP email column: the first AP address, "Not required" for a waived customer with none, else ''. */
+export function customerApEmailText(customer: CustomerBillingFacts | null | undefined, opts: { apEmailRequired?: boolean } = {}): string {
+  return customerApEmails(customer)[0] ?? (customer && opts.apEmailRequired === false ? 'Not required' : '')
+}
+
 /** "Factor · ap@x.com" for the Customer column; "Manual invoice · AP e-mail: not required" when waived and blank. */
 export function customerBillingSummary(
   customer: CustomerBillingFacts | null | undefined,

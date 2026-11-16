@@ -161,6 +161,22 @@ describe('LoadReviewPage', () => {
     expect(reps.every((el) => el.getAttribute('data-state') === 'ok')).toBe(true)
   })
 
+  it('every tab shows the same columns in the same order, with the customer split into name, invoice method and AP email (Ryne 2026-11-16)', () => {
+    const want = ['Shipment', 'Customer', 'Invoice method', 'AP email', 'Load status', 'In review', 'Customer ref (PO)', 'POD', 'RC', 'Customer rate', 'Carrier rate', 'Profit', 'Sales rep', 'Rev division', 'Delivered', 'Carrier', 'Stops', 'Other checks', 'Ready', 'What to fix']
+    for (const tab of ['all', 'fixes', 'ready', 'released']) {
+      window.localStorage.clear()
+      const view = renderPage(`/tms/load-review?tab=${tab}`)
+      const headers = screen.getAllByRole('columnheader').map((h) => (h.textContent ?? '').trim()).filter((h) => h && h !== 'Select')
+      expect(headers.filter((h) => want.includes(h)), tab).toEqual(want)
+      view.unmount()
+    }
+    window.localStorage.clear()
+    renderPage('/tms/load-review?tab=all')
+    expect(screen.getAllByTestId('field-customer').every((el) => !/·/.test(el.textContent ?? ''))).toBe(true)
+    expect(screen.getAllByTestId('field-invoiceMethod').length).toBeGreaterThan(0)
+    expect(screen.getAllByTestId('field-apEmail').length).toBeGreaterThan(0)
+  })
+
   it('a passing POD the document cache has not confirmed says what the check trusted', () => {
     window.localStorage.clear()
     renderPage('/tms/load-review?tab=ready')
