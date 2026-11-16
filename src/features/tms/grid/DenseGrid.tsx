@@ -22,6 +22,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react'
+import { cellContent } from './cellContent'
 import { ArrowDown, ArrowUp, Filter } from 'lucide-react'
 import {
   CHECK_COLUMN_WIDTH,
@@ -522,7 +523,7 @@ export function DenseGrid<T>({
                         data-col={col.key}
                         title={col.fixed ? undefined : col.text(row)}
                       >
-                        {renderCell ? renderCell(row, col.key) : col.text(row)}
+                        {cellContent(renderCell, row, col)}
                       </td>
                     )
                   })}
