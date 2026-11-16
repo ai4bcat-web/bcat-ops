@@ -61,3 +61,7 @@
 .tms-portal .lr-charges-warn { margin: 0; padding: 6px 8px; border-radius: 6px; background: var(--tms-badge-orange-tint, var(--tms-badge-red-tint)); }
 .tms-portal .lr-charges-actions { display: flex; gap: 8px; }
 .tms-portal .lr-charges-confirm { display: grid; gap: 8px; margin-top: 10px; padding: 10px; border-radius: 8px; background: var(--tms-badge-red-tint); }
+/* What to fix: every failing check in plain words, wrapped, never cut off. */
+.tms-shell .aa-what-to-fix { display: flex; flex-wrap: wrap; gap: 4px; white-space: normal; }
+.tms-shell .aa-fix-item { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 12px; line-height: 18px; color: var(--tms-badge-red); background: color-mix(in srgb, var(--tms-badge-red) 10%, transparent); white-space: normal; overflow-wrap: anywhere; }
+.tms-shell .tms-dg-table tbody tr:not(.tms-dg-group):not(.tms-dg-spacer) td[data-col="whatToFix"] { white-space: normal; max-height: none; padding-block: 4px; }

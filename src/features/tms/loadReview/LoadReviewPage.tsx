@@ -17,7 +17,7 @@ import { FACTOR_INFO_OPTIONS, sentence } from '@/features/shipments/shipmentGrid
 import { batchShipmentTask, listAuditLogsFor, pushReadyToLoadReview, releaseToBilling } from '@/lib/apiClient'
 import { useBillingGrant, LOAD_REVIEW_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
 import { NO_DELIVERY_TIME_TIP, failingReasons, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL, LOAD_REVIEW_FIELDS, LOAD_REVIEW_FIELD_LABEL, releasedWithin, reviewAgeDays, type LoadReviewVerdict } from '@/lib/loadReview'
-import { customerRateCents, profitOf, reviewFieldCell, reviewFieldText, reviewReadyText } from './reviewFields'
+import { customerRateCents, profitOf, reviewFieldCell, reviewFieldText, reviewReadyText, whatToFixItems, whatToFixText } from './reviewFields'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
 import { useLoadReviewQueue } from './useLoadReviewQueue'
@@ -35,8 +35,24 @@ const PAGE_STEP = 50
  * (Ryne 2026-11-15: "have the checkmarks sit in the same column as the check they are reviewing"). Released has no
  * verdict, so it keeps the plain columns.
  */
-const REVIEW_TAB_COLUMNS = ['shipment', 'loadStatus', 'age', ...LOAD_REVIEW_FIELDS.map((key) => `field-${key}`), 'ready']
-const RELEASED_TAB_COLUMNS = ['shipment', 'customer', 'lane', 'delivered', 'rep', 'division', 'revenue', 'status']
+const REVIEW_TAB_COLUMNS = ['shipment', 'loadStatus', 'age', ...LOAD_REVIEW_FIELDS.map((key) => `field-${key}`), 'ready', 'whatToFix']
+/** What to fix wraps inside a fixed-width column; the rows grow to the longest list on the page so nothing is cut off. */
+const WHAT_TO_FIX_PX = 420
+const FIX_CHARS_PER_LINE = 56
+function whatToFixLines(entries: readonly ReviewEntry[]): number {
+  let most = 1
+  for (const { verdict } of entries) {
+    if (!verdict) continue
+    let lines = 1, used = 0
+    for (const item of whatToFixItems(verdict)) {
+      const len = item.length + 3
+      if (used > 0 && used + len > FIX_CHARS_PER_LINE) { lines += 1 + Math.floor(len / FIX_CHARS_PER_LINE); used = len % FIX_CHARS_PER_LINE } else used += len
+    }
+    most = Math.max(most, lines)
+  }
+  return most
+}
+const RELEASED_TAB_COLUMNS = ['shipment', 'customer', 'lane', 'delivered', 'rep', 'division', 'revenue', 'status', 'whatToFix']
 const fieldSort = (key: string) => (e: ReviewEntry): string | number => {
   if (key === 'customerRate') return customerRateCents(e.row) ?? -Infinity
   if (key === 'carrierRate') return e.row.costCents ?? -Infinity
@@ -92,11 +108,12 @@ export function LoadReviewPage() {
         return { key: `field-${key}`, header: LOAD_REVIEW_FIELD_LABEL[key], group: 'Checked fields', text: cellText, extraPx: 30, filter: 'multi', optionsOf: (e) => { const c = reviewFieldCell(e.row, e.verdict, key); return c.ok == null ? [] : [{ value: c.ok ? 'OK' : 'NEED', label: c.ok ? 'OK' : 'NEED' }] }, fixedOptions: [{ value: 'OK', label: 'OK' }, { value: 'NEED', label: 'NEED' }], sortValue: fieldSort(key), align: key === 'customerRate' || key === 'carrierRate' || key === 'profit' ? 'right' : undefined }
       }),
       { key: 'ready', header: 'Ready', group: 'Checked fields', text: (e) => reviewReadyText(e.verdict), extraPx: 30, filter: 'multi', optionsOf: (e) => (e.verdict ? [{ value: e.verdict.ok ? 'Ready' : 'NEED', label: e.verdict.ok ? 'Ready' : 'NEED' }] : []), fixedOptions: [{ value: 'Ready', label: 'Ready' }, { value: 'NEED', label: 'NEED' }], sortValue: (e) => (e.verdict ? failingReasons(e.verdict).length : -1) },
+      { key: 'whatToFix', header: 'What to fix', group: 'Checked fields', text: (e) => whatToFixText(e.verdict), width: WHAT_TO_FIX_PX, filter: false, sortValue: (e) => (e.verdict ? failingReasons(e.verdict).length : -1) },
     ]
   }, [tab, now])
-  // Each tab keeps its own layout. The v2 ids start everyone on the inline-check columns once (layouts saved before 2026-11-15 are not read).
+  // Each tab keeps its own layout. The v3 ids start everyone once on the inline-check columns plus What to fix (layouts saved before then are not read).
   const prefs = useDenseGridPrefs({
-    gridId: `load-review-v2-${tab}`,
+    gridId: `load-review-v3-${tab}`,
     email,
     defaultColumns: tab === 'released' ? RELEASED_TAB_COLUMNS : REVIEW_TAB_COLUMNS,
     validKeys: denseCols.map((c) => c.key),
@@ -114,6 +131,8 @@ export function LoadReviewPage() {
   // The table is the same dense grid as the Shipments board: header filters on division / rep / customer, sortable columns.
   const filtered = sortDenseRows(filterRows(searched, denseCols, dense), denseCols, prefs.sort)
   const page = filtered.slice(0, pageSize)
+  const fixLines = prefs.columns.includes('whatToFix') ? whatToFixLines(page) : 1
+  const fixRowHeights = fixLines > 1 ? { compact: Math.max(30, fixLines * 20 + 8), comfortable: Math.max(40, fixLines * 20 + 12) } : undefined
   const eligible = filtered.filter((entry) => entry.verdict?.ok)
   const chosen = eligible.filter(({ row }) => selected.has(row.id)).slice(0, MAX_REVIEW_BATCH).map(({ row }) => row.id)
   // Any ticked row can be batch-edited (a row that still needs fixes is exactly the one you want to fix); only a clean one can be released.
@@ -248,6 +267,11 @@ export function LoadReviewPage() {
         ? <span className="aa-field" data-testid="field-ready" data-state="ok"><Check size={14} aria-label="Ready" className="text-[color:var(--tms-badge-green)]" /><span>Ready</span></span>
         : <span className="aa-field aa-check-fail" data-testid="field-ready" data-state="need" title={failingReasons(verdict).map((r) => r.message).join('; ')}><X size={14} aria-hidden="true" /><span>{reviewReadyText(verdict)}</span></span>
     } },
+    { key: 'whatToFix', header: 'What to fix', render: ({ verdict }) => {
+      const items = verdict ? whatToFixItems(verdict) : []
+      if (items.length === 0) return <span className="tms-muted" data-testid="what-to-fix">{verdict ? 'Nothing' : '—'}</span>
+      return <span className="aa-what-to-fix" data-testid="what-to-fix">{items.map((text) => <span key={text} className="aa-fix-item">{text}</span>)}</span>
+    } },
     { key: 'status', header: tab === 'released' ? 'Released by / at' : 'Status', render: ({ row, verdict }) => { if (tab === 'released') { const entry = audit[row.id] ?? (row.orderIds ?? []).map((id) => audit[id]).find(Boolean); return <>{entry?.user ?? 'Audit unavailable'} · {formatDateTime(entry?.at ?? row.readyToInvoiceAt)} {canOpen && <Link to={`/tms/shipments/${row.id}?tab=invoicing`}>Open invoicing</Link>}</> } return <TmsBadge tone={verdict?.ok ? 'green' : 'orange'}>{verdict?.ok ? 'Looks ready' : `${verdict ? failingReasons(verdict).length : 0} to fix`}</TmsBadge> } },
   ]
   const renderReviewCell = (entry: ReviewEntry, key: string) => columns.find((c) => c.key === key)?.render(entry) ?? null
@@ -294,6 +318,7 @@ export function LoadReviewPage() {
           rowKey={({ row }) => row.id}
           renderCell={renderReviewCell}
           density={prefs.density}
+          rowHeights={fixRowHeights}
           userWidths={prefs.widths}
           stickyCount={Math.max(2, prefs.pinned.length + 1)}
           sort={prefs.sort}

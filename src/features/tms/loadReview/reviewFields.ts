@@ -1,7 +1,7 @@
 import type { ShipmentListRow } from '@/hooks/useShipments'
 import { docCellOf } from '@/features/shipments/shipmentViews'
 import { formatCents } from '@/lib/invoiceBuild'
-import { loadReviewFieldReasons, loadReviewNeeds, type LoadReviewFieldKey, type LoadReviewVerdict } from '@/lib/loadReview'
+import { failingReasons, loadReviewFieldReasons, loadReviewNeeds, type LoadReviewFieldKey, type LoadReviewVerdict } from '@/lib/loadReview'
 import { deliveredText } from './reviewStatus'
 
 /** The customer's rate as the review check reads it (order revenue, else the shipment's). */
@@ -45,7 +45,7 @@ export function reviewFieldText(row: ShipmentListRow, key: LoadReviewFieldKey): 
     case 'rateCon': return docBasisText(row, 'RATE_CON')
     case 'customerRate': { const c = customerRateCents(row); return c == null ? '' : formatCents(c) }
     case 'carrierRate': return row.costCents == null ? '' : formatCents(row.costCents)
-    case 'profit': { const p = profitOf(row); return p == null ? '' : `${formatCents(p.cents)}${p.pct == null ? '' : ` (${p.pct}%)`}` }
+    case 'profit': { const p = profitOf(row); return p == null ? '' : formatCents(p.cents) } // dollars only (Ryne 2026-11-15: no GP %)
     case 'salesRep': return row.salesRepName ?? ''
     case 'revDivision': return row.revDivision?.replace(/_/g, ' ') ?? ''
     case 'delivered': { const t = deliveredText(row); return t === '—' ? '' : t }
@@ -71,4 +71,15 @@ export function reviewReadyText(verdict: LoadReviewVerdict | undefined): string 
   if (verdict.ok) return 'Ready'
   const needs = loadReviewNeeds(verdict)
   return `${needs.length} to fix: ${needs.join(', ')}`
+}
+
+/** What to fix, in plain words: each failing check's own sentence, once, in checklist order (the same reasons as the NEED marks). */
+export function whatToFixItems(verdict: LoadReviewVerdict): string[] {
+  return [...new Set(failingReasons(verdict).map((r) => r.message))]
+}
+
+export function whatToFixText(verdict: LoadReviewVerdict | undefined): string {
+  if (!verdict) return '—'
+  const items = whatToFixItems(verdict)
+  return items.length === 0 ? 'Nothing' : items.join(' · ')
 }
