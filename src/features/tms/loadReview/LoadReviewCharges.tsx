@@ -7,11 +7,12 @@
  * The rate confirmation is the shipment page's own `RateConPanel`: Preview and Download build the PDF in the browser
  * with no side effects; Send e-mails the carrier, so it asks first.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useContext, useEffect, useMemo, useState } from 'react'
 import { FileText, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { RateConPanel } from '@/features/carriers/components/RateConPanel'
 import { TmsAlert, TmsButton, TmsDialog, TmsInput, TmsSelect } from '@/features/tms/kit'
+import { RailSaveContext, useRailPending } from './railSave'
 import { getCarrierBundle, getShipmentBundle, getTmsSettings, recalcCharges, sendRateCon, voidRateCon } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
 import type { CarrierBundle, ChargeCalc, ShipmentBundle, TmsSettings } from '@/types/tms'
@@ -57,6 +58,17 @@ export function LoadReviewCharges({ shipmentId, readOnly = false, disabled = fal
   const amounts = useMemo(() => (bundle ? amountsOf(bundle, drafts) : new Map<string, number>()), [bundle, drafts])
   const totals = bundle ? totalsOf(bundle, drafts) : null
   const codes = useMemo(() => [...new Set([...(settings?.chargeCodes ?? []).map((c) => c.code), 'LINEHAUL', 'FSC', ...drafts.map((d) => d.code)].filter(Boolean))], [settings, drafts])
+
+  // In the Load Review rail, the rail's Save changes saves edited charges with everything else.
+  const inRail = useContext(RailSaveContext) != null
+  const railError = useRailPending('charges', editing && !readOnly && bundle ? { label: 'Charges', order: 60, run: async () => {
+    const input = toRecalc(drafts)
+    if (!input.ok) throw new Error(input.message)
+    const next = await recalcCharges({ shipmentId, expectedVersion: bundle.shipment.version ?? 0, charges: input.charges })
+    setBundle(next)
+    setDrafts(draftsOf(next))
+    setEditing(false)
+  } } : null)
 
   if (error && !bundle) return <TmsAlert tone="red">{error}</TmsAlert>
   if (!bundle || !totals) return <p className="tms-muted text-xs" role="status">Loading charges…</p>
@@ -142,9 +154,11 @@ export function LoadReviewCharges({ shipmentId, readOnly = false, disabled = fal
     })}
     <datalist id="lr-charge-codes">{codes.map((code) => <option key={code} value={code} />)}</datalist>
     {error && <TmsAlert tone="red">{error}</TmsAlert>}
+    {railError && <TmsAlert tone="red">{railError}</TmsAlert>}
     {!locked && <div className="lr-charges-actions">
       {editing ? <>
-        <TmsButton variant="primary" size="sm" disabled={saving || disabled} onClick={() => void save()}>{saving ? 'Saving…' : 'Save charges'}</TmsButton>
+        {!inRail && <TmsButton variant="primary" size="sm" disabled={saving || disabled} onClick={() => void save()}>{saving ? 'Saving…' : 'Save charges'}</TmsButton>}
+        {inRail && <span className="lr-unsaved" data-testid="lr-unsaved">Unsaved · use Save changes below</span>}
         <TmsButton size="sm" variant="ghost" disabled={saving} onClick={cancel}>Cancel</TmsButton>
       </> : <TmsButton size="sm" disabled={disabled} onClick={() => setEditing(true)}>Edit charges</TmsButton>}
     </div>}

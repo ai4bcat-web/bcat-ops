@@ -16,6 +16,7 @@ vi.mock('@/lib/apiClient', () => ({
   putPresignedFile: mocks.put,
   commitDocument: mocks.commit,
   voidDocument: mocks.voidDoc,
+  getRateConfirmUrl: vi.fn(async () => 'https://example.com/tender'),
 }))
 vi.mock('@/lib/driverSubmissionsClient', () => ({ getDriverDocUrl: vi.fn(async () => 'https://example.com/driver') }))
 vi.mock('@/lib/podDownload', () => ({ downloadPodAsPdf: vi.fn() }))
@@ -105,5 +106,22 @@ describe('LoadReviewDocuments', () => {
     render(<LoadReviewDocuments shipmentId="shp-1" readOnly onChanged={vi.fn(async () => {})} />)
     expect(await screen.findByText('pod-signed.pdf')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Replace|Upload/ })).toBeNull()
+  })
+
+  it('deletes a document after an in-page confirm, then re-runs the review', async () => {
+    const onChanged = vi.fn(async () => {})
+    render(<LoadReviewDocuments shipmentId="shp-1" onChanged={onChanged} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete pod-signed.pdf' }))
+    expect(screen.getByText('Delete pod-signed.pdf? This removes it from the shipment.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(mocks.voidDoc).toHaveBeenCalledWith({ documentId: 'd-pod', reason: 'Deleted in Load Review' }))
+    await waitFor(() => expect(onChanged).toHaveBeenCalled())
+  })
+
+  it('lists the intake tender on the load as a viewable rate confirmation, without Delete', async () => {
+    mocks.bundle.mockResolvedValue({ ...bundle, loads: [{ id: 'load-1', orderId: 'o-1', rateConfirmKey: 'rate-confirms/load-1/rate-confirm.pdf' }] })
+    render(<LoadReviewDocuments shipmentId="shp-1" onChanged={vi.fn(async () => {})} />)
+    expect(await screen.findByRole('button', { name: 'View Rate confirmation (from the intake e-mail).pdf' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Delete Rate confirmation (from the intake e-mail).pdf' })).toBeNull()
   })
 })
