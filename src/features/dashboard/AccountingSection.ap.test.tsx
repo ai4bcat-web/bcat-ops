@@ -28,7 +28,7 @@ vi.mock('@/hooks/useAuth', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/hooks/useAuth')>()),
   useAuth: () => ({ isAdmin: false, isOwner: false, hasPageAccess: () => true }),
 }))
-vi.mock('@/features/finance/useNeedsReview', () => ({ useNeedsReview: () => ({ rows: [], error: null, refresh: vi.fn() }) }))
+vi.mock('@/features/finance/useNeedsReview', () => ({ useNeedsReview: () => ({ rows: [], questions: [], error: null, refresh: vi.fn(), replaceQuestion: vi.fn() }), openReviewCount: () => 0 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), message: vi.fn() } }))
 vi.mock('@/features/ap/inbox/useApInbox', () => ({
   useApInboxStatus: () => ({ status: null, error: null, refresh: vi.fn().mockResolvedValue(undefined), syncing: false, progress: null, syncNow: vi.fn() }),

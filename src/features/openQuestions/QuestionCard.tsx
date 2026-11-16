@@ -1,22 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+/**
+ * One open question: what it is about, what Aljex and BCAT Ops each say, the answers so far, and the box
+ * to answer or resolve it. Shown from Needs review on Accounts Receivable and Accounts Payable
+ * (Ryne 2026-11-16: the Open questions tab was folded into Needs review).
+ */
+import { useState } from 'react'
 import './openQuestions.css'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { TmsBadge, TmsButton, TmsCard, TmsEmptyState, TmsInput, TmsScrollPage, TmsSegmentedTabs, TmsSelect, TmsTextarea } from '@/features/tms/kit'
-import { useAuthUser } from '@/hooks/useAuth'
+import { TmsBadge, TmsButton, TmsCard, TmsTextarea } from '@/features/tms/kit'
 import { shipmentEditorPath } from '@/lib/shipmentLinks'
-import { listOpenQuestionRows, updateOpenQuestionRow } from '@/lib/openQuestionsClient'
-import {
-  AREA_LABEL, appendNote, countByStatus, filterQuestions, sortQuestions, statusFor, toOpenQuestion, whoFromEmail,
-  type OpenQuestion, type OpenQuestionArea, type OpenQuestionFilter, type OpenQuestionRef,
-} from './openQuestions'
+import { updateOpenQuestionRow } from '@/lib/openQuestionsClient'
+import { AREA_LABEL, appendNote, statusFor, toOpenQuestion, type OpenQuestion, type OpenQuestionRef } from './openQuestions'
 
-const AREA_OPTIONS: Array<{ value: OpenQuestionArea | 'ALL'; label: string }> = [
-  { value: 'ALL', label: 'All areas' },
-  ...(Object.keys(AREA_LABEL) as OpenQuestionArea[]).map((a) => ({ value: a, label: AREA_LABEL[a] })),
-]
-
-function RefLine({ r }: { r: OpenQuestionRef }) {
+export function RefLine({ r }: { r: OpenQuestionRef }) {
   return (
     <li className="oq-ref">
       {r.shipmentId
@@ -31,7 +27,7 @@ function RefLine({ r }: { r: OpenQuestionRef }) {
   )
 }
 
-function QuestionCard({ item, who, onSaved }: { item: OpenQuestion; who: string; onSaved: (next: OpenQuestion) => void }) {
+export function QuestionCard({ item, who, onSaved }: { item: OpenQuestion; who: string; onSaved: (next: OpenQuestion) => void }) {
   const [answer, setAnswer] = useState('')
   const [busy, setBusy] = useState(false)
   const { details: d } = item
@@ -100,63 +96,3 @@ function QuestionCard({ item, who, onSaved }: { item: OpenQuestion; who: string;
     </TmsCard>
   )
 }
-
-/** Accounting → Open questions: what Claude needs Ryne to decide, one card per question. */
-export function OpenQuestionsPage() {
-  const user = useAuthUser()
-  const [items, setItems] = useState<OpenQuestion[]>([])
-  const [loading, setLoading] = useState(true)
-  const [status, setStatus] = useState<OpenQuestionFilter>('OPEN')
-  const [area, setArea] = useState<OpenQuestionArea | 'ALL'>('ALL')
-  const [query, setQuery] = useState('')
-
-  const load = useCallback(() => {
-    listOpenQuestionRows()
-      .then((rows) => setItems(rows.map(toOpenQuestion)))
-      .catch(() => toast.error('Could not load the open questions'))
-      .finally(() => setLoading(false))
-  }, [])
-  useEffect(load, [load])
-
-  const counts = useMemo(() => countByStatus(items), [items])
-  const visible = useMemo(() => sortQuestions(filterQuestions(items, { status, area, query })), [items, status, area, query])
-  const who = whoFromEmail(user?.email)
-  const replace = (next: OpenQuestion) => setItems((prev) => prev.map((it) => (it.id === next.id ? next : it)))
-
-  return (
-    <TmsScrollPage
-      title="Open questions"
-      subtitle="Things Claude needs you to decide. Answer here and mark each one resolved."
-      actions={<TmsButton size="sm" onClick={() => { setLoading(true); load() }} disabled={loading}>Refresh</TmsButton>}
-      toolbar={
-        <div className="oq-toolbar">
-          <TmsSegmentedTabs
-            aria-label="Status"
-            size="sm"
-            active={status}
-            onSelect={(k) => setStatus(k as OpenQuestionFilter)}
-            tabs={[
-              { key: 'OPEN', label: 'Open', count: counts.open },
-              { key: 'RESOLVED', label: 'Resolved', count: counts.resolved },
-              { key: 'ALL', label: 'All', count: items.length },
-            ]}
-          />
-          <TmsSelect aria-label="Area" value={area} onChange={(e) => setArea(e.target.value as OpenQuestionArea | 'ALL')} options={AREA_OPTIONS} />
-          <TmsInput aria-label="Search" placeholder="Search PRO, carrier, text" value={query} onChange={(e) => setQuery(e.target.value)} className="oq-search" />
-        </div>
-      }
-    >
-      {loading && items.length === 0 ? (
-        <p className="tms-muted">Loading…</p>
-      ) : visible.length === 0 ? (
-        <TmsEmptyState title={status === 'OPEN' ? 'No open questions.' : 'Nothing matches these filters.'} />
-      ) : (
-        <div className="oq-list">
-          {visible.map((it) => <QuestionCard key={it.id} item={it} who={who} onSaved={replace} />)}
-        </div>
-      )}
-    </TmsScrollPage>
-  )
-}
-
-export default OpenQuestionsPage

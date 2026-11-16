@@ -32,7 +32,7 @@ vi.mock('@/lib/worklistShipments', () => ({ loadWorklistShipments: vi.fn().mockR
 vi.mock('@/hooks/useFactoringItems', () => ({
   useFactoringItems: () => ({ items: [], loading: false, error: null, refresh: vi.fn() }),
 }))
-vi.mock('@/features/finance/useNeedsReview', () => ({ useNeedsReview: () => ({ rows: [], error: null, refresh: vi.fn() }) }))
+vi.mock('@/features/finance/useNeedsReview', () => ({ useNeedsReview: () => ({ rows: [], questions: [], error: null, refresh: vi.fn(), replaceQuestion: vi.fn() }), openReviewCount: () => 0 }))
 vi.mock('@/features/ar/useDeliveredNotReady', () => ({ useDeliveredNotReady: () => 3 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 vi.mock('@/lib/otrClient', () => ({ assembleInvoice: vi.fn(), submitToOtr: vi.fn(), uploadOtrDocs: vi.fn() }))

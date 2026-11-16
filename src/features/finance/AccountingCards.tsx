@@ -121,13 +121,16 @@ export function ArPaidCard({ stats, monthLabel }: { stats: ArPaidStats; monthLab
   )
 }
 
-export function ReviewReasonCard({ counts, total }: { counts: { key: ReviewReasonKey; count: number }[]; total: number }) {
+/** `questions`: open questions on this side (Ryne 2026-11-16: Open questions live in Needs review now). */
+export function ReviewReasonCard({ counts, total, questions = 0 }: { counts: { key: ReviewReasonKey; count: number }[]; total: number; questions?: number }) {
+  const rows = counts.map((c) => ({ key: c.key as string, label: REVIEW_REASON_LABEL[c.key], value: String(c.count), tone: (c.key === 'other' ? 'default' : 'warn') as 'default' | 'warn' }))
+  if (questions > 0) rows.push({ key: 'questions', label: 'Open questions', value: String(questions), tone: 'warn' })
   return (
     <TmsListCard
       title="Needs review"
       total={String(total)}
       testId="review-tab-card"
-      rows={counts.map((c) => ({ key: c.key, label: REVIEW_REASON_LABEL[c.key], value: String(c.count), tone: c.key === 'other' ? 'default' : 'warn' }))}
+      rows={rows}
     />
   )
 }

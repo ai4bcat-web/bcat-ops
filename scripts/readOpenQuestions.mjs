@@ -1,4 +1,4 @@
-// Reads back Accounting → Open questions: each question, its status and the answers people saved.
+// Reads back the open questions (Accounting → Needs review): each question, its status and the answers people saved.
 //
 //   node scripts/readOpenQuestions.mjs                 (everything, open first)
 //   node scripts/readOpenQuestions.mjs --answered      (only questions with an answer or marked resolved)

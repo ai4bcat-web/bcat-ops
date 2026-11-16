@@ -108,8 +108,6 @@ const ACCOUNTING_CHILDREN: NavChildDef[] = [
   // Factoring lives inside Invoicing (the Factored view); this entry is only for Factoring-only users.
   { to: '/tms/invoicing/factored', label: 'Factoring', pageKey: 'factoring', hiddenWithPageKey: 'invoicing' },
   { to: '/tms/vendors', label: 'Vendors', pageKey: 'vendorAp' },
-  // What Claude needs Ryne to decide (Ryne 2026-11-15). Owner/ADMIN only.
-  { to: '/tms/open-questions', label: 'Open questions', pageKey: 'openQuestions', adminOnly: true },
 ]
 
 /** Settlements and time cards: the pages the sidebar used to list under Ivan Cartage. Same paths and page grants. */
@@ -270,7 +268,6 @@ const CRUMBS: CrumbRule[] = [
   { path: '/tms/invoicing/payable/bills', prefix: true, crumbs: [ACCOUNTING, AP, { label: 'Bill' }] },
   { path: '/tms/payments-received', crumbs: [ACCOUNTING, { label: 'Payments received' }] },
   { path: '/tms/vendors', crumbs: [ACCOUNTING, { label: 'Vendors' }] },
-  { path: '/tms/open-questions', crumbs: [ACCOUNTING, { label: 'Open questions' }] },
   { path: '/tms/invoicing/factored', crumbs: [ACCOUNTING, AR, { label: 'Factoring' }] },
   { path: '/tms/customers/billing-setup', crumbs: [{ label: 'Customers', to: '/tms/customers' }, { label: 'Billing setup' }] },
   { path: '/tms/brokerage/company/data/aljex-reconciliation', crumbs: [SETTINGS, { label: 'Company', to: '/tms/brokerage/company' }, { label: 'Aljex reconciliation' }] },

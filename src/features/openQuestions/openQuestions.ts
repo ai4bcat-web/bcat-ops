@@ -144,3 +144,20 @@ export function countByStatus(items: OpenQuestion[]): { open: number; resolved: 
   for (const it of items) if (it.status === 'OPEN') open++
   return { open, resolved: items.length - open }
 }
+
+/**
+ * Which Needs review list a question sits on (Ryne 2026-11-16: Open questions moved into Needs review).
+ * Receivables questions on AR, Payables on AP; documents, load setup and other questions on both.
+ */
+export function questionOnSide(q: Pick<OpenQuestion, 'details'>, side: 'AR' | 'AP'): boolean {
+  if (q.details.area === 'AR') return side === 'AR'
+  if (q.details.area === 'AP') return side === 'AP'
+  return true
+}
+
+/** Whole days since the question was raised, or null when it has no date. */
+export function ageDays(iso: string | null | undefined, now: Date = new Date()): number | null {
+  if (!iso) return null
+  const t = Date.parse(iso)
+  return Number.isNaN(t) ? null : Math.max(0, Math.floor((now.getTime() - t) / 86_400_000))
+}
