@@ -12,7 +12,7 @@ import { needsBillingReview, REVIEW_BILLING_LABEL } from '@/lib/reviewBilling'
 import { reviewFactsOfRow } from './batchReview'
 import { docsMissingOf, registerRowText, type ShipmentRow } from './shipmentViews'
 
-export type BoardFlag = 'missingReference' | 'missingSalesRep' | 'missingRevDivision' | 'docsMissing' | 'reviewBilling' | 'checkCallOverdue' | 'pastDeliveryDate' | 'detention'
+export type BoardFlag = 'missingReference' | 'missingSalesRep' | 'missingRevDivision' | 'docsMissing' | 'reviewBilling' | 'checkCallOverdue' | 'pastDeliveryDate' | 'detention' | 'readyForReview'
 
 export const BOARD_FLAGS: readonly BoardFlag[] = [
   'missingReference',
@@ -22,7 +22,7 @@ export const BOARD_FLAGS: readonly BoardFlag[] = [
   'reviewBilling',
   'checkCallOverdue',
 ]
-// pastDeliveryDate and detention are BoardFlags too, but they are toggled from the stats strip, not the chip row.
+// pastDeliveryDate, detention and readyForReview are BoardFlags too, but they are toggled from the stats strip, not the chip row.
 
 export const BOARD_FLAG_LABELS: Record<BoardFlag, string> = {
   missingReference: 'Missing reference #',
@@ -33,6 +33,7 @@ export const BOARD_FLAG_LABELS: Record<BoardFlag, string> = {
   checkCallOverdue: 'Check call overdue',
   pastDeliveryDate: 'Past delivery date',
   detention: 'Detention',
+  readyForReview: 'Ready for review',
 }
 
 const hasText = (v: string | null | undefined): boolean => typeof v === 'string' && v.trim() !== ''
@@ -46,6 +47,15 @@ export function needsSalesRep(row: Pick<ShipmentRow, 'salesRepId' | 'salesRepCod
   return !hasText(row.salesRepId) && !hasText(row.salesRepCode)
 }
 
+/**
+ * "Ready for review" is Push to load review's own test (boardReqs.ts readyForReviewOf, which reads the customers'
+ * Load Review lists). That module imports this one, so it registers the test at load instead of being imported here.
+ */
+let readyForReviewTest: ((row: ShipmentRow) => boolean) | null = null
+export function registerReadyForReview(fn: (row: ShipmentRow) => boolean): void {
+  readyForReviewTest = fn
+}
+
 export function matchesFlag(row: ShipmentRow, flag: BoardFlag, nowMs: number): boolean {
   switch (flag) {
     case 'missingReference': return !reviewFactsOfRow(row).referenceNumber
@@ -56,6 +66,7 @@ export function matchesFlag(row: ShipmentRow, flag: BoardFlag, nowMs: number): b
     case 'checkCallOverdue': return checkCallState({ nextCheckCallAt: row.nextCheckCallAt }, nowMs) === 'OVERDUE'
     case 'pastDeliveryDate': return pastDeliveryOf(row, nowMs) != null
     case 'detention': return parseDetentionFlag(row.detentionFlag) != null
+    case 'readyForReview': return readyForReviewTest?.(row) ?? false
   }
 }
 

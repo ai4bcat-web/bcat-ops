@@ -124,6 +124,7 @@ import {
   SHIPMENT_DEFAULT_FROZEN,
   SHIPMENT_INTRODUCED_COLUMNS,
   SHIPMENT_GRID_COLUMNS,
+  READY_FOR_REVIEW_FILTER_VALUE,
   pastDeliveryOnly,
   sentence,
 } from './shipmentGridColumns'
@@ -139,10 +140,11 @@ import { GRID_DEFAULT_PREFIX } from '@/features/tms/grid/orgGridDefault'
 import type { BatchShipmentTask, CustomerRecord, LocationRecord, ShipmentColumnTemplateRecord, TmsSettings, UserProfileRecord } from '@/types/tms'
 import { REVIEW_BILLING_LABEL, needsBillingReview, reviewBillingNote } from '@/lib/reviewBilling'
 import { matchesFlags, pastDeliveryOf, pastDueDaysOf, type BoardFlag } from './boardChips'
-import { boardReqsOfRow, boardReqsText, setBoardReqSources } from './boardReqs'
+import { boardReqsOfRow, boardReqsText, readyForReviewOf, setBoardReqSources } from './boardReqs'
 import { boardListKey, boardViewKey, clearBoardView, readBoardView, readText, writeBoardView, writeText } from './boardViewState'
 import { BatchActionBar } from './board/BatchActionBar'
 import {
+  MAX_REVIEW_BATCH,
   outcomesFromServer,
   pushRefusals,
   selectAllUpToCap,
@@ -914,26 +916,32 @@ function BoardPane({
   // Step AP: Push to Load Review. Rows that fail their customer's requirements are refused
   // here with every reason; the rest go to the server, which decides each row again.
   // Release is not here: Load Review is the only way into billing.
+  // Pushes `rows` in batches of at most MAX_REVIEW_BATCH (the server's cap), reporting every row's outcome in their order.
+  const pushRows = useCallback(async (rows: readonly ShipmentRow[]): Promise<BatchOutcome[]> => {
+    const labelOf = (id: string, fallback: string | null) => rows.find((r) => r.id === id)?.number ?? fallback ?? id
+    const refused = pushRefusals(rows, { customers, orgDefault: settings?.reviewRequirements })
+    const refusedIds = new Set(refused.map((o) => o.rowId))
+    const sendRows = rows.filter((r) => !refusedIds.has(r.id))
+    const sent: BatchOutcome[] = []
+    for (let i = 0; i < sendRows.length; i += MAX_REVIEW_BATCH) {
+      const chunk = sendRows.slice(i, i + MAX_REVIEW_BATCH)
+      try {
+        const res = await batchShipmentTask({ task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: chunk.map((r) => r.id), params: {} })
+        sent.push(...outcomesFromServer(res.results, labelOf))
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Batch failed'
+        sent.push(...chunk.map((r) => ({ rowId: r.id, rowLabel: r.number, ok: false, reasons: [message] })))
+      }
+    }
+    const order = new Map(rows.map((r, i) => [r.id, i]))
+    return [...refused, ...sent].sort((a, b) => (order.get(a.rowId) ?? 0) - (order.get(b.rowId) ?? 0))
+  }, [customers, settings])
+
   const runPush = useCallback(async () => {
     if (selectedRows.length === 0) return
     setBarRunning(true)
     setBarOutcomes(undefined)
-    const labelOf = (id: string, fallback: string | null) => selectedRows.find((r) => r.id === id)?.number ?? fallback ?? id
-    const refused = pushRefusals(selectedRows, { customers, orgDefault: settings?.reviewRequirements })
-    const refusedIds = new Set(refused.map((o) => o.rowId))
-    const sendRows = selectedRows.filter((r) => !refusedIds.has(r.id))
-    let sent: BatchOutcome[] = []
-    if (sendRows.length > 0) {
-      try {
-        const res = await batchShipmentTask({ task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: sendRows.map((r) => r.id), params: {} })
-        sent = outcomesFromServer(res.results, labelOf)
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Batch failed'
-        sent = sendRows.map((r) => ({ rowId: r.id, rowLabel: r.number, ok: false, reasons: [message] }))
-      }
-    }
-    const order = new Map(selectedRows.map((r, i) => [r.id, i]))
-    const all = [...refused, ...sent].sort((a, b) => (order.get(a.rowId) ?? 0) - (order.get(b.rowId) ?? 0))
+    const all = await pushRows(selectedRows)
     setBarOutcomes(all)
     setBarRunning(false)
     // Done rows leave the selection; the ones that failed stay selected so they can be fixed and retried.
@@ -941,7 +949,22 @@ function BoardPane({
     setSelectedIds((prev) => prev.filter((id) => failedIds.has(id)))
     setCapRefusal(null)
     await handleRefresh()
-  }, [selectedRows, customers, settings, handleRefresh])
+  }, [selectedRows, pushRows, handleRefresh])
+
+  // With the Ready for review filter on: push every ready row shown, nine at a time (Ryne 2026-11-16).
+  const readyOnly = flags.has('readyForReview') || Boolean(filters.status && !filters.status.exclude && filters.status.values?.includes(READY_FOR_REVIEW_FILTER_VALUE))
+  const readyRows = useMemo(() => (readyOnly ? sortedRows.filter((r) => readyForReviewOf(r)) : []), [readyOnly, sortedRows])
+  const runPushAllReady = useCallback(async () => {
+    if (readyRows.length === 0) return
+    setBarRunning(true)
+    setBarOutcomes(undefined)
+    const all = await pushRows(readyRows)
+    setBarOutcomes(all)
+    setBarRunning(false)
+    setSelectedIds([])
+    setCapRefusal(null)
+    await handleRefresh()
+  }, [readyRows, pushRows, handleRefresh])
 
   const renderCell = useCallback(
     (row: ShipmentRow, columnKey: string): ReactNode => {
@@ -1246,6 +1269,7 @@ function BoardPane({
     let docs = 0
     let pastDelivery = 0
     let detention = 0
+    let ready = 0
     let revenue = 0
     const nowMs = Date.now()
     const deliveredRows: ShipmentRow[] = []
@@ -1261,6 +1285,7 @@ function BoardPane({
       if (docsMissingOf(r).length > 0) docs += 1
       if (pastDeliveryOf(r, nowMs)) pastDelivery += 1
       if (r.detentionFlag != null) detention += 1
+      if (readyForReviewOf(r)) ready += 1
     }
     const split = profitByDivision(deliveredRows, (code) => topLevelOf(divisions, code))
     const margin = (d: { revenueCents: number; profitCents: number }) => (d.revenueCents > 0 ? ` (${Math.round((d.profitCents / d.revenueCents) * 100)}%)` : '')
@@ -1297,6 +1322,19 @@ function BoardPane({
           const next = new Set(prev)
           if (next.has('pastDeliveryDate')) next.delete('pastDeliveryDate')
           else next.add('pastDeliveryDate')
+          return next
+        }),
+      },
+      {
+        label: 'Ready for review',
+        value: ready,
+        tone: ready > 0 ? 'good' : undefined,
+        title: flags.has('readyForReview') ? 'Showing only delivered loads Push to load review would accept. Click to show all.' : 'Delivered loads that pass every check to go to Load Review. Click to show only these.',
+        active: flags.has('readyForReview'),
+        onClick: () => setFlags((prev) => {
+          const next = new Set(prev)
+          if (next.has('readyForReview')) next.delete('readyForReview')
+          else next.add('readyForReview')
           return next
         }),
       },
@@ -1398,6 +1436,14 @@ function BoardPane({
           <TmsButton size="sm" variant="destructive" data-testid="delete-selected" onClick={() => setDeleteTargets(selectedRows.map((r) => ({ id: r.id, number: r.number })))}>
             <Trash2 size={14} aria-hidden="true" /> Delete selected ({selectedIds.length})
           </TmsButton>
+        </div>
+      )}
+      {readyRows.length > 0 && (
+        <div className="tms-dense-bar" data-testid="push-all-ready-bar">
+          <TmsButton size="sm" data-testid="push-all-ready" disabled={barRunning} onClick={() => void runPushAllReady()}>
+            Push all ready ({readyRows.length}) to Load Review
+          </TmsButton>
+          <span className="text-xs">Sent {MAX_REVIEW_BATCH} at a time.</span>
         </div>
       )}
       <BatchActionBar

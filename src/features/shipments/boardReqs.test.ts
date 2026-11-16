@@ -78,3 +78,38 @@ describe('REQS export text', () => {
     expect(reqsExportText(row({}))).toBe('')
   })
 })
+
+describe('Ready for review (Active filter + header stat)', () => {
+  it('matches exactly the delivered rows Push to load review would accept', async () => {
+    const { readyForReviewOf, setBoardReqSources } = await import('./boardReqs')
+    const { pushRefusals } = await import('./batchReview')
+    const { matchesFlag } = await import('./boardChips')
+    setBoardReqSources(SRC)
+    const rows = [
+      row({ id: 'ok' } as Partial<ShipmentRow>),
+      row({ id: 'no-rep', salesRepId: null } as Partial<ShipmentRow>),
+      row({ id: 'moving', status: 'IN_TRANSIT' } as Partial<ShipmentRow>),
+      row({ id: 'no-ap', customerBillingGaps: ['CUSTOMER_AP_EMAIL'] } as Partial<ShipmentRow>),
+      row({ id: 'pushed', loadReviewPushedAt: '2026-11-15T00:00:00Z' } as Partial<ShipmentRow>),
+      row({ id: 'voided', voidedAt: '2026-11-15T00:00:00Z' } as Partial<ShipmentRow>),
+    ]
+    const ready = rows.filter((r) => readyForReviewOf(r, SRC)).map((r) => r.id)
+    expect(ready).toEqual(['ok'])
+    const live = rows.filter((r) => !r.voidedAt && !(r as { loadReviewPushedAt?: string }).loadReviewPushedAt)
+    const accepted = live.filter((r) => pushRefusals([r], SRC).length === 0).map((r) => r.id)
+    expect(ready).toEqual(accepted)
+    expect(rows.filter((r) => matchesFlag(r, 'readyForReview', NOW)).map((r) => r.id)).toEqual(['ok'])
+  })
+
+  it('is offered in the Status filter with a count equal to the flag', async () => {
+    const { facetOptions } = await import('@/features/tms/grid/denseGridModel')
+    const { READY_FOR_REVIEW_FILTER_VALUE, SHIPMENT_GRID_COLUMNS } = await import('./shipmentGridColumns')
+    const { setBoardReqSources } = await import('./boardReqs')
+    setBoardReqSources(SRC)
+    const statusCol = SHIPMENT_GRID_COLUMNS.find((c) => c.key === 'status')!
+    const rows = [row({ id: 'a' } as Partial<ShipmentRow>), row({ id: 'b' } as Partial<ShipmentRow>), row({ id: 'c', salesRepId: null } as Partial<ShipmentRow>)]
+    const facet = facetOptions(rows, statusCol).find((f) => f.value === READY_FOR_REVIEW_FILTER_VALUE)
+    expect(facet?.label).toBe('Ready for review')
+    expect(facet?.count).toBe(2)
+  })
+})

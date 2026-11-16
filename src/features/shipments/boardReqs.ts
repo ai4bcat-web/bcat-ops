@@ -17,8 +17,8 @@ import { CUSTOMER_BILLING_GAP_MESSAGE } from '@/lib/customerBillingReady'
 import { FACTOR_GAP_LABEL, type FactorGapCode } from '@/lib/factorReadyAtCreate'
 import { evaluateReviewRequirements, type ReviewRequirement } from '@/lib/reviewRequirements'
 import { hasLeftOperations } from '@/lib/shipmentLists'
-import { pastDeliveryOf } from './boardChips'
-import { requirementsForRow, reviewFactsOfRow } from './batchReview'
+import { pastDeliveryOf, registerReadyForReview } from './boardChips'
+import { pushRefusals, requirementsForRow, reviewFactsOfRow } from './batchReview'
 import type { FormIssue, SectionKey } from './form/sectionProps'
 import { MISSING_DOC_LABEL, openFactorGaps, openMissingDocs, registerRowText, type ShipmentRow } from './shipmentViews'
 
@@ -108,6 +108,18 @@ export function boardReqsListText(reqs: readonly BoardReq[]): string {
   return reqs.map((r) => r.label).join(', ')
 }
 registerRowText('reqs', (row) => boardReqsListText(boardReqsOfRow(row)))
+
+/**
+ * Ready to move to Load Review (Ryne 2026-11-16): a delivered load still on the board that Push to load review would
+ * accept, i.e. pushRefusals (the push's own client test) has nothing to say about it. Voided, canceled and loads
+ * already in review or released are never "ready".
+ */
+export function readyForReviewOf(row: ShipmentRow, src: BoardReqSources = boardSources): boolean {
+  if (row.voidedAt || row.deletedAt || row.status === 'CANCELED') return false
+  if (row.status !== 'DELIVERED' || hasLeftOperations(row)) return false
+  return pushRefusals([row], src).length === 0
+}
+registerReadyForReview((row) => readyForReviewOf(row))
 
 /** "2 NEED" for the cell, empty when complete. */
 export function boardReqsText(reqs: readonly BoardReq[]): string {
