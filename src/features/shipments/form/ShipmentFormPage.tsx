@@ -45,6 +45,7 @@ import { useShipmentForm, type RunKind } from './useShipmentForm'
 import { isFactorBilled } from '@/lib/factorBilling'
 import { blockingIssues, issueSummary, missingDocIssues, missingOnLoadIssues } from './validation'
 import { reqsAsIssues, type BoardReq } from '../boardReqs'
+import { useOwnBoardReqs } from './useOwnBoardReqs'
 import './form.css'
 import { DetentionSection } from '@/features/shipments/components/Detention'
 
@@ -284,12 +285,18 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   )
   const summary = useMemo(() => railSummary(values, form.customer, settings), [values, form.customer, settings])
 
-  // What the board's MISSING chip counts, as the form sees it: the factoring fields still marked on the load, and its PO.
-  // Opened from the board's REQS chip, the chip's own list rides along (link state), so the rail lists exactly what the chip counted.
-  const boardReqs = (innerLocation.state as { boardReqs?: BoardReq[] } | null)?.boardReqs
+  // The rail's What's missing is the board's REQS list for this load (boardReqs.ts), however the editor was opened:
+  // the editor reads its own board row (the same row the board builds) and re-reads it after every save, so items the
+  // form cannot see (sales rep, division, rate, expense, customer setup) clear once they are fixed. Until that row is in,
+  // a list that rode along from the board's REQS chip (link state) stands in, then the form's own factoring/doc gaps.
+  const linkReqs = (innerLocation.state as { boardReqs?: BoardReq[] } | null)?.boardReqs
+  const reqSources = useMemo(() => ({ customers: directory.customers, orgDefault: settings?.reviewRequirements }), [directory.customers, settings])
+  const ownReqs = useOwnBoardReqs(shipmentId, existingLoad, reqSources, bundle)
+  const boardReqs = ownReqs ?? linkReqs
   const missingOnLoad = useMemo(() => {
     const own = [...missingOnLoadIssues(form.issues, existingLoad, isFactorBilled(form.customer)), ...missingDocIssues(bundle, form.customer, existingLoad)]
-    return boardReqs && boardReqs.length > 0 ? reqsAsIssues(boardReqs, own, form.issues) : own
+    if (!boardReqs) return own
+    return boardReqs.length > 0 ? reqsAsIssues(boardReqs, own, form.issues) : []
   }, [form.issues, existingLoad, form.customer, bundle, boardReqs])
   // Opened from the board's MISSING chip (`?missing=1`): go straight to the first missing field, once.
   const missingFocused = useRef(false)

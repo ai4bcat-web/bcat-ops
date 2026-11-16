@@ -44,3 +44,32 @@ describe('Status filter: Past delivery date', () => {
     expect(excluded.map((r) => r.id)).toEqual(['on-time', 'delivered'])
   })
 })
+
+describe('Past due (days) column', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('reads days past the delivery day, blank when not late, and sorts oldest first by value', async () => {
+    const { pastDueDaysOf } = await import('./boardChips')
+    const { pastDueDaysText } = await import('./shipmentViews')
+    const col = SHIPMENT_GRID_COLUMNS.find((c) => c.key === 'pastDueDays')!
+    expect(col).toBeTruthy()
+    expect(pastDueDaysOf(rows[0], NOW)).toBe(7)
+    expect(pastDueDaysOf(rows[2], NOW)).toBeNull()
+    expect(pastDueDaysText(rows[0])).toBe('7')
+    expect(pastDueDaysText(rows[3])).toBe('')
+    const order = [...rows].sort((a, b) => Number(col.sortValue!(b)) - Number(col.sortValue!(a))).map((r) => r.id)
+    expect(order.slice(0, 2)).toEqual(['late-open', 'late-moving'])
+  })
+
+  it('pastDeliveryOnly is true only for an included Past delivery date status filter', async () => {
+    const { pastDeliveryOnly } = await import('./shipmentGridColumns')
+    expect(pastDeliveryOnly({ values: [PAST_DELIVERY_FILTER_VALUE] })).toBe(true)
+    expect(pastDeliveryOnly({ values: [PAST_DELIVERY_FILTER_VALUE], exclude: true })).toBe(false)
+    expect(pastDeliveryOnly({ values: ['DELIVERED'] })).toBe(false)
+    expect(pastDeliveryOnly(undefined)).toBe(false)
+  })
+})

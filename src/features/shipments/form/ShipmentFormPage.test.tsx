@@ -23,6 +23,7 @@ const h = vi.hoisted(() => ({
 }))
 
 vi.mock('./useShipmentLock', () => ({ useShipmentLock: () => ({ heldBy: h.heldBy, release: async () => undefined, takeOver: h.takeOver }) }))
+vi.mock('./useOwnBoardReqs', () => ({ useOwnBoardReqs: () => undefined }))
 vi.mock('./pipelines', () => ({
   runCreate: h.runCreate, runSaveDraft: h.runSaveDraft, runEditSave: h.runEditSave,
   runSubmit: h.runSubmit, runUploadQueued: h.runUploadQueued,

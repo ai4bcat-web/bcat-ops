@@ -12,7 +12,9 @@ import { activeFilterCount, filterRows, nextSort, reorderKeys, sortDenseRows, ty
 import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import { useAuth } from '@/hooks/useAuth'
 import type { ShipmentListRow } from '@/hooks/useShipments'
-import { boardStatusOf, factorInfoText, factorInfoTitle, matchesQuery, missingCountOf } from '@/features/shipments/shipmentViews'
+import { boardStatusOf, matchesQuery } from '@/features/shipments/shipmentViews'
+import { boardReqsListText, boardReqsOfRow, boardReqsText } from '@/features/shipments/boardReqs'
+import { useBoardReqSources } from '@/features/shipments/useBoardReqSources'
 import { FACTOR_INFO_OPTIONS, sentence } from '@/features/shipments/shipmentGridColumns'
 import { batchShipmentTask, listAuditLogsFor, pushReadyToLoadReview, releaseToBilling } from '@/lib/apiClient'
 import { useBillingGrant, LOAD_REVIEW_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
@@ -63,6 +65,7 @@ const fieldSort = (key: string) => (e: ReviewEntry): string | number => {
 }
 export function LoadReviewPage() {
   const [params, setParams] = useSearchParams()
+  useBoardReqSources()
   const { shipments, queue, target, loading, partial, error, refresh } = useLoadReviewQueue(params.get('tab') === 'released', params.get('shipment'))
   const { hasPageAccess, user } = useAuth()
   const email = user?.email ?? ''
@@ -100,7 +103,8 @@ export function LoadReviewPage() {
       { key: 'age', header: 'In review', group: 'Review', text: ({ row }) => { const age = reviewAgeDays({ deliveredAt: deliveredTimeOf(row) }, now); return age == null ? 'No delivery time' : `${age} d` }, extraPx: 24, sortValue: ({ row }) => reviewAgeDays({ deliveredAt: deliveredTimeOf(row) }, now) ?? -1 },
       { key: 'rep', header: 'Sales rep', group: 'Review', text: ({ row }) => row.salesRepName ?? '—', filter: 'multi', optionsOf: ({ row }) => opt(row.salesRepName) },
       { key: 'division', header: 'Division', group: 'Review', text: ({ row }) => row.revDivision?.replace(/_/g, ' ') ?? '—', filter: 'multi', optionsOf: ({ row }) => opt(row.revDivision?.replace(/_/g, ' ')) },
-      { key: 'factoring', header: 'Factoring', group: 'Checks', text: ({ row }) => factorInfoText(row), extraPx: 24, filter: 'multi', optionsOf: ({ row }) => [missingCountOf(row) > 0 ? FACTOR_INFO_OPTIONS[0] : FACTOR_INFO_OPTIONS[1]], fixedOptions: FACTOR_INFO_OPTIONS, sortValue: ({ row }) => missingCountOf(row) },
+      // REQS: the board's combined list (push to load review + factoring/OTR), so both pages count the same (boardReqs.ts).
+      { key: 'factoring', header: 'Reqs', group: 'Checks', text: ({ row }) => boardReqsText(boardReqsOfRow(row)), extraPx: 24, filter: 'multi', optionsOf: ({ row }) => [boardReqsOfRow(row).length > 0 ? FACTOR_INFO_OPTIONS[0] : FACTOR_INFO_OPTIONS[1]], fixedOptions: FACTOR_INFO_OPTIONS, sortValue: ({ row }) => boardReqsOfRow(row).length },
       { key: 'checks', header: 'Checks (preliminary)', group: 'Checks', text: (e) => (!e.verdict ? '' : failedOf(e) === 0 ? `All ${LOAD_REVIEW_CHECKS.length} passed` : `${failedOf(e)} to fix`), extraPx: 24 },
       ...LOAD_REVIEW_CHECKS.map((key): DenseColumn<ReviewEntry> => ({ key: `check-${key}`, header: LOAD_REVIEW_CHECK_LABEL[key], group: 'Checks', text: (e) => (!e.verdict ? '' : e.verdict.checks[key].ok ? 'Pass' : 'Fix'), extraPx: 40, filter: 'multi', optionsOf: (e) => (e.verdict ? [{ value: e.verdict.checks[key].ok ? 'Pass' : 'Fix', label: e.verdict.checks[key].ok ? 'Pass' : 'Fix' }] : []), fixedOptions: [{ value: 'Pass', label: 'Pass' }, { value: 'Fix', label: 'Fix' }] })),
       { key: 'revenue', header: 'Revenue', group: 'Review', text: ({ row }) => formatCents(row.orderRevenueCents ?? row.revenueCents ?? 0), align: 'right', sortValue: ({ row }) => row.orderRevenueCents ?? row.revenueCents ?? 0 },
@@ -226,9 +230,9 @@ export function LoadReviewPage() {
     { key: 'division', header: 'Division', render: ({ row }) => row.revDivision?.replace(/_/g, ' ') ?? '—' },
     // One column per check, each a clear pass (check mark) or fail (cross) with its reason on hover, plus a result column up front:
     // "All passed" or how many need fixing.
-    { key: 'factoring', header: 'Factoring', render: ({ row }) => {
-      const text = factorInfoText(row)
-      return text ? <TmsBadge tone="orange" title={factorInfoTitle(row)}>{text}</TmsBadge> : null
+    { key: 'factoring', header: 'Reqs', render: ({ row }) => {
+      const reqs = boardReqsOfRow(row)
+      return reqs.length > 0 ? <TmsBadge tone={reqs.length > 2 ? 'red' : 'orange'} title={`Needs: ${boardReqsListText(reqs)}`}>{boardReqsText(reqs)}</TmsBadge> : null
     } },
     { key: 'checks', header: 'Checks (preliminary)', render: ({ verdict }) => {
       if (!verdict) return null

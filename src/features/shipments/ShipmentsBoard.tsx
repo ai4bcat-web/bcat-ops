@@ -124,6 +124,7 @@ import {
   SHIPMENT_DEFAULT_FROZEN,
   SHIPMENT_INTRODUCED_COLUMNS,
   SHIPMENT_GRID_COLUMNS,
+  pastDeliveryOnly,
   sentence,
 } from './shipmentGridColumns'
 import {
@@ -137,7 +138,7 @@ import {
 import { GRID_DEFAULT_PREFIX } from '@/features/tms/grid/orgGridDefault'
 import type { BatchShipmentTask, CustomerRecord, LocationRecord, ShipmentColumnTemplateRecord, TmsSettings, UserProfileRecord } from '@/types/tms'
 import { REVIEW_BILLING_LABEL, needsBillingReview, reviewBillingNote } from '@/lib/reviewBilling'
-import { matchesFlags, pastDeliveryOf, type BoardFlag } from './boardChips'
+import { matchesFlags, pastDeliveryOf, pastDueDaysOf, type BoardFlag } from './boardChips'
 import { boardReqsOfRow, boardReqsText, setBoardReqSources } from './boardReqs'
 import { boardListKey, boardViewKey, clearBoardView, readBoardView, readText, writeBoardView, writeText } from './boardViewState'
 import { BatchActionBar } from './board/BatchActionBar'
@@ -746,7 +747,17 @@ function BoardPane({
     return chipBase.filter((r) => matchesFlags(r, flags, nowMs))
   }, [chipBase, flags])
   const filteredRows = useMemo(() => filterRows(fitRows, gridColumns, filters), [fitRows, gridColumns, filters])
-  const sortedRows = useMemo(() => sortDenseRows(filteredRows, gridColumns, prefs.sort), [filteredRows, gridColumns, prefs.sort])
+  // Looking at only the late loads (the Past delivery date stat or the Status filter's option) with no sort of one's own:
+  // oldest first, i.e. most days past the delivery day (Ryne 2026-11-16).
+  const lateOnly = flags.has('pastDeliveryDate') || pastDeliveryOnly(filters.status)
+  const sortedRows = useMemo(() => {
+    const ownSort = prefs.sort != null && !(prefs.sort.key === DEFAULT_SORT.key && prefs.sort.dir === DEFAULT_SORT.dir)
+    if (lateOnly && !ownSort) {
+      const nowMs = Date.now()
+      return [...filteredRows].sort((a, b) => (pastDueDaysOf(b, nowMs) ?? -1) - (pastDueDaysOf(a, nowMs) ?? -1))
+    }
+    return sortDenseRows(filteredRows, gridColumns, prefs.sort)
+  }, [filteredRows, gridColumns, prefs.sort, lateOnly])
   const shownRows = useMemo(() => sortedRows.slice(0, pageSize), [sortedRows, pageSize])
 
   const saveTeamLayout = useCallback(async () => {

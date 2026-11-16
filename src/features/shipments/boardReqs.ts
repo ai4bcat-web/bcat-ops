@@ -20,7 +20,7 @@ import { hasLeftOperations } from '@/lib/shipmentLists'
 import { pastDeliveryOf } from './boardChips'
 import { requirementsForRow, reviewFactsOfRow } from './batchReview'
 import type { FormIssue, SectionKey } from './form/sectionProps'
-import { MISSING_DOC_LABEL, openFactorGaps, openMissingDocs, type ShipmentRow } from './shipmentViews'
+import { MISSING_DOC_LABEL, openFactorGaps, openMissingDocs, registerRowText, type ShipmentRow } from './shipmentViews'
 
 export interface BoardReq {
   /** Stable id, also how the editor's rail matches an item to the field it focuses. */
@@ -102,6 +102,12 @@ export function setBoardReqSources(src: BoardReqSources): void {
 export function boardReqsOfRow(row: ShipmentRow, nowMs: number = Date.now()): BoardReq[] {
   return boardReqsOf(row, boardSources, nowMs)
 }
+
+/** The list as one line ("Sales rep, POD"), for the CSV export and tooltips; empty when complete. */
+export function boardReqsListText(reqs: readonly BoardReq[]): string {
+  return reqs.map((r) => r.label).join(', ')
+}
+registerRowText('reqs', (row) => boardReqsListText(boardReqsOfRow(row)))
 
 /** "2 NEED" for the cell, empty when complete. */
 export function boardReqsText(reqs: readonly BoardReq[]): string {
