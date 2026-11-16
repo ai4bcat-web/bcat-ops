@@ -11,7 +11,7 @@ import type { CarrierBillRecord } from '@/types/tms'
 import { ageOpenItems } from '@/lib/arAging'
 import { chicagoDateStr } from '@/lib/date'
 import { ApPage } from '@/features/ap/ApPage'
-import { PayablesCards } from './AccountingSection'
+import { PayablesCard } from './AccountingSection'
 
 const openBillsMock = vi.hoisted(() => vi.fn())
 vi.mock('@/hooks/useApWorklist', () => ({ useApWorklist: () => ({ rows: [], loading: false, error: null, refresh: vi.fn().mockResolvedValue(undefined) }) }))
@@ -76,27 +76,23 @@ beforeEach(() => {
   })
 })
 
-async function cardText(ui: React.ReactElement, testId: string): Promise<string> {
-  const { unmount } = render(<MemoryRouter>{ui}</MemoryRouter>)
-  await settle()
-  const text = screen.getByTestId(testId).textContent ?? ''
-  unmount()
-  return text
-}
-
-describe('dashboard Payables cards', () => {
-  it('reads the same Payables numbers as the Payable view', async () => {
-    const page = await cardText(<ApPage />, 'ap-summary')
-    const dash = await cardText(<PayablesCards />, 'ap-summary')
-    expect(dash).toBe(page)
-    // Every open bill, Aljex ones included: 1,500 + 800 + 420.
-    expect(dash).toContain('$2,720.00')
-  })
-
-  it('shows the Expected and Aging cards', async () => {
-    render(<MemoryRouter><PayablesCards /></MemoryRouter>)
+describe('dashboard Accounts payable card', () => {
+  it('reads the same figures as the Payable view', async () => {
+    const { unmount } = render(<MemoryRouter><ApPage /></MemoryRouter>)
     await settle()
-    const cards = screen.getAllByTestId('ap-tab-card')
-    expect(cards.map((c) => c.querySelector('.tms-list-card-title')?.textContent)).toEqual(['Expected', 'Open bills by due date'])
+    const page: Record<string, string> = {}
+    for (const li of screen.getByTestId('ap-summary').querySelectorAll('li')) {
+      const label = li.querySelector('.tms-list-row-label')?.firstChild?.textContent?.trim() ?? ''
+      page[label] = (li.querySelector('.tms-list-row-value')?.textContent ?? '').replace(/\.\d\d$/, '')
+    }
+    unmount()
+    render(<MemoryRouter><PayablesCard /></MemoryRouter>)
+    await settle()
+    expect(screen.getByTestId('dashboard-ap-card')).toHaveTextContent(page['Open AP'])
+    // Every open bill, Aljex ones included: 1,500 + 800 + 420.
+    expect(page['Open AP']).toBe('$2,720')
+    for (const [key, label] of [['expected', 'Expected'], ['aging', 'Aging'], ['past-due', 'Past due'], ['next7', 'Due next 7 days']] as const) {
+      expect(screen.getByTestId(`summary-row-${key}`)).toHaveTextContent(page[label])
+    }
   })
 })
