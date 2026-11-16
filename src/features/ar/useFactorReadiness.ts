@@ -20,6 +20,8 @@ export interface FactorReadiness {
 }
 
 const PAGE = 50
+/** How long one factoring-queue row's readiness check may take before the row says it could not be checked. */
+const QUEUE_CHECK_MS = 25_000
 
 type Entry = [string, FactorReadiness]
 const entry = (key: string, r: FactorReadiness): Entry => [key, r]
@@ -37,26 +39,32 @@ export function useFactorReadiness(rows: readonly ArQueueRow[], enabled: boolean
     const pages: string[][] = []
     for (let i = 0; i < orderIds.length; i += PAGE) pages.push(orderIds.slice(i, i + PAGE))
     const keyOfOrder = new Map(orderRows.map((r) => [r.orderId, r.key]))
+    // Each answer lands as it arrives, so one slow row never leaves the whole list on "Checking…".
+    const land = (entries: Entry[]) => { if (alive && entries.length) setByKey((prev) => { const next = new Map(prev); for (const [k, v] of entries) next.set(k, v); return next }) }
+    const COULD_NOT = 'Could not check — reload to try again'
 
     const orderWork = pages.map((orderIds) => previewFactorReady({ orderIds })
       .then(({ results }) => results.map((r) => entry(keyOfOrder.get(r.orderId) ?? `order:${r.orderId}`, { factorBilled: r.factorBilled, ready: r.ready, missing: r.missing })))
-      .catch((err: unknown) => orderIds.map((id) => entry(keyOfOrder.get(id) ?? `order:${id}`, { factorBilled: false, ready: false, missing: [graphqlErrorText(err) || 'Could not check'] }))))
+      .catch((err: unknown) => orderIds.map((id) => entry(keyOfOrder.get(id) ?? `order:${id}`, { factorBilled: false, ready: false, missing: [graphqlErrorText(err) || COULD_NOT] })))
+      .then(land))
     const queueWork = queueRows.map((row) => {
       const item = row.factorItem!
-      return assembleInvoice(item.id)
+      // A readiness check that never answers must not hold the row on "Checking…": give up after a while and say so.
+      const timeout = new Promise<Entry[]>((resolve) => setTimeout(() => resolve([entry(row.key, { factorBilled: true, ready: false, missing: [COULD_NOT] })]), QUEUE_CHECK_MS))
+      const check = assembleInvoice(item.id)
         .then((r) => {
+          // Factoring needs the rate confirmation and the POD, plus what OTR's API takes (r.missingFields already leaves out the ZIPs).
           const missing = [...r.missingFields.map((f) => OTR_FIELD_LABEL[f]), ...r.missingDocuments]
           if (item.otrError) missing.push(item.otrError)
           // Already at OTR with documents to resend: ready once the documents are in.
           const ready = item.otrInvoiceId ? r.missingDocuments.length === 0 : r.missingFields.length === 0 && r.missingDocuments.length === 0
           return [entry(row.key, { factorBilled: true, ready, missing: ready ? [] : missing })]
         })
-        .catch((err: unknown) => [entry(row.key, { factorBilled: true, ready: false, missing: [graphqlErrorText(err) || 'Could not check'] })])
+        .catch((err: unknown) => [entry(row.key, { factorBilled: true, ready: false, missing: [graphqlErrorText(err) || COULD_NOT] })])
+      return Promise.race([check, timeout]).then(land)
     })
 
-    Promise.all([...orderWork, ...queueWork]).then((sets) => {
-      if (alive) setByKey(new Map(sets.flat()))
-    })
+    void Promise.all([...orderWork, ...queueWork])
     return () => { alive = false }
     // orderRows/queueRows follow `signature`; version re-asks after a batch.
     // eslint-disable-next-line react-hooks/exhaustive-deps

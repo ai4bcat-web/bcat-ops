@@ -176,6 +176,20 @@ describe('a rate confirmation on the shipment itself', () => {
     expect(await find(LOAD, '14538')).toBeNull()
   })
 
+  it('takes a customer rate con filed on the shipment itself (the editor box: no order, load or assignment named)', async () => {
+    tables[SHIP_DOC_TABLE] = [doc({ id: 'sd-box', type: 'RATE_CON', orderId: null, loadId: null, loadCarrierId: null, source: 'UPLOAD' })]
+    const find = await loadFindRatecon()
+    expect((await find(LOAD, '20047'))?.id).toBe('sd-box')
+  })
+
+  it('never takes a shipment-level file BCAT generated or a carrier sent through the portal', async () => {
+    const find = await loadFindRatecon()
+    for (const source of ['GENERATED', 'CARRIER_PORTAL']) {
+      tables[SHIP_DOC_TABLE] = [doc({ id: 'sd-x', type: 'RATE_CON', orderId: null, loadId: null, loadCarrierId: null, source })]
+      expect(await find(LOAD, '20047')).toBeNull()
+    }
+  })
+
   it('never takes another order’s tender from the same shipment', async () => {
     tables[SHIP_DOC_TABLE] = [doc({ id: 'sd-other', orderId: 'ord-OTHER' })]
     const find = await loadFindRatecon()
