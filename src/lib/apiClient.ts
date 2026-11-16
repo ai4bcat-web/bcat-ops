@@ -3742,7 +3742,11 @@ const ID_BATCH = { chunk: 100, concurrency: 12 }
 /** `getLoadFinancials` rows are small: 250 aliases per request measured fine on a 761-shipment window, 500 was refused. */
 const FINANCIALS_BATCH = { chunk: 250, concurrency: 6 }
 const NARROW_ID_BATCH = { chunk: 500, concurrency: 4 }
-/** The server drops voided shipments; `deletedAt` stays client-side (a NULL-typed one would hide a live row). */
+/**
+ * The server drops voided shipments; `deletedAt` stays client-side (a NULL-typed one would hide a live row).
+ * A NULL-typed `voidedAt` would hide a live row here too: DUPLICATE_SHIPMENT used to write one (fixed, and the
+ * seven copies it hid were cleaned 2026-11-16), so nothing may ever write `voidedAt: null` straight to DynamoDB.
+ */
 const NOT_VOIDED = { type: 'ModelShipmentFilterInput', value: { voidedAt: { attributeExists: false } } }
 
 /** Several status partitions in ONE aliased request (paged per alias past 1000 rows); one index partition per status. */
