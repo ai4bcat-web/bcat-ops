@@ -16,6 +16,7 @@
 import { CUSTOMER_BILLING_GAP_MESSAGE } from '@/lib/customerBillingReady'
 import { FACTOR_GAP_LABEL, type FactorGapCode } from '@/lib/factorReadyAtCreate'
 import { evaluateReviewRequirements, type ReviewRequirement } from '@/lib/reviewRequirements'
+import { hasLeftOperations } from '@/lib/shipmentLists'
 import { pastDeliveryOf } from './boardChips'
 import { requirementsForRow, reviewFactsOfRow } from './batchReview'
 import type { FormIssue, SectionKey } from './form/sectionProps'
@@ -63,6 +64,8 @@ export function boardReqsOf(row: ShipmentRow, src: BoardReqSources, nowMs: numbe
   if (row.voidedAt || row.deletedAt || row.status === 'CANCELED') return []
   // Imported history is exempt from review and already billed or factored in Aljex.
   if (row.legacyImported === true) return []
+  // A load already in Load Review or released to invoicing has left operations: the board asks nothing more of it.
+  if (hasLeftOperations(row)) return []
   const pod = podStage(row, nowMs)
   const out = new Map<string, BoardReq>()
   const add = (item: BoardReq | null) => { if (item && !out.has(item.key)) out.set(item.key, item) }

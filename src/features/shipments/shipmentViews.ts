@@ -46,7 +46,7 @@ import { SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
 import { boardStatusOf, detailValuesFor, type BoardCarrier } from '@/lib/shipmentViewDefs'
 import { assignmentChipText } from './carrierLadder'
 import { isInLoadReview, isReleasedToInvoicing } from '@/lib/shipmentLists'
-import { loadInvoiceStatusOf, loadInvoiceStatusText, type LoadInvoiceStatus } from '@/lib/loadInvoiceStatus'
+import { loadInvoiceStatusOf, loadInvoiceStatusText, type LoadInvoiceStatus, type LoadInvoiceStatusKey } from '@/lib/loadInvoiceStatus'
 import { factorGapSummary, type FactorGapCode } from '@/lib/factorReadyAtCreate'
 import { effectiveShipmentType, shipmentTypeLabel } from '@/lib/shipmentTypes'
 export { ALJEX_COLUMN_KEYS, boardStatusOf, matchesBoardFilters } from '@/lib/shipmentViewDefs'
@@ -759,9 +759,31 @@ function apptStatusText(row: ShipmentRow, type: 'pickup' | 'delivery'): string {
  * `DEL` while the checkbox beside it says `Delivered` is two names for one fact.
  * A row with no stop evidence shows the status alone.
  */
+/**
+ * Where a released load stands, for its status chip (Ryne 2026-11-16): Invoiced, Factoring · pending, Paid… rather
+ * than a bare RELEASED, so a search that finds it from Active shows plainly that it has left operations.
+ */
+const RELEASED_STAGE: Record<LoadInvoiceStatusKey, string> = {
+  NOT_INVOICED: RELEASED_LABEL,
+  READY: 'READY TO INVOICE',
+  FACTORING_PENDING: 'FACTORING · PENDING',
+  OTR_REJECTED: 'FACTORING · OTR REJECTED',
+  OUTSTANDING: 'INVOICED',
+  PARTIAL: 'INVOICED · PARTIALLY PAID',
+  PAID: 'PAID',
+  FACTORED: 'FACTORED',
+  NO_INVOICE: RELEASED_LABEL,
+  LEGACY: 'INVOICED',
+}
+
+export function releasedStageLabel(row: ShipmentRow): string {
+  return RELEASED_STAGE[invoiceStatusOfRow(row).key] ?? RELEASED_LABEL
+}
+
 export function statusWithProgress(row: ShipmentRow): string {
   let label: string = isVoided(row) ? 'VOIDED' : displayStatusOf(row)
-  if (label === RELEASED_LABEL || label === IN_REVIEW_LABEL) return label
+  if (label === RELEASED_LABEL) return releasedStageLabel(row)
+  if (label === IN_REVIEW_LABEL) return label
   // A brokerage load that is covered but not moving yet reads where it stands on the carrier ladder (Ryne 2026-11-09):
   // COVERED, RC SENT (rate con out), DISPATCHED (rate con signed and the driver details in).
   if (label === 'COVERED' && row.revDivision === 'BROKERAGE') {

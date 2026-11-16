@@ -171,3 +171,18 @@ describe('Load Review and the board never share a load (Ryne 2026-11-15)', () =>
     expect(rows.filter(hasLeftOperations)).toHaveLength(3)
   })
 })
+
+describe('invoiced loads leave Active (Ryne 2026-11-16)', () => {
+  const base = { status: 'DELIVERED' as const }
+  it('an imported order carrying only an invoice number or invoiced stamp is released', () => {
+    expect(inShipmentList({ ...base, invoiceNumber: '14878' }, 'active')).toBe(false)
+    expect(inShipmentList({ ...base, invoicedAt: '2026-11-02T12:00:00.000Z' }, 'active')).toBe(false)
+  })
+  it('a load with an OTR queue row (factoring pending) is released', () => {
+    expect(inShipmentList({ ...base, factoringItemId: '14878' }, 'active')).toBe(false)
+    expect(inShipmentList({ ...base, factoringItemId: '14878' }, 'all')).toBe(true)
+  })
+  it('a delivered load with no invoice facts stays Active', () => {
+    expect(inShipmentList({ ...base, arStatus: 'DOCS_NEEDED' }, 'active')).toBe(true)
+  })
+})
