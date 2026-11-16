@@ -267,7 +267,9 @@ describe('a shipment with no customer record', () => {
     expect(note).toContain('DIRECT DRIVE LOGISTICS')
     expect(note).toContain('Link a customer before submitting, invoicing or factoring it')
 
-    fireEvent.change(screen.getByLabelText('Customer to link'), { target: { value: 'cust-9' } })
+    const picker = screen.getByTestId('link-customer-picker')
+    fireEvent.change(picker.querySelector('input')!, { target: { value: 'Direct Drive' } })
+    fireEvent.click(screen.getByText('Direct Drive Logistics', { selector: 'span' }))
     fireEvent.click(screen.getByRole('button', { name: 'Link customer' }))
     await waitFor(() => expect(actions.setCustomer).toHaveBeenCalledWith('cust-9'))
   })

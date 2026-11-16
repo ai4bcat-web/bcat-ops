@@ -71,12 +71,27 @@ function similarity(a: string, b: string): number {
 
 export interface DirectoryMatch<T> { record: T; score: number; reason: string }
 
+/**
+ * Looser key for matching customer names only (Ryne 2026-11-16, "R&R Transport, Inc."): "&" and "and" are one word, a leading
+ * "the" and a trailing Co/Company never decide a match. Kept separate from `normalizeName`, which stored keys and duplicate
+ * checks depend on.
+ */
+export function customerMatchKey(value: string): string {
+  // "&" and "and" are dropped alike, so "R&R" and "R and R" agree without "and" counting as a shared word between unrelated names.
+  return normalizeName(value.replace(/&/g, ' '))
+    .split(' ').filter((w) => w !== 'and').join(' ')
+    .replace(/^the\s+/, '')
+    .replace(/(?:\s+(?:company|co))+$/, '')
+    .replace(/(?:\s+(?:incorporated|inc|llc|ltd|limited|corporation|corp))+$/, '')
+    .trim()
+}
+
 export function findCustomerMatches(name: string, customers: CustomerRecord[]): DirectoryMatch<CustomerRecord>[] {
-  const needle = normalizeName(name)
+  const needle = customerMatchKey(name)
   if (!needle) return []
   return customers.filter(isActiveDirectoryRecord).map(record => {
     const names = [record.name, ...(record.aliases ?? [])]
-    const score = Math.max(...names.map(candidate => similarity(needle, normalizeName(candidate))))
+    const score = Math.max(...names.map(candidate => similarity(needle, customerMatchKey(candidate))))
     return { record, score, reason: score === 1 ? 'Exact name or alias' : 'Similar name — review before selecting' }
   }).filter(match => match.score >= 0.4).sort((a, b) => b.score - a.score)
 }

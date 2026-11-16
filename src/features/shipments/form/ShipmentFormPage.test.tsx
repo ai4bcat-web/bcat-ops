@@ -223,9 +223,10 @@ describe('ShipmentFormPage — issues and rail', () => {
     const count = screen.getByTestId('rail-required-count')
     // Shipment type defaults to Truckload, so that row starts done.
     expect(count.textContent).toBe('1 / 10')
+    // A typed name is not a customer: Create needs a directory customer (Ryne 2026-11-16), so the row stays open.
     fireEvent.change(screen.getByTestId('f-customer-name'), { target: { value: 'ZZ Customer' } })
-    expect(count.textContent).toBe('2 / 10')
-    expect(screen.getByTestId('rail-req-customer').getAttribute('data-done')).toBe('true')
+    expect(count.textContent).toBe('1 / 10')
+    expect(screen.getByTestId('rail-req-customer').getAttribute('data-done')).toBe('false')
     expect(screen.getByTestId('rail-req-equipment').getAttribute('data-missing')).toBe('false')
     fireEvent.click(screen.getByTestId('rail-req-equipment'))
     return waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('f-shipping-equipmentType')))

@@ -10,7 +10,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { CheckCircle2, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsButton, TmsCard, TmsInput, TmsSelect } from '@/features/tms/kit'
-import { DirectoryPicker } from '@/components/directory-picker/DirectoryPicker'
+import { LinkCustomerPicker } from '@/features/shipments/components/LinkCustomerPicker'
 import { OwnFleetDriverPicker } from '@/components/OwnFleetDriverPicker'
 import { useOwnFleetRoster } from '@/hooks/useOwnFleetRoster'
 import { assignAsset, getShipmentBundle, listCustomers, patchCustomer, setShipmentCustomer, updateOrderDetails, updateStop } from '@/lib/apiClient'
@@ -109,7 +109,7 @@ export function ReviewFixPanel({ shipmentId, readOnly, busy, onSaved, failing, r
   const otr = otrChecks(bundle, customer)
   return <div className="lr-fix" data-testid="review-fix-panel">
     {error && <p role="alert" className="lr-fix-error">{error}</p>}
-    <CustomerFix customer={customer} customers={customers ?? []} linked={Boolean(customerId)} off={off} flagged={failing.has('NO_CUSTOMER') || failing.has('FACTOR_CUSTOMER_MC') || failing.has('FACTOR_BILLING_METHOD')}
+    <CustomerFix customer={customer} customers={customers ?? []} typedName={bundle.shipment.customerName ?? ''} linked={Boolean(customerId)} off={off} flagged={failing.has('NO_CUSTOMER') || failing.has('FACTOR_CUSTOMER_MC') || failing.has('FACTOR_BILLING_METHOD')}
       onLink={(id) => void save('customer', () => setShipmentCustomer({ shipmentId, customerId: id }), 'Customer linked')}
       persist={async (patch) => {
         if (!customer) return
@@ -133,9 +133,11 @@ export function ReviewFixPanel({ shipmentId, readOnly, busy, onSaved, failing, r
 
 type CustomerPatchFields = Pick<CustomerRecord, 'billingMethod' | 'customerType' | 'mcNumber' | 'apEmail' | 'apEmailsExtra' | 'paymentTermsDays' | 'reviewRequirements'>
 
-function CustomerFix({ customer, customers, linked, off, flagged, onLink, persist }: {
+function CustomerFix({ customer, customers, typedName, linked, off, flagged, onLink, persist }: {
   customer: CustomerRecord | null
   customers: CustomerRecord[]
+  /** The customer text on the freight; seeds the search and the create form. */
+  typedName: string
   linked: boolean
   off: boolean
   flagged: boolean
@@ -157,7 +159,7 @@ function CustomerFix({ customer, customers, linked, off, flagged, onLink, persis
   return <TmsCard className={`lr-check ${flagged ? 'lr-check-bad' : 'lr-check-ok'}`} title={<span id={FIX_ANCHOR.customer} className="lr-check-title"><Mark ok={!flagged} />Customer<Unsaved show={dirty} /></span>}>
     {!linked && <div className="lr-fix-row lr-fix-flag">
       <span className="lr-fix-label">Link a customer</span>
-      <DirectoryPicker type="customer" value={pick} customers={customers} locations={[]} placeholder="Search customers…" onChange={(id) => setPick(id)} />
+      <LinkCustomerPicker customers={customers} value={pick} initialQuery={typedName} onChange={(id) => setPick(id)} />
       <TmsButton size="sm" variant="primary" disabled={off || !pick} onClick={() => pick && onLink(pick)}>Link</TmsButton>
     </div>}
     {customer && <>

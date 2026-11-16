@@ -15,6 +15,14 @@ describe('required fields by action', () => {
     expect(blockingIssues(validateForm(v, { ...base, level: 'draft', customer: null }))).toEqual([])
   })
 
+  it('Create refuses a typed customer name: it must be linked from the directory (Ryne 2026-11-16, 20007)', () => {
+    const v = filledValues()
+    v.customer.id = ''; v.customer.useTyped = true; v.customer.typedName = 'R&R Transport, Inc.'
+    const create = blockingIssues(validateForm(v, { ...base, level: 'create', customer: null }))
+    expect(create.find((i) => i.id === 'customer:name')?.message).toMatch(/Link the customer from the directory/)
+    expect(blockingIssues(validateForm(v, { ...base, level: 'draft', customer: null })).some((i) => i.id === 'customer:name')).toBe(false)
+  })
+
   it('Create on an empty form lists exactly the Aljex reds, plus what OTR needs to factor it', () => {
     const all = blockingIssues(validateForm(emptyValues(), { ...base, level: 'create', customer: null }))
     expect(all.filter((i) => i.id.includes(':factor:')).map((i) => i.id)).toEqual([

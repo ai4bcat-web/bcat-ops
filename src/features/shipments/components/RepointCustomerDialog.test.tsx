@@ -10,7 +10,9 @@ globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObse
 if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = () => false
 if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {}
 
-const { repointShipmentCustomer, repointInvoicedCustomer, resolveRevTag, getShipmentBundle, getInvoice } = vi.hoisted(() => ({
+const { repointShipmentCustomer, repointInvoicedCustomer, resolveRevTag, getShipmentBundle, getInvoice, setShipmentCustomer, createCustomer } = vi.hoisted(() => ({
+  setShipmentCustomer: vi.fn(),
+  createCustomer: vi.fn(),
   repointShipmentCustomer: vi.fn(),
   repointInvoicedCustomer: vi.fn(),
   resolveRevTag: vi.fn(),
@@ -19,6 +21,8 @@ const { repointShipmentCustomer, repointInvoicedCustomer, resolveRevTag, getShip
 }))
 
 vi.mock('@/lib/apiClient', () => ({
+  setShipmentCustomer,
+  createCustomer,
   repointShipmentCustomer,
   repointInvoicedCustomer,
   resolveRevTag,
@@ -38,6 +42,16 @@ const customers = [
   { id: 'cust-1', name: 'Acme Freight' },
   { id: 'cust-2', name: 'Globex' },
 ]
+
+const authGroups: string[] = []
+vi.mock('@/hooks/useAuth', () => ({ useAuthUser: () => ({ email: 'ops@bcatcorp.com', groups: authGroups }) }))
+
+/** The picker is a directory search: type the name, click the match. */
+function pickCustomer(id: string) {
+  const name = customers.find((c) => c.id === id)!.name
+  fireEvent.change(screen.getByTestId('link-customer-picker').querySelector('input')!, { target: { value: name } })
+  fireEvent.click(screen.getByText(name, { selector: 'span' }))
+}
 
 /** A bundle with one invoiced order — unpaid, so the plan has no `moneyApplied`. */
 function invoicedBundle() {
@@ -125,7 +139,7 @@ describe('RepointCustomerDialog idempotency', () => {
     fireEvent.click(screen.getByRole('button', { name: /Open/i }))
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy())
 
-    fireEvent.change(screen.getByRole('combobox', { name: /New customer/i }), { target: { value: 'cust-2' } })
+    pickCustomer('cust-2')
     fireEvent.change(screen.getByRole('textbox', { name: /Reason/i }), { target: { value: 'Sold to different division' } })
     fireEvent.click(screen.getByRole('button', { name: /^Re-point$/i }))
 
@@ -147,7 +161,7 @@ describe('RepointCustomerDialog idempotency', () => {
     fireEvent.click(screen.getByRole('button', { name: /Open/i }))
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy())
 
-    fireEvent.change(screen.getByRole('combobox', { name: /New customer/i }), { target: { value: 'cust-2' } })
+    pickCustomer('cust-2')
     fireEvent.change(screen.getByRole('textbox', { name: /Reason/i }), { target: { value: 'Sold to different division' } })
     fireEvent.click(screen.getByRole('button', { name: /^Re-point$/i }))
 
@@ -177,7 +191,7 @@ describe('RepointCustomerDialog idempotency', () => {
       />,
     )
 
-    fireEvent.change(screen.getByRole('combobox', { name: /New customer/i }), { target: { value: 'cust-2' } })
+    pickCustomer('cust-2')
     fireEvent.change(screen.getByRole('textbox', { name: /Reason/i }), { target: { value: 'Sold to different division' } })
     fireEvent.click(screen.getByRole('button', { name: /^Re-point$/i }))
 
@@ -208,7 +222,7 @@ describe('RepointCustomerDialog idempotency', () => {
       />,
     )
 
-    fireEvent.change(screen.getByRole('combobox', { name: /New customer/i }), { target: { value: 'cust-2' } })
+    pickCustomer('cust-2')
     fireEvent.change(screen.getByRole('textbox', { name: /Reason/i }), { target: { value: 'Sold to different division' } })
     fireEvent.click(screen.getByRole('button', { name: /^Re-point$/i }))
 
@@ -244,7 +258,7 @@ describe('RepointCustomerDialog credit-and-rebill acknowledgement', () => {
       />,
     )
 
-    fireEvent.change(screen.getByRole('combobox', { name: /New customer/i }), { target: { value: 'cust-2' } })
+    pickCustomer('cust-2')
     fireEvent.change(screen.getByRole('textbox', { name: /Reason/i }), { target: { value: 'Sold to different division' } })
     fireEvent.click(screen.getByRole('button', { name: /^Re-point$/i }))
 
@@ -292,7 +306,7 @@ describe('RepointCustomerDialog credit-and-rebill acknowledgement', () => {
       />,
     )
 
-    fireEvent.change(screen.getByRole('combobox', { name: /New customer/i }), { target: { value: 'cust-2' } })
+    pickCustomer('cust-2')
     fireEvent.change(screen.getByRole('textbox', { name: /Reason/i }), { target: { value: 'Sold to different division' } })
     fireEvent.click(screen.getByRole('button', { name: /^Re-point$/i }))
 
