@@ -4,9 +4,9 @@
  *  - Invoiced = sent, unpaid invoices. With Billed: All it is "Open AR"; Manually invoiced is
  *    "Pending with shippers"; Factoring is "Factored, open". The tooltip says which.
  *  - Labels are just "Ready to Invoice", "Invoiced", "Aging" (Ryne 2026-11-16); the amounts live in the tooltips.
- *  - There is no Paid tab (Ryne 2026-11-16): what was paid, and when, lives on Accounting → Payments received.
+ *  - There is no Paid tab (Ryne 2026-11-16): what was paid, and when, lives on Accounting → Payments Received.
  *  - Aging = the same invoices as "Open AR" (any billing), counted in invoices, not customers.
- *  - Payments, credits and debits live on their own page, Accounting → Payments received (Ryne 2026-11-15).
+ *  - Payments, credits and debits live on their own page, Accounting → Payments Received (Ryne 2026-11-15).
  *  - Needs review counts loads flagged for a finance check, not invoices.
  */
 import type { TmsTab } from '@/features/tms/kit'

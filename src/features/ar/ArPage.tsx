@@ -4,7 +4,7 @@
  * The queue holds only shipments released to billing from Load Review, and follows each one
  * to paid in three statuses: Ready to invoice, Invoiced, Paid (`arQueue.ts` decides which).
  * Paperwork chasing lives in Load Review, not here. Aging is the ledger view after the queue; payments,
- * credits and debits have their own page, Accounting → Payments received. Every number is integer cents formatted once, by `formatCents`.
+ * credits and debits have their own page, Accounting → Payments Received. Every number is integer cents formatted once, by `formatCents`.
  *
  * On dev, SES is denied: an invoice e-mail comes back NOT_SENT with the refusal and a
  * signed download. The page reports exactly that and never claims a send that did not
@@ -132,7 +132,7 @@ function view<T>(config: Omit<ListView, 'grid'> & { grid: ArGrid<T> }): ListView
 
 /**
  * Two queue statuses, then the two ledger views. There is no Paid tab (Ryne 2026-11-16): what was paid
- * lives on Accounting → Payments received, and an old `?tab=paid` link goes there.
+ * lives on Accounting → Payments Received, and an old `?tab=paid` link goes there.
  */
 export type ArPageTab = 'ready' | 'invoiced' | 'aging' | 'review'
 
@@ -331,7 +331,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const factorReadiness = useFactorReadiness(queue.READY, tab === 'ready', factorVersion)
   const deliveredNotReady = useDeliveredNotReady(tab === 'ready')
   const navigate = useNavigate()
-  // The Paid tab is gone: an old `?tab=paid` link lands on Payments received instead.
+  // The Paid tab is gone: an old `?tab=paid` link lands on Payments Received instead.
   useEffect(() => {
     const to = paidTabRedirect(window.location.search)
     if (to) navigate(to, { replace: true })
@@ -1167,7 +1167,7 @@ function queueView({
         </div>
       )}
       {invoiced && (
-        <span className="text-sm tms-muted" data-testid="payments-recorded-note">Payments are recorded in Payments received.</span>
+        <span className="text-sm tms-muted" data-testid="payments-recorded-note">Payments are recorded in Payments Received.</span>
       )}
       {status === 'PAID' && (
         <>

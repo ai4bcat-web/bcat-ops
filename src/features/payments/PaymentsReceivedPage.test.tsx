@@ -52,7 +52,7 @@ vi.mock('@/hooks/useAuth', () => ({ useAuthUser: () => ({ email: 'ryne@bcatcorp.
 
 import { PaymentsReceivedPage } from './PaymentsReceivedPage'
 
-describe('Payments received page', () => {
+describe('Payments Received page', () => {
   it('opens on Outstanding: open invoices by customer, factored ones in their own OTR group', async () => {
     render(<MemoryRouter><PaymentsReceivedPage /></MemoryRouter>)
     const out = await screen.findByTestId('payments-outstanding')

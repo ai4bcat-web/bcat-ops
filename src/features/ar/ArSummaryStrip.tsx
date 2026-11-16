@@ -11,7 +11,7 @@ export function ArSummaryStrip({ summary, division, onDivision, onCollected }: {
   summary: ArSummary
   division: string | null
   onDivision: (key: string | null) => void
-  /** "Collected this week / month" open Payments received on that period (there is no Paid tab). */
+  /** "Collected this week / month" open Payments Received on that period (there is no Paid tab). */
   onCollected?: (period: 'week' | 'month') => void
 }) {
   const days = (d: number | null) => (d == null ? null : `${d} d`)
@@ -32,8 +32,8 @@ export function ArSummaryStrip({ summary, division, onDivision, onCollected }: {
           })),
           { key: 'shippers', label: 'Pending with shippers', value: formatCents(summary.pendingShippersCents), sub: invoices(summary.pendingShippersCount) },
           { key: 'late', label: 'Late', value: formatCents(summary.lateCents), sub: invoices(summary.lateCount), tone: summary.lateCents > 0 ? 'bad' : 'default' },
-          { key: 'week', label: 'Collected this week', value: formatCents(summary.collectedWeekCents), sub: invoices(summary.collectedWeekCount), title: 'Invoices paid in full this week, by paid date. Opens Payments received.', onClick: onCollected ? () => onCollected('week') : undefined },
-          { key: 'month', label: 'Collected this month', value: formatCents(summary.collectedMonthCents), sub: invoices(summary.collectedMonthCount), title: 'Invoices paid in full this month, by paid date. Opens Payments received.', onClick: onCollected ? () => onCollected('month') : undefined },
+          { key: 'week', label: 'Collected this week', value: formatCents(summary.collectedWeekCents), sub: invoices(summary.collectedWeekCount), title: 'Invoices paid in full this week, by paid date. Opens Payments Received.', onClick: onCollected ? () => onCollected('week') : undefined },
+          { key: 'month', label: 'Collected this month', value: formatCents(summary.collectedMonthCents), sub: invoices(summary.collectedMonthCount), title: 'Invoices paid in full this month, by paid date. Opens Payments Received.', onClick: onCollected ? () => onCollected('month') : undefined },
           { key: 'otr-days', label: 'Days to pay · OTR', value: days(summary.otrDaysToPay), sub: `last ${PAY_WINDOW_DAYS} d`, title: `Submitted → funded, last ${PAY_WINDOW_DAYS} days` },
           { key: 'ship-days', label: 'Days to pay · shippers', value: days(summary.shipperDaysToPay), sub: `last ${PAY_WINDOW_DAYS} d`, title: `Invoice → paid, last ${PAY_WINDOW_DAYS} days` },
         ]}

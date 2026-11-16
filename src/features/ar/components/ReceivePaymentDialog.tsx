@@ -52,10 +52,10 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, invo
   customerId: string
   customerName?: string
   invoiceId?: string
-  /** Opened with several invoices ticked (Payments received, from the Invoiced tab): each paid in full. */
+  /** Opened with several invoices ticked (Payments Received, from the Invoiced tab): each paid in full. */
   invoiceIds?: readonly string[]
   method?: ArPaymentMethod
-  /** Payments received: a link beside the title to pick another customer. */
+  /** Payments Received: a link beside the title to pick another customer. */
   onChangeCustomer?: () => void
   busy?: boolean
   onClose: () => void

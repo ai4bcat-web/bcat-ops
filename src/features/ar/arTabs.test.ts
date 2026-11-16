@@ -86,11 +86,11 @@ describe('Invoicing tabs tie to the Receivables card', () => {
     expect(summary.openCents).toBe(10_000 + 2_500 + 7_000 + 3_000)
   })
 
-  it('has no Payments & credits tab: it is the Payments received page now', () => {
+  it('has no Payments & credits tab: it is the Payments Received page now', () => {
     expect(page('all').tabs.has('payments')).toBe(false)
   })
 
-  it('has no Paid tab in any billed view (Ryne 2026-11-16): paid lives on Payments received', () => {
+  it('has no Paid tab in any billed view (Ryne 2026-11-16): paid lives on Payments Received', () => {
     for (const billedBy of ['all', 'manual', 'factored'] as const) {
       expect([...page(billedBy).tabs.keys()]).toEqual(['ready', 'invoiced', 'aging', 'review'])
     }

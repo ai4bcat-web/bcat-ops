@@ -5,7 +5,7 @@
  * and a sent invoice becomes 'Rev N'. Send / Resend hands it to the review carousel.
  *
  * This drawer is where a single invoice is sent from (Ryne, 2026-11-12): its Actions bar holds
- * Send / Resend, Regenerate, Send to factor and Void (admin). Payments are recorded only on Payments received
+ * Send / Resend, Regenerate, Send to factor and Void (admin). Payments are recorded only on Payments Received
  * (Ryne 2026-11-15); an open sent invoice links there. The preview is the
  * invoice exactly as it goes out — one PDF with the POD pages merged in. Nothing here links to
  * the shipment.
@@ -158,7 +158,7 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
             <TmsButton aria-label="Send to factor instead" disabled={saving} onClick={() => onFactor(current)}>Send to factor</TmsButton>
           )}
           {sent && !factored && current.status !== 'VOID' && current.status !== 'PAID' && current.balanceCents > 0 && (
-            <span className="text-sm tms-muted" data-testid="payments-recorded-note">Payments are recorded in Payments received.</span>
+            <span className="text-sm tms-muted" data-testid="payments-recorded-note">Payments are recorded in Payments Received.</span>
           )}
           {canVoid && onVoid && current.status !== 'VOID' && (
             <TmsButton variant="ghost" aria-label="Void invoice" disabled={saving} onClick={() => onVoid(current)}>Void</TmsButton>

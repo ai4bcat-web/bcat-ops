@@ -24,7 +24,7 @@ describe('AccountingReportsDialog', () => {
   it('lists the AR reports, runs one into a preview and downloads the CSV', async () => {
     render(<AccountingReportsDialog side="AR" asOf="2026-11-14" onClose={() => {}} />)
     const select = screen.getByRole('combobox', { name: 'Report' }) as HTMLSelectElement
-    expect([...select.options].map((o) => o.textContent)).toContain('Payments received')
+    expect([...select.options].map((o) => o.textContent)).toContain('Payments Received')
     expect([...select.options].map((o) => o.textContent)).not.toContain('Bills paid')
     fireEvent.click(screen.getByTestId('report-run'))
     await waitFor(() => expect(screen.getByTestId('report-count').textContent).toContain('1 row'))

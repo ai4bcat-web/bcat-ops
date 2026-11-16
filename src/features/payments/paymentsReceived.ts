@@ -1,5 +1,5 @@
 /**
- * Payments received (Ryne 2026-11-15): every customer receipt, credit, debit and reversal in one
+ * Payments Received (Ryne 2026-11-15): every customer receipt, credit, debit and reversal in one
  * ledger, all customers. Two sources, one row shape:
  *  - BCAT `ArPayment` rows (payments, credit memos, write-offs, reversals), with what each was applied to;
  *  - the Aljex CRED/DEBT memo rows kept as history (`LegacyAljexRow` MEMO_CRED / MEMO_DEBT).

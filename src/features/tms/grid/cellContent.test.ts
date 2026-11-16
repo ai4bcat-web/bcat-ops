@@ -5,7 +5,7 @@ describe('cellContent', () => {
   const col = { key: 'amount', text: (row: { amount: string }) => row.amount }
   const row = { amount: '$5.00' }
 
-  it("falls back to the column's text when renderCell has nothing for that column (the blank Aging / Payments received cells)", () => {
+  it("falls back to the column's text when renderCell has nothing for that column (the blank Aging / Payments Received cells)", () => {
     expect(cellContent(() => undefined, row, col)).toBe('$5.00')
     expect(cellContent(undefined, row, col)).toBe('$5.00')
   })

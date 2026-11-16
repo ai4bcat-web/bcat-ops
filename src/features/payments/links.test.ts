@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { paidTabRedirect, paymentsReceivedPath, periodFromParam, recordPaymentPath } from './links'
 
-describe('Payments received links (the AR Paid tab is gone, Ryne 2026-11-16)', () => {
+describe('Payments Received links (the AR Paid tab is gone, Ryne 2026-11-16)', () => {
   it('opens on a period', () => {
     expect(paymentsReceivedPath('month')).toBe('/tms/payments-received?period=month')
     expect(paymentsReceivedPath('week')).toBe('/tms/payments-received?period=week')
@@ -18,7 +18,7 @@ describe('Payments received links (the AR Paid tab is gone, Ryne 2026-11-16)', (
     expect(periodFromParam(null, '2026-11-16')).toBeNull()
   })
 
-  it('sends an old ?tab=paid link to Payments received', () => {
+  it('sends an old ?tab=paid link to Payments Received', () => {
     expect(paidTabRedirect('?tab=paid')).toBe('/tms/payments-received?period=month')
     expect(paidTabRedirect('?tab=paid&month=2026-10')).toBe('/tms/payments-received?period=2026-10')
     expect(paidTabRedirect('?tab=aging')).toBeNull()

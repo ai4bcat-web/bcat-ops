@@ -141,7 +141,7 @@ describe('dashboard Accounts receivable card', () => {
     expect(page['Open AR']).toContain('$3,400.00')
   })
 
-  it('Collected this month opens Payments received (there is no AR Paid tab)', async () => {
+  it('Collected this month opens Payments Received (there is no AR Paid tab)', async () => {
     const Where = () => { const l = useLocation(); return <p data-testid="where">{l.pathname + l.search}</p> }
     render(<MemoryRouter initialEntries={['/']}><Routes><Route path="/" element={<ReceivablesCard />} /><Route path="*" element={<Where />} /></Routes></MemoryRouter>)
     await settle()

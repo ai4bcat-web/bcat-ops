@@ -76,8 +76,8 @@ export function CustomerArTab({
           ]}
         />
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          {/* Payments are recorded only on Payments received (Ryne 2026-11-15). */}
-          <span className="text-sm tms-muted" data-testid="payments-recorded-note">Payments are recorded in Payments received.</span>
+          {/* Payments are recorded only on Payments Received (Ryne 2026-11-15). */}
+          <span className="text-sm tms-muted" data-testid="payments-recorded-note">Payments are recorded in Payments Received.</span>
           <TmsButton size="sm" onClick={() => setDialog('credit')}>
             <Plus size={14} />New credit
           </TmsButton>

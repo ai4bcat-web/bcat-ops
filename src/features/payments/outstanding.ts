@@ -1,5 +1,5 @@
 /**
- * Payments received → Outstanding (Ryne 2026-11-16): every open customer invoice, grouped by
+ * Payments Received → Outstanding (Ryne 2026-11-16): every open customer invoice, grouped by
  * customer, ticked and received in bulk.
  *
  * - The set is Open AR's own: every sent invoice still ISSUED or PARTIAL (`listOpenInvoices`).
