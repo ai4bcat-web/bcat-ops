@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { paidTabRedirect, paymentsReceivedPath, periodFromParam, recordPaymentPath } from './links'
+import { customerPaymentsPath, paidTabRedirect, paymentsReceivedPath, periodFromParam, recordPaymentPath } from './links'
 
 describe('Payments Received links (the AR Paid tab is gone, Ryne 2026-11-16)', () => {
   it('opens on a period', () => {
@@ -25,3 +25,11 @@ describe('Payments Received links (the AR Paid tab is gone, Ryne 2026-11-16)', (
     expect(paidTabRedirect('')).toBeNull()
   })
 })
+
+describe('Payments Received on one customer', () => {
+  it('links the profile to ?customer=', () => {
+    expect(customerPaymentsPath('c1')).toBe('/tms/payments-received?customer=c1')
+    expect(customerPaymentsPath('a b')).toBe('/tms/payments-received?customer=a%20b')
+  })
+})
+

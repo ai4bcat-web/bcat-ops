@@ -11,6 +11,11 @@ export function recordPaymentPath(input: { customerId?: string | null; invoiceId
   return `/tms/payments-received?${q.toString()}`
 }
 
+/** Payments Received opened on one customer (their profile, an invoice): only their invoices show. */
+export function customerPaymentsPath(customerId: string): string {
+  return `/tms/payments-received?customer=${encodeURIComponent(customerId)}`
+}
+
 export const RECORD_PAYMENT_LINK_LABEL = 'Record payment in Payments Received'
 
 /** A period on Payments Received: `week` / `month` / `last` month, or a `YYYY-MM` month. */

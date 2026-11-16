@@ -152,3 +152,29 @@
 .tms-shell .pr-out-section-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .tms-shell .pr-out-section-head h2 { margin: 0; font-size: 15px; font-weight: 700; }
 .tms-shell .pr-out-section-otr > .pr-out-bar { border: 1px solid var(--tms-border); border-radius: 8px; }
+
+/* Customer search: one box, a type-ahead list, and a chip with × once a customer is picked. */
+.tms-shell .pr-cs { position: relative; display: inline-flex; align-items: center; flex: 1 1 240px; max-width: 340px; min-width: 200px; }
+.tms-shell .pr-cs-icon { position: absolute; left: 10px; color: var(--tms-muted); pointer-events: none; }
+.tms-shell .pr-cs-input { width: 100%; min-height: 36px; padding: 6px 10px 6px 30px; border: 1px solid var(--tms-border); border-radius: var(--tms-radius); background: var(--tms-card); color: inherit; font-size: 14px; }
+.tms-shell .pr-cs-input:focus-visible { outline: 2px solid var(--tms-primary); outline-offset: 1px; }
+.tms-shell .pr-cs-list { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20; margin: 0; padding: 4px; list-style: none; max-height: 320px; overflow-y: auto; border: 1px solid var(--tms-border); border-radius: var(--tms-radius); background: var(--tms-card); box-shadow: var(--tms-shadow-pop); }
+.tms-shell .pr-cs-opt { display: flex; width: 100%; justify-content: space-between; gap: 12px; align-items: center; min-height: 36px; padding: 6px 10px; border: 0; border-radius: 6px; background: none; color: inherit; text-align: left; cursor: pointer; font-size: 14px; }
+.tms-shell .pr-cs-opt-on, .tms-shell .pr-cs-opt:hover { background: var(--tms-surface-hover); }
+.tms-shell .pr-cs-open { font-size: 12px; white-space: nowrap; }
+.tms-shell .pr-cs-empty { padding: 8px 10px; font-size: 13px; }
+.tms-shell .pr-cs-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 4px 6px 4px 12px; border: 1px solid var(--tms-primary); border-radius: 999px; background: var(--tms-card); font-weight: 600; font-size: 14px; max-width: 340px; }
+.tms-shell .pr-cs-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tms-shell .pr-cs-clear { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: 50%; background: none; color: inherit; cursor: pointer; }
+.tms-shell .pr-cs-clear:hover { background: var(--tms-surface-hover); }
+
+/* The one-customer bar above the open invoices. */
+.tms-shell .pr-one { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 12px; border: 1px solid var(--tms-border); border-radius: 8px; background: var(--tms-card); margin-bottom: 8px; }
+.tms-shell .pr-one-name { font-size: 15px; font-weight: 700; }
+.tms-shell .pr-one-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+.tms-shell .pr-one-actions .tms-input { width: 130px; }
+@media (max-width: 900px) {
+  .tms-shell .pr-cs { max-width: none; flex-basis: 100%; }
+  .tms-shell .pr-one-actions { margin-left: 0; flex-basis: 100%; }
+  .tms-shell .pr-one-actions .tms-input { flex: 1 1 120px; width: auto; }
+}

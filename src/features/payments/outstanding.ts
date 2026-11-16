@@ -118,6 +118,46 @@ export function groupOutstanding(
   return [section('manual', 'Manually invoiced'), section('factored', 'Factored (OTR)')].filter((s) => s.count > 0)
 }
 
+/** Open invoices narrowed to one customer and/or a typed search over invoice #, PRO and PO; empty groups and sections drop out. */
+export function filterOutstanding(
+  sections: readonly OutstandingSection[],
+  filter: { customerId?: string | null; query?: string | null },
+): OutstandingSection[] {
+  const q = (filter.query ?? '').trim().toLowerCase()
+  if (!filter.customerId && !q) return [...sections]
+  const hit = (r: OutstandingRow) => !q || [r.number, r.pro, r.po ?? '', r.invoiceId].some((v) => v.toLowerCase().includes(q))
+  return sections.flatMap((s) => {
+    const groups = s.groups
+      .filter((g) => !filter.customerId || g.customerId === filter.customerId)
+      .map((g) => {
+        const rows = g.rows.filter(hit)
+        return { ...g, rows, openCents: rows.reduce((n, r) => n + r.balanceCents, 0) }
+      })
+      .filter((g) => g.rows.length > 0)
+    if (groups.length === 0) return []
+    return [{ ...s, groups, count: groups.reduce((n, g) => n + g.rows.length, 0), openCents: groups.reduce((n, g) => n + g.openCents, 0) }]
+  })
+}
+
+/**
+ * Spends a received amount on invoices oldest first: each row is filled to what its Amount paid would start at
+ * (balance, less OTR's fee on a factored one) until the money runs out; the last row takes what is left. Rows after that
+ * are left unticked. Returns the amount per invoice, in cents.
+ */
+export function allocateOldestFirst(rows: readonly OutstandingRow[], receivedCents: number, feeBps: number): Map<string, number> {
+  const out = new Map<string, number>()
+  let left = Math.max(0, Math.round(receivedCents))
+  const oldest = [...rows].sort((a, b) => a.invoiceDate.localeCompare(b.invoiceDate) || a.number.localeCompare(b.number))
+  for (const r of oldest) {
+    if (left <= 0) break
+    const take = Math.min(left, prefillCents(r, feeBps))
+    if (take <= 0) continue
+    out.set(r.invoiceId, take)
+    left -= take
+  }
+  return out
+}
+
 /** What Amount paid starts at when an invoice is ticked: the balance, less OTR's fee on a factored one. */
 export function prefillCents(row: OutstandingRow, feeBps: number): number {
   return row.factored ? row.balanceCents - factorFeeCents(row.balanceCents, feeBps) : row.balanceCents
