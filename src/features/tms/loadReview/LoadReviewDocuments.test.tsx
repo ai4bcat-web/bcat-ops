@@ -19,7 +19,7 @@ vi.mock('@/lib/apiClient', () => ({
 }))
 vi.mock('@/lib/driverSubmissionsClient', () => ({ getDriverDocUrl: vi.fn(async () => 'https://example.com/driver') }))
 vi.mock('@/lib/podDownload', () => ({ downloadPodAsPdf: vi.fn() }))
-vi.mock('@/hooks/useDirectory', () => ({ useDirectory: () => ({ customers: [{ id: 'c-1', requiredDocsForInvoice: [] }] }) }))
+vi.mock('@/hooks/useDirectory', () => ({ useDirectory: () => ({ customers: [{ id: 'c-1', requiredDocsForInvoice: [], billingMethod: 'FACTOR' }] }) }))
 
 const bundle = {
   shipment: { id: 'shp-1', customerId: 'c-1', legacyImported: false },

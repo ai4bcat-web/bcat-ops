@@ -112,6 +112,27 @@ export function isAssetLoad(row: AssetLoadFacts | null | undefined): boolean {
   return ivan(row.carrierName) || (row.carrierNames ?? []).some(ivan)
 }
 
+/**
+ * Does this load need an outside rate confirmation, the customer's or broker's own (Ryne 2026-11-16)? The ONE rule
+ * behind the board's RC column, the MISSING chip, Load Review, What to fix, the document gate and the release gate:
+ *   - car shipping (AUTO SHIPPER work): no
+ *   - a customer whose Load Review list unticks "RC received" (Batory, Carlyn, Bulk Systems, Rojac): no
+ *   - an asset load (isAssetLoad: ASSETS, or our own trucks / Ivan Cartage): yes
+ *   - a brokered load: no, unless the customer factors, because OTR will not buy an invoice without one
+ * A factored customer can never waive it (customerDocsNotRequired returns nothing for them).
+ */
+export function rateConRequired(facts: {
+  asset: boolean
+  carShipper?: boolean | null
+  customerFactors?: boolean | null
+  customerWaivesRateCon?: boolean | null
+}): boolean {
+  if (facts.carShipper === true) return false
+  if (facts.customerWaivesRateCon === true && facts.customerFactors !== true) return false
+  if (facts.asset) return true
+  return facts.customerFactors === true
+}
+
 export interface ReviewFailure {
   requirement: ReviewRequirement
   code: string

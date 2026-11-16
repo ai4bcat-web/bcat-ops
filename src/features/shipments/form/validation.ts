@@ -23,7 +23,7 @@ import { isFactorBilled } from '@/lib/factorBilling'
 import { carrierSlotsOf, parseInteger, type CarrierSlot, type FormStop, type ShipmentFormValues } from './model'
 import type { FormIssue, SectionKey } from './sectionProps'
 import { evaluateDocGate, gateLoadIds, isOwnFleetLoad } from '@/lib/shipmentDocuments'
-import { customerDocsNotRequired, customerFactorsForOtr } from '@/lib/reviewRequirements'
+import { customerDocsNotRequired, customerFactorsForOtr, rateConRequired } from '@/lib/reviewRequirements'
 import { isCarShipperLoad } from '@/lib/carShipper'
 import type { ShipmentBundle } from '@/types/tms'
 
@@ -340,11 +340,12 @@ export function missingDocIssues(
     loadRateConKeys: bundle.loads.filter((l) => loadIds.includes(l.id)).map((l) => (l as { rateConfirmKey?: string | null }).rateConfirmKey ?? null),
   })
   const notRequired = customerDocsNotRequired(customer ?? null, null)
+  const needsRateCon = rateConRequired({ asset: ownFleet, customerFactors: factored, customerWaivesRateCon: notRequired.includes('RATE_CON') })
   const out: FormIssue[] = []
   const doc = (type: 'RATE_CON' | 'POD', label: string, message: string) => out.push({
     id: `documents:${type}`, section: 'documents', fieldKey: `card-documents-slot-${type}`, label, message, severity: 'warn', marked: true,
   })
-  if (!notRequired.includes('RATE_CON') && !gate.present.includes('RATE_CON')) {
+  if (needsRateCon && !gate.present.includes('RATE_CON')) {
     doc('RATE_CON', 'Rate con', factored ? 'The customer\'s rate confirmation is missing — OTR needs it to factor the load.' : 'The customer\'s rate confirmation is missing.')
   }
   if (factored && bundle.shipment.status === 'DELIVERED' && !gate.present.includes('POD')) {

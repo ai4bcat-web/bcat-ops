@@ -31,7 +31,10 @@ describe('own fleet needs an outside rate confirmation (Ryne 2026-11-16)', () =>
   it('a filed customer rate confirmation counts on own fleet, not on a brokerage load', () => {
     const docs = [doc('POD'), doc('CUSTOMER_RATE_CON', { audience: 'INTERNAL' })]
     expect(evaluateDocGate({ order: { id: 'o1' }, loadIds: ['l1'], loadCarriers: [ownLeg], documents: docs, scope: 'CUSTOMER', ownFleet: true }).missing).not.toContain('RATE_CON')
-    expect(evaluateDocGate({ order: { id: 'o1' }, loadIds: ['l1'], loadCarriers: [], documents: docs, scope: 'CUSTOMER', ownFleet: false }).missing).toContain('RATE_CON')
+    // A factored brokerage customer still needs the carrier-side rate con for OTR; a customer tender is not it.
+    expect(evaluateDocGate({ order: { id: 'o1' }, loadIds: ['l1'], loadCarriers: [], documents: docs, scope: 'CUSTOMER', ownFleet: false, customer: { billingMethod: 'FACTOR' } as never }).missing).toContain('RATE_CON')
+    // A brokered load for a customer that does not factor owes none (Ryne 2026-11-16).
+    expect(evaluateDocGate({ order: { id: 'o1' }, loadIds: ['l1'], loadCarriers: [], documents: [doc('POD')], scope: 'CUSTOMER', ownFleet: false, customer: { billingMethod: 'MANUAL' } as never }).required).not.toContain('RATE_CON')
   })
   it('the release gate agrees', () => {
     const input = {

@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { docCellOf, docsMissingOf, rateConIn } from './shipmentViews'
 
-/** A delivered brokerage row whose order gate requires the POD and the rate confirmation. */
+/** A delivered brokerage row for a factored customer, whose order gate requires the POD and the rate confirmation. */
 const row = (over: Record<string, unknown> = {}) => ({
-  status: 'DELIVERED', voidedAt: null, deletedAt: null, assignmentType: 'CARRIER', revDivision: 'BROKERAGE',
+  status: 'DELIVERED', voidedAt: null, deletedAt: null, assignmentType: 'CARRIER', revDivision: 'BROKERAGE', customerFactors: true,
   docsRequired: ['POD', 'RATE_CON'], docsMissing: ['POD', 'RATE_CON'], docsOverrideAt: null,
   rateConSignedAt: null, rateConStatus: null, rateConOnFile: null, ...over,
 }) as never
@@ -76,5 +76,18 @@ describe('MISSING chip counts the documents OTR or own fleet needs (Ryne 2026-11
   it('a brokerage load for a customer that does not factor is not counted', async () => {
     const { openMissingDocs } = await import('./shipmentViews')
     expect(openMissingDocs({ ...(row() as object), id: 's3', customerFactors: false } as never)).toEqual([])
+  })
+})
+
+describe('RC column follows the one rule (Ryne 2026-11-16)', () => {
+  it('N/A on a brokered load for a customer that does not factor, ✓ / NEED on an asset load', () => {
+    expect(docCellOf(row({ customerFactors: false }), 'RATE_CON')).toBe('NA')
+    expect(docCellOf(row({ customerFactors: false, revDivision: 'ASSETS' }), 'RATE_CON')).toBe('MISSING')
+    expect(docCellOf(row({ customerFactors: false, revDivision: 'ASSETS', rateConOnFile: true }), 'RATE_CON')).toBe('PRESENT')
+    // An Ivan Cartage carrier makes it an asset load whatever the division says.
+    expect(docCellOf(row({ customerFactors: false, revDivision: 'BROKERAGE', carrierName: 'IVAN CARTAGE COMPANY' }), 'RATE_CON')).toBe('MISSING')
+  })
+  it('our own truck signing our own rate con is not the outside rate con', () => {
+    expect(docCellOf(row({ customerFactors: false, revDivision: 'ASSETS', rateConStatus: 'SIGNED', docsMissing: ['RATE_CON'] }), 'RATE_CON')).toBe('MISSING')
   })
 })

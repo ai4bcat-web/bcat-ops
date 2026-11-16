@@ -42,7 +42,8 @@ const loadCarriers = [
   { id: 'lc-active', status: 'ACTIVE' },
   { id: 'lc-bounced', status: 'BOUNCED' },
 ] as LoadCarrierRecord[]
-const customer = { requiredDocsForInvoice: ['POD', 'LUMPER_RECEIPT'] }
+// A factored customer: OTR needs the rate confirmation, so the gate asks for it (rateConRequired).
+const customer = { requiredDocsForInvoice: ['POD', 'LUMPER_RECEIPT'], billingMethod: 'FACTOR' } as never
 const settings = { requiredCarrierUploadTypes: ['POD', 'CARRIER_INVOICE'] }
 
 beforeEach(() => { listShipmentDocuments.mockReset() })
