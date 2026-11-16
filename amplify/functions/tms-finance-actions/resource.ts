@@ -17,4 +17,6 @@ export const tmsFinanceActions = defineFunction({
   entry: './handler.ts',
   resourceGroupName: 'data',
   timeoutSeconds: 60,
+  // A big scanned POD is read back in memory to be made smaller for an e-mail (pdfShrink): 512 MB is not room for a 5712 x 4284 picture.
+  memoryMB: 1024,
 })

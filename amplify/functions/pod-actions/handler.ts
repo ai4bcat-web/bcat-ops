@@ -43,6 +43,7 @@ import { POD_SCAN_VERSION } from './scan-version.js'
 import { pagesToPdf } from '../../../src/lib/pagesToPdf'
 import { extractPagePhotos, rebuildPdfWithPhotos } from './pdfPhotos'
 import { checkPod } from './podCheck'
+import { shrinkPdfImages } from '../_shared/pdfShrink'
 
 // ── AWS clients ────────────────────────────────────────────────────────────
 
@@ -1974,7 +1975,10 @@ export async function finalizeDriverDocsAction(
 
     const driverId = String(docs[0].driverId ?? 'unknown')
     const key = `driver-docs/${driverId}/${submissionId}/${kind}/combined.pdf`
-    await uploadBytes(key, Buffer.from(await combined.blob.arrayBuffer()), 'application/pdf')
+    // Phone photos make a big PDF: lighten the pictures so the POD can be e-mailed on an invoice (Ryne 2026-11-16, a 22.8 MB POD).
+    const combinedBytes = new Uint8Array(await combined.blob.arrayBuffer())
+    const lighter = await shrinkPdfImages(combinedBytes).catch(() => null)
+    await uploadBytes(key, Buffer.from(lighter?.changed ? lighter.bytes : combinedBytes), 'application/pdf')
 
     const field = kind === 'POD' ? 'combinedPodKey' : 'combinedRateconKey'
     await dynamo.send(

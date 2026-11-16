@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { Jimp } from 'jimp'
 import { PDFDocument } from 'pdf-lib'
 import { GetObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3'
-import { conversionFields, convertStoredPodImage, exifOrientation, imageToPdf, isNonPdfImage, isPodImage, pdfKeyFor, pdfNameFor } from './podPdf'
+import { deflateSync } from 'node:zlib'
+import { PDFName, PDFRawStream } from 'pdf-lib'
+import { conversionFields, convertStoredPodImage, exifOrientation, imageToPdf, isNonPdfImage, isPodImage, lightenImage, pdfKeyFor, pdfNameFor, shouldShrinkPdf, smallPdfKeyFor } from './podPdf'
 
 async function jpeg(w: number, h: number): Promise<Buffer> {
   const img = new Jimp({ width: w, height: h, color: 0x336699ff })
@@ -110,4 +112,65 @@ describe('podPdf', () => {
     expect(conversionFields('image/heic', null)).toEqual({ pdfConversion: 'FAILED' })
     expect(conversionFields('application/pdf', null)).toEqual({})
   })
+
+  it('lightens a big photo before wrapping it, and leaves a small one alone', async () => {
+    const small = await jpeg(300, 200)
+    expect(await lightenImage(small, 'image/jpeg')).toBeNull()
+    // A noisy 3000 x 2000 PNG is several MB: it comes out as a JPEG no longer than 2000 px on its long side.
+    const big = new Jimp({ width: 3000, height: 2000, color: 0x336699ff })
+    let seed = 7
+    for (let y = 0; y < 2000; y += 1) {
+      for (let x = 0; x < 3000; x += 1) {
+        seed = (seed * 1664525 + 1013904223) >>> 0
+        big.setPixelColor(((seed >>> 8) | 0xff) >>> 0, x, y)
+      }
+    }
+    const png = await big.getBuffer('image/png')
+    expect(png.length).toBeGreaterThan(1_000_000)
+    const light = await lightenImage(png, 'image/png')
+    expect(light).not.toBeNull()
+    expect(light!.length).toBeLessThan(png.length / 3)
+    const back = await Jimp.read(Buffer.from(light!))
+    expect(Math.max(back.width, back.height)).toBe(2000)
+    // and the PDF made from it is small
+    const pdf = await imageToPdf(png, 'image/png')
+    expect(pdf.length).toBeLessThan(png.length / 3)
+  }, 60_000)
+
+  it('shrinks a big POD that is already a PDF, next to the original, and says so on the row', async () => {
+    const doc = await PDFDocument.create()
+    const page = doc.addPage([612, 792])
+    const w = 2400
+    const h = 1800
+    const raw = new Uint8Array(w * h * 3)
+    let seed = 3
+    // a smooth picture with grain: big when stored losslessly, small as a JPEG (pure noise would not shrink)
+    for (let i = 0; i < raw.length; i += 1) { seed = (seed * 1664525 + 1013904223) >>> 0; raw[i] = (((i / 3) % w) / 9 + Math.floor(i / 3 / w) / 11 + (seed >>> 29)) & 0xff }
+    const image = PDFRawStream.of(doc.context.obj({
+      Type: 'XObject', Subtype: 'Image', Width: w, Height: h, ColorSpace: 'DeviceRGB', BitsPerComponent: 8, Filter: 'FlateDecode',
+    }) as never, deflateSync(raw))
+    page.node.newXObject('Im1', doc.context.register(image))
+    page.node.set(PDFName.of('Contents'), doc.context.register(doc.context.stream('q 612 0 0 459 0 166 cm /Im1 Do Q')))
+    const original = await doc.save({ useObjectStreams: false })
+    expect(shouldShrinkPdf('application/pdf', 'POD', original.length)).toBe(true)
+    expect(shouldShrinkPdf('application/pdf', 'BOL', original.length)).toBe(false)
+    expect(shouldShrinkPdf('application/pdf', 'POD', 100_000)).toBe(false)
+    expect(shouldShrinkPdf('image/jpeg', 'POD', original.length)).toBe(false)
+    expect(smallPdfKeyFor('shipment-docs/s1/sdoc-1-pod.pdf')).toBe('shipment-docs/s1/sdoc-1-pod-small.pdf')
+    const puts: unknown[] = []
+    const s3 = { send: async (cmd: unknown) => {
+      if (cmd instanceof GetObjectCommand) return { Body: { transformToByteArray: async () => original } }
+      if (cmd instanceof PutObjectCommand) { puts.push(cmd.input); return {} }
+      throw new Error('unexpected')
+    } } as unknown as S3Client
+    const out = await convertStoredPodImage(s3, 'b', { key: 'shipment-docs/s1/sdoc-1-pod.pdf', contentType: 'application/pdf', name: 'POD.pdf', type: 'POD', sizeBytes: original.length })
+    expect(out?.key).toBe('shipment-docs/s1/sdoc-1-pod-small.pdf')
+    expect(out!.sizeBytes).toBeLessThan(original.length / 4)
+    expect(puts).toHaveLength(1)
+    // the original object is never overwritten
+    expect(puts[0]).toMatchObject({ Key: 'shipment-docs/s1/sdoc-1-pod-small.pdf' })
+    expect(conversionFields('application/pdf', out)).toEqual({ originalS3Key: 'shipment-docs/s1/sdoc-1-pod.pdf', originalContentType: 'application/pdf', pdfConversion: 'COMPRESSED' })
+    // a document type that is not a POD or rate confirmation is left alone
+    expect(await convertStoredPodImage(s3, 'b', { key: 'k.pdf', contentType: 'application/pdf', name: 'BOL.pdf', type: 'BOL', sizeBytes: original.length })).toBeNull()
+  }, 60_000)
 })

@@ -8,6 +8,8 @@
  * invoice that silently dropped its POD.
  */
 import { PDFDocument } from 'pdf-lib'
+import { lightenImage } from '../_shared/podPdf'
+import { SHRINK_DEFAULTS, SHRINK_HARD, shrinkPdfImages } from '../_shared/pdfShrink'
 
 export interface PacketPart {
   name: string
@@ -70,24 +72,84 @@ async function appendPart(out: PDFDocument, part: PacketPart): Promise<number> {
   throw new Error(`${part.contentType || 'unknown type'} is not a PDF, JPG or PNG`)
 }
 
+/** A POD part smaller than this is not worth lightening when the packet has to shrink. */
+const SHRINK_PART_ABOVE = 1_000_000
+
+export interface PacketCompression {
+  name: string
+  before: number
+  after: number
+}
+
+/** One POD part with its pictures made lighter, or null when it has nothing worth lightening. */
+async function lighterPart(pod: PacketPart, hard: boolean): Promise<PacketPart | null> {
+  if (pod.bytes.byteLength < SHRINK_PART_ABOVE) return null
+  const kind = packetPartKind(pod)
+  if (kind === 'pdf') {
+    const shrunk = await shrinkPdfImages(pod.bytes, hard ? SHRINK_HARD : SHRINK_DEFAULTS)
+    return shrunk.changed ? { ...pod, bytes: shrunk.bytes } : null
+  }
+  if (kind === 'jpg' || kind === 'png') {
+    const lighter = await lightenImage(pod.bytes, kind === 'png' ? 'image/png' : 'image/jpeg')
+    return lighter ? { ...pod, bytes: lighter, contentType: 'image/jpeg' } : null
+  }
+  return null
+}
+
 /**
  * Invoice first, then each POD. Returns the merged bytes and the page count each part
  * contributed (the review shows "Invoice · 1 page, POD 1 · 2 pages").
+ *
+ * `shrinkAbove` (bytes): when the packet comes out bigger than this, the POD pictures are made lighter in the COPY that goes into the
+ * packet (the POD kept in the shipment is never touched; Ryne 2026-11-16, a 22.8 MB POD that blocked an invoice e-mail), then lighter
+ * still if it needs it. `compressed` says which PODs were lightened, so the review can say so; a POD is never dropped.
  */
 export async function combineInvoicePacket(
   invoice: PacketPart,
   pods: readonly PacketPart[],
-): Promise<{ bytes: Uint8Array; pages: { name: string; pages: number }[] }> {
-  const out = await PDFDocument.create()
-  const pages: { name: string; pages: number }[] = []
-  pages.push({ name: invoice.name, pages: await appendPart(out, invoice) })
-  for (const pod of pods) {
-    try {
-      pages.push({ name: pod.name, pages: await appendPart(out, pod) })
-    } catch (err) {
-      throw new PodMergeError(pod.name, err instanceof Error ? err.message : String(err))
+  options: { shrinkAbove?: number } = {},
+): Promise<{ bytes: Uint8Array; pages: { name: string; pages: number }[]; compressed?: PacketCompression[] }> {
+  const build = async (parts: readonly PacketPart[]) => {
+    const out = await PDFDocument.create()
+    const pages: { name: string; pages: number }[] = []
+    pages.push({ name: invoice.name, pages: await appendPart(out, invoice) })
+    for (const pod of parts) {
+      try {
+        pages.push({ name: pod.name, pages: await appendPart(out, pod) })
+      } catch (err) {
+        throw new PodMergeError(pod.name, err instanceof Error ? err.message : String(err))
+      }
     }
+    const bytes = await out.save({ useObjectStreams: false })
+    return { bytes, pages }
   }
-  const bytes = await out.save({ useObjectStreams: false })
-  return { bytes, pages }
+  let result = await build(pods)
+  const limit = options.shrinkAbove
+  if (!limit || result.bytes.byteLength <= limit) return result
+
+  let parts = [...pods]
+  const lightened = new Map<string, PacketCompression>()
+  for (const hard of [false, true]) {
+    const next: PacketPart[] = []
+    for (const part of parts) {
+      const lighter = await lighterPart(part, hard).catch(() => null)
+      if (lighter) {
+        const first = lightened.get(part.name)
+        lightened.set(part.name, { name: part.name, before: first?.before ?? part.bytes.byteLength, after: lighter.bytes.byteLength })
+        next.push(lighter)
+      } else next.push(part)
+    }
+    parts = next
+    if (lightened.size === 0) break
+    result = await build(parts)
+    if (result.bytes.byteLength <= limit) break
+  }
+  return lightened.size ? { ...result, compressed: [...lightened.values()] } : result
+}
+
+/** "POD compressed from 22.8 MB to 0.4 MB for e-mail": what the send review says when a POD was lightened for the packet. */
+export function compressionNote(compressed: readonly PacketCompression[] | undefined): string | null {
+  if (!compressed?.length) return null
+  const mb = (n: number) => (Math.round((n / (1024 * 1024)) * 10) / 10).toFixed(1)
+  return compressed.map((c) => `${c.name} compressed from ${mb(c.before)} MB to ${mb(c.after)} MB for e-mail`).join('; ')
 }

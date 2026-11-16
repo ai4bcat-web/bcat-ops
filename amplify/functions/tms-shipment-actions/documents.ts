@@ -462,7 +462,7 @@ export async function commitDocument(deps: DocumentDeps, input: Row, caller: Cal
 
   // Every document is kept as a PDF: a JPEG or PNG is wrapped on a letter page. The original object stays in S3; a failed
   // conversion files the original as it came.
-  const converted = await convertStoredPodImage(deps.s3, deps.bucket, { key: s3Key, contentType, name })
+  const converted = await convertStoredPodImage(deps.s3, deps.bucket, { key: s3Key, contentType, name, type, sizeBytes })
 
   const now = nowIso()
   const row: Row = {

@@ -7952,6 +7952,8 @@ export interface InvoicePacketPreview {
   url: string | null
   pages: { name: string; pages: number }[]
   separate: { name: string; sizeBytes: number }[]
+  /** Set when a POD was lightened for the e-mail ("POD compressed from 22.8 MB to 0.4 MB for e-mail"); the POD kept in the shipment is untouched. */
+  note?: string | null
   /** Why the packet could not be built (a POD that will not merge, no invoice PDF yet). The send would be refused too. */
   error: string | null
 }
