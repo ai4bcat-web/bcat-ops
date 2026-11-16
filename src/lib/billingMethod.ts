@@ -152,14 +152,18 @@ export function billingIssues(c: BillingFields): BillingIssue[] {
  * `requireAll` (the customer forms, Ryne 2026-11-16): every customer needs a billing method and an AP e-mail, factored
  * customers included. The server save stays on the older rule so a partial save elsewhere is never refused; Load Review
  * refuses the load until both are set (customerBillingReady).
+ *
+ * `apEmailRequired: false` (the customer unticks "AP e-mail" in its Load Review list; never for a factored customer,
+ * see customerApEmailRequired) drops the AP e-mail requirement, MANUAL included (Ryne 2026-11-16: AUTO SHIPPER).
  */
-export function validateBillingFields(c: BillingFields & { invoiceCopyEmails?: string[] | null; apEmailsExtra?: string[] | null; noaEmail?: string | null }, opts: { requireAll?: boolean } = {}): Record<string, string> {
+export function validateBillingFields(c: BillingFields & { invoiceCopyEmails?: string[] | null; apEmailsExtra?: string[] | null; noaEmail?: string | null }, opts: { requireAll?: boolean; apEmailRequired?: boolean } = {}): Record<string, string> {
   const errors: Record<string, string> = {}
   if (c.billingMethod && !BILLING_METHODS.includes(c.billingMethod)) errors.billingMethod = 'Choose Factor or Manual'
   else if (opts.requireAll && !c.billingMethod) errors.billingMethod = 'Choose how this customer is billed: Factor or Manual invoice'
   const ap = (c.apEmail ?? '').trim()
-  if (c.billingMethod === 'MANUAL' && !ap) errors.apEmail = 'Manual billing needs the customer’s AP e-mail'
-  else if (opts.requireAll && !ap) errors.apEmail = 'Every customer needs an AP e-mail'
+  const apRequired = opts.apEmailRequired !== false
+  if (apRequired && c.billingMethod === 'MANUAL' && !ap) errors.apEmail = 'Manual billing needs the customer’s AP e-mail'
+  else if (apRequired && opts.requireAll && !ap) errors.apEmail = 'Every customer needs an AP e-mail'
   else if (ap && !isValidEmail(ap)) errors.apEmail = 'Enter a valid e-mail address'
   const noa = (c.noaEmail ?? '').trim()
   if (noa && !isValidEmail(noa)) errors.noaEmail = 'Enter a valid e-mail address'

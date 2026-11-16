@@ -22,7 +22,7 @@ describe('resolveReviewRequirements', () => {
     expect(resolveReviewRequirements(['salesRep'], ['revDivision'])).toEqual(['salesRep'])
     expect(resolveReviewRequirements(null, ['revDivision', 'salesRep'])).toEqual(['revDivision', 'salesRep'])
     expect(resolveReviewRequirements(undefined, undefined)).toEqual([...DEFAULT_REVIEW_REQUIREMENTS])
-    expect(DEFAULT_REVIEW_REQUIREMENTS).toHaveLength(8)
+    expect(DEFAULT_REVIEW_REQUIREMENTS).toHaveLength(9)
   })
 
   it('treats an explicit empty customer list as "nothing required", not a fallthrough', () => {
@@ -40,7 +40,7 @@ describe('evaluateReviewRequirements', () => {
     const none = evaluateReviewRequirements(DEFAULT_REVIEW_REQUIREMENTS, {})
     expect(none.ok).toBe(false)
     // RC received is a switch for the document gates, never a failure of its own.
-    expect(none.failures.map((f) => f.requirement)).toEqual(DEFAULT_REVIEW_REQUIREMENTS.filter((k) => k !== 'rateConReceived'))
+    expect(none.failures.map((f) => f.requirement)).toEqual(DEFAULT_REVIEW_REQUIREMENTS.filter((k) => k !== 'rateConReceived' && k !== 'apEmail'))
   })
 
   it('unticking POD received or RC received means the customer does not need that document to invoice', () => {

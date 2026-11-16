@@ -9,6 +9,7 @@ import {
 const DOC_KEYS: { key: ReviewRequirement; label: string }[] = [
   { key: 'podReceived', label: 'POD' },
   { key: 'rateConReceived', label: 'RC' },
+  { key: 'apEmail', label: 'AP e-mail' },
 ]
 
 /**
@@ -39,9 +40,9 @@ export function ReviewRequirementsField({ value, onChange, inheritFrom, disabled
           Use the organization default
         </label>
       )}
-      {/* Ryne 2026-11-15: which documents this customer needs before it can be invoiced (AUTO SHIPPER needs neither). */}
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', fontSize: 13, flexWrap: 'wrap' }} role="group" aria-label="Documents required to invoice">
-        <span>Documents required to invoice:</span>
+      {/* Ryne 2026-11-15/16: what this customer needs before it can be invoiced (AUTO SHIPPER needs no POD, RC or AP e-mail). */}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', fontSize: 13, flexWrap: 'wrap' }} role="group" aria-label="Required to invoice">
+        <span>Required to invoice:</span>
         {DOC_KEYS.map(({ key, label }) => (
           <label key={key} style={{ display: 'flex', gap: 6 }}>
             <input
@@ -69,7 +70,8 @@ export function ReviewRequirementsField({ value, onChange, inheritFrom, disabled
       ))}
       <p className="tms-muted" style={{ fontSize: 12, margin: 0 }}>
         A shipment cannot be pushed to Load Review until every ticked item is met. Load Review checks the same list again before release.
-        Unticking POD or RC means this customer's loads can be invoiced without it; OTR still requires both for a factored load.
+        Unticking POD, RC or AP e-mail means this customer's loads can be invoiced without it; a factored customer still needs all
+        three (OTR requires the documents, and the remit goes to the AP e-mail).
       </p>
     </fieldset>
   )

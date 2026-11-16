@@ -81,7 +81,7 @@ import { evaluateReleaseGate, releaseGateError, type ReleaseGateResult } from '.
 import { factorGapsForLoad, factoringPoNumber, routeEnds, type FactorReadyInput } from '../../../src/lib/factorReadyAtCreate'
 import { customerBillingReasons, evaluateLoadReview, loadReviewExtras, loadReviewRefusal, type LoadReviewReason } from '../../../src/lib/loadReview'
 import { customerBillingGaps, type CustomerBillingFacts } from '../../../src/lib/customerBillingReady'
-import { customerFactorsForOtr, isAssetLoad, profitFromFacts, resolveReviewRequirements, type ReviewFacts, type ReviewRequirement } from '../../../src/lib/reviewRequirements'
+import { customerApEmailRequired, customerFactorsForOtr, isAssetLoad, profitFromFacts, resolveReviewRequirements, type ReviewFacts, type ReviewRequirement } from '../../../src/lib/reviewRequirements'
 import {
   isCustomerUnresolved,
   unresolvedCustomerMessage,
@@ -1412,7 +1412,10 @@ function factorAndCustomerReasons(bundle: Bundle, order: Row, customer: Row | nu
   if (bundle.shipment.legacyImported === true) return factor
   return [
     ...factor,
-    ...customerBillingReasons(customerBillingGaps(customer as unknown as CustomerBillingFacts | null), {
+    ...customerBillingReasons(customerBillingGaps(customer as unknown as CustomerBillingFacts | null, {
+      // Waivable per customer (AUTO SHIPPER), never for a factored one: customerApEmailRequired.
+      apEmailRequired: customerApEmailRequired(customer as { reviewRequirements?: string[] | null; billingMethod?: string | null; factored?: boolean | null } | null, null),
+    }), {
       skipBillingMethod: factor.some((r) => r.code === 'FACTOR_BILLING_METHOD'),
     }),
   ]

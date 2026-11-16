@@ -15,6 +15,7 @@ export type ReviewRequirement =
   | 'referenceNumber'
   | 'podReceived'
   | 'rateConReceived'
+  | 'apEmail'
   | 'salesRep'
   | 'revenueEntered'
   | 'expenseEntered'
@@ -26,6 +27,7 @@ export const REVIEW_REQUIREMENTS: readonly ReviewRequirement[] = [
   'referenceNumber',
   'podReceived',
   'rateConReceived',
+  'apEmail',
   'salesRep',
   'revenueEntered',
   'expenseEntered',
@@ -37,6 +39,7 @@ export const REVIEW_REQUIREMENT_LABELS: Record<ReviewRequirement, string> = {
   referenceNumber: 'Reference #',
   podReceived: 'POD received',
   rateConReceived: 'RC received',
+  apEmail: 'AP e-mail',
   salesRep: 'Sales rep',
   revenueEntered: 'Revenue entered',
   expenseEntered: 'Expense entered',
@@ -51,6 +54,7 @@ export const REVIEW_REQUIREMENT_CODES: Record<ReviewRequirement, string> = {
   referenceNumber: 'REFERENCE_NUMBER_MISSING',
   podReceived: 'POD_MISSING',
   rateConReceived: 'RATE_CON_MISSING',
+  apEmail: 'CUSTOMER_AP_EMAIL',
   salesRep: 'SALES_REP_MISSING',
   revenueEntered: 'NO_CUSTOMER_CHARGES',
   expenseEntered: 'EXPENSE_MISSING',
@@ -63,6 +67,7 @@ export const REVIEW_REQUIREMENT_MESSAGES: Record<ReviewRequirement, string> = {
   referenceNumber: 'Missing reference #',
   podReceived: 'POD not received',
   rateConReceived: 'RC not received',
+  apEmail: 'Customer has no AP e-mail',
   salesRep: 'Missing sales rep',
   revenueEntered: 'No customer charges',
   expenseEntered: 'No expense entered',
@@ -185,6 +190,8 @@ function satisfied(requirement: ReviewRequirement, facts: ReviewFacts): boolean 
     // The release gate and the document gate own the rate confirmation itself; this requirement is the per-customer
     // switch for whether it is asked for at all (see docsNotRequiredFor), so it never fails on its own.
     case 'rateConReceived': return true
+    // Likewise the per-customer switch for the AP e-mail; customerBillingGaps (customerBillingReady.ts) owns the check.
+    case 'apEmail': return true
     case 'revenueEntered': return positive(facts.revenueCents)
     case 'expenseEntered': return facts.assetLoad === true || positive(facts.expenseCents)
     case 'profitEntered': return facts.assetLoad === true || (typeof facts.profitCents === 'number' && Number.isFinite(facts.profitCents))
@@ -253,4 +260,20 @@ export function customerFactorsForOtr(customer: { billingMethod?: string | null;
   if (!customer) return false
   if (customer.billingMethod === 'MANUAL') return false
   return customer.billingMethod === 'FACTOR' || customer.factored === true
+}
+
+/**
+ * Does this customer need an AP e-mail before its loads leave Load Review (Ryne 2026-11-16: not for AUTO SHIPPER)?
+ * Read from the same per-customer list as POD and RC: unticking "AP e-mail" waives it. A customer we factor can never
+ * waive it, because the OTR remit and the invoice copy go to that address.
+ */
+export function customerApEmailRequired(
+  customer: { reviewRequirements?: readonly (string | null)[] | null; billingMethod?: string | null; factored?: boolean | null } | null | undefined,
+  settings: { reviewRequirements?: readonly (string | null)[] | null } | null | undefined,
+): boolean {
+  if (!customer) return true
+  if (customerFactorsForOtr(customer)) return true
+  const own = Array.isArray(customer.reviewRequirements) ? customer.reviewRequirements.filter((v): v is string => typeof v === 'string') : null
+  const org = Array.isArray(settings?.reviewRequirements) ? (settings.reviewRequirements.filter((v): v is string => typeof v === 'string')) : null
+  return resolveReviewRequirements(own, org).includes('apEmail')
 }

@@ -101,7 +101,7 @@ describe('requirements per customer and organization', () => {
   it('a customer list overrides the org default, which overrides the built-in seven', () => {
     expect(requirementsForRow({ customerId: 'c1' }, { customers, orgDefault: ['revDivision'] })).toEqual(['salesRep'])
     expect(requirementsForRow({ customerId: 'c2' }, { customers, orgDefault: ['revDivision'] })).toEqual(['revDivision'])
-    expect(requirementsForRow({ customerId: 'zz' }, { customers, orgDefault: null })).toHaveLength(8)
+    expect(requirementsForRow({ customerId: 'zz' }, { customers, orgDefault: null })).toHaveLength(9)
     expect(requirementsForRow({ customerId: 'c3' }, { customers, orgDefault: ['revDivision'] })).toEqual([])
   })
 
