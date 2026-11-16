@@ -31,6 +31,7 @@ import { loadReviewCount } from '@/lib/loadReview'
 import { needsCoverCount } from '@/features/tms/carrierSales/carrierSalesQueue'
 import { shipmentListCounts } from '@/lib/shipmentLists'
 import { isOperationsWork, operationsIndex } from '@/lib/operationsWork'
+import { lifecycleRows as trackingLifecycleRows } from '@/features/shipments/workstations/tracking/trackingTable'
 import type { ShipmentListRow } from '@/hooks/useShipments'
 
 const POLL_MS = 60_000
@@ -146,6 +147,14 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
     [hasDocuments, reviewDocuments, opsIndex],
   )
 
+  // The Track tab's badge: the loads currently in tracking, the very rows the Track page lists
+  // under Active (moving loads plus delivered loads still waiting on their POD, a rate con sent),
+  // so the badge and the page's "N LOADS" can never disagree (Ryne 2026-11-16).
+  const loadsInTracking = useMemo(
+    () => (mayWorkLoads && hasShipments ? trackingLifecycleRows(shipments as never, 'active', false).length : 0),
+    [mayWorkLoads, hasShipments, shipments],
+  )
+
   return useMemo(() => {
     // Every open intake item, appt-move tasks included: the intake queue lists them all.
     const counts: Record<string, number> = {
@@ -166,9 +175,11 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
       loadReview,
       carrierSales,
       activeShipments,
-      // The parent rows' chores: Load Tracking is the check calls due plus the documents to review,
-      // on loads still in operations only.
-      loadTracking: trackCheckCalls + trackDocuments,
+      // The Track tab: how many loads are in tracking right now. Its attention count (check calls
+      // due plus documents waiting, on loads still in operations) rides alongside as
+      // `loadTrackingDue`, which tints the badge amber and fills its tooltip.
+      loadTracking: loadsInTracking,
+      loadTrackingDue: trackCheckCalls + trackDocuments,
       accounting: arToInvoiceCount + apToReviewCount,
       spotNew,
       timeOff: timeOffPending,
@@ -179,6 +190,6 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
   }, [
     loads, maintenanceTasks, intakeItems, reviewCount, truckDocAlerts, dispatchUnread,
     checkCallsDue, documentReviewCount, arToInvoiceCount, apToReviewCount, quotesToReplyCount, intakeLoads,
-    loadReview, carrierSales, activeShipments, spotNew, timeOffPending, trackCheckCalls, trackDocuments,
+    loadReview, carrierSales, activeShipments, spotNew, timeOffPending, trackCheckCalls, trackDocuments, loadsInTracking,
   ])
 }

@@ -38,7 +38,7 @@ describe('useShellBadgeCounts with the stage 1-3 tables missing', () => {
   it('answers 0 (no badge) for every count that reads them, and keeps the production counts', async () => {
     const { result } = renderHook(() => useShellBadgeCounts({ shipments: [] }))
     await Promise.resolve()
-    for (const key of ['intakeLoads', 'spotNew', 'quotesToReply', 'arToInvoice', 'apToReview', 'accounting', 'checkCalls', 'documentReview', 'loadTracking', 'loadReview', 'carrierSales']) {
+    for (const key of ['intakeLoads', 'spotNew', 'quotesToReply', 'arToInvoice', 'apToReview', 'accounting', 'checkCalls', 'documentReview', 'loadTracking', 'loadTrackingDue', 'loadReview', 'carrierSales']) {
       expect(result.current[key], key).toBeUndefined()
     }
     expect(result.current).toMatchObject({ loads: 1, maintenance: 1, intake: 1, appts: 2, review: 1, truckDocs: 1, dispatch: 1 })

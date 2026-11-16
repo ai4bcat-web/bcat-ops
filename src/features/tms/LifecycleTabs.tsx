@@ -60,6 +60,7 @@ export function LifecycleTabs({ pathname, canOpenPage, badgeCounts }: LifecycleT
           const active = i === activeIndex
           const done = activeIndex >= 0 && i < activeIndex
           const count = tab.badgeKey ? (badgeCounts?.[tab.badgeKey] ?? 0) : 0
+          const attention = tab.attentionKey ? (badgeCounts?.[tab.attentionKey] ?? 0) : 0
           const position = LIFECYCLE_TABS.findIndex((t) => t.key === tab.key) + 1
           const dormant = pathIsDormant(tab.to)
           return (
@@ -82,13 +83,13 @@ export function LifecycleTabs({ pathname, canOpenPage, badgeCounts }: LifecycleT
                   data-testid={`lifecycle-tab-${tab.key}`}
                   className={`tms-lifecycle-tab${active ? ' tms-active' : ''}${done ? ' tms-lifecycle-done' : ''}`}
                   aria-current={active ? 'page' : undefined}
-                  title={`${tab.label} · ${tab.caption} (Alt+${position})`}
+                  title={`${tab.label} · ${tab.caption} (Alt+${position})${count > 0 ? ` · ${count} ${count === 1 ? 'load' : 'loads'}` : ''}${attention > 0 ? ` · ${attention} need attention` : ''}`}
                 >
                   <span className="tms-lifecycle-label">{tab.label}</span>
                   <span className="tms-lifecycle-caption">{tab.caption}</span>
                   {count > 0 ? (
                     <span data-testid={`lifecycle-badge-${tab.key}`}>
-                      <TmsCountBadge count={count} max={999} />
+                      <TmsCountBadge count={count} max={999} tone={attention > 0 ? 'amber' : 'green'} />
                     </span>
                   ) : null}
                 </Link>

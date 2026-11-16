@@ -43,9 +43,10 @@ import { NAV_ITEMS } from '@/lib/navItems'
 import { PINNED_ITEMS } from '@/lib/navSections'
 import { LIFECYCLE_TABS } from '@/lib/lifecycleTabs'
 import type { ShipmentListRow } from '@/hooks/useShipments'
+import { lifecycleRows as trackingLifecycleRows } from '@/features/shipments/workstations/tracking/trackingTable'
 
 const shipments = [
-  { id: 's1', status: 'OPEN', voidedAt: null, loadIds: ['l1'], orderIds: ['o1'], dispatcherAssignedId: 'rep@bcatcorp.com', loadStatus: 'IN_TRANSIT' },
+  { id: 's1', status: 'OPEN', voidedAt: null, loadIds: ['l1'], orderIds: ['o1'], dispatcherAssignedId: 'rep@bcatcorp.com', loadStatus: 'IN_TRANSIT', rateConSentAt: '2026-11-10T12:00:00Z' },
   { id: 's2', status: 'OPEN', voidedAt: '2026-01-01', dispatcherAssignedId: 'rep@bcatcorp.com', loadStatus: 'IN_TRANSIT' },
   // Delivered and pushed into Load Review: it has left operations, so nothing on it is Tracking work.
   { id: 's3', status: 'DELIVERED', voidedAt: null, loadIds: ['l3'], orderIds: ['o3'], loadReviewPushedAt: '2026-11-13T21:07:26Z' },
@@ -102,10 +103,26 @@ describe('useShellBadgeCounts', () => {
   it('sums the parent rows from their children', async () => {
     const { result } = renderHook(() => useShellBadgeCounts(args))
     await waitFor(() => expect(result.current.intakeLoads).toBe(2))
-    // Only work on loads still in operations: s1's due check call + s1's document. s3 is in Load Review.
-    expect(result.current.loadTracking).toBe(2)
+    // The Track badge is the loads in tracking: s1 only (s2 is voided, s3 is in Load Review).
+    expect(result.current.loadTracking).toBe(1)
+    // Its attention count: only work on loads still in operations, s1's due check call + s1's document.
+    expect(result.current.loadTrackingDue).toBe(2)
     // arToInvoice 1 + apToReview 1.
     expect(result.current.accounting).toBe(2)
+  })
+
+  it('badges Track with exactly the rows the Track page lists under Active', async () => {
+    const rows = [
+      ...shipments,
+      // Delivered, POD still due: Tracking keeps it until the POD is on file.
+      { id: 's4', status: 'DELIVERED', voidedAt: null, loadIds: ['l4'], orderIds: ['o4'], rateConSentAt: '2026-11-10T12:00:00Z', docsMissing: ['POD'] },
+      // No rate con sent: the page hides it by default, so the badge does too.
+      { id: 's5', status: 'OPEN', voidedAt: null, loadIds: ['l5'], orderIds: ['o5'], loadStatus: 'IN_TRANSIT' },
+    ] as unknown as ShipmentListRow[]
+    const { result } = renderHook(() => useShellBadgeCounts({ shipments: rows }))
+    await waitFor(() => expect(result.current.intakeLoads).toBe(2))
+    expect(result.current.loadTracking).toBe(trackingLifecycleRows(rows as never, 'active', false).length)
+    expect(result.current.loadTracking).toBe(2)
   })
 
   it('badges View with the board\'s Active count (voided rows left out)', async () => {
