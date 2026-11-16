@@ -1113,7 +1113,10 @@ export async function readyToInvoice(
   const gate = customerDocGate({ bundle, documents: releaseDocuments, order, customer, settings })
   // The carrier's AP record is made by the move itself, before the order leaves review: if it cannot
   // be written, nothing is released and a second press picks up where this one stopped.
-  const apRecords = bundle.shipment.legacyImported === true
+  // Imported Aljex history released WITHOUT a review brought its AP over from Aljex, so it gets none here. An
+  // imported load that goes through Load Review is live freight finishing in BCAT Ops: its carrier still has to
+  // be paid, so it gets its AP record like any other (14863, 2026-11-16). Legs already billed are skipped.
+  const apRecords = bundle.shipment.legacyImported === true && !review
     ? { created: [], skipped: [] }
     : await createCarrierApRecords(deps, bundle, settings, now, caller)
   const patch: Row = {
@@ -1173,6 +1176,11 @@ export async function readyToInvoice(
 export interface CarrierApRecordsResult {
   created: { loadCarrierId: string; billId: string; carrierName: string; grossCents: number }[]
   skipped: { loadCarrierId: string; carrierName: string; kind: 'ALREADY_BILLED' | 'NOT_BILLABLE'; reasons: string[] }[]
+}
+
+/** An imported shipment that was pushed into Load Review is live freight, not history: its AP is ours to create. */
+function wentThroughReview(shipment: Row): boolean {
+  return typeof shipment.loadReviewPushedAt === 'string' && shipment.loadReviewPushedAt.trim() !== ''
 }
 
 /**
@@ -1278,7 +1286,7 @@ async function gapFor(deps: DocumentDeps, order: Row, settings: Row | null): Pro
   const shipmentId = String(order.shipmentId ?? '')
   if (!shipmentId) return null
   const bundle = await readBundle(deps.store, shipmentId)
-  if (bundle.shipment.legacyImported === true || isVoided(bundle.shipment)) return null
+  if ((bundle.shipment.legacyImported === true && !wentThroughReview(bundle.shipment)) || isVoided(bundle.shipment)) return null
   const ap = await apPlanFor(deps, bundle, settings)
   const finding = reconcileReleasedOrder({
     order: {
@@ -1316,7 +1324,7 @@ export async function reconcileBilling(deps: DocumentDeps, input: Row, caller: C
     if (!order) throw new Error(`Order not found: ${createFor}`)
     if (!isReleasedOrder(order as never)) throw new Error('That order has not been moved to billing from Load Review')
     const bundle = await readBundle(deps.store, String(order.shipmentId))
-    if (bundle.shipment.legacyImported === true) throw new Error('Imported history has no AP record to create')
+    if (bundle.shipment.legacyImported === true && !wentThroughReview(bundle.shipment)) throw new Error('Imported history has no AP record to create')
     const apRecords = await createCarrierApRecords(deps, bundle, settings, nowIso(), caller)
     await deps.writeAudit('ORDER', createFor, 'RECONCILE_CREATE_AP', caller, { created: apRecords.created, skipped: apRecords.skipped })
     const gap = await gapFor(deps, order, settings)
