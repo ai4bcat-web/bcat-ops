@@ -219,8 +219,8 @@ describe('Carrier tab ladder', () => {
     fireEvent.click(screen.getByTestId('mark-signed-confirm'))
 
     await waitFor(() => expect(actions.markRateConSigned).toHaveBeenCalledWith({ loadCarrierId: 'lc-1', documentId: 'doc-9' }))
-    expect(mocks.prepare).toHaveBeenCalledWith(expect.objectContaining({ shipmentId: 'shp-1', type: 'RATE_CON', contentType: 'application/pdf' }))
-    expect(mocks.commit).toHaveBeenCalledWith(expect.objectContaining({ documentId: 'doc-9', type: 'RATE_CON', loadCarrierId: 'lc-1', loadId: 'load-1' }))
+    expect(mocks.prepare).toHaveBeenCalledWith(expect.objectContaining({ shipmentId: 'shp-1', type: 'BCAT_RATE_CON', contentType: 'application/pdf' }))
+    expect(mocks.commit).toHaveBeenCalledWith(expect.objectContaining({ documentId: 'doc-9', type: 'BCAT_RATE_CON', loadCarrierId: 'lc-1', loadId: 'load-1' }))
   })
 
   it('Remove carrier asks whether to re-post to DAT, off unless ticked, and sends the choice', async () => {

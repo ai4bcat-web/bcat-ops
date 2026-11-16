@@ -2901,6 +2901,8 @@ export type ShipmentDocumentType =
   | 'POD'
   | 'RATE_CON'
   | 'CUSTOMER_RATE_CON'
+  /** The rate confirmation BCAT sends a carrier (Ryne 2026-11-16): never the customer's, never on an invoice. */
+  | 'BCAT_RATE_CON'
   | 'LOAD_SUMMARY'
   | 'LUMPER_RECEIPT'
   | 'WEIGHT_TICKET'

@@ -53,6 +53,7 @@ export const SHIPMENT_DOCUMENT_TYPES = [
   'POD',
   'RATE_CON',
   'CUSTOMER_RATE_CON',
+  'BCAT_RATE_CON',
   'LOAD_SUMMARY',
   'LUMPER_RECEIPT',
   'WEIGHT_TICKET',
@@ -69,8 +70,11 @@ export const SHIPMENT_DOCUMENT_TYPES = [
 export const DOCUMENT_TYPE_LABELS: Record<ShipmentDocumentType, string> = {
   BOL: 'Bill of lading',
   POD: 'Proof of delivery',
+  // Two kinds of rate confirmation (Ryne 2026-11-16): the one we receive (the customer's / broker's, uploaded or from an
+  // intake e-mail) and the one BCAT sends a carrier. Only the first is ever the "rate confirmation" a load needs or an invoice carries.
   RATE_CON: 'Rate confirmation',
-  CUSTOMER_RATE_CON: 'Customer rate confirmation',
+  CUSTOMER_RATE_CON: 'Rate confirmation',
+  BCAT_RATE_CON: 'BCAT Rate Confirmation',
   LOAD_SUMMARY: 'Load summary',
   LUMPER_RECEIPT: 'Lumper receipt',
   WEIGHT_TICKET: 'Weight ticket',
@@ -92,8 +96,10 @@ export const DOCUMENT_TYPE_LABELS: Record<ShipmentDocumentType, string> = {
 export const DEFAULT_AUDIENCE: Record<ShipmentDocumentType, ShipmentDocumentAudience> = {
   BOL: 'ALL',
   POD: 'ALL',
-  RATE_CON: 'CARRIER',
+  // The customer's rate confirmation goes back to the customer (with an asset invoice), never to a carrier.
+  RATE_CON: 'CUSTOMER',
   CUSTOMER_RATE_CON: 'INTERNAL',
+  BCAT_RATE_CON: 'CARRIER',
   LOAD_SUMMARY: 'INTERNAL',
   LUMPER_RECEIPT: 'ALL',
   WEIGHT_TICKET: 'ALL',
@@ -120,6 +126,8 @@ export const CARRIER_UPLOADABLE_TYPES = [
 export const GENERATED_DOCUMENT_TYPES = [
   'BOL',
   'LOAD_SUMMARY',
+  'BCAT_RATE_CON',
+  // Kept readable for an older client; the server files a generated rate confirmation as BCAT_RATE_CON.
   'RATE_CON',
 ] as const satisfies readonly ShipmentDocumentType[]
 
@@ -176,6 +184,9 @@ const REQUIRED_DOC_ALIASES: Record<string, ShipmentDocumentType> = {
   'RATE CONFIRMATION': 'RATE_CON',
   'CUSTOMER RATE CONFIRMATION': 'CUSTOMER_RATE_CON',
   CUSTOMER_RATE_CON: 'CUSTOMER_RATE_CON',
+  'BCAT RATE CONFIRMATION': 'BCAT_RATE_CON',
+  'BCAT RATE CON': 'BCAT_RATE_CON',
+  BCAT_RATE_CON: 'BCAT_RATE_CON',
   'LOAD SUMMARY': 'LOAD_SUMMARY',
   LOAD_SUMMARY: 'LOAD_SUMMARY',
   LUMPER: 'LUMPER_RECEIPT',
@@ -443,33 +454,28 @@ export function driverReviewDocTypes(input: PresentDocTypesInput): ShipmentDocum
 
 export function presentDocTypes(input: PresentDocTypesInput): ShipmentDocumentType[] {
   const present = new Set<ShipmentDocumentType>()
+  const customerScope = input.scope !== 'CARRIER'
   for (const doc of scopedDocuments(input)) {
-    if (countsAsPresent(doc)) present.add(doc.type)
+    if (!countsAsPresent(doc)) continue
+    // Two kinds of rate confirmation (Ryne 2026-11-16). For the customer (the gate, the board's RC, an invoice, OTR) only a
+    // regular one counts: the customer's or broker's own. A BCAT Rate Confirmation is ours to a carrier and never does.
+    // For paying a carrier it is the other way round: the BCAT one the carrier signed is the paperwork.
+    if (customerScope) {
+      if (isBcatRateCon(doc)) continue
+      present.add(doc.type === 'CUSTOMER_RATE_CON' ? 'RATE_CON' : doc.type)
+      if (doc.type === 'CUSTOMER_RATE_CON') present.add('CUSTOMER_RATE_CON')
+    } else {
+      present.add(doc.type === 'BCAT_RATE_CON' ? 'RATE_CON' : doc.type)
+    }
   }
 
-  // The rate confirmation the customer's invoice (and OTR) needs is the customer's or broker's own (Ryne 2026-11-16).
-  // A filed customer rate confirmation, or the tender attached to the load, is it, on any load: the board's RC cell
-  // has always read the tender this way, and the gate, the board and the shipment's box now agree (14938).
-  if (input.scope !== 'CARRIER') {
-    if (present.has('CUSTOMER_RATE_CON')) present.add('RATE_CON')
-    if ((input.loadRateConKeys ?? []).some(isOutsideRateConKey)) present.add('RATE_CON')
-  }
+  // The customer's tender attached to the load (intake e-mail / Loads drawer) is a regular rate confirmation, on any load.
+  if (customerScope && (input.loadRateConKeys ?? []).some(isOutsideRateConKey)) present.add('RATE_CON')
 
-  // The rate confirmation lives in the carrier packet, not here. It is paperwork
-  // once the carrier signed it; having sent it is not.
-  const signedScope =
-    input.scope === 'CARRIER'
-      ? input.loadCarriers.filter((lc) => lc.id === input.loadCarrierId)
-      : input.loadCarriers.filter((lc) => lc.status === 'ACTIVE')
-  // Two or more outside carriers on the load: every one must have signed, and a
-  // filed RATE_CON (or one signature) never waives another carrier's.
-  const outside = signedScope.filter((lc) => lc.kind !== 'OWN_ASSET')
-  if (input.scope !== 'CARRIER' && outside.length >= 2) {
-    present.delete('RATE_CON')
-    if (outside.every((lc) => lc.rateConStatus === 'SIGNED')) present.add('RATE_CON')
-  } else if ((input.scope === 'CARRIER' ? signedScope : outside).some((lc) => lc.rateConStatus === 'SIGNED')) {
-    // Our own truck "signing" our own rate con is not paperwork from outside: only a carrier's signature counts here.
-    present.add('RATE_CON')
+  // Paying a carrier: its signature on our rate confirmation is the paperwork; having sent it is not.
+  if (!customerScope) {
+    const mine = input.loadCarriers.filter((lc) => lc.id === input.loadCarrierId)
+    if (mine.some((lc) => lc.rateConStatus === 'SIGNED')) present.add('RATE_CON')
   }
 
   return SHIPMENT_DOCUMENT_TYPES.filter((type) => present.has(type))
@@ -708,6 +714,26 @@ export function shipmentDocPresence(
   }
   if (!present) return 'MISSING'
   return settled ? 'PRESENT' : 'REVIEW'
+}
+
+/** The BCAT Rate Confirmation row a sent rate con files (one per assignment and version): idempotent on a retry. */
+export function bcatRateConDocumentId(loadCarrierId: string, version: number): string {
+  return `bcatrc:${loadCarrierId}:v${version}`
+}
+
+/**
+ * The rate confirmation BCAT sent a carrier, as opposed to the customer's (Ryne 2026-11-16). The new type says so outright;
+ * an older row says so by where it came from: our generator or the carrier's e-sign, or filed under a carrier assignment.
+ */
+export function isBcatRateCon(doc: Pick<ShipmentDocumentRecord, 'type' | 'loadCarrierId'> & { source?: string | null }): boolean {
+  if (doc.type === 'BCAT_RATE_CON') return true
+  if (doc.type !== 'RATE_CON') return false
+  return doc.source === 'GENERATED' || doc.source === 'CARRIER_PORTAL' || doc.loadCarrierId != null
+}
+
+/** A regular rate confirmation: the customer's or broker's, uploaded or from an intake e-mail. Never BCAT's. */
+export function isRegularRateCon(doc: Pick<ShipmentDocumentRecord, 'type' | 'loadCarrierId'> & { source?: string | null }): boolean {
+  return (doc.type === 'RATE_CON' || doc.type === 'CUSTOMER_RATE_CON') && !isBcatRateCon(doc)
 }
 
 export function legacyRateConDocumentId(loadId: string): string {

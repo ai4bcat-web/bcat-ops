@@ -54,7 +54,7 @@ import {
 import { isCarShipperLoad } from '../../../src/lib/carShipper'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { isCustomerUnresolved, unresolvedCustomerMessage } from '../../../src/lib/customerResolution'
-import { canEmailTo, evaluateDocGate, gateLoadIds, isOwnFleetLoad } from '../../../src/lib/shipmentDocuments'
+import { assetRateConTenders, canEmailTo, evaluateDocGate, gateLoadIds, isOwnFleetLoad } from '../../../src/lib/shipmentDocuments'
 import {
   assertNotSquareInvoiced,
   customerPacketIds,
@@ -168,6 +168,43 @@ interface OrderContext {
   gateLoadIds: string[]
 }
 
+/**
+ * An asset load's regular rate confirmation goes with its invoice (Ryne 2026-11-16), and the customer's tender attached to
+ * the load from the intake e-mail (`Load.rateConfirmKey`) IS that rate confirmation even though no document row names it.
+ * It joins the invoice's documents as the order's rate confirmation, unless a filed row already holds the same file.
+ * A BCAT Rate Confirmation (rate-confirms/carrier/…) is never a tender (isOutsideRateConKey).
+ */
+export function withAssetTenders(
+  documents: ShipmentDocumentRecord[],
+  ctx: { order: OrderRecord; shipment: ShipmentRecord; loads: ShipmentLoad[]; loadCarriers: LoadCarrierRecord[] },
+): ShipmentDocumentRecord[] {
+  if (!isOwnFleetLoad(ctx.shipment as { revDivision?: string | null }, ctx.loadCarriers as unknown as { status?: string | null; kind?: string | null; carrierName?: string | null }[])) return documents
+  const filedKeys = new Set(documents.map((doc) => doc.s3Key))
+  const out = [...documents]
+  for (const tender of assetRateConTenders(ctx.loads as unknown as { id: string; rateConfirmKey?: string | null }[])) {
+    if (filedKeys.has(tender.key)) continue
+    const load = ctx.loads.find((l) => l.id === tender.loadId) as unknown as { loadNumber?: string | null; updatedAt?: string | null } | undefined
+    out.push({
+      id: `tender:${tender.loadId}`,
+      shipmentId: ctx.shipment.id,
+      orderId: ctx.order.id,
+      loadId: tender.loadId,
+      loadCarrierId: null,
+      type: 'RATE_CON',
+      name: `RateCon-${load?.loadNumber ?? ctx.shipment.number ?? tender.loadId}.pdf`,
+      s3Key: tender.key,
+      contentType: 'application/pdf',
+      sizeBytes: 0,
+      source: 'UPLOAD',
+      audience: 'CUSTOMER',
+      status: 'ACTIVE',
+      createdAt: load?.updatedAt ?? '',
+      updatedAt: load?.updatedAt ?? '',
+    } as unknown as ShipmentDocumentRecord)
+  }
+  return out
+}
+
 export async function readOrderContext(orderId: string): Promise<OrderContext> {
   const orderRow = await getById(ORDER_TABLE_NAME, orderId)
   if (!orderRow) throw new Error(`Order not found: ${orderId}`)
@@ -197,14 +234,15 @@ export async function readOrderContext(orderId: string): Promise<OrderContext> {
     invoiceStopLocationIds(loads).map((id) => getById(LOCATION_TABLE_NAME, id)),
   )
 
+  const loadCarriers = carrierRows as unknown as LoadCarrierRecord[]
   return {
     order,
     shipment,
     orders,
     loads,
-    loadCarriers: carrierRows as unknown as LoadCarrierRecord[],
+    loadCarriers,
     charges: chargeRows as unknown as LoadChargeRecord[],
-    documents: documentRows as unknown as ShipmentDocumentRecord[],
+    documents: withAssetTenders(documentRows as unknown as ShipmentDocumentRecord[], { order, shipment, loads, loadCarriers }),
     // Step AW: a FACTOR billing method is the factored flag, so the bill prints the factor's remit-to.
     customer: customerRow
       ? ({ ...customerRow, ...(customerRow.billingMethod === 'FACTOR' ? { factored: true } : {}) } as unknown as CustomerRecord)

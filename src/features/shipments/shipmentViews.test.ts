@@ -527,8 +527,10 @@ describe('POD column', () => {
     expect(pod({ docsMissing: ['BOL'] })).toBe('Y')
     expect(pod({ docsMissing: ['POD'] })).toBe('NEED')
     expect(visibleColumns(['rateConPresent'])[0]!.label).toBe('RC')
-    expect(visibleColumns(['rateConPresent'])[0]!.value(r({ rateConSignedAt: '2026-11-10T10:00:00Z' }))).toBe('Y')
-    expect(visibleColumns(['rateConPresent'])[0]!.value(r({ rateConOnFile: false }))).toBe('')
+    // The RC column is the regular rate confirmation on asset loads only (Ryne 2026-11-16).
+    expect(visibleColumns(['rateConPresent'])[0]!.value(r({ revDivision: 'ASSETS', rateConOnFile: true }))).toBe('Y')
+    expect(visibleColumns(['rateConPresent'])[0]!.value(r({ revDivision: 'ASSETS', rateConSignedAt: '2026-11-10T10:00:00Z' }))).not.toBe('Y')
+    expect(visibleColumns(['rateConPresent'])[0]!.value(r({ rateConSignedAt: '2026-11-10T10:00:00Z' }))).toBe('N/A')
     expect(pod({ docsMissing: null })).toBe('')
   })
   it('prints the words in the column', () => {

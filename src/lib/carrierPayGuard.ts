@@ -26,6 +26,8 @@ export function carrierDocumentReason(
   customerRateCon: boolean,
 ): string | null {
   if (CARRIER_MONEY_TYPES.includes(doc.type)) return `${doc.type === 'CARRIER_INVOICE' ? 'Carrier invoice' : 'Load summary'} shows carrier pay`
+  // A BCAT Rate Confirmation (Ryne 2026-11-16) is ours to a carrier: it never reaches a customer, whatever else it says.
+  if (doc.type === 'BCAT_RATE_CON') return 'BCAT Rate Confirmation (shows carrier pay)'
   if (doc.type === 'RATE_CON' || doc.type === 'CUSTOMER_RATE_CON') {
     if (!customerRateCon) return 'Carrier rate confirmation (shows carrier pay)'
   }

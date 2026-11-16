@@ -49,6 +49,7 @@ import { createHash, randomBytes, randomUUID } from 'crypto'
 import {
   IDX_CARRIERS_BY_SHIPMENT,
   IDX_CHARGES_BY_SHIPMENT,
+  IDX_DOCUMENTS_BY_SHIPMENT,
   IDX_LOADS_BY_SHIPMENT,
   IDX_ORDERS_BY_SHIPMENT,
   batchGetByIds as storeBatchGetByIds,
@@ -287,7 +288,7 @@ import { evaluateReleaseGate, releaseGateError } from '../../../src/lib/releaseG
 import { dedupeEmails, isEmailAddress } from '../../../src/lib/emailAddress'
 import { composeRateConCc } from './rateConRecipients'
 import { assertBolEmailable, bolEmailBody, bolEmailSubject, deliveryLabel, parseEmailBolInput } from './bolEmail'
-import { MAX_GENERATED_BYTES, documentKey } from '../../../src/lib/shipmentDocuments'
+import { MAX_GENERATED_BYTES, bcatRateConDocumentId, documentKey } from '../../../src/lib/shipmentDocuments'
 import { getStops } from '../../../src/lib/stops'
 import type { Load } from '../../../src/types'
 import {
@@ -6672,7 +6673,37 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
       updatedAt: now,
     }, null),
     putItem(SHIPMENT_MESSAGE_TABLE_NAME, message),
+    // The rate confirmation we send fills in the shipment's Documents by itself as a BCAT Rate Confirmation
+    // (Ryne 2026-11-16): carrier audience, filed under the assignment, never on an invoice.
+    putItem(SHIPMENT_DOCUMENT_TABLE_NAME, {
+      id: bcatRateConDocumentId(loadCarrierId, version),
+      __typename: 'ShipmentDocument',
+      shipmentId,
+      loadId,
+      loadCarrierId,
+      type: 'BCAT_RATE_CON',
+      name: filename,
+      s3Key,
+      contentType: 'application/pdf',
+      sizeBytes: bytes.length,
+      source: 'GENERATED',
+      sourceRef: documentId,
+      audience: 'CARRIER',
+      status: 'ACTIVE',
+      version,
+      uploadedBy: caller.email,
+      uploadedAt: now,
+      createdBy: caller.email,
+      createdAt: now,
+      updatedAt: now,
+    }),
   ]
+  for (const old of ((await queryIndex(SHIPMENT_DOCUMENT_TABLE_NAME, IDX_DOCUMENTS_BY_SHIPMENT, 'shipmentId', shipmentId)) as Row[])) {
+    if (old.type === 'BCAT_RATE_CON' && old.status === 'ACTIVE' && old.loadCarrierId === loadCarrierId && old.source === 'GENERATED' && !old.reviewStatus
+      && String(old.id) !== bcatRateConDocumentId(loadCarrierId, version)) {
+      transactionItems.push(updateItemTx(SHIPMENT_DOCUMENT_TABLE_NAME, String(old.id), { status: 'SUPERSEDED', updatedAt: now }, null))
+    }
+  }
   if (!shipment.threadKey) {
     transactionItems.push(
       updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
@@ -7130,7 +7161,7 @@ async function markRateConSigned(input: Row, caller: Caller): Promise<Row> {
   }
   const document = await getById(SHIPMENT_DOCUMENT_TABLE_NAME, documentId)
   if (!document || document.shipmentId !== row.shipmentId) throw new Error('Upload the signed rate confirmation to this shipment first')
-  if (document.type !== 'RATE_CON') throw new Error('The uploaded document must be filed as a rate confirmation')
+  if (document.type !== 'BCAT_RATE_CON' && document.type !== 'RATE_CON') throw new Error('The uploaded document must be filed as a BCAT Rate Confirmation')
   if (document.status !== 'ACTIVE') throw new Error('That document has been voided; upload the signed copy again')
   if (document.contentType !== 'application/pdf') throw new Error('The signed rate confirmation must be a PDF')
 

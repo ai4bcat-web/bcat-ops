@@ -31,7 +31,7 @@ export type GeneratedKind = 'LOAD_SUMMARY' | 'RATE_CON'
 
 const TITLES: Record<GeneratedKind, string> = {
   LOAD_SUMMARY: 'Generate a load summary',
-  RATE_CON: 'Save a copy of the rate confirmation',
+  RATE_CON: 'Save a copy of the BCAT Rate Confirmation',
 }
 
 
@@ -66,7 +66,7 @@ export function GeneratedDocumentDialog({
   // separately per leg. (The bill of lading has its own dialog: `BolDialog`.)
   const loadId = load?.id ?? null
   const version = useMemo(
-    () => nextVersion(bundle.documents, kind, loadId),
+    () => nextVersion(bundle.documents, kind === 'RATE_CON' ? 'BCAT_RATE_CON' : kind, loadId),
     [bundle.documents, kind, loadId],
   )
   const filename = kind === 'LOAD_SUMMARY'
@@ -199,7 +199,7 @@ export function GeneratedDocumentDialog({
         pdfBase64: base64,
         filename,
       })
-      toast.success(`${DOCUMENT_TYPE_LABELS[kind]} saved as v${version}`)
+      toast.success(`${DOCUMENT_TYPE_LABELS[kind === 'RATE_CON' ? 'BCAT_RATE_CON' : kind]} saved as v${version}`)
       onSaved()
       onClose()
     } catch (err) {

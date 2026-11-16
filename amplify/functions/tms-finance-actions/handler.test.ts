@@ -562,7 +562,8 @@ function seed(over: { order?: Row; customer?: Row; settings?: Row } = {}): void 
     createdBy: 'a@b.c',
     updatedBy: 'a@b.c',
   })
-  for (const [id, type] of [['doc-seed-bol', 'BOL'], ['doc-seed-pod', 'POD']]) {
+  // The customer's own rate confirmation (Ryne 2026-11-16): the carrier's signature on BCAT's rate con is not it.
+  for (const [id, type] of [['doc-seed-bol', 'BOL'], ['doc-seed-pod', 'POD'], ['doc-seed-rc', 'CUSTOMER_RATE_CON']]) {
     table(TABLES.document).set(id, {
       id,
       shipmentId: SHIPMENT_ID,
@@ -1042,7 +1043,7 @@ describe('invoice documents packet', () => {
     const { invoiceId } = await generate()
     const stored = table(TABLES.invoice).get(invoiceId)!.attachDocumentIds as string[]
     // BOL (rank other) sits with OTHER, after the lumper receipt, ordered by upload time then id.
-    expect(stored).toEqual(['doc-ratecon', 'doc-seed-pod', 'doc-scale', 'doc-lumper', 'doc-other', 'doc-seed-bol'])
+    expect(stored).toEqual(['doc-ratecon', 'doc-seed-rc', 'doc-seed-pod', 'doc-scale', 'doc-lumper', 'doc-other', 'doc-seed-bol'])
     expect(stored).not.toContain('doc-private-lumper')
     expect(stored).not.toContain('doc-private-other')
     expect(stored).not.toContain('doc-carrier-only')

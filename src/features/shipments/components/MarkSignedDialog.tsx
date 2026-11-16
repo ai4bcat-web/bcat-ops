@@ -28,7 +28,7 @@ export function MarkSignedDialog({ shipmentId, loadId, loadCarrierId, carrierNam
   carrierName?: string | null
   busy: boolean
   onClose: () => void
-  /** Called with the committed RATE_CON document's id; rejects with the server's sentence. */
+  /** Called with the committed BCAT_RATE_CON document's id; rejects with the server's sentence. */
   onConfirm: (documentId: string) => Promise<void>
 }) {
   const [file, setFile] = useState<File | null>(null)
@@ -50,14 +50,14 @@ export function MarkSignedDialog({ shipmentId, loadId, loadCarrierId, carrierNam
     setError(null)
     try {
       const prepared = await prepareDocumentUpload({
-        shipmentId, type: 'RATE_CON', name: file.name, contentType: file.type, sizeBytes: file.size,
+        shipmentId, type: 'BCAT_RATE_CON', name: file.name, contentType: file.type, sizeBytes: file.size,
       })
       await putPresignedFile(prepared.uploadUrl, file, file.type)
       const commit = () => commitDocument({
         shipmentId,
         documentId: prepared.documentId,
         s3Key: prepared.s3Key,
-        type: 'RATE_CON',
+        type: 'BCAT_RATE_CON',
         name: file.name,
         contentType: file.type,
         sizeBytes: file.size,

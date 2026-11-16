@@ -353,7 +353,8 @@ export function openMissingDocs(row: ShipmentRow): MissingDocCode[] {
   if (row.invoiceId || row.factoringItemId || row.legacyImported === true) return []
   const factored = row.customerFactors === true
   const out: MissingDocCode[] = []
-  if (docCellOf(row, 'RATE_CON') === 'MISSING') out.push('RATE_CON')
+  // The RC column covers asset loads; a factored brokered load still needs the customer's rate confirmation for OTR.
+  if (docCellOf(row, 'RATE_CON') === 'MISSING' || (rowNeedsRateCon(row) && !rcColumnApplies(row) && !rateConIn(row) && (boardStatusOf(row) === 'DELIVERED' || (row.docsMissing ?? []).includes('RATE_CON')))) out.push('RATE_CON')
   if (factored && docCellOf(row, 'POD') === 'MISSING') out.push('POD')
   return out
 }
@@ -866,9 +867,8 @@ export function podStatusOf(row: Pick<ShipmentRow, 'revDivision' | 'docsMissing'
  * retyped into a rate confirmation, counts the moment the gate re-reads (Ryne 2026-11-14).
  */
 export function rateConIn(row: Pick<ShipmentRow, 'rateConSignedAt' | 'rateConStatus' | 'rateConOnFile'> & { docsMissing?: string[] | null; docsRequired?: string[] | null; docsPresent?: string[] | null }): boolean {
-  // On an asset load our own truck's signature on our own rate con is not the outside rate confirmation.
-  const asset = isAssetLoad({ revDivision: (row as { revDivision?: string | null }).revDivision ?? null, assignmentType: (row as { assignmentType?: string | null }).assignmentType ?? null })
-  if (!asset && (Boolean(row.rateConSignedAt) || row.rateConStatus === 'SIGNED')) return true
+  // A carrier signing the BCAT Rate Confirmation we sent is never the (regular) rate confirmation (Ryne 2026-11-16): only the
+  // customer's or broker's own counts, filed or attached to the load.
   // The customer's tender on the load counts on any load, exactly as the order gate counts it (presentDocTypes).
   if (row.rateConOnFile === true) return true
   if (Array.isArray(row.docsPresent) && row.docsPresent.includes('RATE_CON')) return true
@@ -884,6 +884,12 @@ export function rowNeedsRateCon(row: { revDivision?: string | null; assignmentTy
     customerFactors: row.customerFactors === true,
     customerWaivesRateCon: row.docsNotRequired?.includes('RATE_CON') === true,
   })
+}
+
+/** Whether the RC column applies: an asset load whose customer needs a rate confirmation (rateConRequired). */
+export function rcColumnApplies(row: Parameters<typeof rowNeedsRateCon>[0]): boolean {
+  const asset = isAssetLoad({ revDivision: row.revDivision ?? null, assignmentType: row.assignmentType ?? null, carrierName: row.carrierName ?? null, carrierNames: (row.carriers ?? []).map((c) => c?.name ?? null) })
+  return asset && rowNeedsRateCon(row)
 }
 
 /** REVIEW: on file, but only as a driver-app page still waiting for someone to accept it ("Driver sent · review"). */
@@ -905,9 +911,10 @@ export function docCellOf(
   docType: 'POD' | 'RATE_CON',
 ): DocCellState {
   if (row.revDivision === 'CAR_SHIPPING') return 'NA'
-  // RC follows the one rule (rateConRequired, Ryne 2026-11-16): N/A on a brokered load for a customer that does not
-  // factor, on AUTO SHIPPER work and for a customer that waives it; ✓ / NEED on an asset load or a factored customer's.
-  if (docType === 'RATE_CON' && !rowNeedsRateCon(row)) return 'NA'
+  // The RC column is the regular rate confirmation on ASSET loads only (Ryne 2026-11-16): N/A on every other load, factored
+  // brokered loads included (OTR's need for one stays in the Factoring (OTR) checklist and REQS), and N/A for a customer
+  // whose loads send none (Batory, Carlyn, Bulk Systems, Rojac: RC unticked on the customer).
+  if (docType === 'RATE_CON' && !rcColumnApplies(row)) return 'NA'
   // The customer does not need this document to invoice (Ryne 2026-11-15: AUTO SHIPPER), unless it is on file anyway.
   if (row.docsNotRequired?.includes(docType)) return docType === 'POD' && Array.isArray(row.docsPresent) && row.docsPresent.includes('POD') ? onFileState(row, 'POD') : 'NA'
   const delivered = boardStatusOf(row) === 'DELIVERED'

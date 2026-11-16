@@ -21,7 +21,7 @@ import { attachIntakeFiles, getIntakeLoad, getRateConfirmUrl, getShipmentDocumen
 import { formatBoardDateTime } from '@/lib/date'
 import {
   ACCEPTED_CONTENT_TYPES, DOCUMENT_TYPE_LABELS, MAX_DOCUMENT_BYTES, SHIPMENT_DOCUMENT_TYPES, SLOT_DOCUMENT_TYPES,
-  assetRateConTenders, isOwnFleetLoad, isPointerDocument, shipmentDocPresence, suggestDocumentType,
+  assetRateConTenders, isBcatRateCon, isOwnFleetLoad, isPointerDocument, isRegularRateCon, shipmentDocPresence, suggestDocumentType,
 } from '@/lib/shipmentDocuments'
 import { customerDocsNotRequired, customerFactorsForOtr, rateConRequired } from '@/lib/reviewRequirements'
 import { isCarShipperLoad } from '@/lib/carShipper'
@@ -147,7 +147,7 @@ function DocumentsCardImpl({ values, ctx, documentApi = liveDocumentApi }: CardP
   const all = ctx.bundle?.documents ?? []
   const hasOld = all.some((d) => d.status === 'SUPERSEDED')
   const active = all.filter((d) => d.status === 'ACTIVE' || (showOld && d.status === 'SUPERSEDED'))
-  const shown = active.filter((d) => !SLOT_DOCUMENT_TYPES.includes(d.type) && (tab === 'public' ? PUBLIC_AUDIENCES.includes(d.audience) : d.audience === 'INTERNAL'))
+  const shown = active.filter((d) => !SLOT_DOCUMENT_TYPES.includes(d.type) && !isBcatRateCon(d) && (tab === 'public' ? PUBLIC_AUDIENCES.includes(d.audience) : d.audience === 'INTERNAL'))
   const queued = queuedAll
     .map((q, index) => ({ q, index }))
     .filter(({ q }) => !SLOT_DOCUMENT_TYPES.includes(q.type) && (tab === 'public' ? q.audience === 'ALL' : q.audience === 'INTERNAL'))
@@ -158,7 +158,9 @@ function DocumentsCardImpl({ values, ctx, documentApi = liveDocumentApi }: CardP
   // Rate confirmation box, and so does the tender on the load. The gate counts exactly these (presentDocTypes).
   const assetLoad = isOwnFleetLoad(ctx.bundle?.shipment ?? null, ctx.bundle?.loadCarriers ?? [])
   // The customer's rate confirmation counts on any load (the gate's rule), so it sits in this box on brokered loads too.
-  const slotDocs = (docType: ShipmentDocumentType) => active.filter((d) => d.type === docType || (docType === 'RATE_CON' && d.type === 'CUSTOMER_RATE_CON'))
+  // Only the regular rate confirmation (the customer's or broker's) sits in the Rate confirmation box; BCAT's own has its box below.
+  const slotDocs = (docType: ShipmentDocumentType) => active.filter((d) => docType === 'RATE_CON' ? isRegularRateCon(d) : d.type === docType)
+  const bcatRateCons = active.filter((d) => isBcatRateCon(d))
   const tenders = assetRateConTenders((ctx.bundle?.loads ?? []) as { id: string; rateConfirmKey?: string | null }[])
   // On file / Driver sent / NEED: the same rule the order gate and the board's cache read (shipmentDocPresence), so they agree.
   const slotPresence = (docType: ShipmentDocumentType) => ctx.bundle
@@ -278,7 +280,7 @@ function DocumentsCardImpl({ values, ctx, documentApi = liveDocumentApi }: CardP
     <div className="tms-card-body-stack" data-testid="card-documents-body">
       <GenerateRow ctx={ctx} />
       <div className="tms-card-docslots" data-testid="card-documents-slots">
-        {([['POD', 'Proof of delivery (POD)', 'Fills in by itself when a driver uploads it in the app or the tracking agent files it.'], ['RATE_CON', 'Rate confirmation', 'Fills in by itself when the carrier e-signs it or it arrives from an intake e-mail.']] as const).map(([docType, label, hint]) => {
+        {([['POD', 'Proof of delivery (POD)', 'Fills in by itself when a driver uploads it in the app or the tracking agent files it.'], ['RATE_CON', 'Rate confirmation', 'The customer\'s or broker\'s. Fills in by itself when it arrives from an intake e-mail; goes with an asset load\'s invoice.']] as const).map(([docType, label, hint]) => {
           const docs = slotDocs(docType)
           const queuedDocs = slotQueued(docType)
           const slotTenders = docType === 'RATE_CON' ? tenders : []
@@ -345,6 +347,26 @@ function DocumentsCardImpl({ values, ctx, documentApi = liveDocumentApi }: CardP
             </div>
           )
         })}
+        <div className="tms-card-docslot" data-testid="card-documents-slot-BCAT_RATE_CON" data-on-file={bcatRateCons.length > 0 ? 'true' : 'false'}>
+          <div className="tms-card-docslot-head">
+            {bcatRateCons.length > 0 ? <Check size={14} aria-hidden /> : <Circle size={14} aria-hidden />}
+            <strong>BCAT Rate Confirmation</strong>
+            <span className="tms-muted text-xs">{bcatRateCons.length > 0 ? 'Sent' : 'None sent'}</span>
+          </div>
+          <p className="tms-muted text-xs">Fills in by itself when we send a carrier a rate confirmation. Never sent with an invoice.</p>
+          {bcatRateCons.length > 0 ? (
+            <ul className="tms-card-docslot-list" data-testid="card-documents-slot-BCAT_RATE_CON-list">
+              {bcatRateCons.map((doc) => (
+                <li key={doc.id} className="text-xs" data-testid="card-documents-slot-bcat-row">
+                  <span>
+                    <button type="button" className="tms-link" onClick={() => void preview(doc)}>{doc.name}</button>
+                    <span className="tms-muted">{` · ${slotOrigin(doc)} · ${formatBoardDateTime(doc.uploadedAt)}`}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       </div>
 
       <div className="tms-card-req-title" data-testid="card-documents-other-title">Other documents</div>

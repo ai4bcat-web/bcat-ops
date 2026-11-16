@@ -151,13 +151,14 @@ describe('evaluateDocGate — customer scope', () => {
     expect(result.missing).toEqual(['POD'])
   })
 
-  it('counts a signed rate confirmation but not one merely sent', () => {
+  it('never counts a carrier signing the BCAT Rate Confirmation as the customer\'s rate confirmation (Ryne 2026-11-16)', () => {
     expect(
       customerGate([], ['Rate confirmation'], [carrier('lc-1', { rateConStatus: 'SIGNED' })]).missing,
-    ).toEqual([])
-    expect(
-      customerGate([], ['Rate confirmation'], [carrier('lc-1', { rateConStatus: 'SENT' })]).missing,
     ).toEqual(['RATE_CON'])
+    expect(
+      customerGate([doc('BCAT_RATE_CON', { loadCarrierId: 'lc-1' })], ['Rate confirmation'], [carrier('lc-1', { rateConStatus: 'SIGNED' })]).missing,
+    ).toEqual(['RATE_CON'])
+    expect(customerGate([doc('RATE_CON')], ['Rate confirmation'], [carrier('lc-1')]).missing).toEqual([])
   })
 })
 
@@ -186,13 +187,9 @@ describe('evaluateDocGate — several carriers', () => {
   const signed = (id: string) => carrier(id, { rateConStatus: 'SIGNED', kind: 'CARRIER' } as Partial<GateCarrier>)
   const sent = (id: string) => carrier(id, { rateConStatus: 'SENT', kind: 'CARRIER' } as Partial<GateCarrier>)
 
-  it('needs every outside carrier signed, not any', () => {
-    expect(customerGate([], ['RATE_CON'], [signed('a'), sent('b')]).missing).toEqual(['RATE_CON'])
-    expect(customerGate([], ['RATE_CON'], [signed('a'), signed('b')]).missing).toEqual([])
-  })
-
-  it('does not let a filed RATE_CON waive an unsigned carrier', () => {
-    expect(customerGate([doc('RATE_CON')], ['RATE_CON'], [signed('a'), sent('b')]).missing).toEqual(['RATE_CON'])
+  it('the customer\'s rate confirmation is the one that counts, however many carriers signed', () => {
+    expect(customerGate([], ['RATE_CON'], [signed('a'), signed('b')]).missing).toEqual(['RATE_CON'])
+    expect(customerGate([doc('RATE_CON')], ['RATE_CON'], [signed('a'), sent('b')]).missing).toEqual([])
   })
 })
 
