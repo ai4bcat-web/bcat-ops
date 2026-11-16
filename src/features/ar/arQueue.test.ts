@@ -66,6 +66,20 @@ describe('the invoicing queue', () => {
     expect(orderByGroup([a, b], 'division').map((r) => r.orderId)).toEqual(['y', 'x'])
     expect(groupTotals([a, b])).toEqual({ count: 2, amountCents: 2000, balanceCents: 2000 })
   })
+
+  it('keeps the groups in the sorted order when the user has picked a sort', () => {
+    const mk = (orderId: string, division: string | null) => buildReadyRows([row({ orderId, shipment: { ...row().shipment!, revDivision: division } as ShipmentRecord })], lookups)[0]
+    const x = mk('x', 'BCAT_LOGISTICS')
+    const y = mk('y', 'ASSETS')
+    // Default: groups A→Z. Sorted: the first row of each group decides where it sits, both directions.
+    const byName = orderByGroup([x, y], 'division').map((r) => r.orderId)
+    const sortedAsc = orderByGroup([x, y], 'division', true).map((r) => r.orderId)
+    const sortedDesc = orderByGroup([y, x], 'division', true).map((r) => r.orderId)
+    expect(sortedAsc).toEqual(['x', 'y'])
+    expect(sortedDesc).toEqual(['y', 'x'])
+    expect(sortedAsc).not.toEqual(sortedDesc)
+    expect(byName).toHaveLength(2)
+  })
 })
 
 describe('factorQueueRows (the folded-in To factor tab)', () => {

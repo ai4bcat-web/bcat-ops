@@ -343,10 +343,15 @@ export function groupTotals(rows: ArQueueRow[]): ArGroupTotals {
   return { count: rows.length, amountCents, balanceCents }
 }
 
-/** Stable: rows keep their order inside a group; groups are alphabetical, the "No …" bucket last. */
-export function orderByGroup(rows: ArQueueRow[], by: ArGroupBy): ArQueueRow[] {
+/**
+ * Rows re-ordered into their groups. By default the groups run A→Z with the unlabelled ones last. When the
+ * user has picked a sort (`sorted`), the groups follow the sorted rows instead: each group sits where its first
+ * row falls, so sorting any column, Status included, reorders the groups as well as the rows inside them.
+ */
+export function orderByGroup(rows: ArQueueRow[], by: ArGroupBy, sorted = false): ArQueueRow[] {
   if (by === 'none') return rows
-  const keys = [...new Set(rows.map((r) => groupKeyOf(r, by)))].sort((a, b) => {
+  const unique = [...new Set(rows.map((r) => groupKeyOf(r, by)))]
+  const keys = sorted ? unique : unique.sort((a, b) => {
     const aNo = a === UNTAGGED || a === NO_REP || a === '—'
     const bNo = b === UNTAGGED || b === NO_REP || b === '—'
     if (aNo !== bNo) return aNo ? 1 : -1
