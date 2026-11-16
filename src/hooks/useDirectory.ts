@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  listCustomers, createCustomer, updateCustomer, archiveCustomer, setCustomerStatus as setCustomerStatusAction,
+  listCustomers, createCustomer, updateCustomer, patchCustomer, archiveCustomer, setCustomerStatus as setCustomerStatusAction,
   restoreCustomer as restoreCustomerAction,
   listLocations, createLocation, updateLocation, archiveLocation, removeLocationDriverNote,
 } from '@/lib/apiClient'
@@ -49,7 +49,10 @@ export function useDirectory(opts?: { includeArchived?: boolean; locations?: boo
     },
     /** `current` is the record the form was opened from — its updatedAt is the CAS token. */
     saveCustomer: async (current: CustomerRecord, patch: Parameters<typeof updateCustomer>[1]) => {
-      const c = await updateCustomer(current.id, patch, current.updatedAt); replaceCustomer(c); return c
+      // A save that carries the customer's name is a full form save; one without it (billing setup, automation
+      // overrides, ...) is a partial change and goes as a patch, so nothing it left out is blanked or refused.
+      const save = 'name' in patch && patch.name ? updateCustomer : patchCustomer
+      const c = await save(current.id, patch, current.updatedAt); replaceCustomer(c); return c
     },
     archiveCustomer: async (current: CustomerRecord) => {
       const c = await archiveCustomer(current.id, current.updatedAt)

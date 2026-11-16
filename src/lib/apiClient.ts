@@ -5564,6 +5564,19 @@ export function graphqlErrorText(err: unknown): string {
   return typeof err === 'string' ? err : ''
 }
 
+/**
+ * An error for a screen, in plain words: a raw validation message from a Lambda ("name must be a string") means the
+ * request was missing a field, which says nothing to the person at the screen, so it becomes a sentence they can act on.
+ */
+export function plainSaveError(err: unknown, fallback: string): string {
+  const text = graphqlErrorText(err)
+  if (!text) return fallback
+  if (/^[\w.[\]]+ must be (a|an) (string|number|boolean|array|object|integer)\b/i.test(text)) {
+    return `${fallback}: a field was missing from the save. Reload the page and try again.`
+  }
+  return text
+}
+
 // ── Vehicle quote email (Best Care Auto Transport) ─────────────────────────────
 
 /**

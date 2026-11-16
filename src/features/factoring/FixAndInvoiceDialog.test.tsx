@@ -6,7 +6,8 @@ import type { FactoringItem } from '@/types'
 import type { CustomerRecord, InvoiceRecord } from '@/types/tms'
 
 const api = vi.hoisted(() => ({
-  updateCustomer: vi.fn(),
+  patchCustomer: vi.fn(),
+  plainSaveError: (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback),
   moveToManualInvoice: vi.fn(),
   generateInvoice: vi.fn(),
   getShipment: vi.fn(),
@@ -47,7 +48,7 @@ describe('Fix & invoice manually', () => {
 
   it('runs the three steps in order and opens the send review without sending anything', async () => {
     const onChanged = vi.fn()
-    api.updateCustomer.mockResolvedValue({ ...customer, apEmail: 'ap@acme.com' })
+    api.patchCustomer.mockResolvedValue({ ...customer, apEmail: 'ap@acme.com' })
     api.moveToManualInvoice.mockResolvedValue({ proNumber: '14700', orderId: 'o1', customerId: 'c1', voidedInvoice: null, note: '' })
     api.generateInvoice.mockResolvedValue({ invoice: { id: 'inv1', number: '14700', customerId: 'c1', shipmentId: 's1' }, gate: {} })
     api.getShipment.mockResolvedValue({ id: 's1' })
@@ -60,12 +61,12 @@ describe('Fix & invoice manually', () => {
     // An AP e-mail is required.
     fireEvent.click(screen.getByTestId('fix-save-customer'))
     expect(screen.getByRole('alert')).toHaveTextContent('AP e-mail')
-    expect(api.updateCustomer).not.toHaveBeenCalled()
+    expect(api.patchCustomer).not.toHaveBeenCalled()
 
     fireEvent.change(screen.getByLabelText('AP e-mail'), { target: { value: 'ap@acme.com' } })
     fireEvent.keyDown(screen.getByLabelText('AP e-mail'), { key: 'Enter' })
     fireEvent.click(screen.getByTestId('fix-save-customer'))
-    await waitFor(() => expect(api.updateCustomer).toHaveBeenCalledWith('c1', expect.objectContaining({
+    await waitFor(() => expect(api.patchCustomer).toHaveBeenCalledWith('c1', expect.objectContaining({
       apEmail: 'ap@acme.com', paymentTermsDays: 30, changeSource: 'Factoring · OTR rejected',
     }), '2026-11-01T00:00:00Z'))
 
@@ -83,5 +84,14 @@ describe('Fix & invoice manually', () => {
     const passed = carousel.mock.calls.at(-1)![0].customerById.get('c1')
     expect(passed).toMatchObject({ billingMethod: 'MANUAL', factored: false })
     expect(onChanged).toHaveBeenCalled()
+  })
+  it('says it plainly when the customer save is refused, never a raw validation message', async () => {
+    api.patchCustomer.mockRejectedValue(new Error('A field was missing from the save'))
+    render(<FixAndInvoiceDialog item={dead} customers={[customer]} isAdmin onClose={() => {}} onChanged={() => {}} />)
+    fireEvent.change(screen.getByLabelText('AP e-mail'), { target: { value: 'ap@acme.com' } })
+    fireEvent.keyDown(screen.getByLabelText('AP e-mail'), { key: 'Enter' })
+    fireEvent.click(screen.getByTestId('fix-save-customer'))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('missing'))
+    expect(screen.getByTestId('fix-move-manual')).toBeDisabled()
   })
 })

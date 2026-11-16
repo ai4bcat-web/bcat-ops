@@ -14,7 +14,7 @@ import { LinkCustomerPicker } from '@/features/shipments/components/LinkCustomer
 import { OwnFleetDriverPicker } from '@/components/OwnFleetDriverPicker'
 import { useAddressAutofill } from '@/hooks/useAddressAutofill'
 import { useOwnFleetRoster } from '@/hooks/useOwnFleetRoster'
-import { assignAsset, getShipmentBundle, listCustomers, patchCustomer, setShipmentCustomer, updateOrderDetails, updateStop } from '@/lib/apiClient'
+import { assignAsset, getShipmentBundle, listCustomers, patchCustomer, plainSaveError, setShipmentCustomer, updateOrderDetails, updateStop } from '@/lib/apiClient'
 import { customerRefOf } from '@/lib/customerRef'
 import { isFactorBilled } from '@/lib/factorBilling'
 import { stopPlace, stopsList } from '@/lib/stopPlace'
@@ -99,7 +99,7 @@ export function ReviewFixPanel({ shipmentId, readOnly, busy, onSaved, failing, r
       toast.success(success)
       await onSaved()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(plainSaveError(err, 'Could not save'))
     } finally { setSaving(null) }
   }
 
