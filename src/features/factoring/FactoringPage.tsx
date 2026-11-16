@@ -337,10 +337,20 @@ function NoBuyFlag({ item }: { item: FactoringItem }) {
 function RejectedFlag({ item }: { item: FactoringItem }) {
   const rejection = otrRejection(item)
   if (!rejection || rejection.kind === 'NO_BUY') return null
+  const details = otrRejectionDetails(item)
+  // Short on the row (the OTR status badge beside it already says Dead); the whole reason is the tooltip and the Fix modal.
+  const short = rejection.kind === 'DEAD' ? 'will not be funded' : rejection.reason
   return (
     <>
-      <TmsBadge tone="red" title={`${rejection.reason}. Stays in the factoring queue: resolve it with OTR.`} data-testid="otr-rejected-flag">Needs attention</TmsBadge>
-      <span className="text-xs tms-muted whitespace-normal" style={{ overflowWrap: 'anywhere' }} data-testid="otr-rejected-reason">{otrRejectionDetails(item)?.headline ?? rejection.reason}</span>
+      <TmsBadge tone="red" title={[details?.headline, ...(details?.lines ?? [])].filter(Boolean).join('\n')} data-testid="otr-rejected-flag">Needs attention</TmsBadge>
+      <span
+      className="text-xs whitespace-nowrap"
+      style={{ color: 'var(--tms-badge-red)', fontWeight: 600 }}
+      title={[details?.headline, ...(details?.lines ?? [])].filter(Boolean).join('\n')}
+      data-testid="otr-rejected-reason"
+    >
+      {short}
+      </span>
     </>
   )
 }
@@ -745,7 +755,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       header: 'STATUS',
       render: (item) => (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <StatusBadge item={item} />
+          {!isOtrRejected(item) && <StatusBadge item={item} />}
           <OtrStatusFlag item={item} />
           <NoBuyFlag item={item} />
           <RejectedFlag item={item} />
@@ -758,7 +768,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       key: 'actions',
       header: 'ACTIONS',
       render: (item: FactoringItem) => (
-        <div className="flex flex-wrap items-center gap-2" data-testid={`factoring-actions-${item.id}`}>
+        <div className="flex items-center gap-2 whitespace-nowrap" data-testid={`factoring-actions-${item.id}`}>
           {canMoveManually(item, user) && !isOtrRejected(item) && (
             <TmsButton
               size="sm"
@@ -788,10 +798,11 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
               size="sm"
               variant="secondary"
               aria-label={`Send PRO ${item.proNumber} to OTR again`}
+              title="Send to OTR again"
               disabled={pendingIds.has(item.id)}
               onClick={() => setResendId(item.id)}
             >
-              Send to OTR again
+              Resend to OTR
             </TmsButton>
           )}
           {canDelete && (
@@ -852,7 +863,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       optionsOf: (i) => [{ value: i.status, label: FACTORING_STATUS_LABEL[i.status] }],
       sortValue: (i) => FACTORING_STATUS_LABEL[i.status],
     },
-    { key: 'actions', header: 'Actions', group: 'Status', text: () => '', fixed: true, filter: false, sortable: false, width: 380 },
+    { key: 'actions', header: 'Actions', group: 'Status', text: () => '', fixed: true, filter: false, sortable: false, width: 350, stickyEnd: true },
   ], [activeTab])
   const prefs = useDenseGridPrefs({
     gridId: 'factoring-queue',

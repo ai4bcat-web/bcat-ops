@@ -47,6 +47,8 @@ export interface DenseColumn<T> {
   extraPx?: number
   /** A fixed column cannot be reordered, resized or hidden from the chooser. */
   fixed?: boolean
+  /** Pinned to the right edge while the rest scrolls sideways (action buttons stay on screen). */
+  stickyEnd?: boolean
   /** The Columns dialog's section for this field (Shipment, Order, Carrier, ...). */
   group?: string
   align?: 'left' | 'right'

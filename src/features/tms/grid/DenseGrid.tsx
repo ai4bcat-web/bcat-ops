@@ -391,6 +391,7 @@ export function DenseGrid<T>({
                 const active = isFilterActive(filters[col.key])
                 const sortable = col.sortable !== false && col.header !== ''
                 const isSticky = col.key in stickyLeft
+                const isStickyEnd = !isSticky && col.stickyEnd === true
                 const direction = sort?.key === col.key ? sort.dir : null
                 return (
                   <th
@@ -398,10 +399,11 @@ export function DenseGrid<T>({
                     scope="col"
                     className={[
                       isSticky ? 'tms-dg-sticky' : '',
+                      isStickyEnd ? 'tms-dg-sticky tms-dg-sticky-end' : '',
                       col.key === lastSticky ? 'tms-dg-sticky-last' : '',
                       dropKey === col.key && dragKey !== col.key ? 'tms-dg-drop' : '',
                     ].filter(Boolean).join(' ') || undefined}
-                    style={isSticky ? { left: stickyLeft[col.key] } : undefined}
+                    style={isSticky ? { left: stickyLeft[col.key] } : isStickyEnd ? { right: 0 } : undefined}
                     aria-sort={direction ? (direction === 'asc' ? 'ascending' : 'descending') : undefined}
                     draggable={!col.fixed && onReorder != null}
                     onDragStart={(e) => {
@@ -510,16 +512,18 @@ export function DenseGrid<T>({
                   )}
                   {columns.map((col) => {
                     const isSticky = col.key in stickyLeft
+                    const isStickyEnd = !isSticky && col.stickyEnd === true
                     return (
                       <td
                         key={col.key}
                         className={[
                           isSticky ? 'tms-dg-sticky' : '',
+                          isStickyEnd ? 'tms-dg-sticky tms-dg-sticky-end' : '',
                           col.key === lastSticky ? 'tms-dg-sticky-last' : '',
                           col.align === 'right' ? 'tms-dg-right' : '',
                           col.fixed ? 'tms-dg-fixed' : '',
                         ].filter(Boolean).join(' ') || undefined}
-                        style={isSticky ? { left: stickyLeft[col.key] } : undefined}
+                        style={isSticky ? { left: stickyLeft[col.key] } : isStickyEnd ? { right: 0 } : undefined}
                         data-col={col.key}
                         title={col.fixed ? undefined : col.text(row)}
                       >

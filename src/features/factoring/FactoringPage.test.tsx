@@ -170,7 +170,8 @@ describe('invoices OTR turned down', () => {
     fireEvent.click(screen.getByRole('tab', { name: /^OTR rejected/ }))
     expect(screen.queryByRole('button', { name: 'Invoice manually for PRO DE3' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Fix and invoice PRO DE3 manually' })).toBeInTheDocument()
-    expect(screen.getByTestId('otr-rejected-reason')).toHaveTextContent('OTR: Dead — this invoice will not be funded')
+    expect(screen.getByTestId('otr-rejected-reason')).toHaveTextContent('will not be funded')
+    expect(screen.getByTestId('otr-rejected-reason').getAttribute('title')).toMatch(/OTR: Dead — this invoice will not be funded/)
   })
 
   it('shows no strip when OTR has turned nothing down', async () => {
