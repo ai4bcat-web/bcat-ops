@@ -7,6 +7,7 @@
  */
 import { MAX_LIVE_CARRIERS } from '@/lib/carrierLegs'
 import { getStops } from '@/lib/stops'
+import { stopPlace } from '@/lib/stopPlace'
 import { defaultBillToIdOf, customerDefaultsOf } from '@/lib/intakeLoad'
 import { formatDateTimeInput } from '@/lib/date'
 import { effectiveShipmentType, typeOfLegacyMode } from '@/lib/shipmentTypes'
@@ -596,6 +597,8 @@ function stopFromRecord(s: Stop, order: OrderRecord | undefined, role: 'first-pi
     instructions, pieces, weightLbs, arrivedAt, departedAt, refs, sequence: _sequence, ...rest } = s
   void _sequence
   const addr = address ?? {}
+  // The same reading every page uses: the address, then "CITY, ST" text in any separator ("COCHRANE. WI" too).
+  const place = stopPlace({ city, address })
   const own = (code: string) => {
     if (role === 'first-pickup') return str(order?.references?.find((r) => referenceCode(r) === REF_PICKUP)?.value)
     if (role === 'last-delivery') return str(order?.references?.find((r) => referenceCode(r) === REF_DELIVERY)?.value)
@@ -619,9 +622,9 @@ function stopFromRecord(s: Stop, order: OrderRecord | undefined, role: 'first-pi
     locationId: str(locationId),
     address1: str(addr.street),
     address2: str((addr as { street2?: string | null }).street2),
-    city: str(addr.city ?? (city ? city.split(',')[0].trim() : '')),
-    state: str(addr.state ?? (city?.includes(',') ? city.split(',')[1].trim() : '')),
-    zip: str(addr.zip),
+    city: str(place.city),
+    state: str(place.state),
+    zip: str(place.zip),
     country: str(addr.country) || 'US',
     contact: str(contact?.name),
     phone: str(contact?.phone),

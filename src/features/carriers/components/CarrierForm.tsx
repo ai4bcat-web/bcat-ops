@@ -9,7 +9,8 @@
  */
 import { useEffect, useState } from 'react'
 import { RepPicker, TeamPicker } from '@/components/RepPicker'
-import { TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { CityInput, TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { useAddressAutofill } from '@/hooks/useAddressAutofill'
 import {
   CARRIER_EQUIPMENT, CARRIER_TYPES, type CarrierFormValue,
 } from './carrierFormModel'
@@ -48,6 +49,11 @@ export function CarrierForm({ value, set, section }: CarrierFormProps) {
     return () => { alive = false }
   }, [section])
 
+  // A ZIP fills a blank city / state; a picked city fills its state and ZIP. Typed text is never overwritten.
+  const { hint: addressHint, pickCity } = useAddressAutofill({
+    zip: String(value.zip ?? ''), city: String(value.city ?? ''), state: String(value.state ?? ''), upper: true,
+    apply: (p) => { if (p.city) set('city', p.city as CarrierFormValue['city']); if (p.state) set('state', p.state as CarrierFormValue['state']); if (p.zip) set('zip', p.zip as CarrierFormValue['zip']) },
+  })
   const text = <K extends keyof CarrierFormValue>(key: K, label: string) => (
     <TmsField label={label}>
       <TmsInput
@@ -82,10 +88,13 @@ export function CarrierForm({ value, set, section }: CarrierFormProps) {
         </div>
         <div className="tms-grid tms-grid-4">
           {text('street', 'Street')}
-          {text('city', 'City')}
+          <TmsField label="City">
+            <CityInput aria-label="City" value={String(value.city)} state={String(value.state)} onChange={(v) => set('city', v as CarrierFormValue['city'])} onPick={pickCity} />
+          </TmsField>
           {text('state', 'State')}
           {text('zip', 'ZIP')}
         </div>
+        {addressHint && <p className="tms-autofill-hint" role="status">{addressHint}</p>}
         <div className="tms-grid tms-grid-3">
           {text('dispatcherName', 'Dispatcher name')}
           {text('dispatcherPhone', 'Dispatcher phone')}

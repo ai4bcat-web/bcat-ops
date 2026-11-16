@@ -1,7 +1,26 @@
 import { useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
-import { TmsButton, TmsField, TmsInput } from '@/features/tms/kit'
+import { CityInput, TmsButton, TmsField, TmsInput } from '@/features/tms/kit'
+import { useAddressAutofill } from '@/hooks/useAddressAutofill'
 import type { BillToParty } from '@/types/tms'
+
+/** One bill-to party's address: a ZIP fills a blank city / state, a picked city fills its state and ZIP. */
+function BillToAddress({ party, update, disabled }: { party: BillToParty; update: (patch: Partial<BillToParty>) => void; disabled?: boolean }) {
+  const a = party.address ?? {}
+  const { hint, pickCity } = useAddressAutofill({
+    zip: a.zip, city: a.city, state: a.state,
+    apply: (p) => update({ address: { ...a, ...(p.city ? { city: p.city } : {}), ...(p.state ? { state: p.state } : {}), ...(p.zip ? { zip: p.zip } : {}) } }),
+  })
+  return (
+    <div className="tms-grid tms-grid-2">
+      <TmsInput value={a.street ?? ''} onChange={(e) => update({ address: { ...a, street: e.target.value || null } })} placeholder="Street" disabled={disabled} />
+      <CityInput value={a.city ?? ''} state={a.state} onChange={(v) => update({ address: { ...a, city: v || null } })} onPick={pickCity} placeholder="City" disabled={disabled} />
+      <TmsInput value={a.state ?? ''} onChange={(e) => update({ address: { ...a, state: e.target.value || null } })} placeholder="State" disabled={disabled} />
+      <TmsInput value={a.zip ?? ''} onChange={(e) => update({ address: { ...a, zip: e.target.value || null } })} placeholder="ZIP" disabled={disabled} />
+      {hint && <p className="tms-autofill-hint" role="status" style={{ gridColumn: '1 / -1' }}>{hint}</p>}
+    </div>
+  )
+}
 
 function emptyParty(): BillToParty {
   return { id: crypto.randomUUID(), name: '', address: {}, isDefault: false }
@@ -81,32 +100,7 @@ export function BillToEditor({ parties, onChange, disabled }: BillToEditorProps)
                   </TmsField>
                   <div>
                     <div className="tms-field-label" style={{ marginBottom: 6 }}>Address</div>
-                    <div className="tms-grid tms-grid-2">
-                      <TmsInput
-                        value={p.address?.street ?? ''}
-                        onChange={(e) => update(p.id, { address: { ...p.address, street: e.target.value || null } })}
-                        placeholder="Street"
-                        disabled={disabled}
-                      />
-                      <TmsInput
-                        value={p.address?.city ?? ''}
-                        onChange={(e) => update(p.id, { address: { ...p.address, city: e.target.value || null } })}
-                        placeholder="City"
-                        disabled={disabled}
-                      />
-                      <TmsInput
-                        value={p.address?.state ?? ''}
-                        onChange={(e) => update(p.id, { address: { ...p.address, state: e.target.value || null } })}
-                        placeholder="State"
-                        disabled={disabled}
-                      />
-                      <TmsInput
-                        value={p.address?.zip ?? ''}
-                        onChange={(e) => update(p.id, { address: { ...p.address, zip: e.target.value || null } })}
-                        placeholder="ZIP"
-                        disabled={disabled}
-                      />
-                    </div>
+                    <BillToAddress party={p} update={(patch) => update(p.id, patch)} disabled={disabled} />
                   </div>
                 </div>
               )}

@@ -1,4 +1,6 @@
 import { useMemo, useState, type CSSProperties } from 'react'
+import { CityInput } from '@/features/tms/kit'
+import { useAddressAutofill } from '@/hooks/useAddressAutofill'
 import { ArrowLeft, ArrowRight, Plus, Trash2, Check, Info } from 'lucide-react'
 import {
   driverApplicationSubmitSchema,
@@ -93,6 +95,21 @@ function normalizeForSubmit(d: Draft): Draft {
       safetySensitive: e.safetySensitive ?? false,
     })),
   }
+}
+
+/** One residence's city / state / ZIP: a ZIP fills a blank city and state, a picked city fills its state and ZIP. */
+function ResidenceAddress({ a, update }: { a: { city?: string; state?: string; zip?: string }; update: (patch: { city?: string; state?: string; zip?: string }) => void }) {
+  const { hint, pickCity } = useAddressAutofill({ zip: a.zip, city: a.city, state: a.state, apply: update })
+  return (
+    <>
+      <div className="grid grid-cols-3 gap-2">
+        <Labeled label="City" required><CityInput style={inputStyle} value={a.city ?? ''} state={a.state} onChange={(v) => update({ city: v })} onPick={pickCity} /></Labeled>
+        <Labeled label="State" required><input style={inputStyle} value={a.state ?? ''} onChange={(e) => update({ state: e.target.value })} /></Labeled>
+        <Labeled label="ZIP" required><input style={inputStyle} inputMode="numeric" value={a.zip ?? ''} onChange={(e) => update({ zip: e.target.value })} /></Labeled>
+      </div>
+      {hint && <div className="text-sm" style={{ color: 'var(--tms-text-2)' }} role="status">{hint}</div>}
+    </>
+  )
 }
 
 function Labeled({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
@@ -197,11 +214,7 @@ export function ApplicationForm({ driverId, initial, onSaveDraft, onSubmit, onEx
           {addresses.map((a, i) => (
             <div key={i} className="space-y-2" style={subCard}>
               <Labeled label="Street" required><input style={inputStyle} value={a.street ?? ''} onChange={(e) => updateItem('addressHistory', i, { street: e.target.value })} /></Labeled>
-              <div className="grid grid-cols-3 gap-2">
-                <Labeled label="City" required><input style={inputStyle} value={a.city ?? ''} onChange={(e) => updateItem('addressHistory', i, { city: e.target.value })} /></Labeled>
-                <Labeled label="State" required><input style={inputStyle} value={a.state ?? ''} onChange={(e) => updateItem('addressHistory', i, { state: e.target.value })} /></Labeled>
-                <Labeled label="ZIP" required><input style={inputStyle} value={a.zip ?? ''} onChange={(e) => updateItem('addressHistory', i, { zip: e.target.value })} /></Labeled>
-              </div>
+              <ResidenceAddress a={a} update={(patch) => updateItem('addressHistory', i, patch)} />
               <div className="grid grid-cols-2 gap-2">
                 <Labeled label="Moved in" required><input type="date" style={inputStyle} value={a.fromDate ?? ''} onChange={(e) => updateItem('addressHistory', i, { fromDate: e.target.value })} /></Labeled>
                 <Labeled label="Moved out (blank = current)"><input type="date" style={inputStyle} value={a.toDate ?? ''} onChange={(e) => updateItem('addressHistory', i, { toDate: e.target.value })} /></Labeled>

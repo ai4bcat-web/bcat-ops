@@ -11,7 +11,8 @@
 import { useEffect, useState } from 'react'
 import { Plus, Pencil, Save, X, Building2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsButton, TmsField, TmsIconButton, TmsInput, TmsSelect } from '@/features/tms/kit'
+import { CityInput, TmsButton, TmsField, TmsIconButton, TmsInput, TmsSelect } from '@/features/tms/kit'
+import { useAddressAutofill } from '@/hooks/useAddressAutofill'
 import { listDivisions, saveDivision } from '@/lib/apiClient'
 import type { Division } from '@/types/tms'
 import { CheckRow, Loading, Panel, SettingsCard, Stack } from './settingsKit'
@@ -47,6 +48,13 @@ export function DivisionCard() {
   }, [])
 
   const set = <K extends keyof Division>(k: K, v: Division[K]) => setForm((p) => ({ ...p, [k]: v }))
+  const { hint: remitHint, pickCity } = useAddressAutofill({
+    zip: form.remitToAddress?.zip, city: form.remitToAddress?.city, state: form.remitToAddress?.state,
+    apply: (p) => setForm((prev) => ({ ...prev, remitToAddress: {
+      ...prev.remitToAddress,
+      ...(p.city ? { city: p.city } : {}), ...(p.state ? { state: p.state } : {}), ...(p.zip ? { zip: p.zip } : {}),
+    } })),
+  })
 
   const save = async () => {
     if (!form.key.trim() || !form.name.trim()) { toast.error('Key and name are required'); return }
@@ -120,10 +128,11 @@ export function DivisionCard() {
             <TmsField label="Remit-to address">
               <div className="tms-grid tms-grid-2">
                 <TmsInput aria-label="Remit-to street" value={form.remitToAddress?.street ?? ''} onChange={(e) => set('remitToAddress', { ...form.remitToAddress, street: e.target.value || null })} placeholder="Street" />
-                <TmsInput aria-label="Remit-to city" value={form.remitToAddress?.city ?? ''} onChange={(e) => set('remitToAddress', { ...form.remitToAddress, city: e.target.value || null })} placeholder="City" />
+                <CityInput aria-label="Remit-to city" value={form.remitToAddress?.city ?? ''} state={form.remitToAddress?.state} onChange={(v) => set('remitToAddress', { ...form.remitToAddress, city: v || null })} onPick={pickCity} placeholder="City" />
                 <TmsInput aria-label="Remit-to state" value={form.remitToAddress?.state ?? ''} onChange={(e) => set('remitToAddress', { ...form.remitToAddress, state: e.target.value || null })} placeholder="State" />
                 <TmsInput aria-label="Remit-to ZIP" value={form.remitToAddress?.zip ?? ''} onChange={(e) => set('remitToAddress', { ...form.remitToAddress, zip: e.target.value || null })} placeholder="ZIP" />
                 <TmsInput aria-label="Remit-to country" value={form.remitToAddress?.country ?? ''} onChange={(e) => set('remitToAddress', { ...form.remitToAddress, country: e.target.value || null })} placeholder="Country" />
+                {remitHint && <p className="tms-autofill-hint" role="status" style={{ gridColumn: '1 / -1' }}>{remitHint}</p>}
               </div>
             </TmsField>
 

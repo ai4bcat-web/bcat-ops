@@ -12,7 +12,7 @@
 import { useMemo, useState } from 'react'
 import { AlertTriangle, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsBadge, TmsButton, TmsDialog, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { CityInput, TmsBadge, TmsButton, TmsDialog, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { MoneyField } from '@/features/directory/components/MoneyField'
@@ -230,7 +230,7 @@ export function LogCheckCallDialog({
 
           <div>
             <Label className="tms-field-label">City</Label>
-            <TmsInput aria-label="Check call city" value={city} onChange={(e) => setCity(e.target.value)} className="h-9 text-sm" />
+            <CityInput aria-label="Check call city" value={city} state={stateCode} onChange={setCity} onPick={(option) => { setCity(option.city.toUpperCase()); setStateCode(option.state) }} className="h-9 text-sm" />
           </div>
           <div>
             <Label className="tms-field-label">State</Label>

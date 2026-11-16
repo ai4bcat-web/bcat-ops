@@ -1,6 +1,6 @@
 import { Plus, Trash2 } from 'lucide-react'
-import { TmsButton, TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
-import { useZipAutofill } from '@/hooks/useZipAutofill'
+import { CityInput, TmsButton, TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { useAddressAutofill } from '@/hooks/useAddressAutofill'
 import { AddressAutocomplete } from './AddressAutocomplete'
 import type { CustomerRecord, LocationRecord, LocationContact } from '@/types/tms'
 import type { LocationFormValue } from './useLocationForm'
@@ -43,9 +43,10 @@ export function LocationForm({
   customers: CustomerRecord[]
 }) {
   const activeCustomers = customers.filter((c) => c.active !== false)
-  useZipAutofill(value.address?.zip, value.address?.city, value.address?.state, (f) => {
-    if (f.city) setAddressField('city', f.city)
-    if (f.state) setAddressField('state', f.state)
+  // A ZIP fills a blank city / state, and a picked city fills its state and ZIP; typed text is never overwritten.
+  const { hint: autofillHint, pickCity } = useAddressAutofill({
+    zip: value.address?.zip, city: value.address?.city, state: value.address?.state,
+    apply: (p) => { if (p.city) setAddressField('city', p.city); if (p.state) setAddressField('state', p.state); if (p.zip) setAddressField('zip', p.zip) },
   })
 
   const toggleCustomer = (id: string) => {
@@ -74,10 +75,13 @@ export function LocationForm({
         {POSTAL_FIELDS.map((f) => (
           <div key={f.key} style={f.span === 2 ? { gridColumn: 'span 2' } : undefined}>
             <TmsField label={f.label}>
-              <TmsInput value={value.address?.[f.key] ?? ''} onChange={(e) => setAddressField(f.key, e.target.value)} />
+              {f.key === 'city'
+                ? <CityInput value={value.address?.city ?? ''} state={value.address?.state} onChange={(v) => setAddressField('city', v)} onPick={pickCity} />
+                : <TmsInput value={value.address?.[f.key] ?? ''} onChange={(e) => setAddressField(f.key, e.target.value)} />}
             </TmsField>
           </div>
         ))}
+        {autofillHint && <p className="tms-autofill-hint" role="status" style={{ gridColumn: 'span 2' }}>{autofillHint}</p>}
         <p className="tms-muted" style={{ gridColumn: 'span 2', fontSize: 12 }}>
           {value.address?.lat != null && value.address?.lng != null
             ? `Pin: ${value.address.lat}, ${value.address.lng}${value.address.timezone ? ` · ${value.address.timezone}` : ''} — typing here drops the pin until the address is searched again.`

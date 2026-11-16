@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import { TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { CityInput, TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { addressPickPatch } from '@/hooks/useAddressAutofill'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { SEED_DIVISIONS } from '@/lib/ownership'
 import { BILLING_METHOD_CHOICES } from '@/lib/newCustomerRules'
@@ -57,7 +58,17 @@ export function NewCustomerRequiredFields({ value, set, errors }: { value: Custo
         <div className="tms-field-label"><RequiredLabel>Address</RequiredLabel></div>
         <div className="tms-grid tms-grid-2">
           <TmsInput value={value.billingAddressStreet} placeholder="Street" aria-label="Street" aria-required="true" onBlur={() => touch('address')} onChange={(e) => set('billingAddressStreet', e.target.value)} />
-          <TmsInput value={value.billingAddressCity} placeholder="City" aria-label="City" aria-required="true" onBlur={() => touch('address')} onChange={(e) => set('billingAddressCity', e.target.value)} />
+          <CityInput
+            value={value.billingAddressCity} state={value.billingAddressState} placeholder="City" aria-label="City" aria-required="true"
+            onBlur={() => touch('address')} onChange={(v) => set('billingAddressCity', v)}
+            onPick={(option) => {
+              // The ZIP filling a blank city / state is CustomerForm's own autofill; a picked city fills its state and ZIP here.
+              const p = addressPickPatch(option, value.billingAddressZip)
+              set('billingAddressCity', p.city ?? option.city)
+              set('billingAddressState', option.state)
+              if (p.zip) set('billingAddressZip', p.zip)
+            }}
+          />
           <TmsInput value={value.billingAddressState} placeholder="State" aria-label="State" aria-required="true" onBlur={() => touch('address')} onChange={(e) => set('billingAddressState', e.target.value)} />
           <TmsInput value={value.billingAddressZip} placeholder="ZIP" aria-label="ZIP" aria-required="true" onBlur={() => touch('address')} onChange={(e) => set('billingAddressZip', e.target.value)} />
         </div>

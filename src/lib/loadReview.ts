@@ -12,6 +12,7 @@
  * Imports are relative and alias-free: the Lambda bundles `loadReviewExtras` and
  * `loadReviewRefusal` so the server refuses on exactly the sentences the page shows.
  */
+import { stopPlace } from './stopPlace'
 import type { ApStatus, ArStatus, AssignmentType, LoadWorkflowStatus, ShipmentBuildState, ShipmentStatus } from '../types/tms'
 import {
   DEFAULT_REVIEW_REQUIREMENTS,
@@ -79,6 +80,8 @@ export interface LoadReviewStop {
   type?: string
   city?: string | null
   appt?: string | null
+  /** The stop's own address: its state counts even when the city text carries none ("COCHRANE. WI" too). */
+  address?: { city?: string | null; state?: string | null; zip?: string | null } | null
 }
 
 /** A structural subset of `ShipmentListRow`: passing the board rows type-checks. */
@@ -292,11 +295,12 @@ function stopSentences(stops: readonly LoadReviewStop[]): LoadReviewReason[] {
   const out: LoadReviewReason[] = []
   stops.forEach((stop, index) => {
     const n = index + 1
-    const city = (stop.city ?? '').trim()
+    // One reading of the place for every page: the stop's address, then its "CITY, ST" text in any separator.
+    const place = stopPlace(stop)
     const tab: LoadReviewAction = { kind: 'OPEN_TAB', tab: 'stops' }
-    if (!city) {
+    if (!place.city) {
       out.push(reason('STOP_INCOMPLETE', `Stop ${n} needs a city`, 'details', tab))
-    } else if (!/,\s*[A-Za-z]{2}\b/.test(city)) {
+    } else if (!place.state) {
       out.push(reason('STOP_INCOMPLETE', `Stop ${n} needs a state`, 'details', tab))
     }
     if (blank(stop.appt)) out.push(reason('STOP_INCOMPLETE', `Stop ${n} needs an appointment`, 'details', tab))

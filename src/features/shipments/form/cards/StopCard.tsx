@@ -7,9 +7,10 @@
  */
 import { useContext, useEffect, useMemo, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { GripVertical, Pencil, Trash2 } from 'lucide-react'
-import { TmsIconButton, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { CityInput, TmsIconButton, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import { NewLocationForm } from './NewLocationForm'
 import { draftFromStop, onceStopPatch, type LocationDraft } from './newLocation'
+import { useAddressAutofill } from '@/hooks/useAddressAutofill'
 import { useAuthUser } from '@/hooks/useAuth'
 import { requiresApptProofs } from '@/lib/apptQueue'
 import { findLocationMatches, tidyLocationSuggestions } from '@/lib/tmsDirectory'
@@ -77,6 +78,8 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
   const nameDef = d('name', first)
   const readyDef = d('ready')
   const addressIssue = [d('city'), d('state'), d('zip')].some((def) => err(def))
+  // A ZIP fills a blank city / state; a picked city fills its state and ZIP. Nothing typed is overwritten.
+  const { hint: autofillHint, pickCity } = useAddressAutofill({ zip: stop.zip, city: stop.city, state: stop.state, upper: true, apply: (p) => onChange(p) })
 
   const ensureLocations = ctx.directory.ensureLocations
   const searching = query.trim().length >= 2
@@ -231,7 +234,10 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
           <FieldGrid>
             <LField span={6} def={d('address1')}><TmsInput {...txt('address1')} /></LField>
             <LField span={6} def={d('address2')}><TmsInput {...txt('address2')} /></LField>
-            <LField span={12} def={d('city')} error={err(d('city'))}><TmsInput {...txt('city')} /></LField>
+            <LField span={12} def={d('city')} error={err(d('city'))}>
+              <CityInput {...ctl(d('city'))} value={stop.city} state={stop.state} disabled={base.disabled} onChange={(v) => onChange({ city: v })} onPick={pickCity} />
+              {autofillHint && <p className="tms-autofill-hint" role="status" data-testid={`f-${prefix}-autofill`}>{autofillHint}</p>}
+            </LField>
             <LField span={4} narrow={4} def={d('state')} error={err(d('state'))}>
               <TmsSelect {...ctl(d('state'))} value={stop.state} disabled={base.disabled} onChange={(e) => onChange({ state: e.target.value })}>
                 <option value="" />

@@ -21,7 +21,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ChevronLeft, Copy, Loader2, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  TmsAlert, TmsBadge, TmsButton, TmsCard, TmsDetailSplit, TmsField, TmsIconButton, TmsInput, TmsMetaList, TmsPage, TmsSelect,
+  CityInput, TmsAlert, TmsBadge, TmsButton, TmsCard, TmsDetailSplit, TmsField, TmsIconButton, TmsInput, TmsMetaList, TmsPage, TmsSelect,
   TmsStatRow, TmsTextarea, TmsTimeline,
 } from '@/features/tms/kit'
 import { useAuthUser } from '@/hooks/useAuth'
@@ -36,6 +36,8 @@ import { formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/invoiceBuild'
 import { humanChargeCode, priceQuoteLines, quoteState } from '@/lib/quotes'
 import { laneInputOfStops } from '@/lib/laneIntel'
+import { stopPlace } from '@/lib/stopPlace'
+import { useAddressAutofill } from '@/hooks/useAddressAutofill'
 import { MoneyField } from '@/features/directory/components/MoneyField'
 import { MODE_OPTIONS } from '@/features/shipments/orderDraft'
 import { LaneHistoryPanel } from './components/LaneHistoryPanel'
@@ -108,14 +110,18 @@ function stopsFrom(quote: QuoteRecord | null): StopDraft[] {
       { id: 'delivery', type: 'delivery', city: '', state: '', zip: '', appt: '' },
     ]
   }
-  return stops.map((stop, index) => ({
-    id: stop.id || `stop-${index}`,
-    type: stop.type,
-    city: stop.address?.city ?? (stop.city ?? '').split(',')[0]?.trim() ?? '',
-    state: stop.address?.state ?? (stop.city ?? '').split(',')[1]?.trim() ?? '',
-    zip: stop.address?.zip ?? '',
-    appt: toLocalInput(stop.appt),
-  }))
+  return stops.map((stop, index) => {
+    // The one place reading: the stop's address, then its "CITY, ST" text in any separator.
+    const placed = stopPlace(stop)
+    return {
+      id: stop.id || `stop-${index}`,
+      type: stop.type,
+      city: placed.city ?? '',
+      state: placed.state ?? '',
+      zip: placed.zip ?? '',
+      appt: toLocalInput(stop.appt),
+    }
+  })
 }
 
 /**
@@ -810,12 +816,8 @@ export function QuoteDetail() {
                       options={[{ value: 'pickup', label: 'Pickup' }, { value: 'delivery', label: 'Delivery' }]}
                     />
                   </TmsField>
-                  <Text label={`Stop ${index + 1} city`} value={stop.city} disabled={locked}
-                    onChange={(v) => editStops((prev) => prev.map((row, i) => (i === index ? { ...row, city: v } : row)))} />
-                  <Text label={`Stop ${index + 1} state`} value={stop.state} disabled={locked}
-                    onChange={(v) => editStops((prev) => prev.map((row, i) => (i === index ? { ...row, state: v } : row)))} />
-                  <Text label={`Stop ${index + 1} ZIP`} value={stop.zip} disabled={locked}
-                    onChange={(v) => editStops((prev) => prev.map((row, i) => (i === index ? { ...row, zip: v } : row)))} />
+                  <QuoteStopAddress n={index + 1} stop={stop} disabled={locked}
+                    onPatch={(patch) => editStops((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)))} />
                   <TmsField label="Appointment">
                     <TmsInput
                       type="datetime-local"
@@ -1029,6 +1031,25 @@ export function QuoteDetail() {
         <MarkLostDialog open quote={quote} onOpenChange={(o) => { if (!o) setDialog(null) }} onDone={closeAndRefresh} />
       )}
     </TmsPage>
+  )
+}
+
+/** A quote stop's city / state / ZIP: a ZIP fills a blank city and state, a picked city fills its state and ZIP. */
+function QuoteStopAddress({ n, stop, disabled, onPatch }: {
+  n: number
+  stop: { city: string; state: string; zip: string }
+  disabled: boolean
+  onPatch: (patch: { city?: string; state?: string; zip?: string }) => void
+}) {
+  const { pickCity } = useAddressAutofill({ zip: stop.zip, city: stop.city, state: stop.state, upper: true, apply: onPatch })
+  return (
+    <>
+      <TmsField label={`Stop ${n} city`}>
+        <CityInput value={stop.city} state={stop.state} disabled={disabled} onChange={(v) => onPatch({ city: v })} onPick={pickCity} />
+      </TmsField>
+      <Text label={`Stop ${n} state`} value={stop.state} disabled={disabled} onChange={(v) => onPatch({ state: v })} />
+      <Text label={`Stop ${n} ZIP`} value={stop.zip} disabled={disabled} onChange={(v) => onPatch({ zip: v })} />
+    </>
   )
 }
 
