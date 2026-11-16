@@ -14,12 +14,14 @@ import {
   TmsField,
   TmsIconButton,
   TmsInput,
+  CityInput,
   TmsSegmentedTabs,
   TmsTable,
   TmsTextarea,
 } from '@/features/tms/kit'
 import type { ColumnDef } from '@/features/tms/kit'
 import { CheckRow, ErrorText, GroupLabel, Loading, Panel, SettingsCard, Stack } from '@/features/settings/settingsKit'
+import { useAddressAutofill } from '@/hooks/useAddressAutofill'
 import { getTmsSettings, listDivisions, saveDivision, saveTmsSettings } from '@/lib/apiClient'
 import type { Address, Division, DivisionContact, PaymentInstructions, PaymentTerm, TmsSettings } from '@/types/tms'
 
@@ -132,6 +134,10 @@ export function BillingPage() {
       return { ...prev, remitToAddress: { ...current, [field]: value || null } }
     })
   }
+  const { hint: remitHint, pickCity } = useAddressAutofill({
+    zip: draft?.remitToAddress?.zip, city: draft?.remitToAddress?.city, state: draft?.remitToAddress?.state,
+    apply: (p) => { if (p.city) setRemitAddress('city', p.city); if (p.state) setRemitAddress('state', p.state); if (p.zip) setRemitAddress('zip', p.zip) },
+  })
 
   const setContact = (which: 'billingContact' | 'payablesContact', field: keyof DivisionContact, value: string) => {
     setDraft((prev) => {
@@ -295,10 +301,11 @@ export function BillingPage() {
                 <TmsField label="Remit-to address">
                   <div className="tms-grid tms-grid-2">
                     <TmsInput aria-label="Street" value={remitAddress.street ?? ''} onChange={(e) => setRemitAddress('street', e.target.value)} placeholder="Street" />
-                    <TmsInput aria-label="City" value={remitAddress.city ?? ''} onChange={(e) => setRemitAddress('city', e.target.value)} placeholder="City" />
+                    <CityInput aria-label="City" value={remitAddress.city ?? ''} state={remitAddress.state} onChange={(v) => setRemitAddress('city', v)} onPick={pickCity} placeholder="City" />
                     <TmsInput aria-label="State" value={remitAddress.state ?? ''} onChange={(e) => setRemitAddress('state', e.target.value)} placeholder="State" />
                     <TmsInput aria-label="ZIP" value={remitAddress.zip ?? ''} onChange={(e) => setRemitAddress('zip', e.target.value)} placeholder="ZIP" />
                     <TmsInput aria-label="Country" value={remitAddress.country ?? ''} onChange={(e) => setRemitAddress('country', e.target.value)} placeholder="Country" />
+                    {remitHint && <p className="tms-autofill-hint" role="status" style={{ gridColumn: '1 / -1' }}>{remitHint}</p>}
                   </div>
                 </TmsField>
               </Panel>

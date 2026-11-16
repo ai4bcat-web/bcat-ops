@@ -43,6 +43,7 @@ export { TmsButton, TmsIconButton } from './TmsButton'
 export type { TmsButtonProps, TmsButtonVariant } from './TmsButton'
 
 export { TmsInput, TmsTextarea } from './TmsInput'
+export { CityInput, type CityInputProps } from './CityInput'
 
 export { TmsSelect } from './TmsSelect'
 export type { TmsSelectProps, TmsSelectOption } from './TmsSelect'

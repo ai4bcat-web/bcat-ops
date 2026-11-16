@@ -9,9 +9,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CheckCircle2, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsButton, TmsCard, TmsInput, TmsSelect } from '@/features/tms/kit'
+import { CityInput, TmsButton, TmsCard, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { LinkCustomerPicker } from '@/features/shipments/components/LinkCustomerPicker'
 import { OwnFleetDriverPicker } from '@/components/OwnFleetDriverPicker'
+import { useAddressAutofill } from '@/hooks/useAddressAutofill'
 import { useOwnFleetRoster } from '@/hooks/useOwnFleetRoster'
 import { assignAsset, getShipmentBundle, listCustomers, patchCustomer, setShipmentCustomer, updateOrderDetails, updateStop } from '@/lib/apiClient'
 import { customerRefOf } from '@/lib/customerRef'
@@ -244,6 +245,11 @@ function StopFix({ n, stop, final, off, persist }: { n: number; stop: Stop; fina
   const [apptType, setApptType] = useState(stop.apptType ?? 'exact')
   const [arrived, setArrived] = useState(stop.arrivedAt ? formatDateTimeInput(stop.arrivedAt) : '')
   const [departed, setDeparted] = useState(stop.departedAt ? formatDateTimeInput(stop.departedAt) : '')
+  // A ZIP fills a blank city / state, and a picked city fills its state and ZIP; nothing typed is overwritten.
+  const { hint: autofillHint, pickCity } = useAddressAutofill({
+    zip, city, state, upper: true,
+    apply: (p) => { if (p.city !== undefined) setCity(p.city); if (p.state !== undefined) setState(p.state); if (p.zip !== undefined) setZip(p.zip) },
+  })
   const placeDirty = city !== (place.city ?? '') || state !== (place.state ?? '') || zip !== (place.zip ?? '')
   const apptDirty = appt !== (stop.appt ? formatDateTimeInput(stop.appt) : '') || apptType !== (stop.apptType ?? 'exact')
   const timesDirty = arrived !== (stop.arrivedAt ? formatDateTimeInput(stop.arrivedAt) : '') || departed !== (stop.departedAt ? formatDateTimeInput(stop.departedAt) : '')
@@ -266,10 +272,11 @@ function StopFix({ n, stop, final, off, persist }: { n: number; stop: Stop; fina
   return <div className="lr-stop" data-testid={`lr-stop-${n}`}>
     <p className="lr-stop-title">{title}<Unsaved show={placeDirty || apptDirty || timesDirty} /></p>
     <div className="lr-fix-grid">
-      <label className={`lr-fix-field ${flag(!text(city))}`}>City<TmsInput aria-label={`Stop ${n} city`} value={city} disabled={off} onChange={(e) => setCity(e.target.value)} /></label>
+      <label className={`lr-fix-field ${flag(!text(city))}`}>City<CityInput aria-label={`Stop ${n} city`} value={city} state={state} disabled={off} onChange={setCity} onPick={pickCity} /></label>
       <label className={`lr-fix-field ${flag(!STATE.test(text(state)))}`}>State<TmsInput aria-label={`Stop ${n} state`} maxLength={2} value={state} disabled={off} onChange={(e) => setState(e.target.value.toUpperCase())} /></label>
       <label className={`lr-fix-field ${flag(!ZIP.test(text(zip)))}`}>ZIP<TmsInput aria-label={`Stop ${n} ZIP`} inputMode="numeric" value={zip} disabled={off} onChange={(e) => setZip(e.target.value)} /></label>
     </div>
+    {autofillHint && <p className="tms-autofill-hint" role="status">{autofillHint}</p>}
     <SaveError message={locationError} />
     <div className="lr-fix-grid">
       <label className={`lr-fix-field ${flag(!appt)}`}>Appointment<TmsInput type="datetime-local" aria-label={`Stop ${n} appointment`} value={appt} disabled={off} onChange={(e) => setAppt(e.target.value)} /></label>

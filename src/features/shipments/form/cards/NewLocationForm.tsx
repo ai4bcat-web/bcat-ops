@@ -7,8 +7,8 @@
  */
 import { useState, useMemo } from 'react'
 import { toast } from 'sonner'
-import { TmsButton, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
-import { useZipAutofill } from '@/hooks/useZipAutofill'
+import { CityInput, TmsButton, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { useAddressAutofill } from '@/hooks/useAddressAutofill'
 import { createLocation, geocodeAddress } from '@/lib/apiClient'
 import type { LocationRecord } from '@/types/tms'
 import { COUNTRIES, US_STATES } from '../constants'
@@ -39,7 +39,11 @@ export function NewLocationForm({ initial, locations, canSave, createdFrom, pref
   const t = (key: string) => `f-${prefix}-new-${key}`
 
   // Zip autofill: a complete US zip fills city / state when they are still blank (never over typed text); offline table, no geocoder.
-  useZipAutofill(d.zip, d.city, d.state, (f) => setD((p) => ({ ...p, city: p.city.trim() ? p.city : (f.city ?? p.city), state: p.state.trim() ? p.state : (f.state ?? p.state) })))
+  // A picked city in the type-ahead fills its state and ZIP too (never over typed text).
+  const { hint: autofillHint, pickCity } = useAddressAutofill({
+    zip: d.zip, city: d.city, state: d.state,
+    apply: (p) => setD((prev) => ({ ...prev, city: p.city ?? prev.city, state: p.state ?? prev.state, zip: p.zip ?? prev.zip })),
+  })
 
   const save = async () => {
     setTried(true)
@@ -78,7 +82,7 @@ export function NewLocationForm({ initial, locations, canSave, createdFrom, pref
         <Field span={3} narrow={6} label="Zip" required error={err('zip')}>
           <TmsInput data-testid={t('zip')} aria-label="Zip" inputMode="numeric" value={d.zip} onChange={(e) => set({ zip: digitsOnly(e.target.value).slice(0, 9) })} />
         </Field>
-        <Field span={3} narrow={6} label="City" required error={err('city')}><TmsInput data-testid={t('city')} aria-label="City" value={d.city} onChange={(e) => set({ city: e.target.value })} /></Field>
+        <Field span={3} narrow={6} label="City" required error={err('city')}><CityInput data-testid={t('city')} aria-label="City" value={d.city} state={d.state} onChange={(v) => set({ city: v })} onPick={pickCity} /></Field>
         <Field span={3} narrow={6} label="State" required error={err('state')}>
           <TmsSelect data-testid={t('state')} aria-label="State" value={d.state} onChange={(e) => set({ state: e.target.value })}>
             <option value="" />
@@ -101,6 +105,7 @@ export function NewLocationForm({ initial, locations, canSave, createdFrom, pref
         </Field>
         <Field span={12} label="Notes"><TmsTextarea data-testid={t('notes')} aria-label="Notes" rows={1} className="tms-fg-oneline" value={d.notes} onChange={(e) => set({ notes: e.target.value })} /></Field>
       </FieldGrid>
+      {autofillHint && <p className="tms-autofill-hint" role="status" data-testid={t('autofill')}>{autofillHint}</p>}
       {dup ? (
         <div className="tms-card-newloc-dup" role="alert" data-testid={t('duplicate')}>
           <span>{dup.why === 'name' ? 'A location with this name and zip already exists' : 'A location at this address already exists'}: {dup.location.name}</span>

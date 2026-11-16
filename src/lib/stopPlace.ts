@@ -64,24 +64,55 @@ export function state2(v: unknown): string | null {
   return s && /^[A-Za-z]{2}$/.test(s) ? s.toUpperCase() : null
 }
 
-/** "EL PASO, TX 79928" / "MESA, AZ" / "Chicago" → its parts. */
+/** US states, DC and territories: a bare two-letter token only counts as a state when it is one of these. */
+export const US_STATE_CODES: ReadonlySet<string> = new Set(
+  'AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY PR VI GU AS MP'.split(' '),
+)
+const CA_PROVINCES: ReadonlySet<string> = new Set('AB BC MB NB NL NS NT NU ON PE QC SK YT'.split(' '))
+export const isRegionCode = (v: string): boolean => US_STATE_CODES.has(v) || CA_PROVINCES.has(v)
+
+const cleanCity = (v: string): string | null => {
+  const t = v.replace(/[\s,.;-]+$/, '').replace(/\s{2,}/g, ' ').trim()
+  return t || null
+}
+
+/**
+ * "EL PASO, TX 79928" / "MESA, AZ" / "Chicago" → its parts. Older rows write the separator loosely:
+ * "COCHRANE. WI", "COCHRANE WI", "Cochrane,WI 54622". A comma always splits (any two letters, as before); a
+ * period, semicolon or plain space splits only when the last word is a real US state or Canadian province, so
+ * "ST. LOUIS" and "FORT WAYNE" are never cut.
+ */
 export function parsePlaceText(v: unknown): { city: string | null; state: string | null; zip: string | null } {
   const s = text(v)
   if (!s) return { city: null, state: null, zip: null }
-  const m = s.match(/^(.*?),\s*([A-Za-z]{2})(?:\s+(\d{5}(?:-?\d{4})?))?\s*$/)
-  if (m) return { city: m[1].trim() || null, state: m[2].toUpperCase(), zip: zip5(m[3]) }
+  const comma = s.match(/^(.*?),\s*([A-Za-z]{2})(?:\s+(\d{5}(?:-?\d{4})?))?\s*$/)
+  if (comma) return { city: comma[1].trim() || null, state: comma[2].toUpperCase(), zip: zip5(comma[3]) }
+  const loose = s.match(/^(.*?)(?:\s*[.;]\s*|\s+)([A-Za-z]{2})(?:[\s,.-]+(\d{5}(?:-?\d{4})?))?\s*$/)
+  if (loose && isRegionCode(loose[2].toUpperCase())) {
+    const city = cleanCity(loose[1])
+    if (city) return { city, state: loose[2].toUpperCase(), zip: zip5(loose[3]) }
+  }
   return { city: s, state: null, zip: null }
+}
+
+/** "COCHRANE" + "WI" → "COCHRANE, WI": the display text a stop carries beside its address. */
+export function cityStateText(city: string | null | undefined, state: string | null | undefined): string {
+  const c = parsePlaceText(city)
+  const st = state2(state) ?? c.state
+  return [c.city ?? '', st ?? ''].filter(Boolean).join(', ')
 }
 
 export function stopPlace(stop: StopPlaceStop | null | undefined, location?: StopPlaceLocation | null): StopPlace {
   const a = stop?.address ?? null
   const label = parsePlaceText(stop?.city)
+  // The address's own city can carry its state too ("COCHRANE. WI"); split it the same way.
+  const own = parsePlaceText(a?.city)
   return {
     name: text(stop?.name) ?? text(location?.name),
     street: text(a?.street) ?? text(a?.address1) ?? text(location?.address1) ?? text(location?.street),
-    city: text(a?.city) ?? text(location?.city) ?? label.city,
-    state: state2(a?.state) ?? state2(location?.state) ?? label.state,
-    zip: zip5(a?.zip) ?? zip5(location?.zip) ?? label.zip,
+    city: own.city ?? text(location?.city) ?? label.city,
+    state: state2(a?.state) ?? own.state ?? state2(location?.state) ?? label.state,
+    zip: zip5(a?.zip) ?? own.zip ?? zip5(location?.zip) ?? label.zip,
     country: text(a?.country) ?? text(location?.country),
   }
 }

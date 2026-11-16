@@ -965,3 +965,32 @@
   .tms-shell .tms-head-band-cards,
   .tms-portal .tms-head-band-cards { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); justify-self: stretch; }
 }
+
+/* City type-ahead (CityInput): suggestions under a city field. Offline ZIP table; see useAddressAutofill. */
+.tms-shell .tms-city-input,
+.tms-portal .tms-city-input { position: relative; min-width: 0; }
+.tms-shell .tms-city-list,
+.tms-portal .tms-city-list {
+  position: absolute; z-index: 40; left: 0; right: 0; top: calc(100% + 2px); margin: 0; padding: 4px; list-style: none;
+  max-height: 280px; overflow-y: auto; background: var(--tms-surface); border: 1px solid var(--tms-border);
+  border-radius: 8px; box-shadow: var(--tms-shadow);
+}
+.tms-shell .tms-city-option,
+.tms-portal .tms-city-option {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 32px; padding: 4px 8px;
+  border-radius: 6px; cursor: pointer; color: var(--tms-text); font-size: 13px;
+}
+.tms-shell .tms-city-option:hover,
+.tms-shell .tms-city-option.is-active,
+.tms-portal .tms-city-option:hover,
+.tms-portal .tms-city-option.is-active { background: var(--tms-primary-tint); }
+.tms-shell .tms-city-zip,
+.tms-portal .tms-city-zip { color: var(--tms-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tms-shell .tms-city-credit,
+.tms-portal .tms-city-credit { padding: 4px 8px 2px; color: var(--tms-muted); font-size: 11px; }
+.tms-shell .tms-autofill-hint,
+.tms-portal .tms-autofill-hint { margin: 4px 0 0; color: var(--tms-muted); font-size: 12px; }
+@media (pointer: coarse) {
+  .tms-shell .tms-city-option,
+  .tms-portal .tms-city-option { min-height: 44px; }
+}

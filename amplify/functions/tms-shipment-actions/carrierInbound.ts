@@ -21,6 +21,7 @@ import type { TransactWriteItem } from '@aws-sdk/client-dynamodb'
 import { marshall } from '@aws-sdk/util-dynamodb'
 
 import { normalizeName } from '../../../src/lib/tmsDirectory'
+import { parsePlaceText } from '../../../src/lib/stopPlace'
 import { threadKeyFor } from '../../../src/lib/shipmentThread'
 import { allRefsToResolve, candidateRefs } from '../../../src/lib/carrierInbox/refs'
 import { scoreMatches, type MatchContext, type MatchLedger } from '../../../src/lib/carrierInbox/match'
@@ -119,8 +120,8 @@ function firstPickupAppt(loads: Row[]): string | null {
  * separate state; the matcher compares city to city, so split a trailing ", ST" off.
  */
 function splitPlace(city: string | null, state: string | null): { city: string | null; state: string | null } {
-  const m = city ? /^(.*?),\s*([A-Za-z]{2})$/.exec(city.trim()) : null
-  return m ? { city: m[1]!.trim(), state: state || m[2]!.toUpperCase() } : { city, state }
+  const placed = parsePlaceText(city)
+  return placed.state ? { city: placed.city, state: state || placed.state } : { city, state }
 }
 
 // ── Match context (all verified against the data) ────────────────────────────

@@ -15,7 +15,8 @@
 import { useEffect, useState } from 'react'
 import { Receipt, Save } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsButton, TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { CityInput, TmsButton, TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { useAddressAutofill } from '@/hooks/useAddressAutofill'
 import { DocumentTypesField } from '@/features/documents/DocumentTypesField'
 import { getTmsSettings, listDivisions, saveArSettings } from '@/lib/apiClient'
 import {
@@ -51,6 +52,10 @@ export function ArSettingsCard() {
   const [factorEmail, setFactorEmail] = useState('')
   const [factorNotice, setFactorNotice] = useState('')
   const [factorFeePct, setFactorFeePct] = useState('2')
+  const { hint: factorAddressHint, pickCity: pickFactorCity } = useAddressAutofill({
+    zip: factorZip, city: factorCity, state: factorState, upper: true,
+    apply: (p) => { if (p.city) setFactorCity(p.city); if (p.state) setFactorState(p.state); if (p.zip) setFactorZip(p.zip) },
+  })
   const [seriesStart, setSeriesStart] = useState('')
   const [maxImported, setMaxImported] = useState<number | null>(null)
   const [plainNumbers, setPlainNumbers] = useState(false)
@@ -255,7 +260,7 @@ export function ArSettingsCard() {
                 <TmsInput aria-label="Factor street" value={factorStreet} onChange={(e) => setFactorStreet(e.target.value)} />
               </TmsField>
               <TmsField label="City">
-                <TmsInput aria-label="Factor city" value={factorCity} onChange={(e) => setFactorCity(e.target.value)} />
+                <CityInput aria-label="Factor city" value={factorCity} state={factorState} onChange={setFactorCity} onPick={pickFactorCity} />
               </TmsField>
               <TmsField label="State">
                 <TmsInput aria-label="Factor state" value={factorState} onChange={(e) => setFactorState(e.target.value)} />
@@ -264,6 +269,7 @@ export function ArSettingsCard() {
                 <TmsInput aria-label="Factor ZIP" value={factorZip} onChange={(e) => setFactorZip(e.target.value)} />
               </TmsField>
             </div>
+            {factorAddressHint && <p className="tms-autofill-hint" role="status">{factorAddressHint}</p>}
             <TmsField label="Assignment notice">
               <TmsTextarea
                 aria-label="Factor notice text"

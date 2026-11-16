@@ -7,6 +7,7 @@
  * e-mail, the aging report or its e-mail, or the outstanding-receivables export (which reads
  * Invoice rows, and an Invoice carries only customer-side lines).
  */
+import { parsePlaceText } from '@/lib/stopPlace'
 import type { ShipmentListRow } from '@/hooks/useShipments'
 import type { ShipmentRecord } from '@/types/tms'
 
@@ -27,8 +28,10 @@ export interface ReadyFacts {
 export function cityState(city: string | null | undefined, state: string | null | undefined): string | null {
   const c = (city ?? '').trim()
   if (!c) return null
-  if (/,\s*[A-Za-z]{2}\s*$/.test(c) || !state) return c.replace(/,\s*([A-Za-z]{2})\s*$/, (_, st: string) => `, ${st.toUpperCase()}`)
-  return `${c}, ${state.toUpperCase()}`
+  const placed = parsePlaceText(c)
+  // A state already on the city text wins (it prints with the city); the stop's own state field fills in when it has none.
+  const st = placed.state ?? ((state ?? '').trim().toUpperCase() || null)
+  return placed.city && st ? `${placed.city}, ${st}` : c
 }
 
 export function readyFactsOf(

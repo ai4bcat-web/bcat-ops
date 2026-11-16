@@ -7,7 +7,8 @@
  */
 import { useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
-import { TmsBadge, TmsButton, TmsField, TmsIconButton, TmsInput, TmsSelect } from '@/features/tms/kit'
+import { CityInput, TmsBadge, TmsButton, TmsField, TmsIconButton, TmsInput, TmsSelect } from '@/features/tms/kit'
+import { useAddressAutofill } from '@/hooks/useAddressAutofill'
 import { formatCents } from '@/lib/invoiceBuild'
 import type { CarrierPayeeType, CarrierPaymentMethodKind, CarrierPaymentMethodRecord } from '@/types/tms'
 
@@ -116,6 +117,11 @@ function PaymentRow({ method, disabled, onSave, onArchive, onCancel }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const { hint: addressHint, pickCity } = useAddressAutofill({
+    zip, city, state, upper: true,
+    apply: (p) => { if (p.city) setCity(p.city); if (p.state) setState(p.state); if (p.zip) setZip(p.zip) },
+  })
+
   const save = async () => {
     if (recipientType === 'FACTOR' && !factorName.trim()) { setError('A factor needs a name.'); return }
     if (accountLast4.trim().length > 4 || routingLast4.trim().length > 4) {
@@ -204,7 +210,7 @@ function PaymentRow({ method, disabled, onSave, onArchive, onCancel }: {
           <TmsInput aria-label="Remit-to street" value={street} disabled={disabled} onChange={(e) => setStreet(e.target.value)} />
         </TmsField>
         <TmsField label="City">
-          <TmsInput aria-label="Remit-to city" value={city} disabled={disabled} onChange={(e) => setCity(e.target.value)} />
+          <CityInput aria-label="Remit-to city" value={city} state={state} disabled={disabled} onChange={setCity} onPick={pickCity} />
         </TmsField>
         <TmsField label="State">
           <TmsInput aria-label="Remit-to state" value={state} disabled={disabled} onChange={(e) => setState(e.target.value)} />
@@ -213,6 +219,7 @@ function PaymentRow({ method, disabled, onSave, onArchive, onCancel }: {
           <TmsInput aria-label="Remit-to ZIP" value={zip} disabled={disabled} onChange={(e) => setZip(e.target.value)} />
         </TmsField>
       </div>
+      {addressHint && <p className="tms-autofill-hint" role="status">{addressHint}</p>}
 
       <div className="mt-3 flex items-center gap-4">
         <label className="flex items-center gap-1.5 text-xs">

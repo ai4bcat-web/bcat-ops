@@ -271,6 +271,20 @@ describe('evaluateLoadReview — cached row verdict', () => {
     ])
   })
 
+  it('counts a state the stop carries in its address or in a loose "CITY. ST" text (Ryne 2026-11-16: COCHRANE. WI)', () => {
+    const verdict = evaluateLoadReview({
+      row: delivered({
+        stops: [
+          { city: 'COCHRANE. WI', appt: '2026-10-28T08:00' },
+          { city: 'COCHRANE', appt: '2026-10-28T09:00', address: { city: 'COCHRANE', state: 'WI', zip: '54622' } },
+          { city: 'HARVARD IL', appt: '2026-10-28T10:00' },
+          { city: 'Dallas', appt: '2026-10-30T09:00', address: { city: 'Dallas', state: '', zip: null } },
+        ],
+      }),
+    })
+    expect(verdict.checks.details.reasons.map((r) => r.message)).toEqual(['Stop 4 needs a state'])
+  })
+
   it('never fails the charges check on a missing carrier bill, whatever the rung', () => {
     const carrier = (apStatus: LoadReviewRow['apStatus']) =>
       evaluateLoadReview({ row: delivered({ assignmentType: 'CARRIER', apStatus }) }).checks.charges.reasons.map((r) => r.code)

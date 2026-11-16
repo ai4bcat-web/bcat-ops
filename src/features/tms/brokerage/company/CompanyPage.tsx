@@ -9,7 +9,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Building2, Save, Upload } from 'lucide-react'
 import { getUrl } from 'aws-amplify/storage'
 import { toast } from 'sonner'
-import { TmsButton, TmsCard, TmsField, TmsInput } from '@/features/tms/kit'
+import { CityInput, TmsButton, TmsCard, TmsField, TmsInput } from '@/features/tms/kit'
+import { useAddressAutofill } from '@/hooks/useAddressAutofill'
 import { listDivisions, saveDivision, uploadBrandAsset } from '@/lib/apiClient'
 import type { Address, Division, DivisionContact } from '@/types/tms'
 import { ErrorText, GroupLabel, Loading, Panel, SettingsCard, Stack } from '@/features/settings/settingsKit'
@@ -57,6 +58,10 @@ export function CompanyPage() {
       return { ...prev, physicalAddress: { ...current, [field]: value || null } }
     })
   }
+  const { hint: addressHint, pickCity } = useAddressAutofill({
+    zip: draft?.physicalAddress?.zip, city: draft?.physicalAddress?.city, state: draft?.physicalAddress?.state,
+    apply: (p) => { if (p.city) setAddress('city', p.city); if (p.state) setAddress('state', p.state); if (p.zip) setAddress('zip', p.zip) },
+  })
 
   const setContact = (which: 'primaryContact', field: keyof DivisionContact, value: string) => {
     setDraft((prev) => {
@@ -230,7 +235,7 @@ export function CompanyPage() {
                 <TmsInput value={physical.street ?? ''} onChange={(e) => setAddress('street', e.target.value)} />
               </TmsField>
               <TmsField label="City">
-                <TmsInput value={physical.city ?? ''} onChange={(e) => setAddress('city', e.target.value)} />
+                <CityInput value={physical.city ?? ''} state={physical.state} onChange={(v) => setAddress('city', v)} onPick={pickCity} />
               </TmsField>
               <TmsField label="State">
                 <TmsInput value={physical.state ?? ''} onChange={(e) => setAddress('state', e.target.value)} />
@@ -242,6 +247,7 @@ export function CompanyPage() {
                 <TmsInput value={physical.country ?? ''} onChange={(e) => setAddress('country', e.target.value)} />
               </TmsField>
             </div>
+            {addressHint && <p className="tms-autofill-hint" role="status">{addressHint}</p>}
             <PrintedOn>Printed on invoices and rate confirmations.</PrintedOn>
           </Panel>
 

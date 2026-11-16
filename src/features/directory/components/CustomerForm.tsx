@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { RepPicker, TeamPicker } from '@/components/RepPicker'
 import { TrackerPicker } from '@/components/TrackerPicker'
-import { TmsField, TmsInput, TmsSelect, TmsTabs, TmsTextarea } from '@/features/tms/kit'
+import { CityInput, TmsField, TmsInput, TmsSelect, TmsTabs, TmsTextarea } from '@/features/tms/kit'
 import { DocumentTypesField } from '@/features/documents/DocumentTypesField'
 import { MoneyField } from './MoneyField'
 import { getTmsSettings } from '@/lib/apiClient'
 import type { Division, CustomerStatus, RemitTo, Team } from '@/types/tms'
-import { useZipAutofill } from '@/hooks/useZipAutofill'
+import { useAddressAutofill } from '@/hooks/useAddressAutofill'
 import type { CustomerFormValue } from './useCustomerForm'
 import { APPT_WORKFLOW_OPTIONS, INVOICE_FREQUENCY_OPTIONS } from './useCustomerForm'
 import { BillingMethodFields } from './BillingMethodFields'
@@ -34,9 +34,13 @@ export function CustomerForm({
   const [tab, setTab] = useState('Overview')
   const [teams, setTeams] = useState<Team[]>([])
   const [factor, setFactor] = useState<RemitTo | null>(null)
-  useZipAutofill(value.billingAddressZip, value.billingAddressCity, value.billingAddressState, (f) => {
-    if (f.city) set('billingAddressCity', f.city)
-    if (f.state) set('billingAddressState', f.state)
+  const { hint: addressHint, pickCity } = useAddressAutofill({
+    zip: value.billingAddressZip, city: value.billingAddressCity, state: value.billingAddressState,
+    apply: (p) => {
+      if (p.city) set('billingAddressCity', p.city)
+      if (p.state) set('billingAddressState', p.state)
+      if (p.zip) set('billingAddressZip', p.zip)
+    },
   })
   const accountOwnerIds = value.accountOwnerIdsText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
 
@@ -147,10 +151,11 @@ export function CustomerForm({
             <div className="tms-field-label">Billing address</div>
             <div className="tms-grid tms-grid-2" style={{ marginTop: 6 }}>
               {!isNew && <TmsInput value={value.billingAddressStreet} onChange={(e) => set('billingAddressStreet', e.target.value)} placeholder="Street" aria-label="Billing street" />}
-              {!isNew && <TmsInput value={value.billingAddressCity} onChange={(e) => set('billingAddressCity', e.target.value)} placeholder="City" aria-label="Billing city" />}
+              {!isNew && <CityInput value={value.billingAddressCity} state={value.billingAddressState} onChange={(v) => set('billingAddressCity', v)} onPick={pickCity} placeholder="City" aria-label="Billing city" />}
               {!isNew && <TmsInput value={value.billingAddressState} onChange={(e) => set('billingAddressState', e.target.value)} placeholder="State" aria-label="Billing state" />}
               {!isNew && <TmsInput value={value.billingAddressZip} onChange={(e) => set('billingAddressZip', e.target.value)} placeholder="ZIP" aria-label="Billing ZIP" />}
               <TmsInput value={value.billingAddressCountry} onChange={(e) => set('billingAddressCountry', e.target.value)} placeholder="Country" aria-label="Billing country" />
+              {addressHint && <p className="tms-autofill-hint" role="status" style={{ gridColumn: '1 / -1' }}>{addressHint}</p>}
             </div>
           </div>
           <div className="tms-grid tms-grid-2">

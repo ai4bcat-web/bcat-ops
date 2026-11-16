@@ -7,7 +7,7 @@ import { aggregateApStatus } from '@/lib/carrierTotals'
 import { customerRefOf } from '@/lib/customerRef'
 import { customerApEmailRequired, customerDocsNotRequired, customerFactorsForOtr } from '@/lib/reviewRequirements'
 import { isOutsideRateConKey } from '@/lib/shipmentDocuments'
-import { stopPlace, type StopPlaceStop } from '@/lib/stopPlace'
+import { parsePlaceText, stopPlace, type StopPlaceStop } from '@/lib/stopPlace'
 import { factorGapsForLoad, factoringPoNumber, routeEnds, type FactorGapCode } from '@/lib/factorReadyAtCreate'
 import { modelsAvailable } from '@/lib/modelAvailability'
 import type { BoardCarrier } from '@/lib/shipmentViewDefs'
@@ -290,9 +290,7 @@ function isEmptyView(view: ShipmentsView): boolean {
 
 /** 'Dallas, TX' -> 'TX'. Anything without a trailing comma-state stays null. */
 function stateFromCity(city: string | null | undefined): string | null {
-  if (!city) return null
-  const match = city.match(/,\s*([A-Za-z]{2})\s*$/)
-  return match ? match[1].toUpperCase() : null
+  return parsePlaceText(city).state
 }
 
 function firstPickupStop(stops: Stop[]): Stop | null {

@@ -9,9 +9,10 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { OwnFleetDriverPicker } from '@/components/OwnFleetDriverPicker'
 import { RepPicker } from '@/components/RepPicker'
+import { addressPickPatch, useAddressAutofill, type AddressPatch } from '@/hooks/useAddressAutofill'
 import { useOwnFleetRoster } from '@/hooks/useOwnFleetRoster'
 import {
-  TmsAlert, TmsButton, TmsCard, TmsDetailSplit, TmsDialog, TmsField, TmsInput, TmsPage, TmsSelect, TmsTextarea,
+  CityInput, TmsAlert, TmsButton, TmsCard, TmsDetailSplit, TmsDialog, TmsField, TmsInput, TmsPage, TmsSelect, TmsTextarea,
 } from '@/features/tms/kit'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import {
@@ -53,6 +54,12 @@ const STOP_FIELDS: Array<{ key: 'name' | 'street' | 'city' | 'state' | 'zip' | '
   { key: 'time', label: 'Appointment time', type: 'time' },
 ]
 interface Work { fields: IntakeFields; meta: IntakeMeta; confirmed: string[] }
+
+/** A complete ZIP fills a blank city and state on an extracted stop; says so under the fields. Draws nothing else. */
+function IntakeStopZipFill({ stop, apply }: { stop: IntakeStop; apply: (patch: AddressPatch) => void }) {
+  const { hint } = useAddressAutofill({ zip: stop.zip, city: stop.city, state: stop.state, upper: true, apply })
+  return hint ? <p className="tms-autofill-hint" role="status" style={{ gridColumn: '1 / -1' }}>{hint}</p> : null
+}
 
 function emptyStop(type: IntakeStop['type']): IntakeStop {
   return { type, name: null, street: null, city: null, state: null, zip: null, date: null, time: null, instructions: null }
@@ -136,6 +143,10 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
   }
   function editStop(i: number, key: keyof IntakeStop, value: string | null) {
     editStops(work.fields.stops.map((s, idx) => (idx === i ? { ...s, [key]: value } : s)))
+  }
+  // Several fields at once (a ZIP filling its city and state): from the latest draft, so no keystroke is lost.
+  function patchStop(i: number, patch: Partial<IntakeStop>) {
+    setWork((w) => patchIntakeFields(w, { stops: w.fields.stops.map((s, idx) => (idx === i ? { ...s, ...patch } : s)) }, { add: [], remove: [] }))
   }
   function setConfirmed(keys: string[], checked: boolean) {
     setWork((w) => patchIntakeFields(w, {}, checked ? { add: keys, remove: [] } : { add: [], remove: keys }))
@@ -405,14 +416,26 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
                 {STOP_FIELDS.map((f) => fieldRow(
                   `stops.${i}.${f.key}`,
                   `${title} ${f.label.toLowerCase()}`,
-                  <TmsInput
-                    aria-label={`${title} ${f.label.toLowerCase()}`}
-                    type={f.type ?? 'text'}
-                    disabled={!editable}
-                    value={stop[f.key] ?? ''}
-                    onChange={(e) => editStop(i, f.key, text(e.target.value))}
-                  />,
+                  f.key === 'city' ? (
+                    <CityInput
+                      aria-label={`${title} ${f.label.toLowerCase()}`}
+                      disabled={!editable}
+                      value={stop.city ?? ''}
+                      state={stop.state}
+                      onChange={(v) => editStop(i, 'city', text(v))}
+                      onPick={(option) => patchStop(i, addressPickPatch(option, stop.zip, true))}
+                    />
+                  ) : (
+                    <TmsInput
+                      aria-label={`${title} ${f.label.toLowerCase()}`}
+                      type={f.type ?? 'text'}
+                      disabled={!editable}
+                      value={stop[f.key] ?? ''}
+                      onChange={(e) => editStop(i, f.key, text(e.target.value))}
+                    />
+                  ),
                 ))}
+                {editable ? <IntakeStopZipFill stop={stop} apply={(p) => patchStop(i, p)} /> : null}
               </div>
             </TmsCard>
           )
