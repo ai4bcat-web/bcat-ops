@@ -48,3 +48,17 @@
   .tms-aging-table-wrap { display: none; }
   .tms-aging-cards { display: flex; }
 }
+
+/* Filters: search, customer, terms, "Has" bucket chips and Past due only, in one wrapping row. */
+.tms-aging-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--tms-border); }
+.tms-aging-search { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; min-height: 32px; border: 1px solid var(--tms-border); border-radius: var(--tms-radius-sm); background: var(--tms-card); color: var(--tms-text-2); }
+.tms-aging-search input { all: unset; min-width: 0; width: 220px; font-size: 13px; color: var(--tms-text); }
+.tms-aging-input { min-height: 32px; padding: 0 8px; border: 1px solid var(--tms-border); border-radius: var(--tms-radius-sm); background: var(--tms-card); color: var(--tms-text); font-size: 13px; max-width: 100%; }
+.tms-aging-chip { all: unset; cursor: pointer; display: inline-flex; align-items: center; min-height: 28px; padding: 0 10px; border: 1px solid var(--tms-border); border-radius: var(--tms-radius-pill); font-size: 12px; color: var(--tms-text-2); }
+.tms-aging-chip.tms-on { background: var(--tms-primary-tint); border-color: var(--tms-primary); color: var(--tms-primary-ink); font-weight: 600; }
+.tms-aging-chip:focus-visible { outline: 2px solid var(--tms-primary); outline-offset: 2px; }
+@media (max-width: 640px) {
+  .tms-aging-search { flex: 1 1 100%; }
+  .tms-aging-search input { width: 100%; }
+  .tms-aging-chip { min-height: 44px; }
+}
