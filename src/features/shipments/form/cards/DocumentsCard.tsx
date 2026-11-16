@@ -17,12 +17,14 @@ import { Check, Circle, Eye, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsButton, TmsIconButton, TmsSelect, TmsTabs } from '@/features/tms/kit'
 import { DocumentPreview } from '@/features/documents/DocumentPreview'
-import { attachIntakeFiles, getIntakeLoad, getShipmentDocumentUrl, updateDocument, voidDocument } from '@/lib/apiClient'
+import { attachIntakeFiles, getIntakeLoad, getRateConfirmUrl, getShipmentDocumentUrl, updateDocument, voidDocument } from '@/lib/apiClient'
 import { formatBoardDateTime } from '@/lib/date'
 import {
   ACCEPTED_CONTENT_TYPES, DOCUMENT_TYPE_LABELS, MAX_DOCUMENT_BYTES, SHIPMENT_DOCUMENT_TYPES, SLOT_DOCUMENT_TYPES,
-  isPointerDocument, suggestDocumentType,
+  assetRateConTenders, isOwnFleetLoad, isPointerDocument, suggestDocumentType,
 } from '@/lib/shipmentDocuments'
+import { customerDocsNotRequired, customerFactorsForOtr, rateConRequired } from '@/lib/reviewRequirements'
+import { isCarShipperLoad } from '@/lib/carShipper'
 import type { ShipmentDocumentAudience, ShipmentDocumentRecord, ShipmentDocumentType } from '@/types/tms'
 import { LABEL } from '../labels'
 import { isLocked } from '../model'
@@ -152,7 +154,18 @@ function DocumentsCardImpl({ values, ctx, documentApi = liveDocumentApi }: CardP
 
   // The two documents everybody looks for get their own slot: on file (with where it came from) or an upload button.
   // Every file of that type is listed in its box (any audience: a private rate con is still the rate con).
-  const slotDocs = (docType: ShipmentDocumentType) => active.filter((d) => d.type === docType)
+  // An asset load's rate confirmation is the customer's (Ryne 2026-11-16): a filed customer rate confirmation sits in the
+  // Rate confirmation box, and so does the tender on the load. The gate counts exactly these (presentDocTypes).
+  const assetLoad = isOwnFleetLoad(ctx.bundle?.shipment ?? null, ctx.bundle?.loadCarriers ?? [])
+  const slotDocs = (docType: ShipmentDocumentType) => active.filter((d) => d.type === docType || (assetLoad && docType === 'RATE_CON' && d.type === 'CUSTOMER_RATE_CON'))
+  const tenders = assetLoad ? assetRateConTenders((ctx.bundle?.loads ?? []) as { id: string; rateConfirmKey?: string | null }[]) : []
+  // RC is only asked for where the one rule says so (rateConRequired): N/A on a brokered load for a customer that does not factor.
+  const rcNeeded = rateConRequired({
+    asset: assetLoad,
+    carShipper: isCarShipperLoad(ctx.bundle?.shipment ?? null),
+    customerFactors: customerFactorsForOtr(ctx.customer as { billingMethod?: string | null; factored?: boolean | null } | null),
+    customerWaivesRateCon: customerDocsNotRequired(ctx.customer as { reviewRequirements?: string[] | null } | null, null).includes('RATE_CON'),
+  })
   const slotQueued = (docType: ShipmentDocumentType) => queuedAll.map((q, index) => ({ q, index })).filter(({ q }) => q.type === docType)
   const editDisabled = disabled || !saved
   const changed = () => ctx.refreshBundle()
@@ -209,6 +222,17 @@ function DocumentsCardImpl({ values, ctx, documentApi = liveDocumentApi }: CardP
       toast.error(err instanceof Error ? err.message : 'Could not open that document')
     }
   }
+  /** The tender on the load lives in the rate-confirmation store, not the shipment's Documents. */
+  const previewTender = async (key: string) => {
+    setViewing({ title: 'Customer rate confirmation', subtitle: 'Attached to the load', name: key.split('/').pop() ?? 'rate-confirm.pdf', contentType: 'application/pdf', url: null, local: false })
+    try {
+      const url = await getRateConfirmUrl(key)
+      setViewing((open) => (open && open.title === 'Customer rate confirmation' && open.url === null ? { ...open, url } : open))
+    } catch (err) {
+      setViewing(null)
+      toast.error(err instanceof Error ? err.message : 'Could not open that document')
+    }
+  }
   const previewQueued = (file: File, docType: ShipmentDocumentType) => {
     setViewing({ title: `${DOCUMENT_TYPE_LABELS[docType] ?? docType} · ${file.name}`, subtitle: 'Will upload when the shipment is created', name: file.name, contentType: file.type || 'application/pdf', url: URL.createObjectURL(file), local: true })
   }
@@ -252,15 +276,29 @@ function DocumentsCardImpl({ values, ctx, documentApi = liveDocumentApi }: CardP
         {([['POD', 'Proof of delivery (POD)', 'Fills in by itself when a driver uploads it in the app or the tracking agent files it.'], ['RATE_CON', 'Rate confirmation', 'Fills in by itself when the carrier e-signs it or it arrives from an intake e-mail.']] as const).map(([docType, label, hint]) => {
           const docs = slotDocs(docType)
           const queuedDocs = slotQueued(docType)
-          const onFile = docs.some((d) => d.status === 'ACTIVE')
+          const slotTenders = docType === 'RATE_CON' ? tenders : []
+          const onFile = docs.some((d) => d.status === 'ACTIVE') || slotTenders.length > 0
+          const notNeeded = docType === 'RATE_CON' && !rcNeeded
           return (
             <div key={docType} id={`docs-${docType}`} className="tms-card-docslot" data-testid={`card-documents-slot-${docType}`} data-on-file={onFile ? 'true' : 'false'}>
               <div className="tms-card-docslot-head">
                 {onFile ? <Check size={14} aria-hidden /> : <Circle size={14} aria-hidden />}
                 <strong>{label}</strong>
-                <span className="tms-muted text-xs">{onFile ? 'On file' : queuedDocs.length > 0 ? 'Queued' : 'NEED'}</span>
+                <span className="tms-muted text-xs">{onFile ? 'On file' : queuedDocs.length > 0 ? 'Queued' : notNeeded ? 'Not required' : 'NEED'}</span>
               </div>
-              {docs.length === 0 && queuedDocs.length === 0 ? <p className="tms-muted text-xs">{hint}</p> : null}
+              {docs.length === 0 && queuedDocs.length === 0 && slotTenders.length === 0 ? <p className="tms-muted text-xs">{hint}</p> : null}
+              {slotTenders.length > 0 ? (
+                <ul className="tms-card-docslot-list" data-testid="card-documents-slot-RATE_CON-tenders">
+                  {slotTenders.map((t) => (
+                    <li key={t.loadId} className="text-xs" data-testid="card-documents-slot-tender">
+                      <span>
+                        <button type="button" className="tms-link" onClick={() => void previewTender(t.key)}>Customer rate confirmation</button>
+                        <span className="tms-muted"> · attached to the load from the intake e-mail</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
               {docs.length > 0 ? (
                 <ul className="tms-card-docslot-list" data-testid={`card-documents-slot-${docType}-list`}>
                   {docs.map((doc) => (
