@@ -16,23 +16,23 @@ function Harness({ initial }: { initial: Partial<CustomerFormValue> }) {
   return <BillingMethodFields value={value} set={set} errors={{}} factor={null} />
 }
 
-describe('invoice e-mail for a factored customer (Ryne 2026-11-14)', () => {
-  it('is in the billing method section and says it is not required', () => {
+describe('AP e-mail for every customer (Ryne 2026-11-16: required, factored customers included)', () => {
+  it('is in the billing method section and says it is required for a factored customer', () => {
     render(<Harness initial={{ billingMethod: 'FACTOR', apEmail: 'ap@motus.test' }} />)
-    expect(screen.getByText('Invoice e-mail (not required)')).toBeTruthy()
-    expect(screen.getByText(/Not required: this customer factors\. Invoices go to the factor, not this address\./)).toBeTruthy()
+    expect(screen.getByText('AP e-mails (required)')).toBeTruthy()
+    expect(screen.getByText(/Required for every customer\. This customer factors/)).toBeTruthy()
     expect((screen.getByLabelText('AP e-mail 1') as HTMLInputElement).value).toBe('ap@motus.test')
     expect(screen.getByLabelText('Notice of assignment email')).toBeTruthy()
   })
   it('says it is required for a manual customer', () => {
     render(<Harness initial={{ billingMethod: 'MANUAL', apEmail: 'ap@acme.test' }} />)
-    expect(screen.getByText('AP e-mails (invoices go here)')).toBeTruthy()
-    expect(screen.getByText(/Required for manual billing/)).toBeTruthy()
+    expect(screen.getByText('AP e-mails (required)')).toBeTruthy()
+    expect(screen.getByText(/Required for every customer\. The first address is the main one/)).toBeTruthy()
   })
-  it('the list chip for a factored customer with no address is neutral, not a red flag', () => {
+  it('the list chip for a factored customer with no address is flagged like any other missing address', () => {
     render(<InvoiceEmailBadge customer={{ billingMethod: 'FACTOR', apEmail: null }} />)
-    const chip = screen.getByText('This customer factors · Missing invoice e-mail (not required)')
-    expect(chip.className).toContain('tms-badge-gray')
+    const chip = screen.getByText('This customer factors · Missing AP e-mail (required)')
+    expect(chip.className).not.toContain('tms-badge-gray')
     cleanup()
     render(<InvoiceEmailBadge customer={{ billingMethod: 'MANUAL', apEmail: null }} />)
     expect(screen.getByText('Missing invoice e-mail').className).not.toContain('tms-badge-gray')

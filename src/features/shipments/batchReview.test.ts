@@ -149,3 +149,26 @@ describe('server outcomes', () => {
     expect(out[2].reasons).toEqual(['Boom'])
   })
 })
+
+describe('asset loads on the board push (Ryne 2026-11-16)', () => {
+  it('does not refuse an asset load for expense or profit', () => {
+    expect(pushRefusals([row('14901', { revDivision: 'ASSETS', costCents: null })], none)).toEqual([])
+    expect(pushRefusals([row('20012', { assignmentType: 'OWN_ASSET', costCents: 0 })], none)).toEqual([])
+    expect(pushRefusals([row('20032', { carrierName: 'IVAN CARTAGE (LOCAL DRIVERS)', costCents: null })], none)).toEqual([])
+  })
+
+  it('still refuses an asset load with no customer rate', () => {
+    expect(pushRefusals([row('14355', { revDivision: 'ASSETS', revenueCents: 0, costCents: null })], none)[0]!.reasons).toEqual(['No customer charges'])
+  })
+
+  it('still refuses a brokered load with no expense', () => {
+    expect(pushRefusals([row('B1', { costCents: null })], none)[0]!.reasons).toContain('No expense entered')
+  })
+})
+
+describe('customer billing on the board push (Ryne 2026-11-16)', () => {
+  it('refuses a load whose customer has no billing method or AP e-mail', () => {
+    const out = pushRefusals([row('C1', { customerBillingGaps: ['CUSTOMER_BILLING_METHOD', 'CUSTOMER_AP_EMAIL'] })], none)
+    expect(out[0]!.reasons).toEqual(['Customer has no billing method (Factor or Manual invoice)', 'Customer has no AP e-mail'])
+  })
+})

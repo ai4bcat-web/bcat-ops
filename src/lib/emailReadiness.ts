@@ -53,7 +53,7 @@ export function groupRemitMethods(methods: readonly RemitEmailFields[]): Map<str
 }
 
 export const invoiceEmailLabels: Record<InvoiceEmailState, string> = {
-  OK: 'Invoice e-mail ready', MISSING: 'Missing invoice e-mail', INVALID: 'Invalid invoice e-mail', FACTORED_QUEUE_ONLY: 'This customer factors · Missing invoice e-mail (not required)',
+  OK: 'Invoice e-mail ready', MISSING: 'Missing invoice e-mail', INVALID: 'Invalid invoice e-mail', FACTORED_QUEUE_ONLY: 'This customer factors · Missing AP e-mail (required)',
 }
 export const remitEmailLabels: Record<EmailState, string> = {
   OK: 'Remittance e-mail ready', MISSING: 'Missing remittance e-mail', INVALID: 'Invalid remittance e-mail',

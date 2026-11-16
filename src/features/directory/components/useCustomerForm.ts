@@ -433,7 +433,7 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
       (value.noaEmail.trim().toLowerCase() || null) !== (initial?.noaEmail?.trim().toLowerCase() || null) ||
       copy.join(',') !== (initial?.invoiceCopyEmails ?? []).join(',')
     return changed
-      ? { ...base, ...validateBillingFields({ billingMethod: value.billingMethod || null, apEmail, apEmailsExtra: extra, noaEmail: value.noaEmail, invoiceCopyEmails: copy }) }
+      ? { ...base, ...validateBillingFields({ billingMethod: value.billingMethod || null, apEmail, apEmailsExtra: extra, noaEmail: value.noaEmail, invoiceCopyEmails: copy }, { requireAll: true }) }
       : base
   }, [value, initial, isNew, problems])
   return { value, set, setPartial, toRecord, errors, isNew, missing }

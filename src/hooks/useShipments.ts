@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { customerBillingGaps, customerBillingSummary, type CustomerBillingGapCode } from '@/lib/customerBillingReady'
 import { listCarriers, listCustomers, listDrivers, listQuotes, listUserProfiles } from '@/lib/apiClient'
 import type { LoadBoardSummary } from '@/lib/apiClient'
 import { loadBoardBundle, peekBoardBundle, type BoardBundle, type BoardView } from '@/lib/boardData'
@@ -136,6 +137,10 @@ export interface ShipmentListRow extends ShipmentRecord {
   customerFactors: boolean
   /** POD / RC this customer does not need to invoice (customerDocsNotRequired). */
   docsNotRequired: string[]
+  /** What the customer is missing to be billed: billing method, AP e-mail (customerBillingReady). */
+  customerBillingGaps: CustomerBillingGapCode[]
+  /** "Factor · ap@x.com" for the review Customer column. */
+  customerBillingSummary: string
   docsOverrideBy: string | null
   docsOverrideNote: string | null
   quoteNumber: string | null
@@ -840,6 +845,8 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         customerFactored: customer?.factored ?? null,
         docsNotRequired: customerDocsNotRequired(customer ?? null, null),
         customerFactors: customerFactorsForOtr(customer ?? null),
+        customerBillingGaps: customerBillingGaps(customer ?? null),
+        customerBillingSummary: customerBillingSummary(customer ?? null),
         customerPaymentTermsDays: customer?.paymentTermsDays ?? null,
         creditLimitCents: customer?.creditLimitCents ?? null,
         creditHold: customer?.creditHoldFlag ?? null,

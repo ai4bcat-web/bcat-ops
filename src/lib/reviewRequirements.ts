@@ -81,6 +81,35 @@ export interface ReviewFacts {
   expenseCents?: number | null
   /** Revenue minus expense once both are entered; null while either is missing. */
   profitCents?: number | null
+  /**
+   * An asset load (isAssetLoad): our own trucks earn the revenue and pay no carrier, so expense and profit are never
+   * required. Only the customer rate (revenue) is (Ryne 2026-11-16).
+   */
+  assetLoad?: boolean | null
+}
+
+/** What isAssetLoad reads; every field optional so board rows, review rows and raw server rows all fit. */
+export interface AssetLoadFacts {
+  revDivision?: string | null
+  assignmentType?: string | null
+  /** Kinds of the live carrier assignments (OWN_ASSET / CARRIER). */
+  legKinds?: readonly (string | null | undefined)[] | null
+  carrierName?: string | null
+  carrierNames?: readonly (string | null | undefined)[] | null
+}
+
+/**
+ * The one test for an asset load (Ryne 2026-11-16): revenue division ASSETS (any subdivision), or our own fleet on the
+ * assignment: an OWN_ASSET assignment, or an Ivan Cartage carrier (local drivers / owner operators / box trucks).
+ * Import-free so the Lambda bundles it.
+ */
+export function isAssetLoad(row: AssetLoadFacts | null | undefined): boolean {
+  if (!row) return false
+  if (String(row.revDivision ?? '').trim().toUpperCase() === 'ASSETS') return true
+  if (row.assignmentType === 'OWN_ASSET') return true
+  if ((row.legKinds ?? []).includes('OWN_ASSET')) return true
+  const ivan = (name: string | null | undefined) => /\bivan\s*cartage\b/i.test(name ?? '')
+  return ivan(row.carrierName) || (row.carrierNames ?? []).some(ivan)
 }
 
 export interface ReviewFailure {
@@ -136,8 +165,8 @@ function satisfied(requirement: ReviewRequirement, facts: ReviewFacts): boolean 
     // switch for whether it is asked for at all (see docsNotRequiredFor), so it never fails on its own.
     case 'rateConReceived': return true
     case 'revenueEntered': return positive(facts.revenueCents)
-    case 'expenseEntered': return positive(facts.expenseCents)
-    case 'profitEntered': return typeof facts.profitCents === 'number' && Number.isFinite(facts.profitCents)
+    case 'expenseEntered': return facts.assetLoad === true || positive(facts.expenseCents)
+    case 'profitEntered': return facts.assetLoad === true || (typeof facts.profitCents === 'number' && Number.isFinite(facts.profitCents))
   }
 }
 
