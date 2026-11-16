@@ -518,6 +518,9 @@ export function DenseGrid<T>({
                   {...rowAttrs?.(row)}
                   className={onRowClick ? 'tms-dg-clickable' : undefined}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  // A clickable row opens with Enter too; only when the row itself has focus, so a control inside it keeps its own keys.
+                  tabIndex={onRowClick ? 0 : undefined}
+                  onKeyDown={onRowClick ? (e) => { if (e.key === 'Enter' && e.target === e.currentTarget) onRowClick(row) } : undefined}
                   onDoubleClick={onRowDoubleClick ? () => onRowDoubleClick(row) : undefined}
                 >
                   {selectable && (

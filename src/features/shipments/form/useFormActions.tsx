@@ -14,8 +14,9 @@ import { useShipmentActions } from '@/features/shipments/useShipmentActions'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useTrucks } from '@/hooks/useTrucks'
 import {
-  commitDocument, logCheckCall, prepareDocumentUpload, putPresignedFile, sendCarrierSetupPacket,
+  logCheckCall, sendCarrierSetupPacket,
 } from '@/lib/apiClient'
+import { uploadShipmentDocument } from '@/lib/shipmentDocumentUpload'
 import type { CarrierRecord, ShipmentBundle, ShipmentDocumentType, TmsSettings } from '@/types/tms'
 import { financialPreview } from './mapping'
 import { carrierSlotsOf, coveredCarrierBlock, emptyCarrierBlock, emptyCarrierRate, liveCarriers, type ShipmentFormValues } from './model'
@@ -26,8 +27,6 @@ import { runAddCarrier, runCover } from './pipelines'
 import type { FormActions } from './sectionProps'
 
 type DialogKind = 'book' | 'assign' | 'dispatch' | 'rateCon' | 'info' | 'address' | 'tonu' | 'uncover' | null
-
-const COMMIT_RETRY_MS = 1500
 
 export function useFormActions(o: {
   values: ShipmentFormValues
@@ -130,21 +129,8 @@ export function useFormActions(o: {
     async uploadDocument(file: File, audience: 'ALL' | 'INTERNAL', type: ShipmentDocumentType) {
       const b = ref.current.bundle
       if (!b) throw new Error('Save the shipment before uploading')
-      const base = { name: file.name, contentType: file.type, sizeBytes: file.size }
       try {
-        const prepared = await prepareDocumentUpload({ shipmentId: b.shipment.id, type, ...base })
-        await putPresignedFile(prepared.uploadUrl, file, file.type)
-        const commit = () => commitDocument({
-          shipmentId: b.shipment.id, documentId: prepared.documentId, s3Key: prepared.s3Key, type, ...base,
-          orderId: b.orders[0]?.id ?? null, loadId: null, loadCarrierId: null, audience,
-        })
-        let res
-        try { res = await commit() } catch (err) {
-          if (!(err instanceof Error) || !/has not landed/i.test(err.message)) throw err
-          await new Promise<void>((resolve) => { setTimeout(resolve, COMMIT_RETRY_MS) })
-          res = await commit()
-        }
-        setBundle(res.bundle)
+        setBundle(await uploadShipmentDocument(b, file, audience, type))
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Upload failed')
         throw err
