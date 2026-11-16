@@ -31,6 +31,13 @@ describe('Load Review checked fields', () => {
     expect(claimed.size).toBe(Object.values(verdict.checks).flatMap((c) => c.reasons).length)
   })
 
+  it('a customer that needs no POD or RC is never held for documents, checked or not (AUTO SHIPPER)', () => {
+    const notNeeded = { ...base, docsNotRequired: ['POD', 'RATE_CON'] }
+    expect(evaluateLoadReview({ row: { ...notNeeded, docsMissing: null } }).ok).toBe(true)
+    expect(evaluateLoadReview({ row: { ...notNeeded, docsMissing: ['POD', 'RATE_CON'] } }).ok).toBe(true)
+    expect(evaluateLoadReview({ row: { ...base, docsMissing: null } }).ok).toBe(false)
+  })
+
   it('a missing document goes to POD or RC by type, anything else to Other checks', () => {
     expect(loadReviewFieldsOf({ code: 'DOC_MISSING', message: 'Missing document: POD' })).toEqual(['pod'])
     expect(loadReviewFieldsOf({ code: 'DOC_MISSING', message: 'Missing document: RATE_CON' })).toEqual(['rateCon'])
