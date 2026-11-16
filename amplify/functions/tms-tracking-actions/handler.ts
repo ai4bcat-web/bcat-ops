@@ -258,7 +258,8 @@ import {
   saveCheckCallPlan,
   type CheckCallDeps,
 } from './checkCallAgent'
-import { runTrackingAutomation, type AutomationDeps } from './automation'
+import { autoTrackingPass, runTrackingAutomation, type AutomationDeps } from './automation'
+import { AUTO_TRACKING_SENDER } from '../../../src/lib/autoTrackingLink'
 import { normalizeCheckCallPlan } from '../../../src/lib/checkCallPlan'
 import { imageToPdf, isPodImage, pdfKeyFor, pdfNameFor } from '../_shared/podPdf'
 import {
@@ -289,6 +290,7 @@ type Action =
   | 'LIST_SHIPMENT_THREAD'
   | 'RUN_CHECK_CALL_PLAN'
   | 'RUN_TRACKING_AUTOMATION'
+  | 'PREVIEW_AUTO_TRACKING_LINKS'
   | 'SAVE_TRACKING_AUTOMATION'
   | 'SAVE_CHECK_CALL_PLAN'
   | 'REQUEST_POD'
@@ -2585,7 +2587,47 @@ const automationDeps: AutomationDeps = {
     } while (lastKey)
     return items
   },
+  queryShipmentsByPickup: async (status, fromIso, toIso) => {
+    const items: Row[] = []
+    let lastKey: Record<string, AttributeValue> | undefined
+    do {
+      const page = await dynamo.send(new QueryCommand({
+        TableName: SHIPMENT_TABLE_NAME,
+        IndexName: 'shipmentsByStatusAndPickupAppt',
+        KeyConditionExpression: '#s = :s AND #p BETWEEN :from AND :to',
+        ExpressionAttributeNames: { '#s': 'status', '#p': 'pickupAppt' },
+        ExpressionAttributeValues: { ':s': { S: status }, ':from': { S: fromIso }, ':to': { S: toIso } },
+        ExclusiveStartKey: lastKey,
+      }))
+      if (page.Items) items.push(...page.Items.map((item) => unmarshall(item)))
+      lastKey = page.LastEvaluatedKey
+    } while (lastKey)
+    return items
+  },
+  sendAutoTrackingLink: async (loadCarrierId) => {
+    // The claim is the idempotency: one conditional write per leg, ever. It fails when a
+    // link was ever set on the leg (a person sent one) or another run already claimed it.
+    const now = nowIso()
+    try {
+      await dynamo.send(new UpdateItemCommand({
+        TableName: LOAD_CARRIER_TABLE_NAME,
+        Key: { id: { S: loadCarrierId } },
+        UpdateExpression: 'SET autoTrackingClaimAt = :now',
+        ConditionExpression: 'attribute_exists(id) AND attribute_not_exists(autoTrackingClaimAt)'
+          + ' AND (attribute_not_exists(trackingLinkId) OR attribute_type(trackingLinkId, :nullType))',
+        ExpressionAttributeValues: { ':now': { S: now }, ':nullType': { S: 'NULL' } },
+      }))
+    } catch (err) {
+      if (err instanceof Error && err.name === 'ConditionalCheckFailedException') return null
+      throw err
+    }
+    const sent = await sendTrackingLink({ loadCarrierId, via: 'SMS' }, AUTO_TRACKING_CALLER)
+    return { smsStatus: String(sent.smsStatus ?? '') }
+  },
 }
+
+/** Who an automatic tracking link is from: createdBy on the link says "sent automatically". */
+const AUTO_TRACKING_CALLER: Caller = { email: AUTO_TRACKING_SENDER, sub: 'tracking-automation', groups: [], isAdmin: false }
 
 /** The bytes of one stored document, for the POD reviewer. */
 async function readObjectBytes(key: string): Promise<Uint8Array> {
@@ -2678,6 +2720,9 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return runCheckCallPlan(checkCallDeps, input, caller)
     case 'RUN_TRACKING_AUTOMATION':
       return runTrackingAutomation(automationDeps, input, caller) as unknown as Promise<Row>
+    case 'PREVIEW_AUTO_TRACKING_LINKS':
+      // Read-only: what the sweep would text today and tomorrow. Never sends.
+      return { rows: await autoTrackingPass(automationDeps, { send: false, caller }) } as Row
     case 'SAVE_TRACKING_AUTOMATION':
       return saveSettings(input, caller, action, trackingAutomationPatch(input))
     case 'SAVE_CHECK_CALL_PLAN':

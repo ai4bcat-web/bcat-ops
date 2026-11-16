@@ -46,6 +46,8 @@ export interface TrackingBoardProps {
   graceMinutes?: number | null
   /** Resolved tracking prefs of a row; when present the optional "Tracking mode" column exists. */
   prefsOf?: (row: ShipmentRow) => EffectiveTrackingPrefs
+  /** Whether the automatic tracking-link send is on for a row (resolved automation policy). */
+  autoLinkOn?: (row: ShipmentRow) => boolean
   onCreateCustomerUrl: (row: ShipmentRow) => void
   onRequestCheckCall: (row: ShipmentRow) => Promise<void>
   onRequestPod: (row: ShipmentRow) => Promise<void>

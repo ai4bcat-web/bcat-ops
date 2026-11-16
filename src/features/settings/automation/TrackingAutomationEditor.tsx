@@ -114,6 +114,20 @@ export function TrackingAutomationEditor({ scope, value: stored, inherited, onCh
       </Panel>
 
       <Panel>
+        {header('trackingLinkAuto', 'Text the tracking link automatically')}
+        <CheckRow
+          checked={field('trackingLinkAuto')}
+          disabled={disabled || inheriting('trackingLinkAuto')}
+          onChange={(on) => setField('trackingLinkAuto', on)}
+          label="Text the driver the tracking link on the pickup day"
+        />
+        <Hint>
+          One hour before a timed pickup appointment, or 8:00 AM Chicago when there is no time. Only outside carriers with a driver
+          phone, once per carrier: a link already sent by hand, or a tracker already reporting, is left alone. Off by default.
+        </Hint>
+      </Panel>
+
+      <Panel>
         {header('podAuto', 'Request the POD automatically')}
         <CheckRow
           checked={field('podAuto')}

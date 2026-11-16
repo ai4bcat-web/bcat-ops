@@ -25,6 +25,7 @@ import { useDirectory } from '@/hooks/useDirectory'
 import { useShipments } from '@/hooks/useShipments'
 import { monthsCovering } from '@/lib/shipmentWindows'
 import { useStaff } from '@/hooks/useStaff'
+import { resolveAutomation } from '@/lib/trackingAutomation'
 import type { ChargeCodeDef, CustomerRecord, ShipmentBundle, TrackingLinkRecord, TmsSettings } from '@/types/tms'
 import {
   assignTracker,
@@ -256,6 +257,18 @@ export function TrackingWorkstation() {
     [customerById],
   )
 
+  // The automatic tracking-link switch, org and division layers (the customer layer is not on the row).
+  const autoLinkOn = useCallback(
+    (row: ShipmentRow) => resolveAutomation({
+      settings,
+      customer: row.customerId ? customerById.get(row.customerId) ?? null : null,
+      load: null,
+      revDivision: row.revDivision ?? null,
+      revSubdivision: row.revSubdivision ?? null,
+    }).policy.trackingLinkAuto,
+    [settings, customerById],
+  )
+
   const logLoad = logCallTarget?.bundle.loads[0]
   const logToken = logLoad?.updatedAt
   const logCarrier = logCallTarget?.bundle.loadCarriers.find((c) => c.status === 'ACTIVE') ?? null
@@ -292,6 +305,7 @@ export function TrackingWorkstation() {
           onFocus={selectFocus}
           graceMinutes={settings?.checkCallGraceMinutes}
           prefsOf={prefsOf}
+          autoLinkOn={autoLinkOn}
           onCreateCustomerUrl={(row) => { void openCustomerLinkDialog(row) }}
           onRequestCheckCall={handleRequestCheckCall}
           onRequestPod={handleRequestPod}

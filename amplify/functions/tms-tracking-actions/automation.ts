@@ -8,6 +8,7 @@
  *
  *   check-call pass  open loads whose next check call is due → runCheckCallPlan(AUTO)
  *   POD pass         recently DELIVERED shipments → one ask per leg per channel
+ *   link pass        today's pickups → text the driver the tracking link once (autoTrackingLink)
  *
  * Every message goes through sendShipmentMessage, so it lands in the shipment's own
  * thread (threadKey, Reply-To plus-address) and replies come back the way they do today.
@@ -28,6 +29,8 @@ import {
   type CheckCallDeps,
 } from './checkCallAgent'
 import { requestPodForLeg } from './podReview'
+import { autoTrackingDecision, maskPhone, type AutoTrackingDecision } from '../../../src/lib/autoTrackingLink'
+import { chicagoDateStr, fromDateTimeInput } from '../../../src/lib/date'
 import { openShipmentThread } from './thread'
 
 export const MAX_SCOPED_SHIPMENTS = 200
@@ -38,6 +41,116 @@ export const POD_LOOKBACK_DAYS = 21
 export interface AutomationDeps extends CheckCallDeps {
   /** Shipments with status DELIVERED and pickupAppt >= sinceIso (Shipment GSI status+pickupAppt). */
   queryDeliveredShipments(sinceIso: string): Promise<Row[]>
+  /** Shipments in `status` whose pickupAppt is in [fromIso, toIso) (same GSI). Optional: absent = no link pass. */
+  queryShipmentsByPickup?(status: string, fromIso: string, toIso: string): Promise<Row[]>
+  /**
+   * Claims the leg for the automatic send (conditional write: only when no tracking link
+   * was ever set and no claim exists), then sends through the manual SEND_TRACKING_LINK
+   * path. Returns null when another run (or a person) got there first.
+   */
+  sendAutoTrackingLink?(loadCarrierId: string): Promise<{ smsStatus: string } | null>
+}
+
+/** Shipment statuses before pickup that can carry a booked carrier. */
+const PRE_PICKUP_STATUSES = ['BOOKED', 'PLANNED', 'DISPATCHED', 'LOADING'] as const
+
+export interface AutoTrackingRow {
+  shipmentId: string
+  shipmentNumber: string
+  loadId: string
+  loadCarrierId: string
+  carrierName: string | null
+  driverName: string | null
+  phone: string
+  pickupAppt: string | null
+  decision: AutoTrackingDecision
+  outcome?: string
+}
+
+function firstPickupDeparted(load: Row): string | null {
+  let stops: unknown = load.stops
+  if (typeof stops === 'string') {
+    try { stops = JSON.parse(stops) } catch { stops = null }
+  }
+  if (!Array.isArray(stops)) return null
+  const pickup = (stops as Row[]).find((s) => String(s?.type ?? '').toLowerCase() === 'pickup')
+  return pickup && typeof pickup.departedAt === 'string' && pickup.departedAt ? pickup.departedAt : null
+}
+
+/**
+ * Today's and tomorrow's pickups (Chicago) with a booked outside carrier: what the sweep
+ * would do for each. `send` actually texts the ones that are due (the policy switch is the
+ * caller's to check); the Settings preview calls it with send=false.
+ */
+export async function autoTrackingPass(
+  deps: AutomationDeps,
+  opts: { send: boolean; caller: Caller; enabledFor?: (shipment: Row, load: Row) => Promise<boolean> },
+): Promise<AutoTrackingRow[]> {
+  if (!deps.queryShipmentsByPickup) return []
+  const now = deps.now()
+  const today = chicagoDateStr(now)
+  const from = fromDateTimeInput(`${today}T00:00`)
+  const dayAfter = chicagoDateStr(new Date(Date.parse(from) + 2 * 24 * 60 * 60 * 1000 + 3 * 60 * 60 * 1000))
+  const to = fromDateTimeInput(`${dayAfter}T00:00`)
+  const shipments: Row[] = []
+  for (const status of PRE_PICKUP_STATUSES) shipments.push(...(await deps.queryShipmentsByPickup(status, from, to)))
+
+  const rows: AutoTrackingRow[] = []
+  const customers = new Map<string, Row | null>()
+  for (const shipment of shipments) {
+    if (isVoided(shipment)) continue
+    const shipmentId = String(shipment.id)
+    const [loads, carriers] = await Promise.all([
+      deps.queryIndex(deps.tables.load, 'loadsByShipmentId', 'shipmentId', shipmentId),
+      deps.queryIndex(deps.tables.loadCarrier, 'loadCarriersByShipmentId', 'shipmentId', shipmentId),
+    ])
+    const customerId = String(shipment.customerId ?? '')
+    if (customerId && !customers.has(customerId)) customers.set(customerId, await deps.getById(deps.tables.customer, customerId))
+    const customer = customerId ? customers.get(customerId) ?? null : null
+    for (const load of loads) {
+      const carrier = activeLoadCarrier(load, carriers)
+      if (!carrier || carrier.kind !== 'CARRIER') continue
+      const phone: string | null = await resolveDriverSms(deps, { carrier, shipment, customer, load })
+        .then((target) => target.to)
+        .catch(() => null)
+      const decision = autoTrackingDecision({
+        now,
+        load: {
+          status: load.status as string | null,
+          pickupAppt: (load.pickupAppt ?? shipment.pickupAppt) as string | null,
+          pickupApptType: load.pickupApptType as string | null,
+          trackingProvider: load.trackingProvider as string | null,
+          pickupDepartedAt: firstPickupDeparted(load),
+        },
+        leg: carrier as never,
+        hasPhone: Boolean(phone),
+      })
+      const row: AutoTrackingRow = {
+        shipmentId,
+        shipmentNumber: String(shipment.number ?? shipmentId),
+        loadId: String(load.id),
+        loadCarrierId: String(carrier.id),
+        carrierName: (carrier.carrierName as string | null) ?? null,
+        driverName: (carrier.driverName as string | null) ?? null,
+        phone: maskPhone(phone),
+        pickupAppt: (load.pickupAppt ?? shipment.pickupAppt ?? null) as string | null,
+        decision,
+      }
+      if (opts.send && decision.kind === 'SEND' && deps.sendAutoTrackingLink) {
+        const enabled = opts.enabledFor ? await opts.enabledFor(shipment, load) : true
+        if (!enabled) {
+          row.outcome = 'OFF'
+        } else {
+          const sent = await deps.sendAutoTrackingLink(row.loadCarrierId)
+          row.outcome = sent ? sent.smsStatus : 'ALREADY_CLAIMED'
+          if (sent) deps.writeAudit('LOAD_CARRIER', row.loadCarrierId, 'AUTO_TRACKING_LINK_SENT', opts.caller, { shipmentId, smsStatus: sent.smsStatus }).catch(() => undefined)
+        }
+      }
+      rows.push(row)
+    }
+  }
+  rows.sort((a, b) => String(a.decision.sendAt ?? '').localeCompare(String(b.decision.sendAt ?? '')))
+  return rows
 }
 
 export interface AutomationResult {
@@ -49,6 +162,8 @@ export interface AutomationResult {
   skipped: number
   errors: number
   pod: { checked: number; requested: number; skipped: number; deferred: number }
+  /** Tracking links texted automatically this run (Ryne 2026-11-16). */
+  trackingLinks?: { due: number; sent: number; off: number }
   reasons: string[]
 }
 
@@ -241,6 +356,40 @@ export async function runTrackingAutomation(deps: AutomationDeps, input: Row, ca
       } catch (err) {
         fail(shipmentId, err)
       }
+    }
+  }
+
+  // ── Tracking-link pass (AUTO, unscoped only: a scoped dev run never texts drivers) ──
+  if (mode === 'AUTO' && !scoped && deps.queryShipmentsByPickup && deps.sendAutoTrackingLink) {
+    let settings: Row | null = null
+    const customers = new Map<string, Row | null>()
+    try {
+      const rows = await autoTrackingPass(deps, {
+        send: true,
+        caller,
+        enabledFor: async (shipment, load) => {
+          settings ??= await deps.getSettings()
+          const customerId = String(shipment.customerId ?? '')
+          if (customerId && !customers.has(customerId)) customers.set(customerId, await deps.getById(deps.tables.customer, customerId))
+          const { policy } = resolveAutomation({
+            settings,
+            customer: customerId ? customers.get(customerId) ?? null : null,
+            load,
+            revDivision: shipment.revDivision as string | null | undefined,
+            revSubdivision: shipment.revSubdivision as string | null | undefined,
+          })
+          return policy.trackingLinkAuto
+        },
+      })
+      const due = rows.filter((r) => r.decision.kind === 'SEND')
+      result.trackingLinks = {
+        due: due.length,
+        sent: due.filter((r) => r.outcome === 'SENT' || r.outcome === 'NOT_CONFIGURED').length,
+        off: due.filter((r) => r.outcome === 'OFF').length,
+      }
+      for (const r of due) if (r.outcome && r.outcome !== 'OFF') note(`${r.shipmentNumber}: tracking link ${r.outcome.toLowerCase()}`)
+    } catch (err) {
+      fail('tracking-links', err)
     }
   }
 

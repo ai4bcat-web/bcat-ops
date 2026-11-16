@@ -62,7 +62,7 @@ export function withTemplate(
 export function overrideCount(patch: AutomationPolicyPatch | null | undefined): number {
   if (!patch) return 0
   let n = 0
-  for (const key of ['checkCallsAuto', 'podAuto', 'podChannels', 'quietHours'] as const) {
+  for (const key of ['checkCallsAuto', 'podAuto', 'trackingLinkAuto', 'podChannels', 'quietHours'] as const) {
     if (patch[key] !== undefined) n += 1
   }
   for (const key of TEMPLATE_KEYS) if (patch.templates?.[key] !== undefined) n += 1

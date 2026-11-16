@@ -25,6 +25,7 @@ import { TrackingLinkDialog } from '../../components/TrackingLinkDialog'
 import type { ShipmentActions } from '../../useShipmentActions'
 import type { ShipmentRow } from '../../shipmentViews'
 import { RecentCheckCalls } from './RecentCheckCalls'
+import { TrackingLinkStatus } from './TrackingLinkStatus'
 import { TrackingConversation } from './TrackingConversation'
 import { TrackingMapPanel } from './map/TrackingMapPanel'
 import { TrackingPrefsRow } from './TrackingPrefsRow'
@@ -190,6 +191,7 @@ export function ShipmentTrackingView({ bundle, customer, catalog = [], actions, 
             <TmsButton size="sm" disabled={!loadCarrier} onClick={() => setDialog('carrier_link')}>
               <Send size={13} aria-hidden /> Send tracking link
             </TmsButton>
+            <TrackingLinkStatus settings={settings} customer={customer} shipment={shipment} load={load} loadCarrier={loadCarrier} row={row} />
             <TmsButton size="sm" onClick={() => setDialog('customer_link')}>
               <Users size={13} aria-hidden /> Customer link
             </TmsButton>

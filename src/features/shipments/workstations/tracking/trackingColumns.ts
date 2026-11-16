@@ -14,6 +14,7 @@ import { LADDER_FILTER_OPTIONS, assignmentChipText } from '../../carrierLadder'
 import { boardStatusOf, type BoardStatusKey, type ShipmentRow } from '../../shipmentViews'
 import { motionOf, relativeTime } from '../motion'
 import { nextEventText } from './nextEventText'
+import { trackingLinkLine } from './trackingLinkLine'
 import {
   UNASSIGNED_KEY,
   hasDocsToReview,
@@ -101,6 +102,8 @@ export interface TrackingColumnContext {
   nameOf: (id: string) => string
   /** Resolved tracking prefs of a row (customer's choice); the `mode` column prints them. */
   prefsOf?: (row: ShipmentRow) => EffectiveTrackingPrefs
+  /** Whether the automatic tracking-link send is on for a row (resolved automation policy). */
+  autoLinkOn?: (row: ShipmentRow) => boolean
 }
 
 /**
@@ -109,7 +112,7 @@ export interface TrackingColumnContext {
  * Carrier status and Tracker wait in the Columns dialog.
  */
 export const TRACKING_DEFAULT_COLUMNS = [
-  'shipment', 'status', 'customer', 'lane', 'pickup', 'delivery', 'lastLocation', 'eta', 'nextCheck', 'carrier',
+  'shipment', 'status', 'customer', 'lane', 'pickup', 'delivery', 'lastLocation', 'eta', 'nextCheck', 'carrier', 'trackingLink',
 ]
 
 const DOC_STATES = { REVIEW: 'To review', MISSING: 'Missing', OK: 'OK' } as const
@@ -145,7 +148,7 @@ function checkCallsText(row: ShipmentRow, nowMs: number): string {
   return parts.join(' · ')
 }
 
-export function trackingColumns({ nowMs, nameOf, prefsOf }: TrackingColumnContext): DenseColumn<ShipmentRow>[] {
+export function trackingColumns({ nowMs, nameOf, prefsOf, autoLinkOn }: TrackingColumnContext): DenseColumn<ShipmentRow>[] {
   return [
     { key: 'shipment', header: 'Shipment #', group: 'Shipment', text: (r) => r.number, extraPx: 70 }, // the star and flag icons beside the number
     {
@@ -283,6 +286,13 @@ export function trackingColumns({ nowMs, nameOf, prefsOf }: TrackingColumnContex
       optionsOf: (r) => LADDER_FILTER_OPTIONS.filter((o) => o.value === r.carrierAssignmentStatus),
       fixedOptions: LADDER_FILTER_OPTIONS,
       sortValue: (r) => LADDER_FILTER_OPTIONS.findIndex((o) => o.value === r.carrierAssignmentStatus),
+    },
+    {
+      // Ryne 2026-11-16: sent manually / sent automatically / auto-sends at 7:00 AM.
+      key: 'trackingLink',
+      header: 'Tracking link',
+      group: 'Tracking',
+      text: (r) => trackingLinkLine(r, new Date(nowMs).toISOString(), autoLinkOn ? autoLinkOn(r) : false),
     },
     {
       key: 'tracker',

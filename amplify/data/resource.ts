@@ -2322,6 +2322,9 @@ const schema = a.schema(stageTypes({
       trackingLinkId:    a.string(),
       trackingStartedAt: a.datetime(),
       trackingStoppedAt: a.datetime(),
+      // Set once when tracking-automation texted the link by itself (autoTrackingLink.ts):
+      // the claim that stops a second automatic send, and how the boards say "sent automatically".
+      autoTrackingClaimAt: a.datetime(),
       // When the driver first accepted the tracking link and started sharing location (the link's consentAt, copied here so the boards
       // can show sent / accepted without reading TrackingLink). Written once per sent link by tracking-api.
       trackingAcceptedAt: a.datetime(),
