@@ -20,6 +20,8 @@ import './agingReport.css'
 
 const money = (cents: number) => (cents ? formatCents(cents) : '—')
 const terms = (days: number | null) => (days == null ? '—' : `Net ${days}`)
+/** The customer's own average, invoice date to paid date (factored invoices left out). */
+const daysToPay = (days: number | null) => (days == null ? '—' : `${Math.round(days)}d`)
 
 export function AgingReportTable({
   report, onOpenInvoice, onPreview, onStatement, selected, onSelect, busy,
@@ -77,6 +79,7 @@ export function AgingReportTable({
               <th scope="col" className="tms-aging-check-col"><span className="sr-only">Select</span></th>
               {head('customer', 'Customer', false)}
               {head('terms', 'Terms', false)}
+              {head('daysToPay', 'Avg days to pay')}
               {AR_AGING_BUCKETS.map((b) => <Fragment key={b}>{head(b, AR_AGING_BUCKET_LABEL[b])}</Fragment>)}
               {head('total', 'Total open')}
               {head('pastDue', 'Past due')}
@@ -103,6 +106,7 @@ export function AgingReportTable({
                     </td>
                     <td><button type="button" className="tms-aging-name" onClick={() => toggle(c.customerId)}>{c.customerName}</button></td>
                     <td>{terms(c.termsDays)}</td>
+                    <td className="tms-dg-right" data-testid="aging-days-to-pay">{daysToPay(c.avgDaysToPay)}</td>
                     {AR_AGING_BUCKETS.map((b) => <td key={b} className="tms-dg-right">{money(c.byBucket[b])}</td>)}
                     <td className="tms-dg-right"><strong>{formatCents(c.totalCents)}</strong></td>
                     <td className="tms-dg-right">{c.pastDueCents ? <span className="tms-aging-late">{formatCents(c.pastDueCents)}</span> : '—'}</td>
@@ -115,7 +119,7 @@ export function AgingReportTable({
                   </tr>
                   {isOpen && (
                     <tr className="tms-aging-detail-row">
-                      <td colSpan={14}>
+                      <td colSpan={15}>
                         <InvoiceTable invoices={c.invoices} onOpenInvoice={onOpenInvoice} />
                       </td>
                     </tr>
@@ -128,6 +132,7 @@ export function AgingReportTable({
             <tr className="tms-aging-total" data-testid="aging-total-row">
               <td colSpan={2} />
               <th scope="row">Total ({report.count} invoices)</th>
+              <td />
               <td />
               {AR_AGING_BUCKETS.map((b) => <td key={b} className="tms-dg-right">{money(report.byBucket[b])}</td>)}
               <td className="tms-dg-right"><strong>{formatCents(report.totalCents)}</strong></td>
@@ -156,6 +161,7 @@ export function AgingReportTable({
                 ))}
                 <div><dt>Past due</dt><dd>{money(c.pastDueCents)}</dd></div>
                 <div><dt>Terms</dt><dd>{terms(c.termsDays)}</dd></div>
+                <div><dt>Avg days to pay</dt><dd>{daysToPay(c.avgDaysToPay)}</dd></div>
                 <div><dt>Oldest</dt><dd>{c.oldestDays}d</dd></div>
                 <div><dt>Last paid</dt><dd>{formatDay(c.lastPaidAt) || '—'}</dd></div>
               </dl>

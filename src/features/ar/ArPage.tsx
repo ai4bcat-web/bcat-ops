@@ -259,8 +259,10 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const [paymentsVersion, setPaymentsVersion] = useState(0)
   const factCustomerIds = useMemo(() => {
     if (tab === 'invoiced' && (groupBy === 'customer' || owed.parties.length > 0)) return queue.INVOICED.map((r) => r.customerId ?? '')
+    // The Aging report shows each customer's average days to pay.
+    if (tab === 'aging') return open.invoices.map((inv) => inv.customerId)
     return []
-  }, [tab, queue, groupBy, owed.parties.length])
+  }, [tab, queue, groupBy, owed.parties.length, open.invoices])
   const paymentFacts = useCustomerPaymentFacts(factCustomerIds, paymentsVersion)
 
   // Ready to invoice reads each shipment's board row for its reference, lane, carrier and carrier pay (internal only).
@@ -444,6 +446,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     refOf: (inv) => customerRefOf(inv.references) ?? boardById.get(inv.shipmentId)?.customerReference ?? null,
     termsOf: (id) => customerById.get(id)?.paymentTermsDays ?? null,
     lastPaidOf: (id) => lastPaidByCustomer.get(id) ?? null,
+    avgDaysToPayOf: (id) => paymentFacts.daysToPayByCustomer.get(id)?.averageDays ?? null,
   })
   const openInvoiceById = new Map(filteredOpen.map((inv) => [inv.id, inv]))
   // Bulk statements always preview and confirm first; nothing is mailed straight from the tick boxes.

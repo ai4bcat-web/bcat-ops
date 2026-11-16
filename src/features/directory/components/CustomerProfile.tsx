@@ -30,7 +30,7 @@ import { useCustomerQuotes } from '@/hooks/useCustomerQuotes'
 import { creditSummaryForCustomer, effectiveCustomerStatus, boardTab } from '@/lib/customerCredit'
 import { oldestOpenInvoiceDays } from '@/lib/arAging'
 import { useCustomerAr } from '@/hooks/useCustomerAr'
-import { customerDaysToPay } from '@/lib/daysToPay'
+import { customerDaysToPay, termsVsActualText } from '@/lib/daysToPay'
 import { loadStatus } from '@/lib/loadStatus'
 import { laneLabelFor } from '@/lib/laneKey'
 import { QUOTE_STATUS_LABEL } from '@/lib/quotes'
@@ -376,11 +376,20 @@ export function CustomerProfile({
               <BillingMethodFields value={value} set={set} errors={errors} factor={settings?.factorRemitTo ?? null} />
             </TmsCard>
             <TmsCard title="Days to pay">
-              <p className="text-sm" data-testid="customer-days-to-pay">
+              <div className="flex flex-col gap-1 text-sm" data-testid="customer-days-to-pay">
+                <p><strong>{termsVsActualText(customer.paymentTermsDays, daysToPay)}</strong></p>
                 {daysToPay.averageDays == null
-                  ? 'No paid invoices yet.'
-                  : <><strong>{daysToPay.averageDays} days</strong> on average, invoice date to paid date, across {daysToPay.count} paid invoice{daysToPay.count === 1 ? '' : 's'}.</>}
-              </p>
+                  ? <p className="tms-muted">No paid invoices yet.</p>
+                  : (
+                    <>
+                      <p><strong>{daysToPay.averageDays} days</strong> on average, invoice date to paid date, across {daysToPay.count} paid invoice{daysToPay.count === 1 ? '' : 's'}.</p>
+                      <p>Last 90 days: {daysToPay.recentDays == null
+                        ? 'nothing paid'
+                        : <><strong>{daysToPay.recentDays} days</strong> across {daysToPay.recentCount} invoice{daysToPay.recentCount === 1 ? '' : 's'}</>}.</p>
+                    </>
+                  )}
+                <p className="tms-muted text-xs">Factored invoices are left out: OTR pays those, not the customer.</p>
+              </div>
             </TmsCard>
             <TmsCard title="Aging statement">
               <div className="flex flex-wrap items-center justify-between gap-2">
