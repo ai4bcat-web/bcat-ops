@@ -62,8 +62,9 @@ function customerGate(
     loadIds: ['ld-1'],
     loadCarriers,
     documents,
-    // A factored customer: OTR needs the rate confirmation, so the gate asks for it (rateConRequired).
-    customer: { requiredDocsForInvoice: required, billingMethod: 'FACTOR' } as never,
+    // A factored customer: OTR needs the rate confirmation, so the gate asks for it (rateConRequired). A car-shipping
+    // load reads the list alone only when the customer does not factor (a factored one needs the RC for OTR).
+    customer: { requiredDocsForInvoice: required, billingMethod: carShipper ? 'MANUAL' : 'FACTOR' } as never,
     scope: 'CUSTOMER',
     carShipper,
   })

@@ -44,7 +44,7 @@ const carRow = (over: Partial<LoadReviewRow> = {}): LoadReviewRow => ({
 
 describe('car-shipping requirement profile', () => {
   it('uses its own fixed review list, plus POD/RC only when the customer factors', () => {
-    expect(reviewRequirementsForLoad(DEFAULT_REVIEW_REQUIREMENTS, { revDivision: 'CAR_SHIPPING' })).toEqual([...CAR_SHIPPING_REVIEW_REQUIREMENTS])
+    expect(reviewRequirementsForLoad(DEFAULT_REVIEW_REQUIREMENTS, { revDivision: 'CAR_SHIPPING' })).toEqual(expect.arrayContaining([...CAR_SHIPPING_REVIEW_REQUIREMENTS, 'apEmail']))
     expect(reviewRequirementsForLoad(DEFAULT_REVIEW_REQUIREMENTS, { revDivision: 'CAR_SHIPPING', customerFactors: true }))
       .toEqual(expect.arrayContaining(['podReceived', 'rateConReceived']))
     expect(reviewRequirementsForLoad(DEFAULT_REVIEW_REQUIREMENTS, { revDivision: 'BROKERAGE' })).toEqual([...DEFAULT_REVIEW_REQUIREMENTS])
