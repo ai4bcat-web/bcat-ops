@@ -21,7 +21,8 @@ import { useLegacyDashboardKpis, type DateRangeKey } from './useLegacyDashboardK
 import { useBatoryApptCount } from './useBatoryApptCount'
 import { BrokerageSection } from './BrokerageDashboardPage'
 import { LazyWidget } from './LazyWidget'
-import { AccountingSection } from './AccountingSection'
+import { PayablesCard, ReceivablesCard } from './AccountingSection'
+import './dashboardGrid.css'
 import { DeliveryToReviewCard } from './DeliveryToReviewCard'
 import { AssistantChat } from '@/features/dashboards/assistant/AssistantChat'
 
@@ -245,9 +246,9 @@ function KpiSkeleton({ label }: { label: string }) {
   )
 }
 
-/** A grid cell: lets the strip keep its visual order while the DOM groups the three rollup cards. */
-function Cell({ order, children }: { order: number; children: React.ReactNode }) {
-  return <div style={{ order, display: 'grid', minWidth: 0 }}>{children}</div>
+/** A grid cell: keeps the visual order while the DOM groups the three rollup cards; `size` sets its span (dashboardGrid.css). */
+function Cell({ order, size, children }: { order: number; size?: 's3' | 'half' | 'wide'; children: React.ReactNode }) {
+  return <div className={`dash-cell${size ? ` dash-${size}` : ''}`} style={{ order }}>{children}</div>
 }
 
 function asOfLabel(iso: string): string {
@@ -299,6 +300,7 @@ export function DashboardPage() {
 
   return (
     <TmsScrollPage
+      width="full"
       className="tms-phone-keep"
       title="Operations Dashboard"
       subtitle={`Live snapshot · ${dateLabel}`}
@@ -368,88 +370,93 @@ export function DashboardPage() {
 
         {canAsk && askOpen && <AssistantChat />}
 
-        {/* ── KPI strip ────────────────────────────────────────────────────── */}
-        {/* Five cards, one row on desktop. */}
-        <div
-          data-testid="legacy-kpis-all"
-          data-state={kpiFinal && needsAppt !== null ? kpi.state : 'loading'}
-          data-source={kpi.source ?? ''}
-          data-asof={kpi.asOf ?? ''}
-          data-kpi-flips={kpi.flips}
-          // Phones and tablets: as many columns as fit at 240px each (one on a phone), so a card is never narrower than its amounts.
-          style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))' : 'repeat(5, minmax(0, 1fr))', gap: 12 }}
-        >
-          {/* Loads, Revenue and Broker covered come from the rollup together; `display: contents` keeps them grid items. */}
+        {/* ── Top cards: one packed grid across the full width (dashboardGrid.css) ── */}
+        <div className="dash-top">
           <div
-            data-testid="legacy-kpis"
-            data-state={kpi.state}
+            className="dash-top-grid"
+            data-testid="legacy-kpis-all"
+            data-state={kpiFinal && needsAppt !== null ? kpi.state : 'loading'}
             data-source={kpi.source ?? ''}
             data-asof={kpi.asOf ?? ''}
             data-kpi-flips={kpi.flips}
-            style={{ display: 'contents' }}
           >
-            <Cell order={1}>
-              {metrics ? (
-                <LoadsCard
-                  split={metrics.loadsSplit}
-                  delta={metrics.totalLoadsDelta > 0 ? `+${metrics.totalLoadsDelta}` : String(metrics.totalLoadsDelta)}
-                  deltaDir={metrics.totalLoadsDelta > 0 ? 'up' : metrics.totalLoadsDelta < 0 ? 'down' : 'neutral'}
-                  sublabel={`vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}`}
+            {/* Loads, Revenue and Broker covered come from the rollup together; `display: contents` keeps them grid items. */}
+            <div
+              data-testid="legacy-kpis"
+              data-state={kpi.state}
+              data-source={kpi.source ?? ''}
+              data-asof={kpi.asOf ?? ''}
+              data-kpi-flips={kpi.flips}
+              style={{ display: 'contents' }}
+            >
+              <Cell order={1}>
+                {metrics ? (
+                  <LoadsCard
+                    split={metrics.loadsSplit}
+                    delta={metrics.totalLoadsDelta > 0 ? `+${metrics.totalLoadsDelta}` : String(metrics.totalLoadsDelta)}
+                    deltaDir={metrics.totalLoadsDelta > 0 ? 'up' : metrics.totalLoadsDelta < 0 ? 'down' : 'neutral'}
+                    sublabel={`vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}`}
+                  />
+                ) : <KpiSkeleton label="Total Loads" />}
+              </Cell>
+              <Cell order={2} size="s3">
+                {metrics ? (
+                  <RevenueCard
+                    split={metrics.revenueSplit}
+                    connected={metrics.revenueConnected}
+                    delta={metrics.revenueConnected ? `${metrics.revenueDelta >= 0 ? '+' : '−'}${cents(Math.abs(metrics.revenueDelta))}` : undefined}
+                    deltaDir={metrics.revenueDelta > 0 ? 'up' : metrics.revenueDelta < 0 ? 'down' : 'neutral'}
+                    sublabel={metrics.revenueConnected ? `vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}` : 'Connect rates to loads'}
+                  />
+                ) : <KpiSkeleton label="Revenue" />}
+              </Cell>
+              <Cell order={3}>
+                {metrics ? (
+                  <BrokerCoveredCard
+                    count={metrics.brokerLoads}
+                    countDelta={metrics.brokerLoadsDelta}
+                    revenue={metrics.brokerRevenue}
+                    revenueDelta={metrics.brokerRevenueDelta}
+                    sublabel={`vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}`}
+                  />
+                ) : <KpiSkeleton label="Broker Covered" />}
+              </Cell>
+            </div>
+            <Cell order={4}>
+              {needsAppt === null ? <KpiSkeleton label="Batory Appts to Book" /> : (
+                <KpiCard
+                  label="Batory Appts to Book"
+                  value={needsAppt}
+                  sublabel={needsAppt > 0 ? 'Stops still on the Batory ladder' : 'All booked'}
+                  accent={needsAppt > 0 ? 'var(--tms-badge-orange)' : undefined}
+                  sparkColor={orange}
+                  icon={<CalendarClock size={15} />}
                 />
-              ) : <KpiSkeleton label="Total Loads" />}
+              )}
             </Cell>
-            <Cell order={5}>
-              {metrics ? (
-                <RevenueCard
-                  split={metrics.revenueSplit}
-                  connected={metrics.revenueConnected}
-                  delta={metrics.revenueConnected ? `${metrics.revenueDelta >= 0 ? '+' : '−'}${cents(Math.abs(metrics.revenueDelta))}` : undefined}
-                  deltaDir={metrics.revenueDelta > 0 ? 'up' : metrics.revenueDelta < 0 ? 'down' : 'neutral'}
-                  sublabel={metrics.revenueConnected ? `vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}` : 'Connect rates to loads'}
-                />
-              ) : <KpiSkeleton label="Revenue" />}
-            </Cell>
-            <Cell order={6}>
-              {metrics ? (
-                <BrokerCoveredCard
-                  count={metrics.brokerLoads}
-                  countDelta={metrics.brokerLoadsDelta}
-                  revenue={metrics.brokerRevenue}
-                  revenueDelta={metrics.brokerRevenueDelta}
-                  sublabel={`vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}`}
-                />
-              ) : <KpiSkeleton label="Broker Covered" />}
+            {/* Delivery → Load review, week over week (Ryne 2026-11-15); anyone who works loads. */}
+            {(hasPageAccess('loads') || hasPageAccess('tms')) && (
+              <Cell order={5} size="s3">
+                <LazyWidget enabled={kpiFinal} minHeight={200} label="delivery-to-review"><DeliveryToReviewCard /></LazyWidget>
+              </Cell>
+            )}
+            {/* Accounts receivable (with Factoring) and Accounts payable, each on its own accounting grant. */}
+            {hasPageAccess('invoicing') && (
+              <Cell order={6} size="wide">
+                <LazyWidget enabled={kpiFinal} minHeight={240} label="accounting-ar"><ReceivablesCard /></LazyWidget>
+              </Cell>
+            )}
+            {hasPageAccess('carrierPay') && (
+              <Cell order={7} size="half">
+                <LazyWidget enabled={kpiFinal} minHeight={240} label="accounting-ap"><PayablesCard /></LazyWidget>
+              </Cell>
+            )}
+            {/* Vendor (non-carrier) bills, next to carrier AP. */}
+            <Cell order={8} size="half">
+              <VendorApCard onOpen={() => navigate('/tms/vendors')} />
             </Cell>
           </div>
-          {/* What we owe vendors, beside what we are owed. */}
-          <Cell order={3}>
-            <VendorApCard onOpen={() => navigate('/tms/vendors')} />
-          </Cell>
-          <Cell order={4}>
-            {needsAppt === null ? <KpiSkeleton label="Batory Appts to Book" /> : (
-              <KpiCard
-                label="Batory Appts to Book"
-                value={needsAppt}
-                sublabel={needsAppt > 0 ? 'Stops still on the Batory ladder' : 'All booked'}
-                accent={needsAppt > 0 ? 'var(--tms-badge-orange)' : undefined}
-                sparkColor={orange}
-                icon={<CalendarClock size={15} />}
-              />
-            )}
-          </Cell>
         </div>
-
-        {/* ── Accounts receivable (with Factoring) and Accounts payable, on each accounting grant only ─ */}
-        {(hasPageAccess('invoicing') || hasPageAccess('carrierPay')) && (
-          <LazyWidget enabled={kpiFinal} minHeight={340} label="accounting"><AccountingSection /></LazyWidget>
-        )}
-
-        {/* ── Delivery → Load review, week over week (Ryne 2026-11-15); anyone who works loads ─ */}
-        {(hasPageAccess('loads') || hasPageAccess('tms')) && (
-          <LazyWidget enabled={kpiFinal} minHeight={260} label="delivery-to-review">
-            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(280px, 360px))', gap: 12 }}><DeliveryToReviewCard /></div>
-          </LazyWidget>
-        )}
 
         {/* ── Brokerage (BCAT Logistics): right under the top cards ─ */}
         <LazyWidget enabled={kpiFinal} minHeight={420} label="brokerage"><BrokerageSection /></LazyWidget>

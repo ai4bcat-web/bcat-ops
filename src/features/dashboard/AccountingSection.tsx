@@ -93,6 +93,7 @@ export function ReceivablesCard() {
       sublabel={`open · ${n(s.openCount, 'invoice')}`}
       rows={rows}
       groups={[{ key: 'factoring', label: `Factoring · ${n(s.pendingOtrCount, 'open invoice')}`, rows: factoring }]}
+      groupsBeside
       accent={s.lateCents > 0 ? 'var(--tms-badge-red)' : 'var(--tms-primary)'}
       onOpen={() => navigate(receivableLink())}
       testId="dashboard-ar-card"

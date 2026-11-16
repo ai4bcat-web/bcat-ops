@@ -8,7 +8,11 @@ function cents(n: number): string {
   return `$${(n / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-/** The vendor AP queue as money: what we owe, what is late, what is due this week. */
+/**
+ * The vendor AP queue as money: what we owe, what is late, what is due this week. These are vendor
+ * (non-carrier) bills from Vendors — repairs, maintenance, fuel, parts — not carrier pay, which is the
+ * Accounts payable card.
+ */
 export function VendorApCard({ onOpen }: { onOpen: () => void }) {
   const { items, loading } = useVendorPayables()
   const totals = useMemo(() => vendorApTotals(items, toLocalDateString(new Date())), [items])
@@ -25,12 +29,12 @@ export function VendorApCard({ onOpen }: { onOpen: () => void }) {
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onOpen() }}
       className="tms-card"
-      style={{ position: 'relative', cursor: 'pointer' }}
+      style={{ position: 'relative', cursor: 'pointer', height: '100%', boxSizing: 'border-box' }}
     >
       <div style={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%', background: accent, filter: 'blur(60px)', opacity: 0.18, pointerEvents: 'none' }} />
       <div style={{ padding: '16px 18px', position: 'relative' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>Vendor AP</div>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)' }} title="Vendor (non-carrier) bills from Vendors. Carrier pay is Accounts payable.">Vendor bills · non-carrier</div>
           <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tms-text-2)' }}>
             <Receipt size={15} />
           </div>
