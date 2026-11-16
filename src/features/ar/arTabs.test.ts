@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { computeArSummary } from './arSummary'
-import { billedByMatches, buildPaidRows, splitOpenInvoices, type ArBilledBy, type ArQueueLookups } from './arQueue'
+import { billedByMatches, splitOpenInvoices, type ArBilledBy, type ArQueueLookups } from './arQueue'
 import { arCompactItems, arTabs, paidInMonthOf } from './arTabs'
 import { ageInvoices } from '@/lib/arAging'
 import { formatCents } from '@/lib/invoiceBuild'
@@ -41,15 +41,12 @@ function page(billedBy: ArBilledBy) {
   const sentOpen = open.filter((i) => !drafts.has(i.id))
   const summary = computeArSummary({ open: sentOpen, paid: recentPaid, factorByItemId: new Map(), shipmentsById: lookups.shipmentsById, divisionName: lookups.divisionName, asOf: '2026-11-15' })
   const invoiced = split.invoiced.filter((r) => billedByMatches(r, billedBy))
-  const paid = buildPaidRows(paidInMonthOf(recentPaid, '2026-11'), lookups).filter((r) => billedByMatches(r, billedBy))
   const aging = ageInvoices(sentOpen, '2026-11-15T12:00:00Z', { fromInvoiceDate: true })
   const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0)
   const tabs = arTabs({
     billedBy,
-    paidMonthLabel: 'November 2026',
     ready: { count: split.drafts.length, total: formatCents(sum(split.drafts.map((r) => r.amountCents))) },
     invoiced: { count: invoiced.length, total: formatCents(sum(invoiced.map((r) => r.balanceCents))) },
-    paid: { count: paid.length, total: formatCents(sum(paid.map((r) => r.amountCents))) },
     aging: { count: sentOpen.length, total: formatCents(aging.totalCents) },
     review: 3,
   })
@@ -57,15 +54,13 @@ function page(billedBy: ArBilledBy) {
 }
 
 describe('Invoicing tabs tie to the Receivables card', () => {
-  it('Billed: All — Invoiced and Aging are Open AR, Paid this month is Collected this month', () => {
+  it('Billed: All — Invoiced and Aging are Open AR', () => {
     const { summary, tabs, chips } = page('all')
     expect(summary.openCount).toBe(4)
     expect(tabs.get('invoiced')?.count).toBe(summary.openCount)
     expect(tabs.get('invoiced')?.label).toBe(`Invoiced · ${formatCents(summary.openCents)} open`)
     expect(tabs.get('aging')?.count).toBe(summary.openCount)
     expect(tabs.get('aging')?.label).toBe(`Aging · ${formatCents(summary.openCents)} open`)
-    expect(tabs.get('paid')?.count).toBe(summary.collectedMonthCount)
-    expect(tabs.get('paid')?.label).toBe(`Paid in Nov · ${formatCents(summary.collectedMonthCents)}`)
     expect(chips.get('open')?.value).toBe(formatCents(summary.openCents))
   })
 
@@ -88,6 +83,12 @@ describe('Invoicing tabs tie to the Receivables card', () => {
 
   it('has no Payments & credits tab: it is the Payments received page now', () => {
     expect(page('all').tabs.has('payments')).toBe(false)
+  })
+
+  it('has no Paid tab in any billed view (Ryne 2026-11-16): paid lives on Payments received', () => {
+    for (const billedBy of ['all', 'manual', 'factored'] as const) {
+      expect([...page(billedBy).tabs.keys()]).toEqual(['ready', 'invoiced', 'aging', 'review'])
+    }
   })
 
   it('paidInMonthOf counts each invoice once, by paid date', () => {

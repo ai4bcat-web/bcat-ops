@@ -3,8 +3,7 @@
  * the cards). One set of definitions, shared with the Receivables card:
  *  - Invoiced = sent, unpaid invoices. With Billed: All it is "Open AR"; Manually invoiced is
  *    "Pending with shippers"; Factoring is "Factored, open". The label says which.
- *  - Paid = invoices settled in the chosen month by paid date. With Billed: All and this month it is
- *    "Collected this month".
+ *  - There is no Paid tab (Ryne 2026-11-16): what was paid, and when, lives on Accounting → Payments received.
  *  - Aging = the same invoices as "Open AR" (any billing), counted in invoices, not customers.
  *  - Payments, credits and debits live on their own page, Accounting → Payments received (Ryne 2026-11-15).
  *  - Needs review counts loads flagged for a finance check, not invoices.
@@ -24,22 +23,10 @@ const INVOICED_LABEL: Record<ArBilledBy, string> = {
   factored: 'Invoiced through OTR',
 }
 
-const PAID_LABEL: Record<ArBilledBy, (month: string) => string> = {
-  all: (m) => `Paid in ${m}`,
-  manual: (m) => `Paid by shippers in ${m}`,
-  factored: (m) => `Paid through OTR in ${m}`,
-}
-
-/** `November 2026` → `Nov`. */
-const shortMonth = (label: string) => label.slice(0, 3)
-
 export function arTabs(input: {
   billedBy: ArBilledBy
-  /** The Paid tab's month, as `monthLabel` writes it. */
-  paidMonthLabel: string
   ready: CountTotal
   invoiced: CountTotal
-  paid: CountTotal
   aging: CountTotal
   review: number
 }): TmsTab[] {
@@ -51,8 +38,6 @@ export function arTabs(input: {
       title: billedBy === 'all' ? 'Sent and unpaid. Same as "Open AR".'
         : billedBy === 'manual' ? 'Sent to the customer and unpaid. Same as "Pending with shippers". Pick Billed: All to see OTR too.'
           : 'Factored through OTR and unpaid. Same as "Factored, open". Pick Billed: All to see shippers too.' },
-    { key: 'paid', label: `${PAID_LABEL[billedBy](shortMonth(input.paidMonthLabel))} · ${input.paid.total}`, count: input.paid.count, testId: 'ar-tab-paid',
-      title: `Invoices paid in full in ${input.paidMonthLabel}, by paid date.${billedBy === 'all' ? ' This month it is the same as "Collected this month".' : ''}` },
     { key: 'aging', label: `Aging · ${input.aging.total} open`, count: input.aging.count, testId: 'ar-tab-aging',
       title: 'Every open invoice by age, any billing. Same as "Open AR".' },
     { key: 'review', label: 'Needs review', count: input.review, testId: 'ar-tab-review',
@@ -73,7 +58,7 @@ export function arCompactItems(summary: ArSummary): TmsSummaryChip[] {
   ]
 }
 
-/** Invoices paid in full in `month` (`YYYY-MM`), by paid date, once each: the Paid tab's rows. */
+/** Invoices paid in full in `month` (`YYYY-MM`), by paid date, once each. */
 export function paidInMonthOf(invoices: readonly InvoiceRecord[], month: string): InvoiceRecord[] {
   const seen = new Set<string>()
   const out: InvoiceRecord[] = []

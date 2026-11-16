@@ -5,8 +5,8 @@
  */
 import '@testing-library/jest-dom/vitest'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import type { ArWorklistRow } from '@/hooks/useArWorklist'
 import type { InvoiceRecord, OrderRecord, ShipmentRecord } from '@/types/tms'
 import { ageInvoices } from '@/lib/arAging'
@@ -139,6 +139,16 @@ describe('dashboard Accounts receivable card', () => {
       expect(row(key)).toContain(sub.split(' ')[0])
     }
     expect(page['Open AR']).toContain('$3,400.00')
+  })
+
+  it('Collected this month opens Payments received (there is no AR Paid tab)', async () => {
+    const Where = () => { const l = useLocation(); return <p data-testid="where">{l.pathname + l.search}</p> }
+    render(<MemoryRouter initialEntries={['/']}><Routes><Route path="/" element={<ReceivablesCard />} /><Route path="*" element={<Where />} /></Routes></MemoryRouter>)
+    await settle()
+    const row = screen.getByTestId('summary-row-collected')
+    fireEvent.click(row.querySelector('button, a') ?? row)
+    await settle()
+    expect(screen.getByTestId('where').textContent).toBe('/tms/payments-received?period=month')
   })
 
   it('shows Factoring inside the card with the shared OTR buckets', async () => {
