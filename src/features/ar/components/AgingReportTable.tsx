@@ -3,20 +3,57 @@
  * Expand all / Collapse all, sortable columns and a totals row that equals Open AR. Phones and
  * iPads get the same report as expandable cards.
  */
-import { Fragment, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Eye, Mail } from 'lucide-react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
+import { ChevronDown, ChevronRight, Eye, Mail, Search, X } from 'lucide-react'
 import { TmsButton } from '@/features/tms/kit'
+import { useAuthUser } from '@/hooks/useAuth'
 import { AR_AGING_BUCKETS, AR_AGING_BUCKET_LABEL } from '@/lib/arAging'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDay } from '../arViews'
 import {
+  DEFAULT_AGING_SORT,
+  EMPTY_AGING_FILTERS,
+  agingFilterCount,
+  filterAgingCustomers,
   sortAgingCustomers,
+  summarizeAging,
+  type AgingFilters,
+  type AgingReportBucket,
   type AgingReport,
   type AgingReportCustomer,
   type AgingReportInvoice,
   type AgingSortKey,
 } from '../agingReport'
 import './agingReport.css'
+
+type AgingSort = { key: AgingSortKey; dir: 'asc' | 'desc' }
+
+/** Each person's own sort and filters for this report (per signed-in user), kept like the other grids. */
+function agingPrefsKey(userId: string | null | undefined): string {
+  return `tms:ar-aging:${userId || 'anon'}:v1`
+}
+
+function readPrefs(key: string): { sort?: AgingSort; filters?: AgingFilters } {
+  try {
+    const raw = typeof window === 'undefined' ? null : window.localStorage.getItem(key)
+    if (!raw) return {}
+    const v = JSON.parse(raw) as { sort?: AgingSort; filters?: Partial<AgingFilters> }
+    return {
+      sort: v.sort && typeof v.sort.key === 'string' && (v.sort.dir === 'asc' || v.sort.dir === 'desc') ? v.sort : undefined,
+      filters: v.filters ? { ...EMPTY_AGING_FILTERS, ...v.filters, buckets: Array.isArray(v.filters.buckets) ? v.filters.buckets : [] } : undefined,
+    }
+  } catch {
+    return {}
+  }
+}
+
+function writePrefs(key: string, sort: AgingSort, filters: AgingFilters): void {
+  try {
+    window.localStorage.setItem(key, JSON.stringify({ sort, filters }))
+  } catch {
+    // Blocked storage: the report still works, it just won't remember.
+  }
+}
 
 const money = (cents: number) => (cents ? formatCents(cents) : '—')
 const terms = (days: number | null) => (days == null ? '—' : `Net ${days}`)
@@ -34,9 +71,24 @@ export function AgingReportTable({
   onSelect: (ids: string[]) => void
   busy: boolean
 }) {
+  const user = useAuthUser()
+  const prefsKey = agingPrefsKey(user?.userId)
   const [open, setOpen] = useState<Set<string>>(() => new Set())
-  const [sort, setSort] = useState<{ key: AgingSortKey; dir: 'asc' | 'desc' }>({ key: 'total', dir: 'desc' })
-  const rows = useMemo(() => sortAgingCustomers(report.customers, sort.key, sort.dir), [report.customers, sort])
+  const [sort, setSort] = useState<AgingSort>(() => readPrefs(prefsKey).sort ?? DEFAULT_AGING_SORT)
+  const [filters, setFilters] = useState<AgingFilters>(() => readPrefs(prefsKey).filters ?? EMPTY_AGING_FILTERS)
+  useEffect(() => { writePrefs(prefsKey, sort, filters) }, [prefsKey, sort, filters])
+  const filtered = useMemo(() => filterAgingCustomers(report.customers, filters), [report.customers, filters])
+  const rows = useMemo(() => sortAgingCustomers(filtered, sort.key, sort.dir), [filtered, sort])
+  const shown = useMemo(() => summarizeAging(rows), [rows])
+  const isFiltered = rows.length !== report.customers.length
+  const activeCount = agingFilterCount(filters)
+  const termsOptions = useMemo(
+    () => [...new Set(report.customers.map((c) => c.termsDays).filter((d): d is number => d != null))].sort((a, b) => a - b),
+    [report.customers],
+  )
+  const setF = (patch: Partial<AgingFilters>) => setFilters((f) => ({ ...f, ...patch }))
+  const toggleBucket = (b: AgingReportBucket) => setF({ buckets: filters.buckets.includes(b) ? filters.buckets.filter((x) => x !== b) : [...filters.buckets, b] })
+  const reset = () => { setFilters(EMPTY_AGING_FILTERS); setSort(DEFAULT_AGING_SORT) }
 
   const toggle = (id: string) => setOpen((prev) => {
     const next = new Set(prev)
@@ -59,16 +111,46 @@ export function AgingReportTable({
     </th>
   )
 
-  if (rows.length === 0) return <p className="tms-muted text-sm" style={{ padding: 16 }}>Nothing is owed.</p>
+  if (report.customers.length === 0) return <p className="tms-muted text-sm" style={{ padding: 16 }}>Nothing is owed.</p>
 
   return (
     <div className="tms-aging" data-testid="aging-report">
+      <div className="tms-aging-filters" role="group" aria-label="Filter the aging report">
+        <label className="tms-aging-search">
+          <Search size={13} aria-hidden="true" />
+          <input id="aging-search" type="search" placeholder="Search customer, PRO, invoice, PO" value={filters.search}
+            onChange={(e) => setF({ search: e.target.value })} aria-label="Search the aging report" />
+        </label>
+        <input id="aging-filter-customer" className="tms-aging-input" type="text" placeholder="Customer contains…" value={filters.customer}
+          onChange={(e) => setF({ customer: e.target.value })} aria-label="Filter by customer name" />
+        <select id="aging-filter-terms" className="tms-aging-input" value={filters.terms} onChange={(e) => setF({ terms: e.target.value })} aria-label="Filter by terms">
+          <option value="">Any terms</option>
+          {termsOptions.map((d) => <option key={d} value={String(d)}>Net {d}</option>)}
+        </select>
+        {AR_AGING_BUCKETS.map((b) => (
+          <button key={b} type="button" className={`tms-aging-chip${filters.buckets.includes(b) ? ' tms-on' : ''}`}
+            aria-pressed={filters.buckets.includes(b)} onClick={() => toggleBucket(b)} data-testid={`aging-has-${b}`}>
+            Has {AR_AGING_BUCKET_LABEL[b]}
+          </button>
+        ))}
+        <button type="button" className={`tms-aging-chip${filters.pastDueOnly ? ' tms-on' : ''}`} aria-pressed={filters.pastDueOnly}
+          onClick={() => setF({ pastDueOnly: !filters.pastDueOnly })} data-testid="aging-past-due-only">
+          Past due only
+        </button>
+        {(activeCount > 0 || sort.key !== DEFAULT_AGING_SORT.key || sort.dir !== DEFAULT_AGING_SORT.dir) && (
+          <TmsButton size="sm" variant="ghost" onClick={reset} data-testid="aging-reset">
+            <X size={12} /> Reset{activeCount ? ` (${activeCount})` : ''}
+          </TmsButton>
+        )}
+      </div>
       <div className="tms-aging-bar">
         <TmsButton size="sm" variant="ghost" onClick={() => setAll(!allOpen)} aria-label={allOpen ? 'Collapse all customers' : 'Expand all customers'}>
           {allOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />} {allOpen ? 'Collapse all' : 'Expand all'}
         </TmsButton>
-        <span className="tms-muted text-sm">{rows.length} customer{rows.length === 1 ? '' : 's'} · {report.count} open invoice{report.count === 1 ? '' : 's'} · {formatCents(report.totalCents)}</span>
+        <span className="tms-muted text-sm">{rows.length} customer{rows.length === 1 ? '' : 's'} · {shown.count} open invoice{shown.count === 1 ? '' : 's'} · {formatCents(shown.totalCents)}
+          {isFiltered && <> · <span data-testid="aging-filtered-note">filtered (Open AR {formatCents(report.totalCents)})</span></>}</span>
       </div>
+      {rows.length === 0 && <p className="tms-muted text-sm" style={{ padding: 16 }}>No customers match these filters.</p>}
 
       {/* Desktop: the report as a table. */}
       <div className="tms-aging-table-wrap">
@@ -131,13 +213,13 @@ export function AgingReportTable({
           <tfoot>
             <tr className="tms-aging-total" data-testid="aging-total-row">
               <td colSpan={2} />
-              <th scope="row">Total ({report.count} invoices)</th>
+              <th scope="row">{isFiltered ? 'Filtered total' : 'Total'} ({shown.count} invoices)</th>
               <td />
               <td />
-              {AR_AGING_BUCKETS.map((b) => <td key={b} className="tms-dg-right">{money(report.byBucket[b])}</td>)}
-              <td className="tms-dg-right"><strong>{formatCents(report.totalCents)}</strong></td>
-              <td className="tms-dg-right">{money(report.pastDueCents)}</td>
-              <td className="tms-dg-right">{report.count}</td>
+              {AR_AGING_BUCKETS.map((b) => <td key={b} className="tms-dg-right">{money(shown.byBucket[b])}</td>)}
+              <td className="tms-dg-right"><strong>{formatCents(shown.totalCents)}</strong></td>
+              <td className="tms-dg-right">{money(shown.pastDueCents)}</td>
+              <td className="tms-dg-right">{shown.count}</td>
               <td colSpan={3} />
             </tr>
           </tfoot>
@@ -192,7 +274,7 @@ export function AgingReportTable({
           )
         })}
         <li className="tms-aging-card tms-aging-card-total">
-          <div className="tms-aging-card-head"><span className="tms-aging-card-name">Total ({report.count} invoices)</span><span className="tms-aging-card-amt">{formatCents(report.totalCents)}</span></div>
+          <div className="tms-aging-card-head"><span className="tms-aging-card-name">{isFiltered ? 'Filtered total' : 'Total'} ({shown.count} invoices)</span><span className="tms-aging-card-amt">{formatCents(shown.totalCents)}</span></div>
         </li>
       </ul>
     </div>

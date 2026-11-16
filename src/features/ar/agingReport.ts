@@ -130,7 +130,7 @@ export function buildAgingReport(
     if (factored) report.factoredCents += row.balanceCents
   }
   for (const c of byCustomer.values()) {
-    c.invoices.sort((a, b) => a.invoiceDate.localeCompare(b.invoiceDate) || a.number.localeCompare(b.number))
+    c.invoices.sort((a, b) => (a.dueAt || '').localeCompare(b.dueAt || '') || a.invoiceDate.localeCompare(b.invoiceDate) || a.number.localeCompare(b.number))
   }
   report.customers = [...byCustomer.values()].sort((a, b) => b.totalCents - a.totalCents || a.customerName.localeCompare(b.customerName))
   return report
@@ -158,4 +158,56 @@ export function sortAgingCustomers(rows: readonly AgingReportCustomer[], key: Ag
     const cmp = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y))
     return cmp * sign || a.customerName.localeCompare(b.customerName)
   })
+}
+
+/** The default order Ryne asked for: customer name A→Z. */
+export const DEFAULT_AGING_SORT: { key: AgingSortKey; dir: 'asc' | 'desc' } = { key: 'customer', dir: 'asc' }
+
+export interface AgingFilters {
+  /** Free text: matches the customer name, or any invoice's PRO, invoice # or PO. */
+  search: string
+  /** Customer-name text filter. */
+  customer: string
+  /** Payment terms in days ('' = any). */
+  terms: string
+  /** Only customers with a balance in these buckets (any of them). */
+  buckets: AgingReportBucket[]
+  /** Only customers with something past due. */
+  pastDueOnly: boolean
+}
+
+export const EMPTY_AGING_FILTERS: AgingFilters = { search: '', customer: '', terms: '', buckets: [], pastDueOnly: false }
+
+export function agingFilterCount(f: AgingFilters): number {
+  return (f.search.trim() ? 1 : 0) + (f.customer.trim() ? 1 : 0) + (f.terms ? 1 : 0) + f.buckets.length + (f.pastDueOnly ? 1 : 0)
+}
+
+export function filterAgingCustomers(rows: readonly AgingReportCustomer[], f: AgingFilters): AgingReportCustomer[] {
+  const q = f.search.trim().toLowerCase()
+  const cust = f.customer.trim().toLowerCase()
+  return rows.filter((c) => {
+    if (cust && !c.customerName.toLowerCase().includes(cust)) return false
+    if (f.terms && String(c.termsDays ?? '') !== f.terms) return false
+    if (f.pastDueOnly && c.pastDueCents <= 0) return false
+    if (f.buckets.length && !f.buckets.some((b) => c.byBucket[b] > 0)) return false
+    if (q) {
+      const hit = c.customerName.toLowerCase().includes(q)
+        || c.invoices.some((i) => [i.pro, i.number, i.customerRef ?? ''].some((v) => v.toLowerCase().includes(q)))
+      if (!hit) return false
+    }
+    return true
+  })
+}
+
+/** Totals for the rows on screen, so the totals row follows the filters. */
+export function summarizeAging(rows: readonly AgingReportCustomer[]): Omit<AgingReport, 'customers'> {
+  const out = { byBucket: emptyBuckets(), totalCents: 0, pastDueCents: 0, factoredCents: 0, count: 0 }
+  for (const c of rows) {
+    for (const b of AR_AGING_BUCKETS as readonly AgingReportBucket[]) out.byBucket[b] += c.byBucket[b]
+    out.totalCents += c.totalCents
+    out.pastDueCents += c.pastDueCents
+    out.factoredCents += c.factoredCents
+    out.count += c.count
+  }
+  return out
 }
