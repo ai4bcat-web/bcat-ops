@@ -84,6 +84,8 @@ export function boardReqsOf(row: ShipmentRow, src: BoardReqSources, nowMs: numbe
     if (doc === 'POD' && !pod) continue
     add({ key: `doc:${doc}`, label: MISSING_DOC_LABEL[doc] })
   }
+  // Profit only follows from the rate and the cost: when either is already listed, profit is not a separate thing to fix.
+  if (out.has('customerRate') || out.has('expense')) out.delete('profit')
   return [...out.values()]
 }
 

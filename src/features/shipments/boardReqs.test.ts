@@ -28,6 +28,11 @@ describe('REQS: Push to load review + factoring, one list', () => {
     expect(keys(r)).toEqual(['po', 'factor:PICKUP_ZIP'])
   })
 
+  it('does not list profit separately when the rate or the cost is already listed', () => {
+    expect(keys(row({ revenueCents: null }))).toEqual(['customerRate'])
+    expect(keys(row({ costCents: null }))).toEqual(['expense'])
+  })
+
   it('never asks an asset load for expense or profit', () => {
     expect(keys(row({ revDivision: 'ASSETS', costCents: null }))).toEqual([])
   })
