@@ -109,6 +109,7 @@ import {
   prepareDocumentUpload,
   rateCarrier,
   readyToInvoice,
+  recacheDocGates,
   reconcileBilling,
   reviewLoad,
   pushToReviewVerdict,
@@ -182,7 +183,7 @@ import { factorGapsAtCreate, factorGapsError, orderPoNumber, routeEnds } from '.
 import { carShippingFactorGaps, customerFactorsForOtr, isCarShippingLoad } from '../../../src/lib/reviewRequirements'
 import { LEAD_STAGES, promotionFor } from '../../../src/lib/crm/promote'
 import { batchShipmentTask, BATCH_TASK_ACTIONS } from './batch'
-import { INTAKE_ACTIONS, reconcileOpenIntake, runIntakeAction, type IntakeAction, type IntakeDeps } from './intake'
+import { INTAKE_ACTIONS, isTenderFileKey, reconcileOpenIntake, runIntakeAction, type IntakeAction, type IntakeDeps } from './intake'
 // ── Step P ──────────────────────────────────────────────────────────────────
 // The demo flow's four shipment-side modules. Same bargain as the quote and
 // document modules above: they are handed this file's clients, tables and
@@ -9194,7 +9195,12 @@ const carrierInboundDeps: CarrierInboundDeps = {
   tables: { ...carrierOfferDeps.tables, message: SHIPMENT_MESSAGE_TABLE_NAME, proClaim: PRO_CLAIM_TABLE_NAME },
 }
 
-/** Intake e-mail files -> the shipment's customer rate con documents (S3 copy under shipment-docs/ + one row each; idempotent per file). */
+/**
+ * Intake e-mail files -> the shipment's customer rate con documents (S3 copy under shipment-docs/ + one row each; idempotent per file).
+ * Tender e-mails arrive under `intake-attachments/` (Intake) or `workflow-inbox/` (the forwarded-tender workflow, e.g. 20059's
+ * "Rate Confirmation for order # 10121814"); both are the customer's files. The order's cached document gate is re-read
+ * afterwards, so the board's RC cell and the shipment's Rate confirmation box agree straight away.
+ */
 async function attachIntakeFiles(
   shipmentId: string,
   intakeId: string,
@@ -9206,7 +9212,7 @@ async function attachIntakeFiles(
   const order = (await queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId))[0]
   let attached = 0
   for (const [index, file] of attachments.entries()) {
-    if (!allowed.has(file.contentType) || !file.key.startsWith('intake-attachments/')) continue
+    if (!allowed.has(file.contentType) || !isTenderFileKey(file.key)) continue
     const id = `intake-${intakeId}-${index}`
     const key = documentKey(shipmentId, id, file.name, file.contentType)
     try {
@@ -9220,6 +9226,15 @@ async function attachIntakeFiles(
       attached += 1
     } catch (err) {
       console.error('[shipment-actions] intake file not attached', shipmentId, intakeId, err instanceof Error ? err.message : String(err))
+    }
+  }
+  if (attached > 0) {
+    try {
+      const bundle = await readBundle(shipmentId)
+      const writes = await recacheDocGates(documentDeps, bundle, bundle.documents, nowIso())
+      if (writes.length > 0) await transact(writes, 'intake document gate')
+    } catch (err) {
+      console.error('[shipment-actions] intake gate re-cache failed', shipmentId, err instanceof Error ? err.message : String(err))
     }
   }
   return attached
