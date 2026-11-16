@@ -42,7 +42,7 @@ import type { FormApi } from './sectionRegistry'
 import { SummaryRail } from './SummaryRail'
 import { useFormActions } from './useFormActions'
 import { useShipmentForm, type RunKind } from './useShipmentForm'
-import { isFactorBilled } from '@/lib/factorBilling'
+import { isFactoredLoad } from '@/lib/factorBilling'
 import { blockingIssues, issueSummary, missingDocIssues, missingOnLoadIssues } from './validation'
 import { reqsAsIssues, type BoardReq } from '../boardReqs'
 import { useOwnBoardReqs } from './useOwnBoardReqs'
@@ -294,10 +294,10 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   const ownReqs = useOwnBoardReqs(shipmentId, existingLoad, reqSources, bundle)
   const boardReqs = ownReqs ?? linkReqs
   const missingOnLoad = useMemo(() => {
-    const own = [...missingOnLoadIssues(form.issues, existingLoad, isFactorBilled(form.customer)), ...missingDocIssues(bundle, form.customer, existingLoad)]
+    const own = [...missingOnLoadIssues(form.issues, existingLoad, isFactoredLoad(form.customer, (bundle?.shipment as { revDivision?: string | null } | null | undefined)?.revDivision ?? form.values.ship.revDivision)), ...missingDocIssues(bundle, form.customer, existingLoad)]
     if (!boardReqs) return own
     return boardReqs.length > 0 ? reqsAsIssues(boardReqs, own, form.issues) : []
-  }, [form.issues, existingLoad, form.customer, bundle, boardReqs])
+  }, [form.issues, existingLoad, form.customer, form.values.ship.revDivision, bundle, boardReqs])
   // Opened from the board's MISSING chip (`?missing=1`): go straight to the first missing field, once.
   const missingFocused = useRef(false)
   const firstMissing = missingOnLoad[0]?.fieldKey

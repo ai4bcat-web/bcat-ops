@@ -12,6 +12,7 @@
  */
 import { InvoiceEditDrawer } from './components/InvoiceEditDrawer'
 import { billsThroughOtr, ordersNeedingInvoice, unsentLabel } from './autoInvoice'
+import { isFactoredLoad } from '@/lib/factorBilling'
 import { ArSummaryStrip } from './ArSummaryStrip'
 import { readyQueueRows, receivablesSummary, useArSummaryModel } from './useArSummaryModel'
 import { tabFromUrl } from '@/features/finance/accountingLinks'
@@ -990,7 +991,7 @@ function queueView({
       case 'email': {
         const { to, cc } = invoiceEmailsOf(row)
         const tip = [to.length ? `To: ${to.join(', ')}` : '', cc.length ? `Copy: ${cc.join(', ')}` : ''].filter(Boolean).join('\n')
-        const factoredCustomer = row.customerId ? customerById.get(row.customerId)?.billingMethod === 'FACTOR' : false
+        const factoredCustomer = row.customerId ? isFactoredLoad(customerById.get(row.customerId), row.revDivision) : false
         if (row.factored || factoredCustomer) {
           return <span className="tms-muted" title={`Not used — factored (OTR)${tip ? `\n${tip}` : ''}`}>{to[0] ?? '—'}{to.length > 1 ? ` +${to.length - 1}` : ''}</span>
         }

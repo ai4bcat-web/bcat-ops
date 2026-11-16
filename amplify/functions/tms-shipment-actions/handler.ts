@@ -2506,11 +2506,12 @@ function assertFactorReadyAtCreate(customer: Row | null, references: Row[], stop
     poNumber: orderPoNumber(references as unknown as Parameters<typeof orderPoNumber>[0]),
     customerRateCents: revenueCents,
     ...routeEnds(stops as unknown as Parameters<typeof routeEnds>[0]),
+    revDivision: shipment?.revDivision as string | null | undefined,
   })
   // Car shipping (Ryne 2026-11-16): only the rate and the billing method, unless the customer factors.
   const message = factorGapsError(carShippingFactorGaps(gaps, {
     revDivision: shipment?.revDivision as string | null | undefined,
-    customerFactors: customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null),
+    customerFactors: customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null, shipment?.revDivision as string | null | undefined),
   }))
   if (message) throw new Error(message)
 }
@@ -2552,7 +2553,7 @@ async function saveOrderForm(input: Row, caller: Caller, opts: SaveOrderFormOpts
   assertWeightUnitsAgree(freight)
   // Car shipping skips the customer's required references and the equipment type (Ryne 2026-11-16), unless it factors.
   const carShipRelaxed = isCarShippingLoad(shipment as { revDivision?: string | null })
-    && !customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null)
+    && !customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null, shipment.revDivision as string | null | undefined)
   if (!draftSave && !carShipRelaxed) assertRequiredReferences(customer, references)
 
   const equipmentType = optionalString(orderInput.equipmentType, 80) ?? optionalString(order.equipmentType, 80)

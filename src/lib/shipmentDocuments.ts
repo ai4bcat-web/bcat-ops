@@ -531,6 +531,8 @@ export interface DocGateInput {
    * confirmation, own-fleet ones included (the office files it), so it is added unless this is true.
    */
   carShipper?: boolean | null
+  /** CUSTOMER scope: the load's revenue division. A BROKERAGE load is never factored (Ryne 2026-11-16). */
+  revDivision?: string | null
 }
 
 /**
@@ -565,10 +567,11 @@ export function evaluateDocGate(input: DocGateInput): DocGateResult {
     const needsRateCon = rateConRequired({
       asset: input.ownFleet === true,
       carShipper: input.carShipper === true,
-      customerFactors: customerFactorsForOtr(input.customer as { billingMethod?: string | null; factored?: boolean | null } | null | undefined),
+      customerFactors: customerFactorsForOtr(input.customer as { billingMethod?: string | null; factored?: boolean | null } | null | undefined, input.revDivision),
       customerWaivesRateCon: customerDocsNotRequired(
         input.customer as { reviewRequirements?: string[] | null } | null | undefined,
         input.settings as { reviewRequirements?: string[] | null } | null | undefined,
+        input.revDivision,
       ).includes('RATE_CON'),
     })
     if (needsRateCon && !gated.includes('RATE_CON')) gated.push('RATE_CON')
@@ -579,6 +582,7 @@ export function evaluateDocGate(input: DocGateInput): DocGateResult {
     const notRequired = customerDocsNotRequired(
       input.customer as { reviewRequirements?: string[] | null } | null | undefined,
       input.settings as { reviewRequirements?: string[] | null } | null | undefined,
+      input.revDivision,
     )
     for (let i = gated.length - 1; i >= 0; i--) if ((notRequired as string[]).includes(gated[i])) gated.splice(i, 1)
     for (const type of normalizeRequiredDocTypes(input.extraDocTypes ?? []).types) {

@@ -52,6 +52,7 @@ import {
   type ReleaseGateResult,
 } from '../../../src/lib/releaseGate'
 import { isCarShipperLoad } from '../../../src/lib/carShipper'
+import { isBrokerageRevDivision } from '../../../src/lib/reviewRequirements'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { isCustomerUnresolved, unresolvedCustomerMessage } from '../../../src/lib/customerResolution'
 import { assetRateConTenders, canEmailTo, evaluateDocGate, gateLoadIds, isOwnFleetLoad } from '../../../src/lib/shipmentDocuments'
@@ -244,8 +245,11 @@ export async function readOrderContext(orderId: string): Promise<OrderContext> {
     charges: chargeRows as unknown as LoadChargeRecord[],
     documents: withAssetTenders(documentRows as unknown as ShipmentDocumentRecord[], { order, shipment, loads, loadCarriers }),
     // Step AW: a FACTOR billing method is the factored flag, so the bill prints the factor's remit-to.
+    // Brokered loads are never factored (Ryne 2026-11-16): the invoice bills as MANUAL with BCAT's own remit-to.
     customer: customerRow
-      ? ({ ...customerRow, ...(customerRow.billingMethod === 'FACTOR' ? { factored: true } : {}) } as unknown as CustomerRecord)
+      ? (isBrokerageRevDivision((shipment as unknown as Row).revDivision as string | null | undefined)
+          ? ({ ...customerRow, billingMethod: 'MANUAL', factored: false } as unknown as CustomerRecord)
+          : ({ ...customerRow, ...(customerRow.billingMethod === 'FACTOR' ? { factored: true } : {}) } as unknown as CustomerRecord))
       : null,
     division,
     locations: locationRows.filter((row): row is Row => row != null) as unknown as LocationRecord[],
@@ -283,6 +287,7 @@ function docGateFor(context: OrderContext): DocGateResult {
     scope: 'CUSTOMER',
     legacyImported: context.shipment?.legacyImported === true,
     carShipper: isCarShipperLoad(context.shipment as { revDivision?: string | null } | null),
+    revDivision: (context.shipment as { revDivision?: string | null } | null)?.revDivision ?? null,
     ownFleet: isOwnFleetLoad(
       context.shipment as { revDivision?: string | null } | null,
       context.loadCarriers as unknown as { status?: string | null; kind?: string | null }[],

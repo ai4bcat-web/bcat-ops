@@ -733,6 +733,7 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
             poNumber: factoringPoNumber(order.references, firstLoad?.tmsId),
             customerRateCents: order.revenueCents ?? null,
             ...routeEnds(stops),
+            revDivision: s.revDivision ?? null,
           }).map((g) => g.code)
           : null,
         // Resolved names.
@@ -858,12 +859,13 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         customerMc: customer?.mcNumber ?? null,
         customerDot: customer?.dotNumber ?? null,
         customerFactored: customer?.factored ?? null,
-        docsNotRequired: customerDocsNotRequired(customer ?? null, null),
-        customerFactors: customerFactorsForOtr(customer ?? null),
-        customerBillingGaps: customerBillingGaps(customer ?? null, { apEmailRequired: customerApEmailRequired(customer ?? null, null) }),
-        customerBillingSummary: customerBillingSummary(customer ?? null, { apEmailRequired: customerApEmailRequired(customer ?? null, null) }),
+        // Brokered loads are never factored (Ryne 2026-11-16): every factored check here reads the load's division.
+        docsNotRequired: customerDocsNotRequired(customer ?? null, null, s.revDivision ?? null),
+        customerFactors: customerFactorsForOtr(customer ?? null, s.revDivision ?? null),
+        customerBillingGaps: customerBillingGaps(customer ?? null, { apEmailRequired: customerApEmailRequired(customer ?? null, null, s.revDivision ?? null) }),
+        customerBillingSummary: customerBillingSummary(customer ?? null, { apEmailRequired: customerApEmailRequired(customer ?? null, null, s.revDivision ?? null) }),
         customerInvoiceMethod: customerInvoiceMethodText(customer ?? null),
-        customerApEmail: customerApEmailText(customer ?? null, { apEmailRequired: customerApEmailRequired(customer ?? null, null) }),
+        customerApEmail: customerApEmailText(customer ?? null, { apEmailRequired: customerApEmailRequired(customer ?? null, null, s.revDivision ?? null) }),
         customerPaymentTermsDays: customer?.paymentTermsDays ?? null,
         creditLimitCents: customer?.creditLimitCents ?? null,
         creditHold: customer?.creditHoldFlag ?? null,

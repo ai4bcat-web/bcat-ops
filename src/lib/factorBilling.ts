@@ -10,6 +10,7 @@
  * Relative imports only: the finance and shipment Lambdas bundle this file by path.
  */
 import type { CustomerRecord } from '../types/tms'
+import { isBrokerageRevDivision } from './reviewRequirements'
 
 export type FactorBillingCustomer = Pick<CustomerRecord, 'factored' | 'billingMethod'>
 
@@ -29,4 +30,12 @@ export function isFactorBilled(customer: FactorBillingCustomer | null | undefine
   if (!customer) return false
   if (customer.billingMethod === 'MANUAL') return false
   return customer.billingMethod === 'FACTOR' || customer.factored === true
+}
+
+/**
+ * Is this LOAD factored (Ryne 2026-11-16)? The customer is factor-billed AND the load is not in the BROKERAGE revenue
+ * division: brokered loads are never factored. Same rule as reviewRequirements.customerFactorsForOtr(customer, division).
+ */
+export function isFactoredLoad(customer: FactorBillingCustomer | null | undefined, revDivision: string | null | undefined): boolean {
+  return isFactorBilled(customer) && !isBrokerageRevDivision(revDivision)
 }

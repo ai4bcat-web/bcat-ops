@@ -19,7 +19,7 @@ import { MAX } from './constants'
 import { carrierLinehaulLine, financialPreview, firstPickupIndex, lastDeliveryIndex } from './mapping'
 import { isShipmentTypeKey } from '@/lib/shipmentTypes'
 import { factorGapsAtCreate, type FactorGapCode } from '@/lib/factorReadyAtCreate'
-import { isFactorBilled } from '@/lib/factorBilling'
+import { isFactoredLoad } from '@/lib/factorBilling'
 import { carrierSlotsOf, parseInteger, type CarrierSlot, type FormStop, type ShipmentFormValues } from './model'
 import type { FormIssue, SectionKey } from './sectionProps'
 import { evaluateDocGate, gateLoadIds, isOwnFleetLoad } from '@/lib/shipmentDocuments'
@@ -269,7 +269,7 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
     const severity: 'error' | 'warn' = o.existingLoad ? 'warn' : 'error'
     // Past draft, a factored load's gaps stay on the field as required (without blocking the save) so they are fixed before
     // Load Review, which refuses a factored load without them (Ryne 2026-11-14).
-    const marked = Boolean(o.existingLoad) && !typed && isFactorBilled(o.customer)
+    const marked = Boolean(o.existingLoad) && !typed && isFactoredLoad(o.customer, values.ship.revDivision)
     const pick = fp >= 0 ? values.stops[fp] : null
     const drop = ld >= 0 ? values.stops[ld] : null
     const gaps = factorGapsAtCreate({
@@ -278,6 +278,7 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
       customerRateCents: financialPreview(values, o.customer, null).customerTotalCents,
       pickup: pick ? { city: pick.city, state: pick.state, zip: pick.zip } : null,
       delivery: drop ? { city: drop.city, state: drop.state, zip: drop.zip } : null,
+      revDivision: values.ship.revDivision,
     })
     const taken = new Set(issues.filter((i) => i.severity === 'error').map((i) => `${i.section}:${i.fieldKey}`))
     for (const gap of gaps) {
@@ -300,7 +301,7 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
   }
   // Car shipping (Ryne 2026-11-16): only its own requirements block or flag the form, unless the customer factors.
   if (isCarShippingLoad({ revDivision: values.ship.revDivision })) {
-    const factored = !typed && customerFactorsForOtr(o.customer)
+    const factored = !typed && customerFactorsForOtr(o.customer, values.ship.revDivision)
     return issues.filter((issue) => carShippingFormKeeps(issue.id, factored))
   }
   return issues
@@ -352,7 +353,8 @@ export function missingDocIssues(
 ): FormIssue[] {
   if (!existingLoad || !bundle || bundle.shipment.legacyImported === true) return []
   if (isCarShipperLoad(bundle.shipment as { revDivision?: string | null })) return []
-  const factored = customerFactorsForOtr(customer ?? null)
+  const revDivision = (bundle.shipment as { revDivision?: string | null }).revDivision ?? null
+  const factored = customerFactorsForOtr(customer ?? null, revDivision)
   const ownFleet = isOwnFleetLoad(bundle.shipment as { revDivision?: string | null }, bundle.loadCarriers)
   if (!factored && !ownFleet) return []
   const order = bundle.orders[0]
@@ -368,8 +370,9 @@ export function missingDocIssues(
     scope: 'CUSTOMER',
     ownFleet,
     loadRateConKeys: bundle.loads.filter((l) => loadIds.includes(l.id)).map((l) => (l as { rateConfirmKey?: string | null }).rateConfirmKey ?? null),
+    revDivision,
   })
-  const notRequired = customerDocsNotRequired(customer ?? null, null)
+  const notRequired = customerDocsNotRequired(customer ?? null, null, revDivision)
   const needsRateCon = rateConRequired({ asset: ownFleet, customerFactors: factored, customerWaivesRateCon: notRequired.includes('RATE_CON') })
   const out: FormIssue[] = []
   const doc = (type: 'RATE_CON' | 'POD', label: string, message: string) => out.push({

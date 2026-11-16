@@ -21,6 +21,7 @@
 // Relative, not `@/` — the tmsFinanceActions Lambda bundles this file by path for its
 // SEND_TO_FACTOR action, and the alias does not exist in the function build.
 import { customerRefOf } from './customerRef'
+import { isBrokerageRevDivision } from './reviewRequirements'
 import { rateCentsToDollars } from './otrInvoice'
 import type { OtrRequiredField } from './otrInvoice'
 import type { FactoringItem, Stop } from '../types'
@@ -200,6 +201,10 @@ export function factoringRowFor(input: FactoringRowInput): FactoringItem {
 export function whyNotFactorable(input: FactorRefusalInput): string | null {
   const { invoice, order, shipment, customer, load, existingRow } = input
 
+  // Brokered loads are never factored (Ryne 2026-11-16): they invoice manually with BCAT's own remit-to.
+  if (isBrokerageRevDivision((shipment as { revDivision?: string | null }).revDivision)) {
+    return `Shipment ${shipment.number} is a brokered load; brokered loads are not factored. Invoice it manually.`
+  }
   if (invoice.status === 'VOID') {
     return `Invoice ${invoice.number} is void; re-issue it before sending it to the factor.`
   }

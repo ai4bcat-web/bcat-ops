@@ -101,6 +101,7 @@ export function useShipmentDocuments(
         scope: 'CUSTOMER',
         legacyImported,
         carShipper,
+        revDivision: (bundle?.shipment as { revDivision?: string | null } | null | undefined)?.revDivision ?? null,
         // Own fleet: the customer's tender on the load is the outside rate confirmation (Ryne 2026-11-16).
         ownFleet: isOwnFleetLoad(bundle?.shipment ?? null, bundle?.loadCarriers ?? []),
         soleOrder: (bundle?.orders ?? []).length === 1,

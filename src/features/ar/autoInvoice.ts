@@ -5,14 +5,15 @@
  * the missing invoices once per order per visit; generating never sends anything.
  */
 import type { ArQueueRow } from './arQueue'
-import { isFactorBilled, type FactorBillingCustomer } from '@/lib/factorBilling'
+import { isFactoredLoad, type FactorBillingCustomer } from '@/lib/factorBilling'
 
 /**
  * Ryne 2026-11-14: a factored load's invoice is never e-mailed: it goes through the OTR queue. A row bills through
- * OTR when its invoice or order is factored, or its customer is factor-billed.
+ * OTR when its invoice or order is factored, or its customer is factor-billed and the load is not brokered
+ * (Ryne 2026-11-16: brokered loads are never factored).
  */
-export function billsThroughOtr(row: Pick<ArQueueRow, 'factored'>, customer: FactorBillingCustomer | null | undefined): boolean {
-  return row.factored || isFactorBilled(customer)
+export function billsThroughOtr(row: Pick<ArQueueRow, 'factored'> & { revDivision?: string | null }, customer: FactorBillingCustomer | null | undefined): boolean {
+  return row.factored || isFactoredLoad(customer, row.revDivision)
 }
 
 /**

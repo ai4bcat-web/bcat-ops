@@ -3139,6 +3139,24 @@ describe('RELEASE_TO_BILLING', () => {
     expect(String(shipmentAudit[0].changes)).toContain('Pushed to factoring queue on release')
   })
 
+  it('FACTOR customer on a BROKERAGE load: manual invoice with BCAT remit-to, never queued for OTR (Ryne 2026-11-16)', async () => {
+    seedMethod('FACTOR')
+    const shipment = [...table(TABLES.shipment).values()][0]
+    shipment.revDivision = 'BROKERAGE'
+    const customer = table(TABLES.customer).get(CUSTOMER_ID)!
+    customer.apEmail = 'ap@cust.test'
+    const out = (await call('RELEASE_TO_BILLING', { orderId: ORDER_ID })) as { invoice: Row; factoringItem: Row | null; billingMethod: string; readyToSend: boolean }
+    expect(out.billingMethod).toBe('MANUAL')
+    expect(out.factoringItem).toBeNull()
+    expect(out.readyToSend).toBe(true)
+    const invoice = table(TABLES.invoice).get(String(out.invoice.id))!
+    expect(invoice.factored).toBe(false)
+    expect(invoice.factoringItemId ?? null).toBeNull()
+    expect((invoice.remitTo as Row | undefined)?.name).not.toBe((FACTOR_REMIT as Row).name)
+    expect(table(TABLES.factoring).size).toBe(0)
+    expect(sesSend).not.toHaveBeenCalled()
+  })
+
   it('MANUAL: invoice is Ready to send, nothing is e-mailed', async () => {
     seedMethod('MANUAL')
     const out = (await call('RELEASE_TO_BILLING', { orderId: ORDER_ID })) as { invoice: Row; readyToSend: boolean; factoringItem: Row | null }

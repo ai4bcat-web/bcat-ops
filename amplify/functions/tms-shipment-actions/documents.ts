@@ -268,6 +268,7 @@ export function customerDocGate(args: {
     scope: 'CUSTOMER',
     legacyImported: args.bundle.shipment?.legacyImported === true,
     carShipper: isCarShipperLoad(args.bundle.shipment as { revDivision?: string | null } | null),
+    revDivision: (args.bundle.shipment as { revDivision?: string | null } | null)?.revDivision ?? null,
     // Own fleet: the customer's tender on the load counts as the outside rate confirmation (Ryne 2026-11-16).
     ownFleet: isOwnFleetLoad(
       args.bundle.shipment as { revDivision?: string | null } | null,
@@ -1359,7 +1360,9 @@ export async function computeReleaseGate(
 
 /** The customer's Load Review list, then the org default, then the built-in seven. */
 function reviewRequirementsFor(customer: Row | null, settings: Row | null, shipment?: Row | null): ReviewRequirement[] {
-  const factors = customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null)
+  // Brokered loads are never factored (Ryne 2026-11-16): the load's division decides, not only the customer.
+  const revDivision = typeof shipment?.revDivision === 'string' ? shipment.revDivision : null
+  const factors = customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null, revDivision)
   // Car shipping (Ryne 2026-11-16): its own fixed list, whatever the customer's (reviewRequirementsForLoad).
   if (isCarShippingLoad(shipment as { revDivision?: string | null } | null)) {
     return reviewRequirementsForLoad([], { revDivision: shipment?.revDivision as string | null, customerFactors: factors })
@@ -1369,7 +1372,7 @@ function reviewRequirementsFor(customer: Row | null, settings: Row | null, shipm
     Array.isArray(settings?.reviewRequirements) ? (settings.reviewRequirements as string[]) : null,
   )
   // A customer we factor cannot waive the POD or the RC: OTR needs both (customerDocsNotRequired says the same).
-  if (customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null)) {
+  if (factors) {
     for (const key of ['podReceived', 'rateConReceived'] as const) if (!list.includes(key)) list.push(key)
   }
   return list
@@ -1436,7 +1439,7 @@ function reviewExtras(bundle: Bundle, order: Row, customer: Row | null, settings
     ...factorAndCustomerReasons(bundle, order, customer),
   ], {
     revDivision: typeof bundle.shipment.revDivision === 'string' ? bundle.shipment.revDivision : null,
-    customerFactors: customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null),
+    customerFactors: customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null, typeof bundle.shipment.revDivision === 'string' ? bundle.shipment.revDivision : null),
   })
 }
 
@@ -1448,7 +1451,7 @@ function factorAndCustomerReasons(bundle: Bundle, order: Row, customer: Row | nu
     ...factor,
     ...customerBillingReasons(customerBillingGaps(customer as unknown as CustomerBillingFacts | null, {
       // Waivable per customer (AUTO SHIPPER), never for a factored one: customerApEmailRequired.
-      apEmailRequired: customerApEmailRequired(customer as { reviewRequirements?: string[] | null; billingMethod?: string | null; factored?: boolean | null } | null, null),
+      apEmailRequired: customerApEmailRequired(customer as { reviewRequirements?: string[] | null; billingMethod?: string | null; factored?: boolean | null } | null, null, typeof bundle.shipment.revDivision === 'string' ? bundle.shipment.revDivision : null),
     }), {
       skipBillingMethod: factor.some((r) => r.code === 'FACTOR_BILLING_METHOD'),
     }),
@@ -1477,6 +1480,7 @@ function factorReviewReasons(bundle: Bundle, order: Row, customer: Row | null): 
     ),
     customerRateCents: numberOrNull(order.revenueCents),
     ...routeEnds(stops),
+    revDivision: typeof bundle.shipment.revDivision === 'string' ? bundle.shipment.revDivision : null,
   })
   return gaps.map((gap) => ({
     code: `FACTOR_${gap.code}`,

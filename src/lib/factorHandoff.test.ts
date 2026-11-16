@@ -318,3 +318,16 @@ describe('refusing to send an invoice to the factor', () => {
       .toMatch(/already submitted to OTR as invoice 99812/)
   })
 })
+
+describe('brokered loads are never factored (Ryne 2026-11-16)', () => {
+  it('refuses to send a brokered load to the factor', () => {
+    const refusal = whyNotFactorable({
+      invoice: invoice(),
+      order: order(),
+      shipment: { ...shipment(), revDivision: 'BROKERAGE' } as ReturnType<typeof shipment>,
+      customer: customer(),
+      load: LOAD,
+    })
+    expect(refusal).toMatch(/brokered load/)
+  })
+})

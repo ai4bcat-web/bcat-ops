@@ -3,7 +3,7 @@
  * (ReviewFixPanel) and the review page, kept out of the component file for fast refresh.
  */
 import { factorGapsForLoad, factoringPoNumber, routeEnds, FACTOR_GAP_LABEL } from '@/lib/factorReadyAtCreate'
-import { isFactorBilled } from '@/lib/factorBilling'
+import { isFactoredLoad } from '@/lib/factorBilling'
 import { countsAsPresent } from '@/lib/shipmentDocuments'
 import { stopsList } from '@/lib/stopPlace'
 import type { CustomerRecord, ShipmentBundle } from '@/types/tms'
@@ -64,7 +64,9 @@ export interface OtrCheck { key: string; label: string; ok: boolean; anchor: Fix
 
 /** What OTR needs on this load: the booking fields factoring checks, then the POD and the rate confirmation. Empty unless factored. */
 export function otrChecks(bundle: ShipmentBundle, customer: CustomerRecord | null): OtrCheck[] {
-  if (!isFactorBilled(customer)) return []
+  // Brokered loads are never factored (Ryne 2026-11-16): no OTR section for them.
+  const revDivision = (bundle.shipment as { revDivision?: string | null } | null | undefined)?.revDivision ?? null
+  if (!isFactoredLoad(customer, revDivision)) return []
   const order = bundle.orders[0]
   const load = bundle.loads.find(liveLoad) ?? bundle.loads[0]
   const stops = bundle.loads.filter(liveLoad).flatMap((l) => stopsList<Stop>(l.stops))
@@ -73,6 +75,7 @@ export function otrChecks(bundle: ShipmentBundle, customer: CustomerRecord | nul
     poNumber: factoringPoNumber(order?.references as never, load?.tmsId ?? null),
     customerRateCents: order?.revenueCents ?? null,
     ...routeEnds(stops),
+    revDivision,
   }).map((g) => g.code))
   const fields: { code: keyof typeof FACTOR_GAP_LABEL; anchor: FixAnchor }[] = [
     { code: 'BILLING_METHOD', anchor: 'customer' }, { code: 'CUSTOMER_MC', anchor: 'customer' }, { code: 'PO_MISSING', anchor: 'ref' },

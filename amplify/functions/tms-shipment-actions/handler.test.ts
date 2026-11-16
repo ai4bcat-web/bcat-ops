@@ -4787,6 +4787,8 @@ describe('documents', () => {
   it('re-caches what the order still needs in the same write', async () => {
     seedCustomer({ requiredDocsForInvoice: ['POD', 'LUMPER_RECEIPT'], billingMethod: 'FACTOR' })
     const ids = await delivered()
+    // A factored load is a FACTOR customer on a non-brokerage load (Ryne 2026-11-16): take the test load out of BROKERAGE.
+    table(TABLES.shipment).set(ids.shipmentId, { ...table(TABLES.shipment).get(ids.shipmentId)!, revDivision: 'ASSETS' })
     const prepared = await prepare(ids.shipmentId)
     putS3Object(prepared.s3Key, { ContentLength: 1024, ContentType: 'application/pdf' })
     await commit(ids, prepared)
@@ -4872,6 +4874,8 @@ describe('documents', () => {
   it('moves the gate only once a portal upload is accepted, and back when it is voided', async () => {
     seedCustomer({ requiredDocsForInvoice: ['POD'], billingMethod: 'FACTOR' })
     const ids = await delivered()
+    // A factored load is a FACTOR customer on a non-brokerage load (Ryne 2026-11-16): take the test load out of BROKERAGE.
+    table(TABLES.shipment).set(ids.shipmentId, { ...table(TABLES.shipment).get(ids.shipmentId)!, revDivision: 'ASSETS' })
     seedPortalUpload(ids)
 
     // A carrier labelling their POD "other" is the common case, so accepting retypes.
@@ -4921,6 +4925,8 @@ describe('documents', () => {
   it('adds and removes a per-load required document in the cached gate', async () => {
     seedCustomer({ requiredDocsForInvoice: ['POD'], billingMethod: 'FACTOR' })
     const ids = await delivered()
+    // A factored load is a FACTOR customer on a non-brokerage load (Ryne 2026-11-16): take the test load out of BROKERAGE.
+    table(TABLES.shipment).set(ids.shipmentId, { ...table(TABLES.shipment).get(ids.shipmentId)!, revDivision: 'ASSETS' })
     await expect(
       call('SET_LOAD_REQUIRED_DOCS', { shipmentId: ids.shipmentId, loadId: ids.loadId, requiredDocTypes: ['INVOICE'] }),
     ).rejects.toThrow(/must be one of/)
@@ -5043,6 +5049,8 @@ describe('bill of lading', () => {
     it('stamps the slot on the audit row and re-caches the required-doc gate with the row', async () => {
       seedCustomer({ requiredDocsForInvoice: ['BOL'], billingMethod: 'FACTOR' })
       const ids = await draftWithTwoDeliveries()
+      // A factored load is a FACTOR customer on a non-brokerage load (Ryne 2026-11-16): take the test load out of BROKERAGE.
+      table(TABLES.shipment).set(ids.shipmentId, { ...table(TABLES.shipment).get(ids.shipmentId)!, revDivision: 'ASSETS' })
       const before = table(TABLES.order).get(ids.orderId)!
       expect(before.docsMissing ?? ['BOL']).toEqual(['BOL'])
       const saved = (await saveBol(ids, { stopId: 'stp-de' })) as { document: Row }
@@ -5562,6 +5570,8 @@ describe('READY_TO_INVOICE', () => {
       it('a factored load cannot go into or out of Load Review without what OTR needs from booking (Ryne 2026-11-14)', async () => {
         const factoredBroker = { reviewRequirements: [], billingMethod: 'FACTOR', customerType: 'BROKER', mcNumber: '123456', apEmail: 'ap@broker.test' }
         const ids = await reviewable({ customer: factoredBroker })
+        // A factored load is a FACTOR customer on a non-brokerage load (Ryne 2026-11-16): take the test load out of BROKERAGE.
+        table(TABLES.shipment).set(ids.shipmentId, { ...table(TABLES.shipment).get(ids.shipmentId)!, revDivision: 'ASSETS' })
         // Booked before the rule had its MC: take it away on the customer record, as an old customer would be.
         const customerId = String(table(TABLES.order).get(ids.orderId)!.customerId)
         table(TABLES.customer).set(customerId, { ...table(TABLES.customer).get(customerId)!, mcNumber: null })
@@ -5576,6 +5586,10 @@ describe('READY_TO_INVOICE', () => {
         table(TABLES.customer).set(customerId, { ...table(TABLES.customer).get(customerId)!, customerType: 'SHIPPER' })
         expect(await extrasOf(ids)).not.toContain('FACTOR_CUSTOMER_MC')
         table(TABLES.customer).set(customerId, { ...table(TABLES.customer).get(customerId)!, billingMethod: 'MANUAL', customerType: 'BROKER' })
+        expect((await extrasOf(ids)).filter((c) => c.startsWith('FACTOR_'))).toEqual([])
+        // Brokered loads are never factored (Ryne 2026-11-16): the same FACTOR broker with no MC is not held on a BROKERAGE load.
+        table(TABLES.customer).set(customerId, { ...table(TABLES.customer).get(customerId)!, billingMethod: 'FACTOR', customerType: 'BROKER', mcNumber: null })
+        table(TABLES.shipment).set(ids.shipmentId, { ...table(TABLES.shipment).get(ids.shipmentId)!, revDivision: 'BROKERAGE' })
         expect((await extrasOf(ids)).filter((c) => c.startsWith('FACTOR_'))).toEqual([])
       })
 
