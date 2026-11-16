@@ -45,13 +45,13 @@ export function reviewFieldText(row: ShipmentListRow, key: LoadReviewFieldKey): 
     case 'rateCon': return docBasisText(row, 'RATE_CON')
     case 'customerRate': { const c = customerRateCents(row); return c == null ? '' : formatCents(c) }
     // Own fleet (Ivan Cartage) has no carrier rate to enter, so neither it nor profit is checked (Ryne 2026-11-15).
-    case 'carrierRate': return isOwnFleetReviewLoad(row) ? 'N/A (own fleet)' : row.costCents == null ? '' : formatCents(row.costCents)
-    case 'profit': { if (isOwnFleetReviewLoad(row)) return 'N/A (own fleet)'; const p = profitOf(row); return p == null ? '' : formatCents(p.cents) } // dollars only (Ryne 2026-11-15: no GP %)
+    case 'carrierRate': return isOwnFleetReviewLoad(row) ? 'N/A (asset)' : row.costCents == null ? '' : formatCents(row.costCents)
+    case 'profit': { if (isOwnFleetReviewLoad(row)) return 'N/A (asset)'; const p = profitOf(row); return p == null ? '' : formatCents(p.cents) } // dollars only (Ryne 2026-11-15: no GP %)
     case 'salesRep': return row.salesRepName ?? ''
     case 'revDivision': return row.revDivision?.replace(/_/g, ' ') ?? ''
     case 'delivered': { const t = deliveredText(row); return t === '—' ? '' : t }
     case 'carrier': return carrierNames(row)
-    case 'customer': return row.customerName ?? ''
+    case 'customer': return [row.customerName, row.customerBillingSummary].filter(Boolean).join(' · ')
     case 'stops': return row.originCity || row.destinationCity ? `${row.originCity ?? '—'} → ${row.destinationCity ?? '—'}` : ''
     case 'other': return ''
   }

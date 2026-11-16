@@ -16,6 +16,7 @@ import type { ApStatus, ArStatus, AssignmentType, LoadWorkflowStatus, ShipmentBu
 import {
   DEFAULT_REVIEW_REQUIREMENTS,
   evaluateReviewRequirements,
+  isAssetLoad,
   profitFromFacts,
   type ReviewFacts,
   type ReviewRequirement,
@@ -29,6 +30,7 @@ import {
   type ReleaseGateError,
 } from './releaseGate'
 import { FACTOR_GAP_LABEL, type FactorGapCode } from './factorReadyAtCreate'
+import { CUSTOMER_BILLING_GAP_MESSAGE, type CustomerBillingGapCode } from './customerBillingReady'
 
 export type LoadReviewCheckKey = 'salesRep' | 'revDivision' | 'details' | 'charges' | 'documents'
 
@@ -114,14 +116,30 @@ export interface LoadReviewRow {
   factorGaps?: FactorGapCode[] | null
   /** POD / RC this customer does not need to invoice (customerDocsNotRequired, from the customer row). */
   docsNotRequired?: string[] | null
+  /** What the customer is missing to be billed (customerBillingGaps); null = not judged. */
+  customerBillingGaps?: CustomerBillingGapCode[] | null
+  customerBillingSummary?: string | null
+}
+
+/** Review reasons for the customer's billing gaps (Ryne 2026-11-16: billing method and AP e-mail, every customer). */
+export function customerBillingReasons(gaps: readonly CustomerBillingGapCode[] | null | undefined, opts: { skipBillingMethod?: boolean } = {}): LoadReviewReason[] {
+  return (gaps ?? [])
+    .filter((code) => !(opts.skipBillingMethod && code === 'CUSTOMER_BILLING_METHOD'))
+    .map((code) => reason(code, CUSTOMER_BILLING_GAP_MESSAGE[code], 'details', { kind: 'OPEN_TAB', tab: 'overview' }))
 }
 
 /**
- * An Ivan Cartage (own fleet) load, by kind as ownAssetDriver.ts defines it: the shipment's assignment is OWN_ASSET.
- * Ryne 2026-11-15: own-fleet loads need no carrier rate, so expense and profit are not review requirements for them.
+ * An asset load (isAssetLoad, reviewRequirements.ts): revenue division ASSETS, or our own fleet on the assignment.
+ * Ryne 2026-11-15/16: asset loads need no carrier rate, so expense and profit are not review requirements for them.
  */
-export function isOwnFleetReviewLoad(row: Pick<LoadReviewRow, 'assignmentType'> & { legKinds?: readonly (string | null | undefined)[] | null }): boolean {
-  return row.assignmentType === 'OWN_ASSET' || (row.legKinds ?? []).includes('OWN_ASSET')
+export function isOwnFleetReviewLoad(row: Partial<Pick<LoadReviewRow, 'assignmentType' | 'revDivision' | 'carrierName' | 'carriers'>> & { legKinds?: readonly (string | null | undefined)[] | null }): boolean {
+  return isAssetLoad({
+    revDivision: row.revDivision ?? null,
+    assignmentType: row.assignmentType ?? null,
+    legKinds: row.legKinds ?? null,
+    carrierName: row.carrierName ?? null,
+    carrierNames: (row.carriers ?? []).map((c) => c?.name ?? null),
+  })
 }
 
 /** The requirements that do not apply to an own-fleet load. */
@@ -207,6 +225,7 @@ export function reviewFactsOfRow(row: LoadReviewRow): ReviewFacts {
     revenueCents,
     expenseCents,
     profitCents: profitFromFacts(revenueCents, expenseCents),
+    assetLoad: isOwnFleetReviewLoad(row),
   }
 }
 
@@ -363,6 +382,9 @@ export function evaluateLoadReview(input: {
       const tab: LoadReviewTab = code.startsWith('PICKUP') || code.startsWith('DELIVERY') ? 'stops' : 'overview'
       reasons.push(reason(`FACTOR_${code}`, `Missing for factoring: ${FACTOR_GAP_LABEL[code]}`, 'details', openTab(tab)))
     }
+    if (row.legacyImported !== true) {
+      reasons.push(...customerBillingReasons(row.customerBillingGaps, { skipBillingMethod: (row.factorGaps ?? []).includes('BILLING_METHOD') }))
+    }
   }
   if (input.revDivisionActive === false && !blank(row.revDivision)) {
     reasons.push(reason('REV_DIVISION_INACTIVE', 'Revenue division is inactive', 'revDivision', { kind: 'SET_REV_DIVISION' }))
@@ -461,6 +483,8 @@ const FIELD_BY_CODE: Record<string, readonly LoadReviewFieldKey[]> = {
   NO_CUSTOMER: ['customer'],
   FACTOR_CUSTOMER_MC: ['customer'],
   FACTOR_BILLING_METHOD: ['customer'],
+  CUSTOMER_BILLING_METHOD: ['customer'],
+  CUSTOMER_AP_EMAIL: ['customer'],
   STOP_INCOMPLETE: ['stops'],
   FACTOR_PICKUP_CITY: ['stops'],
   FACTOR_PICKUP_STATE: ['stops'],

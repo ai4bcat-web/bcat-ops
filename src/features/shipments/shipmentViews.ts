@@ -8,6 +8,7 @@
  * voided row keeps its PRO, and rows that were soft-deleted before Void existed are
  * read as voided for exactly the same reason — the PRO never leaves the book.
  */
+import type { CustomerBillingGapCode } from '@/lib/customerBillingReady'
 import { STATUS_META } from '@/lib/apptStatus'
 import { PHASE_LABEL, deliveryPhase, deliveryPhaseText } from '@/lib/deliveryPhase'
 import { phaseInputOfRow } from './deliveryPhaseInputs'
@@ -138,6 +139,9 @@ export type ShipmentRow = ShipmentRecord & {
   factorGaps?: FactorGapCode[] | null
   /** The bill-to customer factors through OTR (customerFactorsForOtr). */
   customerFactors?: boolean | null
+  /** What the customer is missing to be billed (customerBillingReady). */
+  customerBillingGaps?: CustomerBillingGapCode[] | null
+  customerBillingSummary?: string | null
   // ── R2 column catalog (projected by the data layer; every one null when unknown) ──
   /** Rep and audit ids resolved to profile names; null when no profile matches. */
   salesRepName?: string | null

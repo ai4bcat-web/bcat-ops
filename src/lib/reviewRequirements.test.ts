@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isAssetLoad,
   customerDocsNotRequired,
   docsNotRequiredFor,
   DEFAULT_REVIEW_REQUIREMENTS,
@@ -79,5 +80,31 @@ describe('the Load Review gate reads this same list', () => {
       const viaGate = loadReviewExtras({ shipment: {}, facts, requirements: list }).map((r) => r.code)
       expect(viaGate).toEqual(direct)
     }
+  })
+})
+
+describe('asset loads (Ryne 2026-11-16: only customer rate and gross)', () => {
+  it('isAssetLoad: ASSETS division, OWN_ASSET, or an Ivan Cartage carrier', () => {
+    expect(isAssetLoad({ revDivision: 'ASSETS' })).toBe(true)
+    expect(isAssetLoad({ revDivision: 'assets' })).toBe(true)
+    expect(isAssetLoad({ assignmentType: 'OWN_ASSET' })).toBe(true)
+    expect(isAssetLoad({ legKinds: ['CARRIER', 'OWN_ASSET'] })).toBe(true)
+    expect(isAssetLoad({ carrierName: 'IVAN CARTAGE (LOCAL DRIVERS)' })).toBe(true)
+    expect(isAssetLoad({ carrierNames: ['Ivan Cartage (Box Trucks)'] })).toBe(true)
+    expect(isAssetLoad({ revDivision: 'BROKERAGE', carrierName: 'LENTI INC', assignmentType: 'CARRIER' })).toBe(false)
+    expect(isAssetLoad(null)).toBe(false)
+  })
+
+  it('an asset load needs no expense or profit, but still needs revenue', () => {
+    const all = [...DEFAULT_REVIEW_REQUIREMENTS]
+    const facts = { revDivision: 'ASSETS', salesRepId: 'rep', referenceNumber: 'PO', podReceived: true, revenueCents: 116100, expenseCents: 0, profitCents: null, assetLoad: true }
+    expect(evaluateReviewRequirements(all, facts).ok).toBe(true)
+    const noRevenue = evaluateReviewRequirements(all, { ...facts, revenueCents: 0 })
+    expect(noRevenue.failures.map((f) => f.requirement)).toEqual(['revenueEntered'])
+  })
+
+  it('a brokered load still needs expense and profit', () => {
+    const facts = { revDivision: 'BROKERAGE', salesRepId: 'rep', referenceNumber: 'PO', podReceived: true, revenueCents: 100000, expenseCents: 0, profitCents: null }
+    expect(evaluateReviewRequirements([...DEFAULT_REVIEW_REQUIREMENTS], facts).failures.map((f) => f.requirement)).toEqual(['expenseEntered', 'profitEntered'])
   })
 })

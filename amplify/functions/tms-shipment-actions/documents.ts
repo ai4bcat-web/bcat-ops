@@ -78,8 +78,9 @@ import { planPendingCarrierBills, readPendingBillContext, writePendingBill } fro
 import { hasGap, isReleasedOrder, reconcileReleasedOrder, type ReconcileFinding } from '../../../src/lib/billingReconcile'
 import { evaluateReleaseGate, releaseGateError, type ReleaseGateResult } from '../../../src/lib/releaseGate'
 import { factorGapsForLoad, factoringPoNumber, routeEnds, type FactorReadyInput } from '../../../src/lib/factorReadyAtCreate'
-import { evaluateLoadReview, isOwnFleetReviewLoad, loadReviewExtras, loadReviewRefusal, type LoadReviewReason } from '../../../src/lib/loadReview'
-import { customerFactorsForOtr, profitFromFacts, resolveReviewRequirements, type ReviewFacts, type ReviewRequirement } from '../../../src/lib/reviewRequirements'
+import { customerBillingReasons, evaluateLoadReview, loadReviewExtras, loadReviewRefusal, type LoadReviewReason } from '../../../src/lib/loadReview'
+import { customerBillingGaps, type CustomerBillingFacts } from '../../../src/lib/customerBillingReady'
+import { customerFactorsForOtr, isAssetLoad, profitFromFacts, resolveReviewRequirements, type ReviewFacts, type ReviewRequirement } from '../../../src/lib/reviewRequirements'
 import {
   isCustomerUnresolved,
   unresolvedCustomerMessage,
@@ -1357,7 +1358,20 @@ function reviewFacts(bundle: Bundle, order: Row): ReviewFacts {
     revenueCents,
     expenseCents,
     profitCents: profitFromFacts(revenueCents, expenseCents),
+    assetLoad: assetLoadOf(bundle),
   }
+}
+
+/** isAssetLoad from the raw rows: revenue division ASSETS, or an own-fleet (OWN_ASSET / Ivan Cartage) assignment. */
+function assetLoadOf(bundle: Bundle): boolean {
+  const live = (bundle.loads as Row[]).filter((l) => !l.voidedAt && !l.deletedAt)
+  const legs = (bundle.loadCarriers as Row[]).filter((l) => l.status === 'ACTIVE')
+  return isAssetLoad({
+    revDivision: typeof bundle.shipment.revDivision === 'string' ? bundle.shipment.revDivision : null,
+    assignmentType: live.some((l) => l.assignmentType === 'OWN_ASSET') ? 'OWN_ASSET' : null,
+    legKinds: legs.map((l) => (l.kind == null ? null : String(l.kind))),
+    carrierNames: [...live.map((l) => (typeof l.carrierName === 'string' ? l.carrierName : null)), ...legs.map((l) => (typeof l.carrierName === 'string' ? l.carrierName : null))],
+  })
 }
 
 /** The review extras, typed from the raw rows. Imported history is exempt inside the lib. */
@@ -1366,17 +1380,26 @@ function reviewExtras(bundle: Bundle, order: Row, customer: Row | null, settings
     ...loadReviewExtras({
       shipment: {
         legacyImported: bundle.shipment.legacyImported === true,
-        // Own fleet (Ivan Cartage) by kind: an OWN_ASSET load or an active OWN_ASSET assignment needs no carrier rate.
-        ownFleet: isOwnFleetReviewLoad({
-          assignmentType: (bundle.loads as Row[]).some((l) => l.assignmentType === 'OWN_ASSET') ? 'OWN_ASSET' : null,
-          legKinds: (bundle.loadCarriers as Row[]).filter((l) => l.status === 'ACTIVE').map((l) => (l.kind == null ? null : String(l.kind))),
-        }),
+        // Asset load (revenue division ASSETS or own fleet): needs no carrier rate, expense or profit.
+        ownFleet: assetLoadOf(bundle),
       },
       facts: reviewFacts(bundle, order),
       // The release gate already refuses on a missing POD (with its own sentence); a push has no gate.
       requirements: reviewRequirementsFor(customer, settings).filter((key) => !gateOwnsPod || key !== 'podReceived'),
     }),
-    ...factorReviewReasons(bundle, order, customer),
+    ...factorAndCustomerReasons(bundle, order, customer),
+  ]
+}
+
+/** The factoring gaps, then the customer's billing gaps (every customer: billing method and AP e-mail), said once. */
+function factorAndCustomerReasons(bundle: Bundle, order: Row, customer: Row | null): LoadReviewReason[] {
+  const factor = factorReviewReasons(bundle, order, customer)
+  if (bundle.shipment.legacyImported === true) return factor
+  return [
+    ...factor,
+    ...customerBillingReasons(customerBillingGaps(customer as unknown as CustomerBillingFacts | null), {
+      skipBillingMethod: factor.some((r) => r.code === 'FACTOR_BILLING_METHOD'),
+    }),
   ]
 }
 

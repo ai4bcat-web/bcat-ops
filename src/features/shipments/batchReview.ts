@@ -5,6 +5,7 @@
  * one file the Load Review gate and the release gate read on the server too.
  */
 import { reviewFactsOfRow } from '@/lib/loadReview'
+import { CUSTOMER_BILLING_GAP_MESSAGE } from '@/lib/customerBillingReady'
 import {
   MAX_REVIEW_BATCH,
   batchCapMessage,
@@ -57,7 +58,8 @@ export function pushRefusals(
     const requirements = requirementsForRow(row, src).filter((key) => key !== 'podReceived' || facts.podReceived != null)
     const evaluation = evaluateReviewRequirements(requirements, facts)
     // Ryne 2026-11-12: only a delivered load goes to Load Review (the server refuses the same way, on the shipment status).
-    const reasons = [...notDeliveredReasons(row), ...(evaluation.ok ? [] : evaluation.failures.map((f) => f.message))]
+    const customerGaps = row.legacyImported === true ? [] : (row.customerBillingGaps ?? []).map((code) => CUSTOMER_BILLING_GAP_MESSAGE[code])
+    const reasons = [...notDeliveredReasons(row), ...(evaluation.ok ? [] : evaluation.failures.map((f) => f.message)), ...customerGaps]
     if (reasons.length > 0) out.push({ rowId: row.id, rowLabel: row.number, ok: false, reasons })
   }
   return out

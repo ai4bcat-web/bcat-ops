@@ -129,7 +129,7 @@ describe('LoadReviewPage', () => {
     expect(screen.getAllByText('PO-1').length).toBeGreaterThan(0)
     expect(screen.getAllByText('$1,200.00').length).toBeGreaterThan(0)
     // The fixture rows are own fleet: no carrier rate or profit to check.
-    expect(screen.getAllByText('N/A (own fleet)').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('N/A (asset)').length).toBeGreaterThan(0)
     expect(screen.getAllByTestId('field-ready').every((el) => el.getAttribute('data-state') === 'ok')).toBe(true)
   })
 

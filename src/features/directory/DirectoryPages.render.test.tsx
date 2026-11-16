@@ -185,13 +185,13 @@ describe('DirectoryPages', () => {
       fireEvent.click(screen.getByLabelText('Include factored'))
       expect(screen.getByRole('button', { name: 'Missing invoice e-mail (3)' })).toBeTruthy()
       expect(screen.getByText('Active Co')).toBeTruthy()
-      fireEvent.click(screen.getByRole('button', { name: 'Factored, no invoice e-mail (not required) (1)' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Factored, no AP e-mail (required) (1)' }))
       expect(screen.queryByText('Lead Co')).toBeNull()
       // A factored customer with no invoice address is flagged like any other.
-      expect(within(screen.getByText('Active Co').closest('tr') as HTMLElement).getByText('This customer factors · Missing invoice e-mail (not required)')).toBeTruthy()
+      expect(within(screen.getByText('Active Co').closest('tr') as HTMLElement).getByText('This customer factors · Missing AP e-mail (required)')).toBeTruthy()
       fireEvent.click(screen.getByText('Active Co'))
       const detail = await screen.findByRole('dialog', { name: 'Customer profile' })
-      expect(within(detail).getByText('This customer factors · Missing invoice e-mail (not required)')).toBeTruthy()
+      expect(within(detail).getByText('This customer factors · Missing AP e-mail (required)')).toBeTruthy()
     } finally {
       customers.forEach((c, i) => Object.assign(c, previous[i]))
     }

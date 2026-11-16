@@ -96,3 +96,12 @@ describe('allApEmails / extra To validation', () => {
     expect(validateBillingFields({ billingMethod: 'MANUAL', apEmail: 'ap@acme.com', apEmailsExtra: ['ok@acme.com', 'nope'] }).apEmailsExtra).toBe('Not a valid e-mail: nope')
   })
 })
+
+describe('validateBillingFields requireAll (Ryne 2026-11-16)', () => {
+  it('needs a method and an AP e-mail for every customer, factored included', () => {
+    expect(validateBillingFields({ billingMethod: 'FACTOR', apEmail: '' }, { requireAll: true }).apEmail).toBe('Every customer needs an AP e-mail')
+    expect(validateBillingFields({ billingMethod: null, apEmail: 'a@b.co' }, { requireAll: true }).billingMethod).toMatch(/Factor or Manual/)
+    expect(validateBillingFields({ billingMethod: 'FACTOR', apEmail: 'a@b.co' }, { requireAll: true })).toEqual({})
+    expect(validateBillingFields({ billingMethod: 'FACTOR', apEmail: '' })).toEqual({})
+  })
+})

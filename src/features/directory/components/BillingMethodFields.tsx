@@ -40,14 +40,12 @@ export function BillingMethodFields({
           />
         </TmsField>
       </div>
-      {/* Ryne 2026-11-14: the invoice e-mail lives here for every method; a factored customer does not need one. */}
+      {/* Ryne 2026-11-16: every customer needs an AP e-mail, factored customers included (Load Review checks it). */}
       <TmsField
-        label={isFactor ? 'Invoice e-mail (not required)' : 'AP e-mails (invoices go here)'}
+        label="AP e-mails (required)"
         hint={isFactor
-          ? 'Not required: this customer factors. Invoices go to the factor, not this address. Used for aging statements and manual invoices if the method changes.'
-          : value.billingMethod === 'MANUAL'
-            ? 'Required for manual billing. The first address is the main one; every address listed here receives the invoice and the aging statement.'
-            : 'The first address is the main one. Every address listed here receives the invoice.'}
+          ? 'Required for every customer. This customer factors, so invoices go to the factor; this address gets aging statements and manual invoices if a load is rejected by OTR.'
+          : 'Required for every customer. The first address is the main one; every address listed here receives the invoice and the aging statement.'}
         error={errors.apEmail ?? errors.apEmailsExtra}
       >
         <EmailListField
