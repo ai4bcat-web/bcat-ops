@@ -68,6 +68,7 @@ import {
   SQUARE_INVOICED_CODE,
   SQUARE_INVOICED_MESSAGE,
   SquareInvoicedError,
+  type InvoiceAttachmentPlan,
   type InvoiceAttachmentScope,
 } from '../../../src/lib/invoiceDelivery'
 import { invoiceBrandingFor } from '../../../src/lib/invoiceBranding'
@@ -79,7 +80,8 @@ import {
   type CarrierPayFlag,
 } from '../../../src/lib/carrierPayGuard'
 import { pdfText } from '../_shared/pdfText'
-import { combineInvoicePacket } from './invoicePacket'
+import { combineInvoicePacket, compressionNote, type PacketCompression } from './invoicePacket'
+import { SHRINK_DEFAULTS, SHRINK_HARD, shrinkPdfImages } from '../_shared/pdfShrink'
 import type {
   BillToParty,
   CustomerRecord,
@@ -876,6 +878,9 @@ export function carrierPayFlags(
   return { hard, content }
 }
 
+/** A packet bigger than this is built from lighter copies of its POD pictures (an e-mail carries at most 10 MB). */
+const PACKET_SHRINK_ABOVE_BYTES = 8 * 1024 * 1024
+
 /** Where a combined invoice + POD packet is kept when it has to be handed back as a download (or previewed). */
 function packetKey(invoice: InvoiceRecord): string {
   return `invoices/packets/${invoice.id}/${Date.now()}.pdf`
@@ -888,6 +893,8 @@ interface SendFiles {
   files: Parameters<typeof carrierPayFlags>[0]
   /** Pages each part put into the invoice PDF; empty when there was no invoice PDF to merge into. */
   packetPages: { name: string; pages: number }[]
+  /** PODs whose pictures were made lighter in the packet because it would not fit one e-mail (the POD kept in the shipment is untouched). */
+  compressed?: PacketCompression[]
 }
 
 /**
@@ -929,9 +936,14 @@ async function attachmentsFor(invoice: InvoiceRecord, docs: ShipmentDocumentReco
   const merged = invoiceFile ? files.filter((file) => file.doc && mergesIntoInvoicePdf(file.doc, true)) : []
   const attachments: EmailAttachment[] = []
   let packetPages: SendFiles['packetPages'] = []
+  let compressed: PacketCompression[] | undefined
   if (invoiceFile) {
-    const packet = await combineInvoicePacket(invoiceFile, merged)
+    // The files that ride beside the packet use part of the e-mail's room; the packet is lightened only when it would not fit.
+    const beside = files.filter((file) => file !== invoiceFile && !merged.includes(file)).reduce((sum, file) => sum + file.bytes.byteLength, 0)
+    const shrinkAbove = Math.min(PACKET_SHRINK_ABOVE_BYTES, MAX_EMAIL_ATTACHMENT_BYTES - beside - 256 * 1024)
+    const packet = await combineInvoicePacket(invoiceFile, merged, { shrinkAbove })
     packetPages = packet.pages
+    compressed = packet.compressed
     attachments.push({ filename: invoiceFile.name, contentType: 'application/pdf', bytes: packet.bytes })
   }
   for (const file of files) {
@@ -945,7 +957,37 @@ async function attachmentsFor(invoice: InvoiceRecord, docs: ShipmentDocumentReco
       `Those attachments come to ${mb} MB; one e-mail carries at most ${MAX_EMAIL_ATTACHMENT_BYTES / (1024 * 1024)} MB — send fewer`,
     )
   }
-  return { attachments, files, packetPages }
+  return { attachments, files, packetPages, ...(compressed?.length ? { compressed } : {}) }
+}
+
+/**
+ * The review's plan with the PODs' sizes as the send will carry them: when the packet is over the point where the send lightens its
+ * POD pictures, the same lightening is worked out here (never stored), so "tooBig" and the byte counts match what the send does and the
+ * review can say "POD compressed from 22.8 MB to 0.4 MB for e-mail".
+ */
+async function lightenedPlan(plan: InvoiceAttachmentPlan, docs: readonly ShipmentDocumentRecord[]): Promise<{ plan: InvoiceAttachmentPlan; note: string | null }> {
+  if (plan.totalBytes <= PACKET_SHRINK_ABOVE_BYTES) return { plan, note: null }
+  const candidates = docs
+    .filter((doc) => doc.type === 'POD' && /pdf/i.test(doc.contentType ?? 'application/pdf') && !!doc.s3Key && (doc.sizeBytes ?? 0) >= 1_000_000
+      && EMAILABLE_KEY_PREFIXES.some((prefix) => String(doc.s3Key).startsWith(prefix)))
+    .slice(0, 4)
+  if (!candidates.length) return { plan, note: null }
+  const sources = await Promise.all(candidates.map(async (doc) => ({ doc, bytes: (await s3Bytes(String(doc.s3Key)).catch(() => null))?.bytes ?? null })))
+  const sizes = new Map<string, PacketCompression>()
+  let totalBytes = plan.totalBytes
+  for (const options of [SHRINK_DEFAULTS, SHRINK_HARD]) {
+    for (const { doc, bytes } of sources) {
+      if (!bytes) continue
+      const shrunk = await shrinkPdfImages(bytes, options)
+      if (!shrunk.changed) continue
+      sizes.set(doc.id, { name: doc.name, before: sizes.get(doc.id)?.before ?? bytes.byteLength, after: shrunk.after })
+    }
+    totalBytes = plan.items.reduce((sum, item) => sum + ((item.documentId && sizes.get(item.documentId)?.after) || (item.sizeBytes ?? 0)), 0)
+    if (totalBytes <= MAX_EMAIL_ATTACHMENT_BYTES - 256 * 1024) break
+  }
+  if (!sizes.size) return { plan, note: null }
+  const items = plan.items.map((item) => (item.documentId && sizes.has(item.documentId) ? { ...item, sizeBytes: sizes.get(item.documentId)!.after } : item))
+  return { plan: { ...plan, items, totalBytes }, note: compressionNote([...sizes.values()]) }
 }
 
 /**
@@ -967,7 +1009,7 @@ export async function previewInvoicePacket(input: Row, caller: Caller): Promise<
   const name = attachmentNameOf(invoice)
   if (!invoice.pdfKey) return { invoiceId, name, url: null, pages: [], separate: [], error: 'No invoice PDF stored yet — regenerate it first' }
   try {
-    const { attachments, packetPages } = await attachmentsFor(invoice, docs)
+    const { attachments, packetPages, compressed } = await attachmentsFor(invoice, docs)
     const key = packetKey(invoice)
     await putPdf(key, attachments[0].bytes)
     return {
@@ -976,6 +1018,7 @@ export async function previewInvoicePacket(input: Row, caller: Caller): Promise<
       url: await signedDownload(key),
       pages: packetPages as unknown as Row[],
       separate: attachments.slice(1).map((a) => ({ name: a.filename, sizeBytes: a.bytes.byteLength })) as unknown as Row[],
+      note: compressionNote(compressed),
       error: null,
     }
   } catch (err) {
@@ -1424,7 +1467,7 @@ export async function invoiceAttachmentPlans(input: Row): Promise<Row> {
           revDivision: shipment?.revDivision,
           legs: carrierRows as unknown as LoadCarrierRecord[],
         })
-        const plan = invoiceAttachmentPlan(
+        const rawPlan = invoiceAttachmentPlan(
           documentRows as unknown as ShipmentDocumentRecord[],
           scope,
           invoice.pdfKey ? { name: attachmentNameOf(invoice), sizeBytes: invoice.pdfSizeBytes ?? null } : null,
@@ -1432,6 +1475,7 @@ export async function invoiceAttachmentPlans(input: Row): Promise<Row> {
         )
         // The same carrier-pay guard the send runs, so the review and the list show it first.
         const docs = invoiceEmailDocuments(documentRows as unknown as ShipmentDocumentRecord[], scope)
+        const { plan, note: compressedNote } = await lightenedPlan(rawPlan, docs)
         const files = await Promise.all(docs.map(async (doc) => {
           const scan = !scope.ivan && /pdf/i.test(doc.contentType ?? 'application/pdf') && !!doc.s3Key
             && EMAILABLE_KEY_PREFIXES.some((prefix) => String(doc.s3Key).startsWith(prefix))
@@ -1444,6 +1488,7 @@ export async function invoiceAttachmentPlans(input: Row): Promise<Row> {
           invoiceId: id,
           ivan: scope.ivan,
           tooBig: plan.totalBytes > MAX_EMAIL_ATTACHMENT_BYTES,
+          ...(compressedNote ? { compressedNote } : {}),
           carrierPayFlags: [...flags.hard.map((f) => ({ ...f, hard: true })), ...flags.content.map((f) => ({ ...f, hard: false }))],
           ...plan,
         } as unknown as Row)

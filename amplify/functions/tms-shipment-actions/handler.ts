@@ -9317,7 +9317,7 @@ async function attachIntakeFiles(
     try {
       await s3.send(new CopyObjectCommand({ Bucket: BUCKET_NAME, CopySource: `${BUCKET_NAME}/${file.key}`, Key: key }))
       // A rate confirmation that came in as a picture is filed as a PDF (Ryne 2026-11-16); the picture stays next to it.
-      const converted = await convertStoredPodImage(s3, BUCKET_NAME, { key, contentType: file.contentType, name: file.name })
+      const converted = await convertStoredPodImage(s3, BUCKET_NAME, { key, contentType: file.contentType, name: file.name, type: 'CUSTOMER_RATE_CON', sizeBytes: Math.max(0, Math.trunc(file.size) || 0) })
       const now = nowIso()
       await transact([putItem(documentDeps.store.tables.shipmentDocument, {
         id, __typename: 'ShipmentDocument', shipmentId, ...(order?.id ? { orderId: String(order.id) } : {}), type: 'CUSTOMER_RATE_CON',

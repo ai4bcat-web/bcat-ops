@@ -303,6 +303,8 @@ export interface InvoiceAttachmentPlanRow extends Partial<InvoiceAttachmentPlan>
   ivan?: boolean
   /** Over the 10 MB an e-mail can carry: the send will be refused. */
   tooBig?: boolean
+  /** Set when a POD is too big for one e-mail as filed and the send lightens its pictures in the packet: "POD compressed from 22.8 MB to 0.4 MB for e-mail". */
+  compressedNote?: string
   /** Carrier-pay guard hits. `hard`: a carrier document — remove it, no override. Otherwise a content match an admin may override. */
   carrierPayFlags?: { documentId: string | null; name: string; reason: string; hard: boolean }[]
   error?: string

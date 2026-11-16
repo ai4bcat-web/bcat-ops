@@ -291,6 +291,7 @@ function AttachmentList({ plan, fallback, excluded }: {
       {plan.pod === 'MISSING' && <AttachmentInfo tone="error">No POD on file — file one before this invoice can go.</AttachmentInfo>}
       {plan.rateCon === 'NOT_INCLUDED' && <AttachmentInfo>Rate confirmation not included: BCAT Logistics invoices never carry a rate confirmation.</AttachmentInfo>}
       {plan.rateCon === 'MISSING' && <AttachmentInfo tone="warn">Ivan Cartage invoice: no customer rate confirmation on file.</AttachmentInfo>}
+      {plan.compressedNote && !plan.tooBig && <AttachmentInfo>{plan.compressedNote}. The POD in the shipment is unchanged.</AttachmentInfo>}
       {plan.tooBig && <AttachmentInfo tone="error">Over 10 MB — this e-mail will be refused. Remove a document first.</AttachmentInfo>}
     </div>
   )
