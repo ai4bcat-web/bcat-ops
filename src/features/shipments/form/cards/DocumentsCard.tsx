@@ -21,7 +21,7 @@ import { attachIntakeFiles, getIntakeLoad, getRateConfirmUrl, getShipmentDocumen
 import { formatBoardDateTime } from '@/lib/date'
 import {
   ACCEPTED_CONTENT_TYPES, DOCUMENT_TYPE_LABELS, MAX_DOCUMENT_BYTES, SHIPMENT_DOCUMENT_TYPES, SLOT_DOCUMENT_TYPES,
-  assetRateConTenders, isOwnFleetLoad, isPointerDocument, suggestDocumentType,
+  assetRateConTenders, isOwnFleetLoad, isPointerDocument, shipmentDocPresence, suggestDocumentType,
 } from '@/lib/shipmentDocuments'
 import { customerDocsNotRequired, customerFactorsForOtr, rateConRequired } from '@/lib/reviewRequirements'
 import { isCarShipperLoad } from '@/lib/carShipper'
@@ -157,8 +157,13 @@ function DocumentsCardImpl({ values, ctx, documentApi = liveDocumentApi }: CardP
   // An asset load's rate confirmation is the customer's (Ryne 2026-11-16): a filed customer rate confirmation sits in the
   // Rate confirmation box, and so does the tender on the load. The gate counts exactly these (presentDocTypes).
   const assetLoad = isOwnFleetLoad(ctx.bundle?.shipment ?? null, ctx.bundle?.loadCarriers ?? [])
-  const slotDocs = (docType: ShipmentDocumentType) => active.filter((d) => d.type === docType || (assetLoad && docType === 'RATE_CON' && d.type === 'CUSTOMER_RATE_CON'))
-  const tenders = assetLoad ? assetRateConTenders((ctx.bundle?.loads ?? []) as { id: string; rateConfirmKey?: string | null }[]) : []
+  // The customer's rate confirmation counts on any load (the gate's rule), so it sits in this box on brokered loads too.
+  const slotDocs = (docType: ShipmentDocumentType) => active.filter((d) => d.type === docType || (docType === 'RATE_CON' && d.type === 'CUSTOMER_RATE_CON'))
+  const tenders = assetRateConTenders((ctx.bundle?.loads ?? []) as { id: string; rateConfirmKey?: string | null }[])
+  // On file / Driver sent / NEED: the same rule the order gate and the board's cache read (shipmentDocPresence), so they agree.
+  const slotPresence = (docType: ShipmentDocumentType) => ctx.bundle
+    ? shipmentDocPresence({ documents: all, orders: ctx.bundle.orders, loads: ctx.bundle.loads as { id: string; orderId?: string | null; rateConfirmKey?: string | null }[], loadCarriers: ctx.bundle.loadCarriers, shipment: ctx.bundle.shipment }, docType)
+    : null
   // RC is only asked for where the one rule says so (rateConRequired): N/A on a brokered load for a customer that does not factor.
   const rcNeeded = rateConRequired({
     asset: assetLoad,
@@ -277,14 +282,15 @@ function DocumentsCardImpl({ values, ctx, documentApi = liveDocumentApi }: CardP
           const docs = slotDocs(docType)
           const queuedDocs = slotQueued(docType)
           const slotTenders = docType === 'RATE_CON' ? tenders : []
-          const onFile = docs.some((d) => d.status === 'ACTIVE') || slotTenders.length > 0
+          const presence = slotPresence(docType)
+          const onFile = presence ? presence !== 'MISSING' : docs.some((d) => d.status === 'ACTIVE') || slotTenders.length > 0
           const notNeeded = docType === 'RATE_CON' && !rcNeeded
           return (
             <div key={docType} id={`docs-${docType}`} className="tms-card-docslot" data-testid={`card-documents-slot-${docType}`} data-on-file={onFile ? 'true' : 'false'}>
               <div className="tms-card-docslot-head">
                 {onFile ? <Check size={14} aria-hidden /> : <Circle size={14} aria-hidden />}
                 <strong>{label}</strong>
-                <span className="tms-muted text-xs">{onFile ? 'On file' : queuedDocs.length > 0 ? 'Queued' : notNeeded ? 'Not required' : 'NEED'}</span>
+                <span className="tms-muted text-xs">{presence === 'REVIEW' ? 'Driver sent · review' : onFile ? 'On file' : queuedDocs.length > 0 ? 'Queued' : notNeeded ? 'Not required' : 'NEED'}</span>
               </div>
               {docs.length === 0 && queuedDocs.length === 0 && slotTenders.length === 0 ? <p className="tms-muted text-xs">{hint}</p> : null}
               {slotTenders.length > 0 ? (

@@ -131,6 +131,8 @@ export interface ShipmentListRow extends ShipmentRecord {
   docsRequired: string[] | null
   /** Every document type on file for the shipment's orders (the gate's `present`); null until a gate re-cache writes it. */
   docsPresent: string[] | null
+  /** Of docsPresent, the types held only by a driver-app page still waiting for review. */
+  docsPendingReview: string[] | null
   docsCheckedAt: string | null
   docsOverrideAt: string | null
   /** The bill-to customer factors through OTR (customerFactorsForOtr). */
@@ -430,6 +432,12 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
       if (o.docsPresent == null) continue
       const present = docsPresentByShipment[o.shipmentId] ??= []
       for (const type of o.docsPresent) if (!present.includes(type)) present.push(type)
+    }
+    const docsPendingByShipment: Record<string, string[]> = {}
+    for (const o of orders) {
+      if (o.docsPendingReview == null) continue
+      const pending = docsPendingByShipment[o.shipmentId] ??= []
+      for (const type of o.docsPendingReview) if (!pending.includes(type)) pending.push(type)
     }
 
     // The quote a shipment was sold off. Carrier offers (BUY) are a different story and
@@ -762,6 +770,7 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         factoringItemId: order?.factoringItemId ?? null,
         docsRequired: order?.docsRequired ?? null,
         docsPresent: docsPresentByShipment[s.id] ?? null,
+        docsPendingReview: docsPendingByShipment[s.id] ?? null,
         docsCheckedAt: order?.docsCheckedAt ?? null,
         docsOverrideAt: order?.docsOverrideAt ?? null,
         docsOverrideBy: order?.docsOverrideBy ?? null,

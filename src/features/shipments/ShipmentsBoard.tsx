@@ -1045,6 +1045,20 @@ function BoardPane({
         const label = docType === 'POD' ? 'POD' : 'Rate confirmation'
         const cell = docCellOf(row, docType)
         if (cell === 'PRESENT') return <span className="text-[color:var(--tms-badge-green)]" title={`${label} on file`} data-testid={`doc-cell-${docType}`} data-state="present"><Check size={14} aria-label={`${label} on file`} /></span>
+        if (cell === 'REVIEW') {
+          return (
+            <Link
+              to={`/tms/shipments/${row.id}/edit#docs-${docType}`}
+              className="tms-board-link"
+              title={`${label} sent from the driver app, waiting for review: open it to accept`}
+              data-testid={`doc-cell-${docType}`}
+              data-state="review"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <TmsBadge tone="green"><Check size={12} aria-hidden /> Driver sent · review</TmsBadge>
+            </Link>
+          )
+        }
         if (cell === 'NA') return <span className="tms-muted" title={`No ${label} to chase on this load`} data-testid={`doc-cell-${docType}`} data-state="na">N/A</span>
         if (cell === 'MISSING') {
           return (

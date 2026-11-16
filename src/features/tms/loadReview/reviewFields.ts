@@ -23,9 +23,10 @@ export function profitOf(row: ShipmentListRow): { cents: number; pct: number | n
  * not require this document, or the order's document check found nothing missing.
  */
 export function docBasisText(row: ShipmentListRow, docType: 'POD' | 'RATE_CON'): string {
-  if (row.docsNotRequired?.includes(docType) && docCellOf(row, docType) !== 'PRESENT') return 'Not required'
   const cell = docCellOf(row, docType)
+  if (row.docsNotRequired?.includes(docType) && cell !== 'PRESENT' && cell !== 'REVIEW') return 'Not required'
   if (cell === 'PRESENT') return 'On file'
+  if (cell === 'REVIEW') return 'Driver sent · review'
   if (cell === 'NA') return 'N/A'
   if (row.docsOverrideAt) return 'Signed off (no file seen)'
   if (Array.isArray(row.docsMissing) && !row.docsMissing.includes(docType)) return 'Doc check OK (file not seen)'

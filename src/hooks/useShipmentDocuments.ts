@@ -103,6 +103,7 @@ export function useShipmentDocuments(
         carShipper,
         // Own fleet: the customer's tender on the load is the outside rate confirmation (Ryne 2026-11-16).
         ownFleet: isOwnFleetLoad(bundle?.shipment ?? null, bundle?.loadCarriers ?? []),
+        soleOrder: (bundle?.orders ?? []).length === 1,
         loadRateConKeys: (bundle?.loads ?? [])
           .filter((load) => gateLoadIds(bundle?.loads ?? [], bundle?.orders ?? [], order.id).includes(load.id))
           .map((load) => (load as { rateConfirmKey?: string | null }).rateConfirmKey ?? null),
