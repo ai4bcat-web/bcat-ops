@@ -206,7 +206,8 @@ export function factorQueueRows(
       const inv = item.invoiceId ? invoicesById.get(item.invoiceId) ?? null : null
       const shipment = item.shipmentId ? l.shipmentsById.get(item.shipmentId) ?? null : null
       // Unlinked rows carry their amount in the cached OTR payload; 0 only when nothing has resolved one.
-      const payloadDollars = item.otrAmount ?? invoiceAmountOf(item)
+      // `otrAmount` is cents (what was submitted); the readiness payload is dollars.
+      const payloadDollars = typeof item.otrAmount === 'number' ? item.otrAmount / 100 : invoiceAmountOf(item)
       const amountCents = inv?.totalCents ?? (payloadDollars != null ? Math.round(payloadDollars * 100) : 0)
       return {
         key: `factor:${item.id}`,

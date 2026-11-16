@@ -74,7 +74,7 @@ describe('factorQueueRows (the folded-in To factor tab)', () => {
 
   it('lists queue rows not yet at OTR, once, and skips any a Ready order already carries', () => {
     const rows = factorQueueRows([
-      item({ id: '11836', proNumber: '11836', otrAmount: 375 }),
+      item({ id: '11836', proNumber: '11836', otrAmount: 37_500 }),
       item({ id: 'P2', proNumber: 'P2', orderId: 'o-covered' }),
       item({ id: 'P3', proNumber: 'P3', status: 'PENDING_WITH_OTR' }),
     ], [{ orderId: 'o-covered', shipmentId: 's-x' } as never], new Map(), l)
@@ -114,7 +114,7 @@ describe('factorQueueRows (the folded-in To factor tab)', () => {
     const rows = factorQueueRows([
       item({ id: 'p', proNumber: 'P', otrReadiness: { payload: { InvoiceAmount: 375 } } }),
       item({ id: 'q', proNumber: 'Q', otrReadiness: { payload: { InvoiceAmount: '$1,250.50' } } }),
-      item({ id: 'r', proNumber: 'R', otrAmount: 90, otrReadiness: { payload: { InvoiceAmount: 375 } } }),
+      item({ id: 'r', proNumber: 'R', otrAmount: 9_000, otrReadiness: { payload: { InvoiceAmount: 375 } } }),
       item({ id: 's', proNumber: 'S' }),
     ], [], new Map(), l)
     expect(rows.map((r) => [r.key, r.amountCents, r.balanceCents])).toEqual([
@@ -123,5 +123,10 @@ describe('factorQueueRows (the folded-in To factor tab)', () => {
       ['factor:r', 9_000, 9_000],
       ['factor:s', 0, 0],
     ])
+  })
+
+  it('reads otrAmount as cents (14629: 26650 is $266.50, not $26,650)', () => {
+    const rows = factorQueueRows([item({ id: '14629', proNumber: '14629', otrAmount: 26_650 })], [], new Map(), l)
+    expect(rows[0].amountCents).toBe(26_650)
   })
 })
