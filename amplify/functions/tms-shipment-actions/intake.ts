@@ -719,3 +719,8 @@ export async function reconcileOpenIntake(deps: IntakeDeps, shipmentId: string, 
 export async function intakeAutolinkBuilt(deps: IntakeDeps, caller: Caller): Promise<number> {
   return autolinkRows(deps, await openIntakeRows(deps), caller)
 }
+
+/** A tender e-mail's file the shipment may copy in: Intake (`intake-attachments/`) or the forwarded-tender workflow (`workflow-inbox/`). */
+export function isTenderFileKey(key: string): boolean {
+  return key.startsWith('intake-attachments/') || key.startsWith('workflow-inbox/')
+}
