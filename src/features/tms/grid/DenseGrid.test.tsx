@@ -265,3 +265,13 @@ describe('useDenseGridPrefs', () => {
     expect(result.current.widths).toEqual({})
   })
 })
+
+describe('stickyEnd', () => {
+  it('pins a column to the right edge so its buttons stay on screen while the rest scrolls', () => {
+    const { container } = grid({ columns: [...columns.slice(0, 2), { key: 'actions', header: 'Actions', text: () => '', fixed: true, width: 120, stickyEnd: true }] })
+    const th = container.querySelector('th[class*="tms-dg-sticky-end"]') as HTMLElement
+    expect(th).toHaveTextContent('Actions')
+    expect(th.style.right).toBe('0px')
+    expect(container.querySelectorAll('td.tms-dg-sticky-end')).toHaveLength(3)
+  })
+})

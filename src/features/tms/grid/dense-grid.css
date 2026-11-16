@@ -393,6 +393,10 @@
   z-index: 2;
 }
 
+.tms-shell .tms-dg-table .tms-dg-sticky-end {
+  box-shadow: -1px 0 0 0 var(--tms-border), -4px 0 6px -4px color-mix(in srgb, var(--tms-text) 25%, transparent);
+}
+
 .tms-shell .tms-dg-table .tms-dg-sticky-last {
   box-shadow: 1px 0 0 0 var(--tms-border), 4px 0 6px -4px color-mix(in srgb, var(--tms-text) 25%, transparent);
 }
