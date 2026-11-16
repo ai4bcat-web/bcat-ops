@@ -52,6 +52,8 @@ export function ArSettingsCard() {
   const [factorEmail, setFactorEmail] = useState('')
   const [factorNotice, setFactorNotice] = useState('')
   const [factorFeePct, setFactorFeePct] = useState('2')
+  const [payDiffDollars, setPayDiffDollars] = useState('0')
+  const [payAsEntered, setPayAsEntered] = useState(true)
   const { hint: factorAddressHint, pickCity: pickFactorCity } = useAddressAutofill({
     zip: factorZip, city: factorCity, state: factorState, upper: true,
     apply: (p) => { if (p.city) setFactorCity(p.city); if (p.state) setFactorState(p.state); if (p.zip) setFactorZip(p.zip) },
@@ -83,6 +85,8 @@ export function ArSettingsCard() {
         setFactorEmail(s?.factorRemitTo?.email ?? '')
         setFactorNotice(s?.factorRemitTo?.noticeText ?? '')
         setFactorFeePct(String((s?.factorFeeBps ?? 200) / 100))
+        setPayDiffDollars(String((s?.payDiffAutoAcceptCents ?? 0) / 100))
+        setPayAsEntered(s?.payAcceptAsEntered !== false)
         // Posting money is admin-only unless somebody deliberately opened it up.
         setBatchEmail(s?.invoiceBatchEmail ?? 'PER_INVOICE')
       })
@@ -107,6 +111,8 @@ export function ArSettingsCard() {
     if (seriesProblem) { setError(seriesProblem); return }
     const feePct = Number(factorFeePct.trim())
     if (!Number.isFinite(feePct) || feePct < 0 || feePct > 10) { setError('The OTR factoring fee must be a percent between 0 and 10'); return }
+    const diffDollars = Number(payDiffDollars.trim() === '' ? '0' : payDiffDollars.trim())
+    if (!Number.isFinite(diffDollars) || diffDollars < 0 || diffDollars > 100) { setError('Auto-accept payment differences must be between $0 and $100'); return }
     // A factor remit-to with no name is not a remit-to; it clears the whole block.
     const name = factorName.trim()
     const address = [factorStreet, factorCity, factorState, factorZip].some((v) => v.trim())
@@ -130,6 +136,8 @@ export function ArSettingsCard() {
           : null,
         invoiceBatchEmail: batchEmail,
         factorFeeBps: Math.round(feePct * 100),
+        payDiffAutoAcceptCents: Math.round(diffDollars * 100),
+        payAcceptAsEntered: payAsEntered,
         // Only a series start the person changed is sent: the Lambda moves the counter forward on it.
         ...(seriesStart.trim() !== '' && Number(seriesStart) !== (savedSeriesStart ?? -1)
           ? { invoiceSeriesStart: Number(seriesStart) }
@@ -240,6 +248,19 @@ export function ArSettingsCard() {
             disabled={saving}
             help={`Attached on top of whatever the customer's own required-document list asks for. Leave every box clear for the house default: ${DEFAULT_INVOICE_ATTACH_TYPES.join(' and ')}.`}
           />
+
+          <Panel>
+            <GroupLabel>Payments Received</GroupLabel>
+            <TmsField label="Accept payment amounts as entered" hint="On: a payment that is short or over is never blocked. The invoice is marked paid, a short pay is closed as an adjustment and an overpay is accepted, and both stay reportable. Off: each line must be ticked &ldquo;In full&rdquo;.">
+              <label>
+                <input type="checkbox" aria-label="Accept payment amounts as entered" checked={payAsEntered} onChange={(e) => setPayAsEntered(e.target.checked)} />{' '}
+                Accept amounts as entered
+              </label>
+            </TmsField>
+            <TmsField label="Auto-accept payment differences under ($)" hint="When a payment is short or over by this much or less, Payments Received accepts it as paid in full without ticking &ldquo;In full&rdquo;. The difference is closed as an adjustment and stays reportable. 0 turns it off.">
+              <TmsInput aria-label="Auto-accept payment differences under dollars" inputMode="decimal" value={payDiffDollars} onChange={(e) => setPayDiffDollars(e.target.value)} />
+            </TmsField>
+          </Panel>
 
           <Panel>
             <GroupLabel>Factor remit-to</GroupLabel>

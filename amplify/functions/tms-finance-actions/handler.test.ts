@@ -1600,6 +1600,14 @@ describe('SAVE_AR_SETTINGS', () => {
     await expect(call('SAVE_AR_SETTINGS', { factorFeeBps: 1500 })).rejects.toThrow(/factorFeeBps/)
   })
 
+  it('stores the auto-accept payment difference in cents (0 = off) and refuses more than $100', async () => {
+    await call('SAVE_AR_SETTINGS', { payDiffAutoAcceptCents: 200 })
+    expect(table(TABLES.settings).get('default')).toMatchObject({ payDiffAutoAcceptCents: 200 })
+    await call('SAVE_AR_SETTINGS', { payDiffAutoAcceptCents: 0 })
+    expect(table(TABLES.settings).get('default')).toMatchObject({ payDiffAutoAcceptCents: 0 })
+    await expect(call('SAVE_AR_SETTINGS', { payDiffAutoAcceptCents: 10_001 })).rejects.toThrow(/payDiffAutoAcceptCents/)
+  })
+
   describe('invoice series start (Aljex-exit DECIDED-6)', () => {
     const settingsRow = () => table(TABLES.settings).get('default')!
 

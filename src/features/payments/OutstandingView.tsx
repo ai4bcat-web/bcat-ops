@@ -10,6 +10,11 @@
  * 2%). After the payment posts, the fee is closed on the invoice as a write-off reasoned
  * "Factoring fee (OTR 2%)", so the invoice ends PAID and the fee is reportable.
  *
+ * "Paid in full" (Ryne 2026-11-16): a row, or the whole bar, can accept the amount typed as the full settlement.
+ * A short pay is closed as a write-off reasoned "Short pay accepted as paid in full" and an overpay is recorded on
+ * the payment (acceptOverage), so the invoice ends PAID with no open balance and no customer credit. Both stay
+ * reportable. `TmsSettings.payDiffAutoAcceptCents` accepts a small gap without ticking anything.
+ *
  * Manual and Factored are never received together: each type has its own receive bar (a check is one
  * customer's; one OTR remittance covers many customers' invoices and posts one payment per customer).
  */
@@ -26,8 +31,8 @@ import { termsVsActualText } from '@/lib/daysToPay'
 import { formatCents } from '@/lib/invoiceBuild'
 import type { ArPaymentMethod, CustomerRecord, InvoiceRecord } from '@/types/tms'
 import {
-  DEFAULT_FACTOR_FEE_BPS, LATE_BUCKETS, allocateOldestFirst, factorFeeReason, filterTableRows, lateBucket, parseDollars, planReceive, prefillCents,
-  recordPaymentInput, tableRows,
+  DEFAULT_FACTOR_FEE_BPS, LATE_BUCKETS, SHORT_PAY_REASON, allocateOldestFirst, differenceReason, factorFeeReason, filterTableRows, lateBucket, parseDollars,
+  planReceive, prefillCents, recordPaymentInput, tableRows,
   type OutstandingSectionKey, type OutstandingTableRow, type ReceiveDraft, type ReceivePlan,
 } from './outstanding'
 
@@ -36,7 +41,7 @@ const FACTOR_METHODS: ArPaymentMethod[] = ['FACTOR', 'ACH', 'WIRE', 'CHECK', 'OT
 
 const TYPE_LABEL: Record<OutstandingSectionKey, string> = { manual: 'Manual', factored: 'Factored (OTR)' }
 
-interface BarForm { reference: string; receivedAt: string; method: ArPaymentMethod }
+interface BarForm { reference: string; receivedAt: string; method: ArPaymentMethod; note: string }
 
 const invoicePath = (id: string) => `/tms/invoicing/invoices/${encodeURIComponent(id)}`
 const dollars = (cents: number) => (cents / 100).toFixed(2)
@@ -57,9 +62,18 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
   divisionName?: (key: string) => string
 }) {
   const [feeBps, setFeeBps] = useState(DEFAULT_FACTOR_FEE_BPS)
+  // "Auto-accept differences under $X": 0 means never (the default).
+  const [autoAcceptCents, setAutoAcceptCents] = useState(0)
+  // "Accept payment amounts as entered": on unless Settings turns it off.
+  const [asEntered, setAsEntered] = useState(true)
   useEffect(() => {
     let alive = true
-    getTmsSettings().then((s) => { if (alive && s?.factorFeeBps != null) setFeeBps(s.factorFeeBps) }).catch(() => { /* default 2% */ })
+    getTmsSettings().then((s) => {
+      if (!alive) return
+      if (s?.factorFeeBps != null) setFeeBps(s.factorFeeBps)
+      if (s?.payDiffAutoAcceptCents != null) setAutoAcceptCents(s.payDiffAutoAcceptCents)
+      if (s?.payAcceptAsEntered === false) setAsEntered(false)
+    }).catch(() => { /* default 2%, no auto-accept */ })
     return () => { alive = false }
   }, [])
 
@@ -80,6 +94,8 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
   const facts = useCustomerPaymentFacts(manualCustomerIds, factsVersion)
 
   const [tickedAll, setTicked] = useState<Record<string, string>>({})
+  // Invoices whose amount is accepted as the full settlement, short or over.
+  const [accept, setAccept] = useState<Record<string, boolean>>({})
   const [forms, setForms] = useState<Record<string, BarForm>>({})
   const [confirm, setConfirm] = useState<{ barKey: OutstandingSectionKey; title: string; draft: ReceiveDraft; plan: ReceivePlan } | null>(null)
   const [posting, setPosting] = useState(false)
@@ -110,7 +126,7 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
   }
 
   const formOf = (barKey: OutstandingSectionKey): BarForm =>
-    forms[barKey] ?? { reference: '', receivedAt: asOf, method: barKey === 'factored' ? 'FACTOR' : 'CHECK' }
+    forms[barKey] ?? { reference: '', receivedAt: asOf, method: barKey === 'factored' ? 'FACTOR' : 'CHECK', note: '' }
   const setForm = (barKey: OutstandingSectionKey, patch: Partial<BarForm>) =>
     setForms((f) => ({ ...f, [barKey]: { ...formOf(barKey), ...patch } }))
   const tick = (list: OutstandingTableRow[], on: boolean) => setTicked((t) => {
@@ -127,7 +143,10 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
 
   const startReceive = (barKey: OutstandingSectionKey) => {
     const f = formOf(barKey)
-    const draft: ReceiveDraft = { lines: pickedOf(barKey).map((row) => ({ row, amount: ticked[row.invoiceId] })), feeBps, ...f }
+    const draft: ReceiveDraft = {
+      lines: pickedOf(barKey).map((row) => ({ row, amount: ticked[row.invoiceId], accept: accept[row.invoiceId] === true })),
+      feeBps, autoAcceptCents, acceptAsEntered: asEntered, ...f,
+    }
     const plan = planReceive(draft)
     setErrors((e) => ({ ...e, [barKey]: plan.errors }))
     if (!plan.ok) return
@@ -156,9 +175,25 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
           clientRequestId: `${reqId}-fee-${l.invoiceId}`.slice(0, 64),
         })
       }
-      toast.success(`Received ${formatCents(plan.receivedCents)}${plan.feeCents ? ` · OTR fee ${formatCents(plan.feeCents)} closed` : ''}`)
+      // A short pay accepted as paid in full: the rest is closed as an adjustment, so no balance stays open.
+      for (const l of plan.lines) {
+        if (l.shortCents <= 0) continue
+        await writeOffInvoice({
+          invoiceId: l.invoiceId,
+          amountCents: l.shortCents,
+          reason: differenceReason(SHORT_PAY_REASON, draft.note),
+          clientRequestId: `${reqId}-short-${l.invoiceId}`.slice(0, 64),
+        })
+      }
+      const accepted = plan.lines.filter((l) => l.accepted).length
+      toast.success(`Received ${formatCents(plan.receivedCents)}${plan.feeCents ? ` · OTR fee ${formatCents(plan.feeCents)} closed` : ''}${accepted ? ` · ${accepted} accepted as paid in full` : ''}`)
       setTicked((t) => {
         const next = { ...t }
+        for (const l of plan.lines) delete next[l.invoiceId]
+        return next
+      })
+      setAccept((a) => {
+        const next = { ...a }
         for (const l of plan.lines) delete next[l.invoiceId]
         return next
       })
@@ -210,7 +245,7 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
     },
     { key: 'division', header: 'Rev division', group: 'Invoice', text: (r) => divLabel(r.divisionKey), filter: 'multi', optionsOf: (r) => opt(divLabel(r.divisionKey)) },
     { key: 'sent', header: 'Sent', group: 'Dates', text: (r) => (r.sentOn ? formatDay(r.sentOn) : ''), filter: 'date', dateOf: (r) => r.sentOn || null, sortValue: (r) => r.sentOn },
-    { key: 'amountPaid', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 132 },
+    { key: 'amountPaid', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 210 },
   ], [divLabel])
 
   const renderCell = (r: OutstandingTableRow, key: string): ReactNode => {
@@ -220,9 +255,18 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
       case 'amountPaid': {
         const on = r.invoiceId in ticked
         return (
-          <TmsInput className="pr-out-amt" inputMode="decimal" aria-label={`Amount paid on ${r.pro}`} disabled={!on}
-            value={on ? ticked[r.invoiceId] : ''} placeholder={on ? '' : 'Amount paid'}
-            onChange={(e) => setTicked((t) => ({ ...t, [r.invoiceId]: e.target.value }))} />
+          <span className="pr-out-amtcell">
+            <TmsInput className="pr-out-amt" inputMode="decimal" aria-label={`Amount paid on ${r.pro}`} disabled={!on}
+              value={on ? ticked[r.invoiceId] : ''} placeholder={on ? '' : 'Amount paid'}
+              onChange={(e) => setTicked((t) => ({ ...t, [r.invoiceId]: e.target.value }))} />
+            {on && (
+              <label className="pr-out-full" title="Accept this amount as the full settlement: a short pay is closed and an overpay is accepted, leaving no open balance or credit.">
+                <input type="checkbox" aria-label={`Accept ${r.pro} as paid in full`} checked={accept[r.invoiceId] === true}
+                  onChange={(e) => setAccept((a) => ({ ...a, [r.invoiceId]: e.target.checked }))} />
+                In full
+              </label>
+            )}
+          </span>
         )
       }
       case 'type':
@@ -244,6 +288,8 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
     const factored = barKey === 'factored'
     const f = formOf(barKey)
     const running = picked.reduce((s, r) => s + typedCents(ticked[r.invoiceId]), 0)
+    const allAccepted = picked.every((r) => accept[r.invoiceId] === true)
+    const anyAccepted = picked.some((r) => accept[r.invoiceId] === true)
     const methods = factored ? FACTOR_METHODS : MANUAL_METHODS
     const refLabel = f.method === 'CHECK' ? 'Check number' : factored ? 'OTR remittance or ACH reference' : 'Reference'
     // A check is one customer's: ticked manual invoices from several customers can't share one payment.
@@ -258,6 +304,15 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
         <TmsInput aria-label={`${TYPE_LABEL[barKey]} ${refLabel}`} placeholder={f.method === 'CHECK' ? 'Check #' : factored ? 'OTR remittance #' : 'Reference'}
           value={f.reference} onChange={(e) => setForm(barKey, { reference: e.target.value })} />
         <TmsInput type="date" aria-label={`${TYPE_LABEL[barKey]} payment date`} value={f.receivedAt} onChange={(e) => setForm(barKey, { receivedAt: e.target.value })} />
+        <label className="pr-out-full pr-out-fullall" title="Accept every ticked amount as the full settlement: short pays are closed and overpays accepted, with no open balance or credit left.">
+          <input type="checkbox" aria-label={`Accept all ${TYPE_LABEL[barKey]} as paid in full`} checked={allAccepted}
+            onChange={(e) => setAccept((a) => { const next = { ...a }; for (const r of picked) next[r.invoiceId] = e.target.checked; return next })} />
+          Accept all as paid in full
+        </label>
+        {anyAccepted && (
+          <TmsInput aria-label={`${TYPE_LABEL[barKey]} reason for accepting the difference`} placeholder="Reason (optional)" value={f.note}
+            onChange={(e) => setForm(barKey, { note: e.target.value })} />
+        )}
         <span className="pr-out-total">{picked.length} invoice{picked.length === 1 ? '' : 's'} · <strong>{formatCents(running)}</strong></span>
         <TmsButton variant="primary" size="sm" disabled={mixed} onClick={() => startReceive(barKey)} data-testid="receive-payments">Receive payments</TmsButton>
         {mixed && <p className="pr-out-errors" role="alert" data-testid="receive-mixed-customers">A check is one customer&rsquo;s. The ticked manual invoices belong to {customersPicked} customers: pick one customer above, or untick the others.</p>}
@@ -363,6 +418,8 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
               Received <strong>{formatCents(confirm.plan.receivedCents)}</strong>
               {confirm.plan.feeCents > 0 && <> · OTR fee {confirm.draft.feeBps / 100}% <strong>{formatCents(confirm.plan.feeCents)}</strong></>}
               {' '}· Invoice total <strong>{formatCents(confirm.plan.invoiceCents)}</strong>
+              {confirm.plan.shortCents > 0 && <> · accepted as paid in full (short <strong>{formatCents(confirm.plan.shortCents)}</strong>)</>}
+              {confirm.plan.overCents > 0 && <> · accepted as paid in full (over <strong>{formatCents(confirm.plan.overCents)}</strong>)</>}
             </p>
             <ul className="flex flex-col gap-1">
               {confirm.plan.lines.map((l) => (
@@ -371,6 +428,8 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
                     {l.pro}
                     {l.feeCents > 0 ? <span className="tms-muted"> · fee {formatCents(l.feeCents)}</span> : null}
                     {l.leftCents > 0 ? <span className="tms-muted"> · {formatCents(l.leftCents)} stays open</span> : null}
+                    {l.shortCents > 0 ? <span className="tms-muted"> · paid in full, short {formatCents(l.shortCents)}{l.auto ? ' (auto-accepted)' : ''}</span> : null}
+                    {l.overCents > 0 ? <span className="tms-muted"> · paid in full, over {formatCents(l.overCents)}{l.auto ? ' (auto-accepted)' : ''}</span> : null}
                   </span>
                   <strong>{formatCents(l.paidCents)}</strong>
                 </li>
@@ -379,6 +438,8 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
             <p className="tms-muted">
               {confirm.plan.payments.length === 1 ? 'One payment' : `${confirm.plan.payments.length} payments, one per customer,`} with this reference.
               {confirm.plan.feeCents > 0 ? ` OTR's fee is closed on each factored invoice as "${factorFeeReason(confirm.draft.feeBps)}".` : ''}
+              {confirm.plan.shortCents > 0 ? ` A short pay is closed as "${differenceReason(SHORT_PAY_REASON, confirm.draft.note)}", so no balance stays open.` : ''}
+              {confirm.plan.overCents > 0 ? ' An overpay is recorded on the payment and never kept as customer credit.' : ''}
             </p>
           </div>
         </TmsDialog>

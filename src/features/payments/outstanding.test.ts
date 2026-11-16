@@ -88,7 +88,7 @@ describe('planReceive', () => {
   ], nameOf, '2026-11-16')
   const rows = [...manual.groups.flatMap((g) => g.rows), ...factored.groups.flatMap((g) => g.rows)]
   const draft = (amounts: Record<string, string>, extra: Partial<ReceiveDraft> = {}): ReceiveDraft => ({
-    reference: '1042', receivedAt: '2026-11-16', method: 'CHECK', feeBps: 200,
+    reference: '1042', receivedAt: '2026-11-16', method: 'CHECK', feeBps: 200, acceptAsEntered: false,
     lines: rows.filter((r) => r.invoiceId in amounts).map((row) => ({ row, amount: amounts[row.invoiceId] })), ...extra,
   })
 
@@ -121,6 +121,69 @@ describe('planReceive', () => {
   it('paying more than 98% only closes what is left', () => {
     const plan = planReceive(draft({ F1: '495.00' }, { method: 'FACTOR', reference: 'x' }))
     expect(plan.lines[0]).toMatchObject({ paidCents: 49_500, feeCents: 500, leftCents: 0 })
+  })
+
+  it('accept as paid in full closes a short pay as an adjustment: nothing stays open', () => {
+    const d = draft({ A: '99.00' })
+    d.lines[0].accept = true
+    const plan = planReceive(d)
+    expect(plan.ok).toBe(true)
+    expect(plan.lines[0]).toMatchObject({ paidCents: 9_900, appliedCents: 9_900, shortCents: 100, overCents: 0, leftCents: 0, accepted: true, auto: false })
+    expect(plan.shortCents).toBe(100)
+    expect(plan.payments[0]).toMatchObject({ amountCents: 9_900, overCents: 0, applications: [{ invoiceId: 'A', amountCents: 9_900 }] })
+    // No overpay: the payment carries no acceptOverage.
+    expect(recordPaymentInput(d, plan.payments[0], 'r')).not.toHaveProperty('acceptOverage')
+  })
+
+  it('without accept, a short pay stays open and an overpay is still refused (with a hint)', () => {
+    expect(planReceive(draft({ A: '99.00' })).lines[0]).toMatchObject({ leftCents: 100, shortCents: 0, accepted: false })
+    const over = planReceive(draft({ A: '101.00' }))
+    expect(over.ok).toBe(false)
+    expect(over.errors[0]).toMatch(/Paid in full/)
+  })
+
+  it('accept as paid in full takes an overpay: the invoice takes its balance, the extra is recorded, never credit', () => {
+    const d = draft({ A: '101.50' })
+    d.lines[0].accept = true
+    d.note = 'rounded up'
+    const plan = planReceive(d)
+    expect(plan.ok).toBe(true)
+    expect(plan.lines[0]).toMatchObject({ paidCents: 10_150, appliedCents: 10_000, overCents: 150, shortCents: 0, leftCents: 0, accepted: true })
+    expect(plan.payments[0]).toMatchObject({ amountCents: 10_150, overCents: 150, applications: [{ invoiceId: 'A', amountCents: 10_000 }] })
+    expect(recordPaymentInput(d, plan.payments[0], 'r')).toMatchObject({
+      amountCents: 10_150, acceptOverage: true, overageReason: 'Overpay accepted as paid in full: rounded up',
+      applications: [{ invoiceId: 'A', amountCents: 10_000 }],
+    })
+  })
+
+  it('a factored invoice accepted as paid in full still closes the 2% fee, then the rest of the gap as a short pay', () => {
+    const d = draft({ F1: '400.00' }, { method: 'FACTOR', reference: 'OTR-80' })
+    d.lines[0].accept = true
+    const plan = planReceive(d)
+    expect(plan.lines[0]).toMatchObject({ paidCents: 40_000, feeCents: 1_000, shortCents: 9_000, leftCents: 0, accepted: true })
+  })
+
+  it('the auto-accept setting accepts a small gap without ticking, and only up to its size', () => {
+    const small = planReceive(draft({ A: '98.80' }, { autoAcceptCents: 200 }))
+    expect(small.lines[0]).toMatchObject({ shortCents: 120, leftCents: 0, accepted: true, auto: true })
+    const big = planReceive(draft({ A: '90.00' }, { autoAcceptCents: 200 }))
+    expect(big.lines[0]).toMatchObject({ shortCents: 0, leftCents: 1_000, accepted: false, auto: false })
+    const overSmall = planReceive(draft({ A: '101.00' }, { autoAcceptCents: 200 }))
+    expect(overSmall.ok).toBe(true)
+    expect(overSmall.lines[0]).toMatchObject({ overCents: 100, accepted: true, auto: true })
+    // Off by default.
+    expect(planReceive(draft({ A: '99.99' })).lines[0]).toMatchObject({ leftCents: 1, accepted: false })
+  })
+
+  it('by default amounts are accepted as entered: a short pay and an overpay never block, and both are closed', () => {
+    const over = planReceive(draft({ A: '106.54' }, { acceptAsEntered: undefined }))
+    expect(over.ok).toBe(true)
+    expect(over.lines[0]).toMatchObject({ appliedCents: 10_000, overCents: 654, leftCents: 0, accepted: true })
+    const short = planReceive(draft({ A: '99.00' }, { acceptAsEntered: undefined }))
+    expect(short.lines[0]).toMatchObject({ shortCents: 100, leftCents: 0, accepted: true })
+    expect([short.shortCents, over.overCents]).toEqual([100, 654])
+    // Still invalid: blank, zero, negative.
+    for (const bad of ['', '0', '-5']) expect(planReceive(draft({ A: bad }, { acceptAsEntered: undefined })).ok).toBe(false)
   })
 
   it('refuses more than the balance, a blank amount, and a check with no number', () => {

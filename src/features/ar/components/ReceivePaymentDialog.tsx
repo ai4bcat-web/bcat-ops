@@ -20,6 +20,7 @@ import { AlertTriangle, Loader2, Wand2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsButton, TmsDialog, TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import {
+  getTmsSettings,
   graphqlErrorText,
   listArPaymentsByCustomer,
   listInvoicesByCustomer,
@@ -27,6 +28,7 @@ import {
   writeOffInvoice,
 } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
+import { OVERPAY_REASON, SHORT_PAY_REASON, differenceReason } from '@/lib/paymentDifference'
 import { planPayment, suggestAllocation, type PlanCredit, type PlanDocument } from '@/lib/paymentApply'
 import { formatDateInput } from '@/lib/date'
 import { centsFromInput, inputFromCents } from './money'
@@ -73,6 +75,16 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, invo
   const [overageReason, setOverageReason] = useState('')
   // Short paid: the invoices whose unpaid rest is ignored (written off), each with its reason.
   const [ignoreRest, setIgnoreRest] = useState<Record<string, string>>({})
+  // One switch for the whole payment: accept the amount as paid in full, short or over (Ryne 2026-11-16).
+  const [acceptAll, setAcceptAll] = useState(false)
+  // "Auto-accept differences under $X" from settings; 0 means never.
+  const [autoAcceptCents, setAutoAcceptCents] = useState(0)
+  const [asEntered, setAsEntered] = useState(true)
+  useEffect(() => {
+    let alive = true
+    getTmsSettings().then((s) => { if (!alive) return; if (s?.payDiffAutoAcceptCents != null) setAutoAcceptCents(s.payDiffAutoAcceptCents); if (s?.payAcceptAsEntered === false) setAsEntered(false) }).catch(() => { /* never */ })
+    return () => { alive = false }
+  }, [])
   const [allocations, setAllocations] = useState<AmountDrafts>({})
   const [creditUses, setCreditUses] = useState<AmountDrafts>({})
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([])
@@ -178,8 +190,14 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, invo
     const restCents = invoice ? invoice.balanceCents - row.amountCents : 0
     return invoice && row.amountCents > 0 && restCents > 0 ? [{ invoice, restCents }] : []
   }), [applications, invoices])
-  const ignoring = shortPaid.filter((row) => ignoreRest[row.invoice.id] !== undefined)
-  const ignoreBlocked = ignoring.some((row) => !ignoreRest[row.invoice.id]?.trim())
+  // A short pay is ignored when it was ticked, the whole payment is accepted, or it is small enough to auto-accept.
+  const autoShort = (restCents: number) => asEntered || (autoAcceptCents > 0 && restCents <= autoAcceptCents)
+  const ignoring = shortPaid.filter((row) => ignoreRest[row.invoice.id] !== undefined || acceptAll || autoShort(row.restCents))
+  // The typed reason is required only on a single ticked invoice; "accept as paid in full" uses the standard reason.
+  const ignoreBlocked = !acceptAll && ignoring.some((row) => ignoreRest[row.invoice.id] !== undefined && !ignoreRest[row.invoice.id]?.trim())
+  const reasonFor = (invoiceId: string) => ignoreRest[invoiceId]?.trim() || SHORT_PAY_REASON
+  const acceptOverageNow = plan.unappliedCents > 0 && (overage === 'ACCEPT' || acceptAll || asEntered || (autoAcceptCents > 0 && plan.unappliedCents <= autoAcceptCents))
+  const hasDifference = plan.unappliedCents > 0 || shortPaid.length > 0
   const disabled = busy === true || posting || loading
 
   const autoAllocate = () => {
@@ -206,8 +224,8 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, invo
       clientRequestId,
       reference: reference.trim() || undefined,
       note: note.trim() || undefined,
-      ...(plan.unappliedCents > 0 && overage === 'ACCEPT'
-        ? { acceptOverage: true, overageReason: overageReason.trim() || undefined }
+      ...(acceptOverageNow
+        ? { acceptOverage: true, overageReason: overageReason.trim() || differenceReason(OVERPAY_REASON, null) }
         : {}),
     })
       .then(async (row) => {
@@ -217,7 +235,7 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, invo
           await writeOffInvoice({
             invoiceId: invoice.id,
             amountCents: restCents,
-            reason: ignoreRest[invoice.id].trim(),
+            reason: reasonFor(invoice.id),
             clientRequestId: `${clientRequestId}-wo-${invoice.id}`.slice(0, 64),
           })
         }
@@ -444,7 +462,14 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, invo
               <span>From credits <strong aria-label="From credits total">{formatCents(plan.fromCreditsCents)}</strong></span>
               <span>Unapplied <strong aria-label="Unapplied total">{formatCents(plan.unappliedCents)}</strong></span>
             </div>
-            {plan.unappliedCents > 0 && (
+            {hasDifference && (
+              <label className="mt-2 flex items-center gap-2 text-xs font-medium">
+                <input type="checkbox" aria-label="Accept this payment as paid in full" checked={acceptAll} disabled={disabled}
+                  onChange={(e) => setAcceptAll(e.target.checked)} />
+                Accept this payment as paid in full: short pays are closed and an overpay is accepted, with no open balance or credit left
+              </label>
+            )}
+            {plan.unappliedCents > 0 && !acceptAll && (
               <fieldset className="mt-2 flex flex-col gap-1 text-xs">
                 <legend className="sr-only">Overpayment</legend>
                 <label className="flex items-center gap-2">
@@ -480,7 +505,7 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, invo
                 )}
               </fieldset>
             )}
-            {shortPaid.map(({ invoice, restCents }) => (
+            {!acceptAll && shortPaid.map(({ invoice, restCents }) => (
               <div key={invoice.id} className="mt-2 flex flex-col gap-1 text-xs">
                 <label className="flex items-center gap-2">
                   <input

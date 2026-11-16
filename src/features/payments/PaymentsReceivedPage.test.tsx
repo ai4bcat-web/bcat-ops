@@ -56,6 +56,7 @@ vi.mock('@/features/ar/components/ReceivePaymentDialog', () => ({
 }))
 vi.mock('@/hooks/useAuth', () => ({ useAuthUser: () => ({ email: 'ryne@bcatcorp.com', groups: ['ADMIN'] }) }))
 
+import { recordPayment, writeOffInvoice } from '@/lib/apiClient'
 import { PaymentsReceivedPage } from './PaymentsReceivedPage'
 
 describe('Payments Received page', () => {
@@ -93,6 +94,47 @@ describe('Payments Received page', () => {
     expect(within(out).getByTestId('outstanding-summary').textContent).toContain('1 invoice')
     fireEvent.click(within(out).getByTestId('chip-factored'))
     await waitFor(() => expect(within(out).getByLabelText('Select 14200')).toBeTruthy())
+  })
+
+  it('"In full" accepts a short pay as paid in full: the payment posts at what was received and the rest is closed as a short-pay adjustment', async () => {
+    vi.mocked(recordPayment).mockResolvedValue({ payment: {}, invoices: [], duplicate: false } as never)
+    vi.mocked(writeOffInvoice).mockResolvedValue({ payment: {}, invoices: [], duplicate: false } as never)
+    render(<MemoryRouter><PaymentsReceivedPage /></MemoryRouter>)
+    const out = await screen.findByTestId('payments-outstanding')
+    fireEvent.click(within(out).getByLabelText('Select 14200'))
+    fireEvent.change(within(out).getByLabelText('Amount paid on 14200'), { target: { value: '499.00' } })
+    const bar = within(out).getByTestId('receive-bar')
+    // Short, not accepted: the rest would stay open.
+    fireEvent.change(within(bar).getByLabelText('Manual Check number'), { target: { value: '1042' } })
+    fireEvent.click(within(out).getByLabelText('Accept 14200 as paid in full'))
+    fireEvent.click(within(bar).getByTestId('receive-payments'))
+    expect((await screen.findByTestId('receive-fee-summary')).textContent).toContain('accepted as paid in full (short $1.00)')
+    fireEvent.click(screen.getByTestId('receive-confirm'))
+    await waitFor(() => expect(writeOffInvoice).toHaveBeenCalledTimes(1))
+    expect(recordPayment).toHaveBeenCalledWith(expect.objectContaining({ amountCents: 49_900, applications: [{ invoiceId: '14200', amountCents: 49_900 }] }))
+    expect(vi.mocked(recordPayment).mock.calls[0][0]).not.toHaveProperty('acceptOverage')
+    expect(writeOffInvoice).toHaveBeenCalledWith(expect.objectContaining({ invoiceId: '14200', amountCents: 100, reason: 'Short pay accepted as paid in full' }))
+  })
+
+  it('"In full" on an overpay posts the extra as accepted, never as credit, and writes nothing off', async () => {
+    vi.mocked(recordPayment).mockClear()
+    vi.mocked(writeOffInvoice).mockClear()
+    vi.mocked(recordPayment).mockResolvedValue({ payment: {}, invoices: [], duplicate: false } as never)
+    render(<MemoryRouter><PaymentsReceivedPage /></MemoryRouter>)
+    const out = await screen.findByTestId('payments-outstanding')
+    fireEvent.click(within(out).getByLabelText('Select 14200'))
+    fireEvent.change(within(out).getByLabelText('Amount paid on 14200'), { target: { value: '502.00' } })
+    const bar = within(out).getByTestId('receive-bar')
+    fireEvent.change(within(bar).getByLabelText('Manual Check number'), { target: { value: '1043' } })
+    // Accepted as entered by default: no blocking error, no ticking.
+    fireEvent.click(within(bar).getByTestId('receive-payments'))
+    expect((await screen.findByTestId('receive-fee-summary')).textContent).toContain('accepted as paid in full (over $2.00)')
+    fireEvent.click(screen.getByTestId('receive-confirm'))
+    await waitFor(() => expect(recordPayment).toHaveBeenCalledTimes(1))
+    expect(recordPayment).toHaveBeenCalledWith(expect.objectContaining({
+      amountCents: 50_200, acceptOverage: true, overageReason: 'Overpay accepted as paid in full', applications: [{ invoiceId: '14200', amountCents: 50_000 }],
+    }))
+    expect(writeOffInvoice).not.toHaveBeenCalled()
   })
 
   it('a check is one customer: manual invoices from two customers cannot be received together', async () => {

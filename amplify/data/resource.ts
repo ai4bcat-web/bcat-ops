@@ -1240,6 +1240,8 @@ const schema = a.schema(stageTypes({
       invoiceAttachTypes:       a.string().array(),  // ['POD','BOL'] on top of the customer's required docs
       factorRemitTo:            a.json(),        // { name, address, email, noticeText }
       factorFeeBps:             a.integer(),     // OTR's fee on a factored invoice, basis points; unset = 200 (2%)
+      payAcceptAsEntered:       a.boolean(),     // receive payments as entered (close short pays, accept overpays); unset = on
+      payDiffAutoAcceptCents:   a.integer(),     // a payment short/over by this many cents or less is accepted as paid in full; unset/0 = never
       arPostingAdminOnly:       a.boolean(),     // true — void/payment/credit/write-off/reversal
       invoiceBatchEmail:        a.enum(['PER_INVOICE', 'PER_BILL_TO']),
 

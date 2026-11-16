@@ -1346,6 +1346,8 @@ export async function saveArSettings(input: Row, caller: Caller): Promise<Row> {
   if (batchMode) patch.invoiceBatchEmail = batchMode
   const terms = optionalString(input.invoiceTerms, 4000)
   if (terms) patch.invoiceTerms = terms
+  const asEntered = optionalBoolean(input.payAcceptAsEntered)
+  if (asEntered != null) patch.payAcceptAsEntered = asEntered
   const adminOnly = optionalBoolean(input.arPostingAdminOnly)
   if (adminOnly != null) patch.arPostingAdminOnly = adminOnly
   if (input.invoiceAlwaysCopyEmails !== undefined) {
@@ -1364,6 +1366,9 @@ export async function saveArSettings(input: Row, caller: Caller): Promise<Row> {
   // OTR's fee, basis points: 0–1000 (10%).
   const feeBps = optionalInteger(input.factorFeeBps, { min: 0, max: 1000, label: 'factorFeeBps' })
   if (feeBps != null) patch.factorFeeBps = feeBps
+  // Accept a small payment difference without ticking "paid in full": 0 (off) to $100.
+  const diffCents = optionalInteger(input.payDiffAutoAcceptCents, { min: 0, max: 10_000, label: 'payDiffAutoAcceptCents' })
+  if (diffCents != null) patch.payDiffAutoAcceptCents = diffCents
   if (input.factorRemitTo != null) {
     // A blob without a name silently turns every factored customer's bill back into
     // "pay us", which is the one mistake this whole field exists to prevent.

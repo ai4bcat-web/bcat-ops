@@ -10,6 +10,7 @@
  */
 import { AR_PAYMENT_METHOD_LABEL } from '@/features/ar/arViews'
 import type { ArPaymentRecord } from '@/types/tms'
+import { isShortPayNote } from '@/lib/paymentDifference'
 
 export type ReceivedType = 'payment' | 'credit' | 'debit' | 'write-off' | 'reversal'
 
@@ -52,6 +53,8 @@ export interface ReceivedRow {
   reversedReason: string | null
   /** The BCAT row itself, for Reverse. Null on Aljex history. */
   payment: ArPaymentRecord | null
+  /** Overpay accepted as paid in full on this payment: recorded, never kept as customer credit. */
+  overAcceptedCents?: number
 }
 
 const KIND_TYPE: Record<ArPaymentRecord['kind'], ReceivedType> = {
@@ -92,6 +95,7 @@ export function fromArPayment(
     reversedOn: ymd(reversal?.receivedAt ?? reversal?.createdAt),
     reversedReason: reversal?.note || null,
     payment: p,
+    overAcceptedCents: p.overageAcceptedCents ?? 0,
   }
 }
 
@@ -169,6 +173,11 @@ export function fromAljexMemo(row: AljexMemoRow, customerIdByName: (name: string
 /** The list's segmented control: cash receipts, adjustments (credits, debits, write-offs), or both. */
 export type ReceivedView = 'payments' | 'adjustments' | 'all'
 
+/** A short pay accepted as paid in full (a write-off with the standard reason), or a payment that accepted an overpay. */
+export function isAcceptedDifference(row: ReceivedRow): boolean {
+  return (row.type === 'write-off' && isShortPayNote(row.note)) || (row.overAcceptedCents ?? 0) > 0
+}
+
 export function inView(row: ReceivedRow, view: ReceivedView): boolean {
   if (view === 'all') return true
   const cash = row.type === 'payment' || (row.type === 'reversal' && row.payment != null)
@@ -194,6 +203,8 @@ export interface ReceivedFilter {
   /** Division keys (`BROKERAGE`, `ASSETS/LOCAL`); matched when any applied invoice's shipment is in one. */
   divisions: string[]
   unappliedOnly: boolean
+  /** Only accepted differences: short pays closed as paid in full, and overpays accepted. */
+  diffsOnly?: boolean
 }
 
 export function monthBounds(asOf: string): { from: string; to: string } {
@@ -216,6 +227,7 @@ export function filterReceived(
     if (f.types.length > 0 && !f.types.includes(r.type)) return false
     if (f.methods.length > 0 && !f.methods.includes(r.method ?? NO_METHOD)) return false
     if (f.unappliedOnly && r.unappliedCents <= 0) return false
+    if (f.diffsOnly && !isAcceptedDifference(r)) return false
     if (f.divisions.length > 0) {
       const mine = divisionsOf(r)
       if (!f.divisions.some((d) => mine.some((k) => k === d || k.startsWith(`${d}/`)))) return false
