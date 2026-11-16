@@ -23,7 +23,7 @@ import { isFactorBilled } from '@/lib/factorBilling'
 import { carrierSlotsOf, parseInteger, type CarrierSlot, type FormStop, type ShipmentFormValues } from './model'
 import type { FormIssue, SectionKey } from './sectionProps'
 import { evaluateDocGate, gateLoadIds, isOwnFleetLoad } from '@/lib/shipmentDocuments'
-import { customerDocsNotRequired, customerFactorsForOtr, rateConRequired } from '@/lib/reviewRequirements'
+import { customerDocsNotRequired, customerFactorsForOtr, isCarShippingLoad, rateConRequired } from '@/lib/reviewRequirements'
 import { isCarShipperLoad } from '@/lib/carShipper'
 import type { ShipmentBundle } from '@/types/tms'
 
@@ -298,7 +298,37 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
     if (known.has(`${t.section}:${t.fieldKey}`)) continue
     push(t.section, `needs:${key}`, t.fieldKey, requiredFieldLabel(key), `Needs: ${requiredFieldLabel(key)}`, submit ? 'error' : 'warn')
   }
+  // Car shipping (Ryne 2026-11-16): only its own requirements block or flag the form, unless the customer factors.
+  if (isCarShippingLoad({ revDivision: values.ship.revDivision })) {
+    const factored = !typed && customerFactorsForOtr(o.customer)
+    return issues.filter((issue) => carShippingFormKeeps(issue.id, factored))
+  }
   return issues
+}
+
+/** Form issue ids a car-shipping load is not asked for: requirements outside its nine (validity checks always stay). */
+const CAR_SHIPPING_DROPPED_FORM = [
+  /^shipping:(shipmentType|equipmentType|weightLbs|description)$/,
+  /^picks:(pickup|delivery)$/,
+  /^(pickup|consignee):name$/,
+  /^pickup:appt$/,
+  /^(pickup|consignee|picks):(city|state):\d+$/,
+  /^rates:carrierRate:/,
+]
+
+/**
+ * Does a car-shipping load keep this form issue? Its nine requirements (customer, division, sales rep, customer rate,
+ * billing method) and every validity check stay; references, stops, freight and the factoring fields go, except the
+ * PO and the factoring fields when the customer factors (OTR needs them).
+ */
+export function carShippingFormKeeps(id: string, factored: boolean): boolean {
+  if (CAR_SHIPPING_DROPPED_FORM.some((re) => re.test(id))) return false
+  if (/^(customer|more):ref:/.test(id)) return factored
+  const factor = /:factor:([A-Z_]+)$/.exec(id)
+  if (factor) return factored || factor[1] === 'RATE_MISSING' || factor[1] === 'BILLING_METHOD'
+  const needs = /:needs:(.+)$/.exec(id)
+  if (needs) return ['salesRep', 'revenueDivision', 'customerRate'].includes(needs[1])
+  return true
 }
 
 /**

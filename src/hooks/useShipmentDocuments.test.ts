@@ -118,14 +118,15 @@ describe('useShipmentDocuments', () => {
     expect(result.current.orderGates['ord-2'].missing).toEqual(['POD', 'LUMPER_RECEIPT', 'RATE_CON'])
   })
 
-  it('asks no rate confirmation of a car-shipping load', async () => {
+  it('asks no rate confirmation of a car-shipping load whose customer does not factor', async () => {
     listShipmentDocuments.mockResolvedValue([
       doc({ id: 'sdoc-7', type: 'POD', loadId: 'lod-1', orderId: 'ord-1' }),
       doc({ id: 'sdoc-8', type: 'LUMPER_RECEIPT', loadId: 'lod-1', orderId: 'ord-1' }),
     ])
     const { result } = renderHook(() => useShipmentDocuments('shp-1', {
       bundle: { orders: [order], loads, loadCarriers },
-      customer,
+      // A factored car-shipping customer still owes OTR the rate confirmation (Ryne 2026-11-16).
+      customer: { requiredDocsForInvoice: ['POD', 'LUMPER_RECEIPT'], billingMethod: 'MANUAL' } as never,
       settings,
       carShipper: true,
     }))

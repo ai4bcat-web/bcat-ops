@@ -80,9 +80,9 @@ import { planPendingCarrierBills, readPendingBillContext, writePendingBill } fro
 import { hasGap, isReleasedOrder, reconcileReleasedOrder, type ReconcileFinding } from '../../../src/lib/billingReconcile'
 import { evaluateReleaseGate, releaseGateError, type ReleaseGateResult } from '../../../src/lib/releaseGate'
 import { factorGapsForLoad, factoringPoNumber, routeEnds, type FactorReadyInput } from '../../../src/lib/factorReadyAtCreate'
-import { customerBillingReasons, evaluateLoadReview, loadReviewExtras, loadReviewRefusal, type LoadReviewReason } from '../../../src/lib/loadReview'
+import { carShippingReasons, customerBillingReasons, evaluateLoadReview, loadReviewExtras, loadReviewRefusal, type LoadReviewReason } from '../../../src/lib/loadReview'
 import { customerBillingGaps, type CustomerBillingFacts } from '../../../src/lib/customerBillingReady'
-import { customerApEmailRequired, customerFactorsForOtr, isAssetLoad, profitFromFacts, resolveReviewRequirements, type ReviewFacts, type ReviewRequirement } from '../../../src/lib/reviewRequirements'
+import { customerApEmailRequired, customerFactorsForOtr, isAssetLoad, isCarShippingLoad, profitFromFacts, resolveReviewRequirements, reviewRequirementsForLoad, type ReviewFacts, type ReviewRequirement } from '../../../src/lib/reviewRequirements'
 import {
   isCustomerUnresolved,
   unresolvedCustomerMessage,
@@ -1355,7 +1355,12 @@ export async function computeReleaseGate(
 }
 
 /** The customer's Load Review list, then the org default, then the built-in seven. */
-function reviewRequirementsFor(customer: Row | null, settings: Row | null): ReviewRequirement[] {
+function reviewRequirementsFor(customer: Row | null, settings: Row | null, shipment?: Row | null): ReviewRequirement[] {
+  const factors = customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null)
+  // Car shipping (Ryne 2026-11-16): its own fixed list, whatever the customer's (reviewRequirementsForLoad).
+  if (isCarShippingLoad(shipment as { revDivision?: string | null } | null)) {
+    return reviewRequirementsForLoad([], { revDivision: shipment?.revDivision as string | null, customerFactors: factors })
+  }
   const list = resolveReviewRequirements(
     Array.isArray(customer?.reviewRequirements) ? (customer.reviewRequirements as string[]) : null,
     Array.isArray(settings?.reviewRequirements) ? (settings.reviewRequirements as string[]) : null,
@@ -1413,7 +1418,8 @@ function assetLoadOf(bundle: Bundle): boolean {
 
 /** The review extras, typed from the raw rows. Imported history is exempt inside the lib. */
 function reviewExtras(bundle: Bundle, order: Row, customer: Row | null, settings: Row | null, gateOwnsPod = true): LoadReviewReason[] {
-  return [
+  // Car shipping keeps only its nine requirements (and OTR's set when the customer factors): carShippingReasons.
+  return carShippingReasons([
     ...loadReviewExtras({
       shipment: {
         legacyImported: bundle.shipment.legacyImported === true,
@@ -1422,10 +1428,13 @@ function reviewExtras(bundle: Bundle, order: Row, customer: Row | null, settings
       },
       facts: reviewFacts(bundle, order),
       // The release gate already refuses on a missing POD (with its own sentence); a push has no gate.
-      requirements: reviewRequirementsFor(customer, settings).filter((key) => !gateOwnsPod || key !== 'podReceived'),
+      requirements: reviewRequirementsFor(customer, settings, bundle.shipment).filter((key) => !gateOwnsPod || key !== 'podReceived'),
     }),
     ...factorAndCustomerReasons(bundle, order, customer),
-  ]
+  ], {
+    revDivision: typeof bundle.shipment.revDivision === 'string' ? bundle.shipment.revDivision : null,
+    customerFactors: customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null),
+  })
 }
 
 /** The factoring gaps, then the customer's billing gaps (every customer: billing method and AP e-mail), said once. */

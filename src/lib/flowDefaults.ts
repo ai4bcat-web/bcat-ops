@@ -166,6 +166,18 @@ export function marginBpsOf(sellCents: number, buyCents: number): number {
  * The required-field list for one customer: the org's list plus the customer's,
  * de-duplicated, in catalog order so two customers never read differently.
  */
+/** The required load fields a car-shipping load still has (Ryne 2026-11-16: sales rep, revenue division, customer rate). */
+export const CAR_SHIPPING_REQUIRED_FIELDS: readonly string[] = ['salesRep', 'revenueDivision', 'customerRate']
+
+/**
+ * The required-field list for one load: a car-shipping load (revenue division CAR_SHIPPING) keeps only
+ * CAR_SHIPPING_REQUIRED_FIELDS, so it is never held in Building on a stop, bill-to, appointment or freight field.
+ */
+export function requiredFieldsForLoad(required: readonly string[], load: { revDivision?: string | null } | null | undefined): string[] {
+  if (String(load?.revDivision ?? '').trim().toUpperCase() !== 'CAR_SHIPPING') return [...required]
+  return required.filter((key) => CAR_SHIPPING_REQUIRED_FIELDS.includes(key))
+}
+
 export function resolveRequiredFields(
   settings: { defaultRequiredLoadFields?: readonly string[] | null } | null | undefined,
   customer: CustomerFlowSource | null | undefined,

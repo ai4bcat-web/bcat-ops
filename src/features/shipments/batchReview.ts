@@ -11,6 +11,7 @@ import {
   batchCapMessage,
   evaluateReviewRequirements,
   resolveReviewRequirements,
+  reviewRequirementsForLoad,
 } from '@/lib/reviewRequirements'
 import type { ShipmentRow } from './shipmentViews'
 
@@ -22,9 +23,13 @@ interface RequirementSources {
   orgDefault: readonly string[] | null | undefined
 }
 
-export function requirementsForRow(row: Pick<ShipmentRow, 'customerId'>, src: RequirementSources) {
+/** The customer's (or org) list; a car-shipping load uses its own fixed list (reviewRequirementsForLoad). */
+export function requirementsForRow(
+  row: Pick<ShipmentRow, 'customerId'> & { revDivision?: string | null; customerFactors?: boolean | null },
+  src: RequirementSources,
+) {
   const customer = row.customerId ? src.customers.find((c) => c.id === row.customerId) : undefined
-  return resolveReviewRequirements(customer?.reviewRequirements, src.orgDefault)
+  return reviewRequirementsForLoad(resolveReviewRequirements(customer?.reviewRequirements, src.orgDefault), row)
 }
 
 /** One line of a batch's outcome: either the client's refusal or the server's answer. */
