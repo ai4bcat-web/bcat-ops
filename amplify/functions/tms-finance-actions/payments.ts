@@ -463,6 +463,101 @@ export async function writeOffInvoice(input: Row, caller: Caller): Promise<Poste
   return readBack(id, invoiceIds, duplicate)
 }
 
+const SHORT_PAY_REASON = 'Short pay accepted as paid in full'
+const OVERPAY_REASON = 'Overpay accepted as paid in full'
+const MAX_ACCEPT_ITEMS = 200
+
+interface AcceptResult {
+  key: string
+  ok: boolean
+  error?: string
+}
+
+/**
+ * Accept open short pays and overpays as paid in full, many at once (Payments Received → Differences).
+ *
+ * Each item carries the amount the screen showed. A short pay is written off through `writeOffInvoice` only if the
+ * invoice still owes exactly that; an overpay moves the payment's `unappliedCents` into `overageAcceptedCents` only
+ * if it still holds exactly that (and the payment is not reversed). A stale item is skipped with a reason, never applied;
+ * one failure does not stop the rest. Each item is its own write, retried safely by its clientRequestId.
+ */
+export async function acceptDifferences(input: Row, caller: Caller): Promise<Row> {
+  const items = assertArrayOf(input.items, 'items', (item) => assertRecord(item, 'item'))
+  if (items.length === 0) throw new Error('Pick at least one difference')
+  if (items.length > MAX_ACCEPT_ITEMS) throw new Error(`Accept at most ${MAX_ACCEPT_ITEMS} at a time`)
+  const batchId = optionalString(input.clientRequestId, 40) ?? randomUUID().slice(0, 8)
+  const note = optionalString(input.note, 500)
+  const results: AcceptResult[] = []
+  for (const item of items) {
+    const kind = assertString(item.kind, 'kind')
+    const expected = optionalInteger(item.expectedCents, { min: 1, label: 'expectedCents' }) ?? 0
+    if (kind === 'SHORT') {
+      const invoiceId = assertString(item.invoiceId, 'invoiceId')
+      const key = `short:${invoiceId}`
+      try {
+        const row = await getById(INVOICE_TABLE_NAME, invoiceId)
+        if (!row) throw new Error('Invoice not found')
+        if (row.status === 'VOID') throw new Error('Invoice is void')
+        const balance = numberOrNull(row.balanceCents) ?? 0
+        if (balance !== expected) throw new Error(`Balance is now ${balance} cents, not ${expected}; refresh and look again`)
+        await writeOffInvoice(
+          {
+            invoiceId,
+            amountCents: expected,
+            reason: note ? `${SHORT_PAY_REASON}: ${note}` : SHORT_PAY_REASON,
+            clientRequestId: `${batchId}-s-${invoiceId}`.slice(0, 64),
+          },
+          caller,
+        )
+        results.push({ key, ok: true })
+      } catch (err) {
+        results.push({ key, ok: false, error: err instanceof Error ? err.message : String(err) })
+      }
+    } else if (kind === 'OVER') {
+      const pid = assertString(item.paymentId, 'paymentId')
+      const key = `over:${pid}`
+      try {
+        const row = await getById(AR_PAYMENT_TABLE_NAME, pid)
+        if (!row) throw new Error('Payment not found')
+        if (row.kind !== 'PAYMENT') throw new Error('Only a payment can accept an overpay')
+        if (row.reversedByPaymentId != null) throw new Error('Payment was reversed')
+        const unapplied = numberOrNull(row.unappliedCents) ?? 0
+        if (unapplied !== expected) throw new Error(`Unapplied is now ${unapplied} cents, not ${expected}; refresh and look again`)
+        const now = nowIso()
+        const already = numberOrNull(row.overageAcceptedCents) ?? 0
+        await transact(
+          [
+            updateTx(
+              AR_PAYMENT_TABLE_NAME,
+              pid,
+              {
+                unappliedCents: 0,
+                overageAcceptedCents: already + expected,
+                overageReason: note ? `${OVERPAY_REASON}: ${note}` : OVERPAY_REASON,
+                updatedAt: now,
+                updatedBy: caller.email,
+              },
+              {
+                condition: `${unsetCondition('reversedByPaymentId')} AND unappliedCents = :unappliedNow`,
+                extraValues: { ':unappliedNow': { N: String(expected) }, ':nullType': NULL_TYPE_VALUE },
+              },
+            ),
+          ],
+          'accept overpay',
+        )
+        await writeAudit('ArPayment', pid, 'ACCEPT_OVERPAY', caller, { amountCents: expected, reason: note ?? null })
+        results.push({ key, ok: true })
+      } catch (err) {
+        results.push({ key, ok: false, error: err instanceof Error ? err.message : String(err) })
+      }
+    } else {
+      throw new Error(`Unknown difference kind: ${kind}`)
+    }
+  }
+  const accepted = results.filter((r) => r.ok).length
+  return { results, accepted, failed: results.length - accepted } as unknown as Row
+}
+
 export async function reversePayment(input: Row, caller: Caller): Promise<PostedRow> {
   const paymentRowId = assertString(input.paymentId, 'paymentId')
   const reason = optionalString(input.reason, MAX_NOTE)

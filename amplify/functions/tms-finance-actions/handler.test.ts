@@ -1435,6 +1435,57 @@ describe('RECORD_PAYMENT', () => {
   })
 })
 
+describe('ACCEPT_DIFFERENCES', () => {
+  const part = async () => {
+    const { invoiceId } = await generate()
+    const out = (await call('RECORD_PAYMENT', {
+      customerId: CUSTOMER_ID, receivedAt: '2026-10-25', method: 'CHECK', reference: '55',
+      amountCents: 200_000, applications: [{ invoiceId, amountCents: 200_000 }], creditApplications: [],
+    })) as { payment: Row }
+    return { invoiceId, paymentId: String(out.payment.id) }
+  }
+
+  it('writes a short pay off as paid in full', async () => {
+    const { invoiceId } = await part()
+    const out = (await call('ACCEPT_DIFFERENCES', { items: [{ kind: 'SHORT', invoiceId, expectedCents: 50_000 }], clientRequestId: 'b1' })) as unknown as { accepted: number; failed: number }
+    expect(out).toMatchObject({ accepted: 1, failed: 0 })
+    expect(table(TABLES.invoice).get(invoiceId)).toMatchObject({ status: 'PAID', balanceCents: 0 })
+    const wo = [...table(TABLES.arPayment).values()].find((r) => r.kind === 'WRITE_OFF')
+    expect(wo).toMatchObject({ amountCents: 50_000, note: 'Short pay accepted as paid in full' })
+  })
+
+  it('moves an open overpay into accepted, and the payment still reverses', async () => {
+    const { invoiceId } = await generate()
+    const paid = (await call('RECORD_PAYMENT', {
+      customerId: CUSTOMER_ID, receivedAt: '2026-10-25', method: 'WIRE',
+      amountCents: 300_000, applications: [{ invoiceId, amountCents: 250_000 }], creditApplications: [],
+    })) as { payment: Row }
+    const pid = String(paid.payment.id)
+    const out = (await call('ACCEPT_DIFFERENCES', { items: [{ kind: 'OVER', paymentId: pid, expectedCents: 50_000 }], clientRequestId: 'b2' })) as unknown as { accepted: number }
+    expect(out.accepted).toBe(1)
+    expect(table(TABLES.arPayment).get(pid)).toMatchObject({ unappliedCents: 0, overageAcceptedCents: 50_000 })
+    await call('REVERSE_PAYMENT', { paymentId: pid, reason: 'bounced' })
+    expect(table(TABLES.invoice).get(invoiceId)).toMatchObject({ balanceCents: 250_000 })
+  })
+
+  it('skips an item whose amount changed and carries on with the rest', async () => {
+    const { invoiceId } = await part()
+    const out = (await call('ACCEPT_DIFFERENCES', {
+      items: [{ kind: 'SHORT', invoiceId, expectedCents: 40_000 }, { kind: 'SHORT', invoiceId, expectedCents: 50_000 }], clientRequestId: 'b3',
+    })) as unknown as { accepted: number; failed: number; results: Array<{ ok: boolean; error?: string }> }
+    expect(out).toMatchObject({ accepted: 1, failed: 1 })
+    expect(out.results[0].error).toMatch(/refresh/)
+  })
+
+  it('is safe to retry', async () => {
+    const { invoiceId } = await part()
+    const input = { items: [{ kind: 'SHORT', invoiceId, expectedCents: 50_000 }], clientRequestId: 'b4' }
+    await call('ACCEPT_DIFFERENCES', input)
+    await call('ACCEPT_DIFFERENCES', input)
+    expect([...table(TABLES.arPayment).values()].filter((r) => r.kind === 'WRITE_OFF')).toHaveLength(1)
+  })
+})
+
 describe('WRITE_OFF', () => {
   it('settles the remainder without pretending it was paid', async () => {
     const { invoiceId } = await generate()

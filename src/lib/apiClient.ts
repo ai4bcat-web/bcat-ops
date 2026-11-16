@@ -7852,6 +7852,21 @@ export async function writeOffInvoice(input: {
   return financeAction<PostedRow>('WRITE_OFF', input)
 }
 
+export interface AcceptDifferencesResult {
+  results: Array<{ key: string; ok: boolean; error?: string }>
+  accepted: number
+  failed: number
+}
+
+/** Accept open short pays and overpays as paid in full, many at once; each item is refused if its amount changed. */
+export async function acceptDifferences(input: {
+  items: Array<{ kind: 'SHORT' | 'OVER'; invoiceId?: string; paymentId?: string; expectedCents: number }>
+  note?: string
+  clientRequestId: string
+}): Promise<AcceptDifferencesResult> {
+  return financeAction<AcceptDifferencesResult>('ACCEPT_DIFFERENCES', input)
+}
+
 export interface AgingStatementResult {
   preview: boolean
   to: string[]

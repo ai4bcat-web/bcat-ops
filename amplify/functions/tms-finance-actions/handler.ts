@@ -28,7 +28,7 @@ import {
   saveArSettings,
   voidInvoice,
 } from './invoices'
-import { createCredit, recordPayment, reversePayment, writeOffInvoice } from './payments'
+import { acceptDifferences, createCredit, recordPayment, reversePayment, writeOffInvoice } from './payments'
 import { previewFactor, previewFactorReady, sendToFactor } from './factor'
 import { moveToManualInvoice } from './otrRejected'
 import { releaseToBilling, sendInvoice, syncFactoringChange } from './release'
@@ -101,6 +101,7 @@ type Action =
   | 'RECORD_PAYMENT'
   | 'CREATE_CREDIT'
   | 'WRITE_OFF'
+  | 'ACCEPT_DIFFERENCES'
   | 'REVERSE_PAYMENT'
   | 'PREVIEW_FACTOR'
   | 'PREVIEW_FACTOR_READY'
@@ -288,6 +289,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return createCredit(input, caller) as unknown as Promise<Row>
     case 'WRITE_OFF':
       return writeOffInvoice(input, caller) as unknown as Promise<Row>
+    case 'ACCEPT_DIFFERENCES':
+      return acceptDifferences(input, caller)
     case 'REVERSE_PAYMENT':
       return reversePayment(input, caller) as unknown as Promise<Row>
     case 'REPOINT_INVOICED_CUSTOMER':
