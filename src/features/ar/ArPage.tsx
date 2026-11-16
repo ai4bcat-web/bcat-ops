@@ -11,6 +11,7 @@
  * happen — a false "sent" here is a customer who never got their bill.
  */
 import { InvoiceEditDrawer } from './components/InvoiceEditDrawer'
+import { ChangeInvoiceCustomerDialog } from './components/ChangeInvoiceCustomerDialog'
 import { NOT_IN_OTR_QUEUE, billsThroughOtr, ordersNeedingInvoice, unsentLabel } from './autoInvoice'
 import { isFactoredLoad } from '@/lib/factorBilling'
 import { ArSummaryStrip } from './ArSummaryStrip'
@@ -103,6 +104,7 @@ type ArDialog =
   | { kind: 'factor'; invoiceId: string }
   | { kind: 'batchFactor'; rows: ArQueueRow[] }
   | { kind: 'void'; invoice: InvoiceRecord }
+  | { kind: 'changeCustomer'; invoice: InvoiceRecord }
 
 /** One shipment the batch would not bill, and exactly what the release gate said. */
 interface BatchRefusal {
@@ -629,6 +631,18 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           onSend={(inv) => setDialog({ kind: 'review', invoices: [inv] })}
           onFactor={(inv) => setDialog({ kind: 'factor', invoiceId: inv.id })}
           onVoid={(inv) => setDialog({ kind: 'void', invoice: inv })}
+          onChangeCustomer={(inv) => setDialog({ kind: 'changeCustomer', invoice: inv })}
+        />
+      )}
+      {dialog?.kind === 'changeCustomer' && (
+        <ChangeInvoiceCustomerDialog
+          invoice={dialog.invoice}
+          customers={customers}
+          shipment={lookups.shipmentsById.get(dialog.invoice.shipmentId)}
+          factoringRow={dialog.invoice.factoringItemId ? (factorByItemId.get(dialog.invoice.factoringItemId) ?? null) : null}
+          onClose={() => setDialog(null)}
+          onChanged={() => void refreshAll()}
+          onReviewSend={(inv) => setDialog({ kind: 'review', invoices: [inv] })}
         />
       )}
       {dialog?.kind === 'review' && (

@@ -53,6 +53,7 @@ import {
   sendRemittance,
 } from './apPayments'
 import { repointInvoicedCustomer } from './repoint'
+import { changeInvoiceCustomer } from './changeCustomer'
 import { brokerageRepRollup } from './brokerageRep'
 import { agingStatement } from './statements'
 /** Auto-settling factored invoices from OTR's status is off; see the schedule branch in handler(). */
@@ -141,6 +142,7 @@ type Action =
   | 'SYNC_FACTORING_CHANGE'
   | 'AGING_STATEMENT'
   | 'REVISE_INVOICE'
+  | 'CHANGE_INVOICE_CUSTOMER'
   | 'SETTLE_FACTORED_INVOICES'
   | 'BROKERAGE_REP_ROLLUP'
   | 'INVOICE_ATTACHMENTS'
@@ -299,6 +301,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       throw new Error(SETTLE_TURNED_OFF.reason)
     case 'REVISE_INVOICE':
       return reviseInvoice(input, caller)
+    case 'CHANGE_INVOICE_CUSTOMER':
+      return changeInvoiceCustomer(input, caller)
     case 'AGING_STATEMENT':
       return agingStatement(input, caller)
     case 'PREVIEW_INVOICE_PACKET':
