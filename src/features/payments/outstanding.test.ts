@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { InvoiceRecord } from '@/types/tms'
-import { allocateOldestFirst, factorFeeCents, factorFeeReason, filterOutstanding, groupOutstanding, planReceive, prefillCents, recordPaymentInput, type ReceiveDraft } from './outstanding'
+import {
+  allocateOldestFirst, daysLate, factorFeeCents, factorFeeReason, filterOutstanding, filterTableRows, groupOutstanding, lateBucket, planReceive, prefillCents,
+  recordPaymentInput, tableRows, type ReceiveDraft,
+} from './outstanding'
 
 const inv = (id: string, p: Partial<InvoiceRecord>): InvoiceRecord => ({
   id, number: id, shipmentNumber: id, customerId: 'c1', customerName: 'ACME', status: 'ISSUED', invoiceDate: '2026-10-01', dueAt: '2026-10-31',
@@ -27,6 +30,42 @@ describe('groupOutstanding', () => {
     expect(sections[1].groups.map((g) => g.label)).toEqual(['ACME', 'BETA'])
     expect(sections[1]).toMatchObject({ count: 2, openCents: 20_000 })
     expect(sections[0].groups[0].rows[0].daysOutstanding).toBe(76)
+  })
+})
+
+describe('tableRows (Outstanding as one table)', () => {
+  it('is one flat list: customer A→Z, then due date, each row says Manual or Factored and how late it is', () => {
+    const rows = tableRows([
+      inv('2', { customerId: 'c2', dueAt: '2026-11-20' }),
+      inv('1', { dueAt: '2026-11-10', termsText: 'Net 30', divisionKey: 'BCAT_LOGISTICS', sentAt: '2026-10-02T15:00:00.000Z' }),
+      inv('0', { dueAt: '2026-10-31', termsDays: 45 }),
+      inv('F', { factored: true, customerId: 'c2', dueAt: '2026-11-01' }),
+      inv('P', { status: 'PAID', balanceCents: 0 }),
+    ], nameOf, '2026-11-16')
+    expect(rows.map((r) => r.invoiceId)).toEqual(['0', '1', 'F', '2'])
+    expect(rows.map((r) => r.type)).toEqual(['manual', 'manual', 'factored', 'manual'])
+    expect(rows[0]).toMatchObject({ customerName: 'ACME', termsText: 'Net 45', daysLate: 16 })
+    expect(rows[1]).toMatchObject({ termsText: 'Net 30', divisionKey: 'BCAT_LOGISTICS', sentOn: '2026-10-02', daysLate: 6 })
+    expect(rows[3].daysLate).toBe(0)
+  })
+
+  it('narrows to one customer, a type chip and a typed search', () => {
+    const rows = tableRows([
+      inv('A1', { po: undefined, references: [{ type: 'PO', value: 'PO-9' }] as never }),
+      inv('B1', { customerId: 'c2' }),
+      inv('B2', { customerId: 'c2', factored: true }),
+    ], nameOf, '2026-11-16')
+    expect(filterTableRows(rows, { customerId: 'c2' }).map((r) => r.invoiceId)).toEqual(['B1', 'B2'])
+    expect(filterTableRows(rows, { customerId: 'c2', type: 'factored' }).map((r) => r.invoiceId)).toEqual(['B2'])
+    expect(filterTableRows(rows, { query: 'b1' }).map((r) => r.invoiceId)).toEqual(['B1'])
+    expect(filterTableRows(rows, {}).length).toBe(3)
+  })
+
+  it('buckets how late an invoice is', () => {
+    expect(daysLate('2026-11-20', '2026-11-16')).toBe(0)
+    expect([0, 1, 30, 31, 60, 61, 90, 91].map(lateBucket)).toEqual([
+      'Current', '1–30 days late', '1–30 days late', '31–60 days late', '31–60 days late', '61–90 days late', '61–90 days late', '90+ days late',
+    ])
   })
 })
 

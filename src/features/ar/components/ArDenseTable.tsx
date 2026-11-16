@@ -6,7 +6,7 @@
  *
  * Mount it with `key={view}`: filters belong to one view's columns and are dropped with it.
  */
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Search } from 'lucide-react'
 import { TmsInput } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
@@ -37,6 +37,10 @@ export interface ArGrid<T> {
   cardLayout?: DenseCardLayout
   /** A row (or phone card) opens its detail. */
   onRowClick?: (row: T) => void
+  /** The rows left after the grid's own filters, search and sort, for a page that totals or acts on what is shown. */
+  onFiltered?: (rows: T[]) => void
+  /** The columns shown before anyone changes the layout (default: every movable one). */
+  defaultColumns?: string[]
   /** Optional grouping: rows are re-ordered by group after sort and filter, a header row per group. */
   group?: {
     keyOf: (row: T) => string
@@ -52,7 +56,7 @@ export function ArDenseTable<T>({ grid, pageFilters }: {
   pageFilters?: { count: number; onClear: () => void }
 }) {
   const email = useAuthUser()?.email ?? ''
-  const { gridId, label, columns: catalogAll, rows, rowKey, renderCell, empty, kpis, group, cardLayout, onRowClick } = grid
+  const { gridId, label, columns: catalogAll, rows, rowKey, renderCell, empty, kpis, group, cardLayout, onRowClick, onFiltered, defaultColumns } = grid
   const [filters, setFilters] = useState<DenseFilters>({})
   const [search, setSearch] = useState('')
 
@@ -70,7 +74,7 @@ export function ArDenseTable<T>({ grid, pageFilters }: {
   const prefs = useDenseGridPrefs({
     gridId,
     email,
-    defaultColumns: movable.map((c) => c.key),
+    defaultColumns: defaultColumns ? defaultColumns.filter((k) => movable.some((c) => c.key === k)) : movable.map((c) => c.key),
     validKeys: movable.map((c) => c.key),
     defaultSort: null,
   })
@@ -93,6 +97,8 @@ export function ArDenseTable<T>({ grid, pageFilters }: {
     const sorted = sortDenseRows(filterRows(searchRows(rows, catalogAll, search), catalogAll, filters), catalogAll, prefs.sort)
     return group ? group.order(sorted, prefs.sort != null) : sorted
   }, [rows, catalogAll, filters, prefs.sort, search, group])
+
+  useEffect(() => { onFiltered?.(filtered) }, [filtered, onFiltered])
 
   return (
     <div className="tms-dense-page" data-testid={`ar-grid-${gridId}`}>
