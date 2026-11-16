@@ -1,7 +1,7 @@
 /**
  * Shipments › Intake: the tender e-mails that arrived at a division's intake address and became
- * partially built loads. Opens on All loads; "By rev division" / "By customer" split the queue into sub-tabs
- * (?view=&group=), a table; a row opens the review page. Only open loads are listed (Ryne 2026-11-12): moved
+ * partially built loads. Opens on All loads; "By rev division" / "By customer" section the table into collapsible groups
+ * (?view=), a table; a row opens the review page. Only open loads are listed (Ryne 2026-11-12): moved
  * and dismissed ones simply leave. Rows stay one line; duplicate / already-built flags and team notes open in a dialog.
  */
 import { BatchActionBar } from '../board/BatchActionBar'
@@ -9,7 +9,7 @@ import { outcomesFromServer, selectAllUpToCap, toggleSelection, type BatchOutcom
 import { batchShipmentTask } from '@/lib/apiClient'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Mail, Truck, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Mail, Truck, X } from 'lucide-react'
 import { TmsAlert, TmsBadge, TmsButton, TmsEmptyState, TmsSegmentedTabs } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
 import {
@@ -40,13 +40,12 @@ import { DeleteIntakeDialog, IntakeItemDialog, IntakeRowFlags } from './Duplicat
 import { useAutolinkBuilt, useBuiltMatches } from './useBuiltMatches'
 import type { IntakeLoadRecord } from '@/types/intake'
 import {
-  ALL_GROUP,
   UNASSIGNED,
   groupByCustomer,
   groupByDivision,
+  groupKeyOfRow,
+  orderByGroup,
   parseView,
-  resolveGroup,
-  rowInGroup,
   withDivisionColumn,
   type IntakeView,
 } from './intakeGroups'
@@ -146,8 +145,6 @@ export function IntakeBoard() {
     : legacyDivision ? 'division'
     : params.get('group') ? (rememberedView(viewKey) ?? 'all')
     : 'all'
-  const requestedGroup = params.get('group') ?? (legacyDivision === 'unrouted' ? UNASSIGNED : legacyDivision)
-
   useEffect(() => {
     if (view !== 'all') rememberView(viewKey, view)
   }, [view, viewKey])
@@ -157,12 +154,20 @@ export function IntakeBoard() {
     if (view === 'customer') return groupByCustomer(open.rows)
     return []
   }, [view, open.rows, activeDivisions, unroutedShown])
-  const selected = resolveGroup(groups, requestedGroup)
-  const tabs = [{ id: ALL_GROUP, label: 'All', count: open.rows.length }, ...groups].map((g) => ({
-    key: g.id, label: g.label, count: g.count, testId: `intake-group-${g.id}`, countTestId: `intake-group-count-${g.id}`,
-  }))
-
-  const division = view === 'division' ? activeDivisions.find((d) => d.code === selected) : undefined
+  // Grouped views section the one table (Ryne 2026-11-16): a header row per division or customer with its count, empty groups hidden.
+  const shownGroups = useMemo(() => groups.filter((g) => g.count > 0), [groups])
+  const groupLabel = useMemo(() => new Map(shownGroups.map((g) => [g.id, g])), [shownGroups])
+  // Collapsed groups belong to the view they were collapsed in: switching views opens every group again.
+  const [collapsedIn, setCollapsedIn] = useState<{ view: IntakeView; keys: ReadonlySet<string> }>({ view: 'all', keys: new Set() })
+  const collapsed = useMemo<ReadonlySet<string>>(() => (collapsedIn.view === view ? collapsedIn.keys : new Set()), [collapsedIn, view])
+  const toggleGroup = useCallback((key: string) => {
+    setCollapsedIn((prev) => {
+      const next = new Set(prev.view === view ? prev.keys : [])
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return { view, keys: next }
+    })
+  }, [view])
   // Rows an admin deleted are out of every tab; duplicates are found among the open queue.
   const dups = useMemo(() => duplicateGroups(open.rows), [open.rows])
   const { matches: built } = useBuiltMatches(open.rows)
@@ -175,7 +180,7 @@ export function IntakeBoard() {
       return code ? (names.get(code) ?? code) : '—'
     }
   }, [divisions])
-  const rows = open.rows.filter((r) => !isDeletedIntake(r) && rowInGroup(r, view, selected, activeCodes))
+  const rows = open.rows.filter((r) => !isDeletedIntake(r))
   const missingAddress = activeDivisions.filter((d) => !d.intakeEmail)
 
   function update(next: Record<string, string | null>) {
@@ -258,7 +263,34 @@ export function IntakeBoard() {
     [prefs.columns, columns],
   )
   const filteredRows = useMemo(() => filterRows(rows, columns, filters), [rows, columns, filters])
-  const sortedRows = useMemo(() => sortDenseRows(filteredRows, columns, prefs.sort), [filteredRows, columns, prefs.sort])
+  const groupKeyOf = useMemo(
+    () => (view === 'all' ? undefined : (r: IntakeLoadRecord) => groupKeyOfRow(r, view, activeCodes)),
+    [view, activeCodes],
+  )
+  const sortedRows = useMemo(() => {
+    const sorted = sortDenseRows(filteredRows, columns, prefs.sort)
+    return groupKeyOf ? orderByGroup(sorted, shownGroups, groupKeyOf) : sorted
+  }, [filteredRows, columns, prefs.sort, groupKeyOf, shownGroups])
+  const renderGroupHeader = useCallback(
+    (key: string, shown: IntakeLoadRecord[]) => {
+      const expanded = !collapsed.has(key)
+      const label = groupLabel.get(key)?.label ?? (key === UNASSIGNED ? 'Unassigned' : key)
+      return (
+        <button
+          type="button"
+          className="tms-intake-group-toggle"
+          aria-expanded={expanded}
+          data-testid={`intake-group-${key}`}
+          onClick={(e) => { e.stopPropagation(); toggleGroup(key) }}
+        >
+          {expanded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+          <span className="tms-intake-group-title">{label}</span>
+          <span className="tms-intake-group-count" data-testid={`intake-group-count-${key}`}>{shown.length}</span>
+        </button>
+      )
+    },
+    [collapsed, groupLabel, toggleGroup],
+  )
   const setColumnFilter = useCallback((key: string, next: DenseColumnFilter | null) => {
     setFilters((prev) => {
       const copy = { ...prev }
@@ -357,22 +389,8 @@ export function IntakeBoard() {
     setCapRefusal(null)
   }
 
-  const noAddress = division != null && !division.intakeEmail
-  const emptyBody = noAddress ? (
-    <TmsEmptyState
-      compact
-      title={`No intake e-mail set for ${division.name}`}
-      message={
-        isOwnerOrAdmin ? (
-          <Link to="/tms/brokerage/divisions">Set one under Divisions &amp; ownership</Link>
-        ) : (
-          'Ask an owner to set the address tender e-mails for this division arrive at.'
-        )
-      }
-    />
-  ) : (
-    <TmsEmptyState compact title="No tender e-mails waiting." message={null} />
-  )
+  // Divisions without an intake address are listed in the owner notice above the table.
+  const emptyBody = <TmsEmptyState compact title="No tender e-mails waiting." message={null} />
 
   return (
     <div className="tms-dense-page">
@@ -391,15 +409,6 @@ export function IntakeBoard() {
             { key: 'customer', label: 'By customer', testId: 'intake-view-customer' },
           ]}
         />
-        {view !== 'all' ? (
-          <TmsSegmentedTabs
-            aria-label={view === 'division' ? 'Rev division' : 'Customer'}
-            size="sm"
-            tabs={tabs}
-            active={selected}
-            onSelect={(key) => update({ view, group: key === ALL_GROUP ? null : key, division: null })}
-          />
-        ) : null}
         <ClearFiltersButton count={activeFilterCount(filters)} onClear={() => setFilters({})} />
         <span className="tms-dense-spacer" />
         <ColumnsButton
@@ -444,7 +453,7 @@ export function IntakeBoard() {
         <DenseGrid<IntakeLoadRecord>
           aria-label="Intake"
           recentKey={`tms:intake:recent:${user?.email ?? 'anon'}`}
-          resetKey={`${view}|${selected}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
+          resetKey={`${view}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
           columns={gridColumns}
           rows={sortedRows}
           fitRows={rows}
@@ -458,6 +467,9 @@ export function IntakeBoard() {
             setCapRefusal(next.refusal)
           }}
           renderCell={renderCell}
+          groupKeyOf={groupKeyOf}
+          renderGroupHeader={groupKeyOf ? renderGroupHeader : undefined}
+          collapsedGroups={collapsed}
           density={prefs.density}
           userWidths={prefs.widths}
           stickyCount={Math.max(1, prefs.pinned.length)}
