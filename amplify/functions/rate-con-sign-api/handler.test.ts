@@ -418,7 +418,7 @@ describe('rate-con-sign-api', () => {
   }
 
   describe('submit', () => {
-    it('signs once: stamps server-side, files a Public Signed Rate Confirmation, fills only what was blank', async () => {
+    it('signs once: stamps server-side, files a BCAT Rate Confirmation (carrier audience), fills only what was blank', async () => {
       seedLoadCarrier({ rateConStatus: 'OPENED', driverName: 'Dispatch Knew This' })
       const { status, body } = await json(post({ token: TOKEN, action: 'submit', payload: validPayload() }))
 
@@ -446,11 +446,11 @@ describe('rate-con-sign-api', () => {
       expect(puts()[0].Key).toBe(row.rateConKey)
       expect((await putPdf()).getPageCount()).toBe(3)
 
-      // The load's Documents: Public folder (audience ALL), the type the invoice packet looks for.
-      const [signed] = docs('RATE_CON')
+      // The load's Documents: a BCAT Rate Confirmation (Ryne 2026-11-16), carrier audience, never on an invoice.
+      const [signed] = docs('BCAT_RATE_CON')
       expect(signed).toMatchObject({
-        shipmentId: 'shp-1', loadId: 'lod-1', loadCarrierId: 'lcr-1', name: 'Signed Rate Confirmation v1.pdf',
-        audience: 'ALL', status: 'ACTIVE', version: 1, s3Key: row.rateConKey, pages: 3, source: 'GENERATED',
+        shipmentId: 'shp-1', loadId: 'lod-1', loadCarrierId: 'lcr-1', name: 'Signed BCAT Rate Confirmation v1.pdf',
+        audience: 'CARRIER', status: 'ACTIVE', version: 1, s3Key: row.rateConKey, pages: 3, source: 'GENERATED',
       })
       expect(signed.reviewStatus).toBeUndefined()
 
@@ -553,7 +553,7 @@ describe('rate-con-sign-api', () => {
       expect(second.status).toBe(200)
       expect(second.body).toMatchObject({ ok: true, alreadySigned: true, signerName: 'Yuri Petrov', signedAt: first.body.signedAt })
       expect(puts()).toHaveLength(1)
-      expect(docs('RATE_CON')).toHaveLength(1)
+      expect(docs('BCAT_RATE_CON')).toHaveLength(1)
       expect(auditActions().filter((a) => a === 'rate_con_signed')).toHaveLength(1)
       expect(table(TABLES.loadCarrier).get('lcr-1')!.rateConSignerName).toBe('Yuri Petrov')
     })
@@ -575,11 +575,11 @@ describe('rate-con-sign-api', () => {
       seedLoadCarrier({ rateConStatus: 'SIGNED', rateConSignerName: 'Yuri Petrov', rateConKey: 'shipment-docs/shp-1/x-signed-v1.pdf', rateConSignedAt: '2026-03-02T00:00:00.000Z' })
       const { status } = await json(post({ token: TOKEN, action: 'submit', payload: validPayload() }))
       expect(status).toBe(200)
-      expect(docs('RATE_CON')).toHaveLength(1)
-      expect(docs('RATE_CON')[0]).toMatchObject({ s3Key: 'shipment-docs/shp-1/x-signed-v1.pdf', status: 'ACTIVE', audience: 'ALL' })
+      expect(docs('BCAT_RATE_CON')).toHaveLength(1)
+      expect(docs('BCAT_RATE_CON')[0]).toMatchObject({ s3Key: 'shipment-docs/shp-1/x-signed-v1.pdf', status: 'ACTIVE', audience: 'CARRIER' })
       // Replaying again does not mint a second one.
       await post({ token: TOKEN, action: 'submit', payload: validPayload() })
-      expect(docs('RATE_CON')).toHaveLength(1)
+      expect(docs('BCAT_RATE_CON')).toHaveLength(1)
     })
 
     it('the new signed version REPLACES the old one: old is SUPERSEDED (kept), new is ACTIVE', async () => {
@@ -594,8 +594,8 @@ describe('rate-con-sign-api', () => {
       expect(table(TABLES.shipmentDoc).get('old-signed')).toMatchObject({ status: 'SUPERSEDED' })
       expect(table(TABLES.shipmentDoc).get('other-carrier')!.status).toBe('ACTIVE')
       expect(table(TABLES.shipmentDoc).get('pod')!.status).toBe('ACTIVE')
-      const fresh = docs('RATE_CON').find((d) => d.version === 2)!
-      expect(fresh).toMatchObject({ status: 'ACTIVE', audience: 'ALL', supersedesId: 'old-signed', name: 'Signed Rate Confirmation v2.pdf' })
+      const fresh = docs('BCAT_RATE_CON').find((d) => d.version === 2)!
+      expect(fresh).toMatchObject({ status: 'ACTIVE', audience: 'CARRIER', supersedesId: 'old-signed', name: 'Signed BCAT Rate Confirmation v2.pdf' })
       const superseded = auditRows().find((r) => r.action === 'rate_con_document_superseded')!
       expect(JSON.parse(String(superseded.changes))).toMatchObject({ supersededDocumentId: 'old-signed', byDocumentId: fresh.id, version: 2 })
     })

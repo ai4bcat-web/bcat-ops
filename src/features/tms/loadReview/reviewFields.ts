@@ -79,7 +79,12 @@ export function reviewFieldText(row: ShipmentListRow, key: LoadReviewFieldKey): 
 export function reviewFieldCell(row: ShipmentListRow, verdict: LoadReviewVerdict | undefined, key: LoadReviewFieldKey): { text: string; ok: boolean | null; reasons: string[] } {
   const text = reviewFieldText(row, key)
   if (!verdict) return { text, ok: null, reasons: [] }
-  const reasons = loadReviewFieldReasons(verdict)[key].map((r) => r.message)
+  const byField = loadReviewFieldReasons(verdict)
+  // The RC column is the regular rate confirmation on asset loads only (Ryne 2026-11-16). On any other load it reads N/A, and
+  // a rate confirmation the review still wants there (a factored customer's, for OTR) is listed under Other checks instead.
+  const rcNa = docCellOf(row, 'RATE_CON') === 'NA'
+  if (key === 'rateCon' && rcNa) return { text: text || 'N/A', ok: true, reasons: [] }
+  const reasons = [...byField[key], ...(key === 'other' && rcNa ? byField.rateCon : [])].map((r) => r.message)
   // A failing document has nothing on file to vouch for: the basis text would contradict the NEED.
   return { text: reasons.length > 0 && (key === 'pod' || key === 'rateCon') && text !== CAR_SHIPPING_NA_TEXT ? '' : text, ok: reasons.length === 0, reasons }
 }

@@ -99,6 +99,7 @@ import type {
   LoadWorkflowStatus,
   ShipmentDocumentAudience,
   ShipmentDocumentRecord,
+  ShipmentDocumentType,
   TmsSettings,
 } from '../../../src/types/tms'
 import type { Stop } from '../../../src/types'
@@ -515,7 +516,9 @@ export async function commitDocument(deps: DocumentDeps, input: Row, caller: Cal
 export async function saveGeneratedDocument(deps: DocumentDeps, input: Row, caller: Caller): Promise<Row> {
   if (!deps.bucket) throw new Error('Document storage is not configured')
   const shipmentId = assertString(input.shipmentId, 'shipmentId')
-  const type = assertEnum(input.type, GENERATED_DOCUMENT_TYPES, 'type')
+  // A rate confirmation the browser generated is BCAT's own to a carrier (Ryne 2026-11-16): filed as BCAT_RATE_CON.
+  const requested = assertEnum(input.type, GENERATED_DOCUMENT_TYPES, 'type')
+  const type: ShipmentDocumentType = requested === 'RATE_CON' ? 'BCAT_RATE_CON' : requested
   const pdfBase64 = assertString(input.pdfBase64, 'pdfBase64')
   const loadId = optionalString(input.loadId, 100)
   const loadCarrierId = optionalString(input.loadCarrierId, 100)
@@ -546,7 +549,7 @@ export async function saveGeneratedDocument(deps: DocumentDeps, input: Row, call
   const assignment = loadCarrierId
     ? bundle.loadCarriers.find((c) => c.id === loadCarrierId) ?? null
     : bundle.loadCarriers.find((c) => c.loadId === loadId && c.status === 'ACTIVE') ?? null
-  if (type === 'RATE_CON' && (!assignment || assignment.status !== 'ACTIVE')) {
+  if (type === 'BCAT_RATE_CON' && (!assignment || assignment.status !== 'ACTIVE')) {
     throw new Error('A rate confirmation needs the carrier that is currently on the load')
   }
 
@@ -576,7 +579,7 @@ export async function saveGeneratedDocument(deps: DocumentDeps, input: Row, call
     shipmentId,
     orderId: null,
     loadId,
-    loadCarrierId: assignment && type === 'RATE_CON' ? String(assignment.id) : loadCarrierId,
+    loadCarrierId: assignment && type === 'BCAT_RATE_CON' ? String(assignment.id) : loadCarrierId,
     stopId,
     type,
     name: optionalString(input.filename, MAX_DOCUMENT_NAME) ?? generatedFilename(type, reference, version),
@@ -932,7 +935,7 @@ export async function updateDocument(deps: DocumentDeps, input: Row, caller: Cal
 // ── VOID_DOCUMENT ────────────────────────────────────────────────────────────
 
 /** The paperwork an invoice is billed and factored on. */
-const BILLED_ON_TYPES = new Set(['POD', 'RATE_CON'])
+const BILLED_ON_TYPES = new Set(['POD', 'RATE_CON', 'CUSTOMER_RATE_CON'])
 
 /**
  * Once an order is invoiced, its POD and rate confirmation have gone out with the invoice

@@ -2806,7 +2806,7 @@ const schema = a.schema(stageTypes({
       loadCarrierId: a.string(),
       stopId:        a.string(),
       type: a.enum([
-        'BOL', 'POD', 'RATE_CON', 'CUSTOMER_RATE_CON', 'LOAD_SUMMARY',
+        'BOL', 'POD', 'RATE_CON', 'CUSTOMER_RATE_CON', 'BCAT_RATE_CON', 'LOAD_SUMMARY',
         'LUMPER_RECEIPT', 'WEIGHT_TICKET', 'TEMP_LOG', 'INSPECTION_REPORT',
         'CUSTOMS', 'PACKING_LIST', 'CARRIER_INVOICE', 'INVOICE', 'PHOTO', 'OTHER',
       ]),

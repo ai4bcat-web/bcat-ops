@@ -9113,7 +9113,7 @@ describe('Step AM — cover flow and assignment ladder', () => {
       await expect(call('MARK_RATE_CON_SIGNED', { loadCarrierId, documentId: 'nope' })).rejects.toThrow(/Upload the signed rate confirmation/)
       await expect(call('MARK_RATE_CON_SIGNED', { loadCarrierId, documentId: signedPdf('other-shipment') })).rejects.toThrow(/Upload the signed rate confirmation/)
       table(TABLES.shipmentDocument).set('sdoc-pod', { id: 'sdoc-pod', shipmentId, type: 'POD', status: 'ACTIVE', contentType: 'application/pdf', s3Key: 'k' })
-      await expect(call('MARK_RATE_CON_SIGNED', { loadCarrierId, documentId: 'sdoc-pod' })).rejects.toThrow(/filed as a rate confirmation/)
+      await expect(call('MARK_RATE_CON_SIGNED', { loadCarrierId, documentId: 'sdoc-pod' })).rejects.toThrow(/filed as a BCAT Rate Confirmation/)
       await expect(call('MARK_RATE_CON_SIGNED', { loadCarrierId, documentId: signedPdf(shipmentId, { contentType: 'image/png' }) })).rejects.toThrow(/must be a PDF/)
       await expect(call('MARK_RATE_CON_SIGNED', { loadCarrierId, documentId: signedPdf(shipmentId, { status: 'VOIDED' }) })).rejects.toThrow(/voided/)
       expect(table(TABLES.carrier).get(loadCarrierId)!.rateConStatus).toBe('SENT')

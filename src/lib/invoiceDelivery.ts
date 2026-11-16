@@ -43,6 +43,7 @@ export function assertNotSquareInvoiced(shipment: { revDivision?: string | null 
 const PACKET_RANK: Partial<Record<ShipmentDocumentType, number>> = {
   CUSTOMER_RATE_CON: 1,
   RATE_CON: 1,
+  BCAT_RATE_CON: 1,
   POD: 2,
   WEIGHT_TICKET: 3,
   LUMPER_RECEIPT: 4,
@@ -88,7 +89,7 @@ export function customerPacketIds(documents: readonly ShipmentDocumentRecord[], 
  * carrier e-sign produced (`source` GENERATED / CARRIER_PORTAL) is a carrier rate con on
  * any load and is never attached.
  */
-export const RATE_CON_TYPES: readonly ShipmentDocumentType[] = ['RATE_CON', 'CUSTOMER_RATE_CON']
+export const RATE_CON_TYPES: readonly ShipmentDocumentType[] = ['RATE_CON', 'CUSTOMER_RATE_CON', 'BCAT_RATE_CON']
 
 export function isRateConType(type: ShipmentDocumentType): boolean {
   return RATE_CON_TYPES.includes(type)
@@ -104,10 +105,13 @@ export function isCustomerRateCon(
   doc: Pick<ShipmentDocumentRecord, 'type' | 'source' | 'orderId' | 'loadCarrierId'>,
 ): boolean {
   // GENERATED / CARRIER_PORTAL: our rate-con generator or a carrier's e-sign. LEGACY: an imported Aljex carrier rate confirm.
+  // A BCAT Rate Confirmation (Ryne 2026-11-16) is ours to a carrier: never with an invoice.
+  if (doc.type === 'BCAT_RATE_CON') return false
   if (doc.source === 'GENERATED' || doc.source === 'CARRIER_PORTAL' || doc.source === 'LEGACY') return false
   if (doc.loadCarrierId != null) return false
   if (doc.type === 'CUSTOMER_RATE_CON') return true
-  return doc.type === 'RATE_CON' && doc.orderId != null
+  // A RATE_CON uploaded to the shipment's Rate confirmation box (no order named) is the customer's too.
+  return doc.type === 'RATE_CON'
 }
 
 /** Filed, live, and not waiting on (or refused by) review — audience aside. */
@@ -146,7 +150,9 @@ export function invoiceEmailDocuments<T extends ShipmentDocumentRecord>(
   const out: T[] = []
   for (const doc of documents) {
     if (isRateConType(doc.type)) {
-      if (scope.ivan && isCustomerRateCon(doc) && isLiveDocument(doc) && inScope(doc, scope)) out.push(doc)
+      // The asset load's regular rate confirmation goes with its invoice (Ryne 2026-11-16); a BCAT one never does.
+      const shipmentLevel = doc.orderId == null && doc.loadId == null
+      if (scope.ivan && isCustomerRateCon(doc) && isLiveDocument(doc) && (shipmentLevel || inScope(doc, scope))) out.push(doc)
       continue
     }
     if (!canEmailTo(doc, 'CUSTOMER')) continue

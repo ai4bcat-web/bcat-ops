@@ -51,9 +51,11 @@ describe('DocumentsCard', () => {
   it('the POD and Rate confirmation slots show what is on file and where it came from, or offer an upload', () => {
     const rc = { ...doc('9', 'Signed Rate Confirmation v1.pdf', 'ALL', 'RATE_CON'), uploadedBy: 'link:abcd1234', source: 'GENERATED' }
     setup({ mode: 'edit', bundle: savedBundle({ documents: [rc] }) })
-    const rcSlot = screen.getByTestId('card-documents-slot-RATE_CON')
-    expect(rcSlot.getAttribute('data-on-file')).toBe('true')
-    expect(rcSlot.textContent).toContain('e-signed by the carrier')
+    // The carrier's e-signed copy is a BCAT Rate Confirmation (Ryne 2026-11-16): its own box, never the Rate confirmation.
+    const bcatSlot = screen.getByTestId('card-documents-slot-BCAT_RATE_CON')
+    expect(bcatSlot.getAttribute('data-on-file')).toBe('true')
+    expect(bcatSlot.textContent).toContain('e-signed by the carrier')
+    expect(screen.getByTestId('card-documents-slot-RATE_CON').getAttribute('data-on-file')).toBe('false')
     const podSlot = screen.getByTestId('card-documents-slot-POD')
     expect(podSlot.getAttribute('data-on-file')).toBe('false')
     expect(podSlot.textContent).toContain('NEED')
