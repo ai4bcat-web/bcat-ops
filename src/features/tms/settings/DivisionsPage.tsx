@@ -35,7 +35,7 @@ import {
   testOwnershipRules,
 } from '@/lib/apiClient'
 import type { OwnershipRuleTest, RetagReport } from '@/lib/apiClient'
-import { DIVISION_REP_KEYS, parseDivisionSalesReps } from '@/lib/divisionSalesRep'
+import { DIVISION_REP_KEYS, mergeDivisionRepDefaults, parseDivisionSalesReps } from '@/lib/divisionSalesRep'
 import { OWN_FLEET_CARRIER_CODE, validateDivisions, validateRules } from '@/lib/ownership'
 import { checkIntakeEmail, intakeEmailOwner, suggestIntakeMailboxes } from '@/lib/intakeMail'
 import type {
@@ -922,6 +922,7 @@ export function DivisionsPage() {
 function DivisionRepCard({ divisions }: { divisions: OwnershipDivisionRecord[] }) {
   const [staff, setStaff] = useState<UserProfileRecord[]>([])
   const [reps, setReps] = useState<Record<string, string>>({})
+  const [rawReps, setRawReps] = useState<unknown>(null)
   const [updatedAt, setUpdatedAt] = useState<string | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<string | null>(null)
@@ -934,6 +935,7 @@ function DivisionRepCard({ divisions }: { divisions: OwnershipDivisionRecord[] }
         if (!live) return
         setStaff(profiles)
         setReps(parseDivisionSalesReps(settings?.divisionSalesReps))
+        setRawReps(settings?.divisionSalesReps ?? null)
         setUpdatedAt(settings?.updatedAt ?? undefined)
       })
       .catch((err: unknown) => live && setError(messageOf(err)))
@@ -952,9 +954,9 @@ function DivisionRepCard({ divisions }: { divisions: OwnershipDivisionRecord[] }
     setError(null)
     setNote(null)
     try {
-      const saved = await saveTmsSettings({ divisionSalesReps: reps } as Parameters<typeof saveTmsSettings>[0], updatedAt)
+      const saved = await saveTmsSettings({ divisionSalesReps: mergeDivisionRepDefaults(rawReps, reps) } as Parameters<typeof saveTmsSettings>[0], updatedAt)
       setUpdatedAt(saved?.updatedAt ?? undefined)
-      setNote('Saved. New shipments take these reps; existing reps are never overwritten.')
+      setNote('Saved. Divisions set from now on take these reps; reps chosen by hand are kept.')
     } catch (err) {
       setError(messageOf(err))
     } finally {
@@ -965,7 +967,7 @@ function DivisionRepCard({ divisions }: { divisions: OwnershipDivisionRecord[] }
   return (
     <TmsCard title="Sales rep by division">
       <p className="tms-muted" style={{ marginTop: 0 }}>
-        A shipment without a sales rep takes the rep of its division. A rep set by hand is never changed.
+        When a shipment's division is set or changes, it takes the rep of its division unless a person chose another rep. A rep set by hand is never changed.
       </p>
       <div className="tms-grid tms-grid-2">
         {DIVISION_REP_KEYS.map((code) => (

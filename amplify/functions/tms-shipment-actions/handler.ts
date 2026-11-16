@@ -178,7 +178,7 @@ import {
   buildPostInvoiceEntry, cleanGuardedInput, diffSnapshots, isInvoicedOrder, isPostInvoiceGuarded, POST_INVOICE_ACTION,
   postInvoiceCleared, readChangeReason, REASON_REQUIRED_MESSAGE, snapshotOf, type PostInvoiceGuardedAction,
 } from './postInvoice'
-import { salesRepForDivision } from '../../../src/lib/divisionSalesRep'
+import { salesRepAfterDivisionChange } from '../../../src/lib/divisionSalesRep'
 import { parseRateConSnapshot, rateConThreadHeaders, revisedRateConSubject } from '../../../src/lib/rateConRevision'
 import { buildAddressDetailsEmail, type AddressDetailsStopInput } from '../../../src/lib/addressDetailsEmail'
 import { factorGapsAtCreate, factorGapsError, orderPoNumber, routeEnds } from '../../../src/lib/factorReadyAtCreate'
@@ -3303,9 +3303,9 @@ async function applyTag(
         ? { revDivision: held.revDivision, revSubdivision: held.revSubdivision, revRuleId: held.ruleId }
         : tag
     const taggedBy = hand ? optionalString(shipment.revTaggedBy, 200) : null
-    const settingsForRep = salesRepOf(shipment, order) == null ? await getSettings() : null
-    const salesRepId = salesRepOf(shipment, order)
-      ?? salesRepForDivision(settingsForRep, { revDivision: effective.revDivision, salesRepId: null })
+    // Standing rule: the division's default rep, unless a person chose another one (salesRepAfterDivisionChange).
+    const currentRep = salesRepOf(shipment, order)
+    const salesRepId = salesRepAfterDivisionChange(await getSettings(), { revDivision: effective.revDivision, salesRepId: currentRep }) ?? currentRep
 
     const unchanged = sameTag(shipment, effective, source, taggedBy)
       && (optionalString(shipment.salesRepId, 100) ?? null) === salesRepId
@@ -3320,8 +3320,8 @@ async function applyTag(
             updatedAt: now,
             version: (numberOrNull(shipment.version) ?? 1) + 1,
           }, null),
-          // A rep filled in from the division map is mirrored onto the order, as SET_SALES_REP does.
-          ...(order && salesRepId && !optionalString(order.customerRepId, 100)
+          // A rep taken from the division map is mirrored onto the order, as SET_SALES_REP does.
+          ...(order && salesRepId && optionalString(order.customerRepId, 100) !== salesRepId
             ? [updateItemTx(ORDER_TABLE_NAME, String(order.id), {
               customerRepId: salesRepId,
               updatedBy: caller.email,
@@ -3486,26 +3486,42 @@ async function setRevTag(input: Row, caller: Caller): Promise<Row> {
   // An intake promotion holds the division it arrived under but lets the driver decide the subdivision.
   const source: 'HAND' | 'INTAKE' = input.source === 'INTAKE' && !subdivisionCode ? 'INTAKE' : 'HAND'
   const now = nowIso()
+  // Standing rule: setting a division moves the rep to the division's default unless a person chose another rep.
+  const orders = await queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  const currentRep = salesRepOf(shipment, orders[0] ?? null)
+  const newRep = salesRepAfterDivisionChange(await getSettings(), { revDivision: divisionCode, salesRepId: currentRep })
   await transact(
-    [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
-      ...shipmentTagPatch(tag, source, caller.email),
-      updatedBy: caller.email,
-      updatedAt: now,
-      version: (numberOrNull(shipment.version) ?? 1) + 1,
-    }, null)],
+    [
+      updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+        ...shipmentTagPatch(tag, source, caller.email),
+        ...(newRep ? { salesRepId: newRep } : {}),
+        updatedBy: caller.email,
+        updatedAt: now,
+        version: (numberOrNull(shipment.version) ?? 1) + 1,
+      }, null),
+      ...(newRep
+        ? orders.map((order) => updateItemTx(ORDER_TABLE_NAME, String(order.id), {
+          customerRepId: newRep,
+          updatedBy: caller.email,
+          updatedAt: now,
+          version: (numberOrNull(order.version) ?? 1) + 1,
+        }, null))
+        : []),
+    ],
     'shipment tag',
   )
   const loads = await queryIndex(LOAD_TABLE_NAME, IDX_LOADS_BY_SHIPMENT, 'shipmentId', shipmentId)
   const client = await getDataClient()
   for (const load of loads) {
     assertLoadWriteOk(
-      await client.models.Load.update({ id: String(load.id), ...tagPatch(tag, source), updatedBy: caller.email }),
+      await client.models.Load.update({ id: String(load.id), ...tagPatch(tag, source), ...(newRep ? { salesRepId: newRep } : {}), updatedBy: caller.email }),
       'Load update',
     )
   }
   await writeAudit('SHIPMENT', shipmentId, 'SET_REV_TAG', caller, {
     from: { revDivision: shipment.revDivision ?? null, revSubdivision: shipment.revSubdivision ?? null },
     to: tag,
+    ...(newRep ? { salesRep: { from: currentRep, to: newRep } } : {}),
   })
   return readBundle(shipmentId) as unknown as Row
 }

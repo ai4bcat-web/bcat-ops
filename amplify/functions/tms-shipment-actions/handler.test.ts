@@ -2472,7 +2472,7 @@ describe('RESOLVE_REV_TAG', () => {
 })
 
 describe('applyTag sales rep from the division map', () => {
-  it('fills a missing rep from TmsSettings.divisionSalesReps and never overwrites a set one', async () => {
+  it('gives the division default rep when the division changes, but keeps a rep a person chose', async () => {
     seedCustomer({ id: 'auto-shipper-id-resolved-at-seed', name: 'Auto Shipper', status: 'ACTIVE', active: true, creditLimitCents: 10_000_00 })
     table(TABLES.settings).set('default', {
       ...(table(TABLES.settings).get('default') ?? { id: 'default' }),
@@ -2483,10 +2483,20 @@ describe('applyTag sales rep from the division map', () => {
     await saveForm(shipmentId)
     expect(table(TABLES.shipment).get(shipmentId)!).toMatchObject({ revDivision: 'CAR_SHIPPING', salesRepId: 'rep-car' })
 
-    // Moving to a brokerage customer re-resolves the division but the rep already set stays.
+    // Moving to a brokerage customer re-resolves the division and the rep follows: rep-car was only the old division's default.
     table(TABLES.shipment).set(shipmentId, { ...table(TABLES.shipment).get(shipmentId)!, customerId: 'cus-1', customerName: 'BATORY FOODS' })
     await call('RESOLVE_REV_TAG', { shipmentId }, ADMIN)
-    expect(table(TABLES.shipment).get(shipmentId)!).toMatchObject({ revDivision: 'BROKERAGE', salesRepId: 'rep-car' })
+    expect(table(TABLES.shipment).get(shipmentId)!).toMatchObject({ revDivision: 'BROKERAGE', salesRepId: 'rep-brk' })
+
+    // A rep a person chose (not any division's default) survives a division change.
+    for (const id of ['rep-hand', 'rep-brk']) table('UserProfile-test').set(id, { id, role: 'CUSTOMER_REP' })
+    await call('SET_SALES_REP', { shipmentId, repId: 'rep-hand' }, ADMIN)
+    await call('SET_REV_TAG', { shipmentId, divisionCode: 'CAR_SHIPPING' }, ADMIN)
+    expect(table(TABLES.shipment).get(shipmentId)!).toMatchObject({ revDivision: 'CAR_SHIPPING', salesRepId: 'rep-hand' })
+    // Setting the division by hand otherwise takes the division's default.
+    await call('SET_SALES_REP', { shipmentId, repId: 'rep-brk' }, ADMIN)
+    await call('SET_REV_TAG', { shipmentId, divisionCode: 'CAR_SHIPPING' }, ADMIN)
+    expect(table(TABLES.shipment).get(shipmentId)!).toMatchObject({ salesRepId: 'rep-car' })
   })
 })
 

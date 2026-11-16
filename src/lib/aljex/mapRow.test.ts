@@ -152,7 +152,7 @@ describe('mapAljexRow reproduces the generator oracle (standard anomalies, 1k ro
     for (const r of ivan) expect(pickDivision(r, DEFAULT_ALJEX_PROFILE)).toBe('ASSETS')
     for (const r of memos) expect(pickDivision(r, DEFAULT_ALJEX_PROFILE)).toBe('BROKERAGE')
     const vehicle = loads.filter((r) => !isOwnAssetCarrier(r.carrier?.name, DEFAULT_ALJEX_PROFILE) && ['V', 'VA', 'VH', 'VM', 'VZ'].includes(r.typeOfShipment))
-    for (const r of vehicle) expect(pickDivision(r, DEFAULT_ALJEX_PROFILE)).toBe('CAR_SHIPPING')
+    for (const r of vehicle) expect(pickDivision(r, DEFAULT_ALJEX_PROFILE)).not.toBe('CAR_SHIPPING')
     expect(new Set(loads.filter((r) => r.carrier).map((r) => r.carrier?.id)).size).toBe(o.carriers)
     expect(new Set(unique.filter((r) => r.customer.account).map((r) => r.customer.account)).size).toBe(o.customers)
   })

@@ -2,7 +2,7 @@
  * The form's state (AH-plan §3.3, §7, §8, §9): one values object, dirty flag, issues from
  * `validateForm`, local-draft autosave, and the pipeline runner (one at a time).
  */
-import { repForDivision } from '@/lib/divisionSalesRep'
+import { salesRepAfterDivisionChange } from '@/lib/divisionSalesRep'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { requiresApptProofs } from '@/lib/apptQueue'
@@ -118,10 +118,8 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
     }
     // New shipment: the division picks the sales rep (TmsSettings.divisionSalesReps) unless a person already chose another one.
     if (!current && next.ship.revDivision !== prev.ship.revDivision) {
-      const map = live.current.divisionReps
-      const before = repForDivision(map, prev.ship.revDivision)
-      const want = repForDivision(map, next.ship.revDivision)
-      if (want && (!next.roles.salesRepId || next.roles.salesRepId === before)) next = { ...next, roles: { ...next.roles, salesRepId: want } }
+      const want = salesRepAfterDivisionChange({ divisionSalesReps: live.current.divisionReps }, { revDivision: next.ship.revDivision, salesRepId: next.roles.salesRepId })
+      if (want) next = { ...next, roles: { ...next.roles, salesRepId: want } }
     }
     if (next.roles.salesRepId !== prev.roles.salesRepId && next.ship.officeLabel === prev.ship.officeLabel) {
       next = { ...next, ship: { ...next.ship, officeLabel: officeLabelOf(staffRows, next.roles.salesRepId) } }
