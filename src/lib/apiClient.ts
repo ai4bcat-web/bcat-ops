@@ -7835,6 +7835,11 @@ export interface AgingStatementResult {
 }
 
 /** Save edits into the existing invoice: re-read charges, replace hand adjustments, recompute, re-render (Rev N once sent). */
+/** Move an issued invoice (and its shipment) to another customer in place; nothing is e-mailed (CHANGE_INVOICE_CUSTOMER). */
+export async function changeInvoiceCustomer(input: { invoiceId: string; customerId: string; billToId?: string | null; reason: string }): Promise<{ invoice: InvoiceRecord; wholeShipment: boolean }> {
+  return financeAction<{ invoice: InvoiceRecord; wholeShipment: boolean }>('CHANGE_INVOICE_CUSTOMER', input)
+}
+
 export async function reviseInvoice(input: { invoiceId: string; adjustments: InvoiceAdjustment[]; reason?: string }): Promise<{ invoice: InvoiceRecord; revision: number }> {
   return financeAction<{ invoice: InvoiceRecord; revision: number }>('REVISE_INVOICE', input)
 }

@@ -751,6 +751,19 @@ export async function reviseInvoice(input: Row, caller: Caller): Promise<Row> {
   return { invoice: stored as unknown as Row, documentFiled: documentFiled !== false, revision }
 }
 
+/**
+ * Re-render after something the PDF prints changed (CHANGE_INVOICE_CUSTOMER: the bill-to). Best effort like
+ * every issue path: a failure leaves the invoice as written with no current PDF, repaired by Regenerate PDF.
+ */
+export async function rerenderInvoicePdf(invoiceId: string, caller: Caller): Promise<Row> {
+  const row = await getById(INVOICE_TABLE_NAME, invoiceId)
+  if (!row) throw new Error(`Invoice not found: ${invoiceId}`)
+  const invoice = row as unknown as InvoiceRecord
+  const context = await readOrderContext(invoice.orderId)
+  const { documentFiled: _filed, ...stored } = await storePdf(invoice, context, caller)
+  return stored as unknown as Row
+}
+
 export async function renderInvoicePdf(input: Row, caller: Caller): Promise<Row> {
   const invoiceId = assertString(input.invoiceId, 'invoiceId')
   const row = await getById(INVOICE_TABLE_NAME, invoiceId)

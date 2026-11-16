@@ -31,7 +31,7 @@ import { AttachmentInfo, AttachmentRow, AttachmentsSection, InvoiceEnvelope, Mes
 
 interface Draft { kind: 'CREDIT' | 'DEBIT'; description: string; amount: string; reason: string }
 
-export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, canEdit, canVoid = false, onClose, onSaved, onSend, onFactor, onVoid }: {
+export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, canEdit, canVoid = false, onClose, onSaved, onSend, onFactor, onVoid, onChangeCustomer }: {
   invoice: InvoiceRecord
   customer: CustomerRecord | undefined
   shipment: ShipmentRecord | undefined
@@ -44,6 +44,8 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
   canVoid?: boolean
   onFactor?: (invoice: InvoiceRecord) => void
   onVoid?: (invoice: InvoiceRecord) => void
+  /** Move the invoice to the right customer (CHANGE_INVOICE_CUSTOMER), then review and resend. */
+  onChangeCustomer?: (invoice: InvoiceRecord) => void
 }) {
   const [current, setCurrent] = useState(invoice)
   const paymentFacts = useCustomerPaymentFacts([invoice.customerId])
@@ -148,6 +150,9 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
           )}
           {canEdit && current.status !== 'VOID' && !locked && (
             <TmsButton aria-label="Regenerate invoice PDF" disabled={saving} onClick={regenerate}><RefreshCw size={13} /> Regenerate PDF</TmsButton>
+          )}
+          {canEdit && onChangeCustomer && current.status !== 'VOID' && !locked && (
+            <TmsButton aria-label="Change customer" disabled={saving} onClick={() => onChangeCustomer(current)}>Change customer…</TmsButton>
           )}
           {canEdit && onFactor && !factored && !sent && current.status !== 'VOID' && current.status !== 'PAID' && (
             <TmsButton aria-label="Send to factor instead" disabled={saving} onClick={() => onFactor(current)}>Send to factor</TmsButton>
