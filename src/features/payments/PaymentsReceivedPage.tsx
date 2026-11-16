@@ -400,7 +400,7 @@ export function PaymentsReceivedPage() {
 
         {view === 'outstanding' ? (
           <OutstandingView invoices={open.invoices} customers={customerById} loading={open.loading} asOf={asOf}
-            customerId={oneCustomer} query={outQuery}
+            customerId={oneCustomer} query={outQuery} divisionName={divisionName}
             onReceived={() => { void load(); void open.refresh() }} />
         ) : (
         <ArDenseTable<ReceivedRow>

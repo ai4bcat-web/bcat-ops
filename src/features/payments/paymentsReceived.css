@@ -178,3 +178,13 @@
   .tms-shell .pr-one-actions { margin-left: 0; flex-basis: 100%; }
   .tms-shell .pr-one-actions .tms-input { flex: 1 1 120px; width: auto; }
 }
+
+/* Outstanding as one table (Ryne 2026-11-16): the summary line above it and the receive bars below. */
+.tms-shell .pr-out-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 2px 2px 6px; }
+.tms-shell .pr-out-hint { margin-left: auto; }
+.tms-shell .pr-out-bars { display: flex; flex-direction: column; gap: 6px; position: sticky; bottom: 0; z-index: 5; }
+.tms-shell .pr-out-bars .pr-out-bar { border: 1px solid var(--tms-border); border-radius: 8px; position: static; box-shadow: var(--tms-shadow-pop); }
+.tms-shell .pr-out-bar-title { flex-basis: 100%; font-size: 13px; }
+@media (max-width: 640px) {
+  .tms-shell .pr-out-hint { margin-left: 0; flex-basis: 100%; }
+}

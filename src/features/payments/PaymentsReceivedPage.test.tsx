@@ -59,21 +59,49 @@ vi.mock('@/hooks/useAuth', () => ({ useAuthUser: () => ({ email: 'ryne@bcatcorp.
 import { PaymentsReceivedPage } from './PaymentsReceivedPage'
 
 describe('Payments Received page', () => {
-  it('opens on Outstanding: Manually invoiced and Factored (OTR), factored ticks pre-fill at 98%', async () => {
+  it('opens on Outstanding as one table with a Type column; factored ticks pre-fill at 98% and get their own OTR bar', async () => {
     render(<MemoryRouter><PaymentsReceivedPage /></MemoryRouter>)
     const out = await screen.findByTestId('payments-outstanding')
-    const manual = within(out).getByTestId('outstanding-section-manual')
-    const factored = within(out).getByTestId('outstanding-section-factored')
-    expect(within(manual).getAllByText('TANAGER LOGISTICS').length).toBeGreaterThan(0)
-    expect(within(manual).getAllByTestId('outstanding-days-to-pay').map((e) => e.textContent)).toContain('No terms · pays in 42 days avg')
-    fireEvent.click(within(manual).getAllByLabelText('Select 14200')[0])
-    expect(within(manual).getByTestId('receive-bar')).toBeTruthy()
-    expect((within(manual).getAllByLabelText('Amount paid on 14200')[0] as HTMLInputElement).value).toBe('500.00')
-    fireEvent.click(within(factored).getAllByLabelText('Select 14201')[0])
-    expect((within(factored).getAllByLabelText('Amount paid on 14201')[0] as HTMLInputElement).value).toBe('294.00')
-    fireEvent.change(within(factored).getByLabelText('OTR remittance or ACH reference'), { target: { value: 'OTR-9' } })
-    fireEvent.click(within(within(factored).getByTestId('receive-bar-factored')).getByTestId('receive-payments'))
+    // One flat table: no sections, no per-customer blocks; the Type column says how each was invoiced.
+    expect(within(out).queryByTestId('outstanding-section-manual')).toBeNull()
+    expect(within(out).queryByTestId('outstanding-group')).toBeNull()
+    expect(within(out).getAllByText('TANAGER LOGISTICS').length).toBeGreaterThan(0)
+    expect(within(out).getAllByText('Manual').length).toBeGreaterThan(0)
+    expect(within(out).getAllByText('Factored (OTR)').length).toBeGreaterThan(0)
+    fireEvent.click(within(out).getByLabelText('Select 14200'))
+    expect(within(out).getByTestId('receive-bar')).toBeTruthy()
+    expect((within(out).getByLabelText('Amount paid on 14200') as HTMLInputElement).value).toBe('500.00')
+    fireEvent.click(within(out).getByLabelText('Select 14201'))
+    expect((within(out).getByLabelText('Amount paid on 14201') as HTMLInputElement).value).toBe('294.00')
+    // Manual and Factored are never received together: two bars, each acting on its own type only.
+    expect(within(out).getByTestId('receive-bar')).toBeTruthy()
+    const factoredBar = within(out).getByTestId('receive-bar-factored')
+    fireEvent.change(within(factoredBar).getByLabelText('Factored (OTR) OTR remittance or ACH reference'), { target: { value: 'OTR-9' } })
+    fireEvent.click(within(factoredBar).getByTestId('receive-payments'))
     expect((await screen.findByTestId('receive-fee-summary')).textContent).toBe('Received $294.00 · OTR fee 2% $6.00 · Invoice total $300.00')
+  })
+
+  it('the Manual / Factored chips count and filter the table; the summary follows what is shown', async () => {
+    render(<MemoryRouter><PaymentsReceivedPage /></MemoryRouter>)
+    const out = await screen.findByTestId('payments-outstanding')
+    expect(within(out).getByTestId('chip-manual').textContent).toBe('Manual 3')
+    expect(within(out).getByTestId('chip-factored').textContent).toBe('Factored (OTR) 1')
+    await waitFor(() => expect(within(out).getByTestId('outstanding-summary').textContent).toContain('4 invoices'))
+    fireEvent.click(within(out).getByTestId('chip-factored'))
+    await waitFor(() => expect(within(out).queryByLabelText('Select 14200')).toBeNull())
+    expect(within(out).getByLabelText('Select 14201')).toBeTruthy()
+    expect(within(out).getByTestId('outstanding-summary').textContent).toContain('1 invoice')
+    fireEvent.click(within(out).getByTestId('chip-factored'))
+    await waitFor(() => expect(within(out).getByLabelText('Select 14200')).toBeTruthy())
+  })
+
+  it('a check is one customer: manual invoices from two customers cannot be received together', async () => {
+    render(<MemoryRouter><PaymentsReceivedPage /></MemoryRouter>)
+    const out = await screen.findByTestId('payments-outstanding')
+    fireEvent.click(within(out).getByLabelText('Select 14200'))
+    fireEvent.click(within(out).getByLabelText('Select 15000'))
+    expect(within(out).getByTestId('receive-mixed-customers').textContent).toContain('belong to 2 customers')
+    expect((within(within(out).getByTestId('receive-bar')).getByTestId('receive-payments') as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('lists this month by default and ties "Collected this month" to the card computation', async () => {
@@ -91,7 +119,7 @@ describe('Payments Received page', () => {
     expect(await screen.findByText('Record payment for c1: 14096,14097')).toBeTruthy()
   })
 
-  it('works on one customer: ?customer= shows only theirs, in both sections, with a chip and the customer bar', async () => {
+  it('works on one customer: ?customer= shows only theirs, with a chip and the customer bar', async () => {
     render(<MemoryRouter initialEntries={['/tms/payments-received?customer=c2']}><PaymentsReceivedPage /></MemoryRouter>)
     const out = await screen.findByTestId('payments-outstanding')
     expect(within(out).queryByText('TANAGER LOGISTICS')).toBeNull()
@@ -119,7 +147,7 @@ describe('Payments Received page', () => {
     await waitFor(() => expect(within(out).queryByLabelText('Select 14200')).toBeNull())
     expect(within(out).getAllByLabelText('Select 15001').length).toBeGreaterThan(0)
     fireEvent.change(screen.getByLabelText('Search invoice, PRO or PO'), { target: { value: 'nothing-like-it' } })
-    expect(await screen.findByTestId('outstanding-no-match')).toBeTruthy()
+    expect(await within(out).findByText(/No open invoices match/)).toBeTruthy()
   })
 
   it('Select all open ticks every open invoice for the customer; a check is applied oldest first', async () => {

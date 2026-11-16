@@ -1,22 +1,24 @@
 /**
- * Payments Received → Outstanding: every open invoice in two sections — Manually invoiced and
- * Factored (OTR) — each grouped by customer. Tick the invoices a payment covers, adjust each amount,
- * enter the check # / OTR reference and date, and "Receive payments" posts one payment per customer
- * (RECORD_PAYMENT) after a read-back.
+ * Payments Received → Outstanding: every open invoice in ONE table (Ryne 2026-11-16: "look more like a table
+ * like active shipments"), the shared dense grid. A Type column says Manual or Factored (OTR); every column
+ * filters and sorts; the customer search box (and ?customer=) narrows the table to one customer.
+ *
+ * Tick the invoices a payment covers, adjust each amount, enter the check # / OTR reference and date, and
+ * "Receive payments" posts the payment (RECORD_PAYMENT) after a read-back.
  *
  * A factored invoice is pre-filled at its balance less OTR's fee (TmsSettings.factorFeeBps, default
  * 2%). After the payment posts, the fee is closed on the invoice as a write-off reasoned
  * "Factoring fee (OTR 2%)", so the invoice ends PAID and the fee is reportable.
  *
- * Manually invoiced: one receive bar per customer (one check is one customer's).
- * Factored: one receive bar for the whole section — one OTR remittance covers many customers' invoices;
- * it still posts one payment per customer, because a payment row belongs to one customer.
+ * Manual and Factored are never received together: each type has its own receive bar (a check is one
+ * customer's; one OTR remittance covers many customers' invoices and posts one payment per customer).
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronDown, ChevronRight } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsBadge, TmsButton, TmsDialog, TmsInput, TmsSelect } from '@/features/tms/kit'
+import type { DenseColumn, DenseOption } from '@/features/tms/grid/denseGridModel'
+import { ArDenseTable } from '@/features/ar/components/ArDenseTable'
 import { AR_PAYMENT_METHOD_LABEL, formatDay } from '@/features/ar/arViews'
 import { useCustomerPaymentFacts } from '@/hooks/useCustomerPaymentFacts'
 import { getTmsSettings, graphqlErrorText, recordPayment, writeOffInvoice } from '@/lib/apiClient'
@@ -24,30 +26,35 @@ import { termsVsActualText } from '@/lib/daysToPay'
 import { formatCents } from '@/lib/invoiceBuild'
 import type { ArPaymentMethod, CustomerRecord, InvoiceRecord } from '@/types/tms'
 import {
-  DEFAULT_FACTOR_FEE_BPS, allocateOldestFirst, factorFeeReason, filterOutstanding, groupOutstanding, parseDollars, planReceive, prefillCents,
-  recordPaymentInput,
-  type OutstandingGroup, type OutstandingRow, type OutstandingSection, type ReceiveDraft, type ReceivePlan,
+  DEFAULT_FACTOR_FEE_BPS, LATE_BUCKETS, allocateOldestFirst, factorFeeReason, filterTableRows, lateBucket, parseDollars, planReceive, prefillCents,
+  recordPaymentInput, tableRows,
+  type OutstandingSectionKey, type OutstandingTableRow, type ReceiveDraft, type ReceivePlan,
 } from './outstanding'
 
 const MANUAL_METHODS: ArPaymentMethod[] = ['CHECK', 'ACH', 'WIRE', 'CARD', 'ZELLE', 'OTHER']
 const FACTOR_METHODS: ArPaymentMethod[] = ['FACTOR', 'ACH', 'WIRE', 'CHECK', 'OTHER']
+
+const TYPE_LABEL: Record<OutstandingSectionKey, string> = { manual: 'Manual', factored: 'Factored (OTR)' }
 
 interface BarForm { reference: string; receivedAt: string; method: ArPaymentMethod }
 
 const invoicePath = (id: string) => `/tms/invoicing/invoices/${encodeURIComponent(id)}`
 const dollars = (cents: number) => (cents / 100).toFixed(2)
 const typedCents = (text: string | undefined) => Math.max(0, Math.round(Number((text ?? '').replace(/[$,\s]/g, '')) * 100) || 0)
+const opt = (value: string): DenseOption[] => (value ? [{ value, label: value }] : [])
 
-export function OutstandingView({ invoices, customers, loading, asOf, onReceived, customerId = null, query = '' }: {
+export function OutstandingView({ invoices, customers, loading, asOf, onReceived, customerId = null, query = '', divisionName }: {
   invoices: InvoiceRecord[]
   customers: Map<string, CustomerRecord>
   loading: boolean
   asOf: string
   onReceived: () => void
-  /** Work on one customer: only their invoices, in both sections (Ryne 2026-11-16). */
+  /** Work on one customer: only their invoices (Ryne 2026-11-16). */
   customerId?: string | null
   /** A typed search over invoice #, PRO and PO. */
   query?: string
+  /** A division key → its name, for the Rev division column. */
+  divisionName?: (key: string) => string
 }) {
   const [feeBps, setFeeBps] = useState(DEFAULT_FACTOR_FEE_BPS)
   useEffect(() => {
@@ -56,83 +63,76 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
     return () => { alive = false }
   }, [])
 
-  const sections = useMemo(
-    () => groupOutstanding(invoices, (id, fallback) => customers.get(id)?.name ?? fallback, asOf),
+  const allRows = useMemo(
+    () => tableRows(invoices, (id, fallback) => customers.get(id)?.name ?? fallback, asOf),
     [invoices, customers, asOf],
   )
-  const visible = useMemo(() => filterOutstanding(sections, { customerId, query }), [sections, customerId, query])
-  // The customer's own open money, whatever is typed in the search.
-  const oneCustomer = useMemo(() => {
-    if (!customerId) return null
-    const mine = filterOutstanding(sections, { customerId })
-    return { openCents: mine.reduce((n, sec) => n + sec.openCents, 0), count: mine.reduce((n, sec) => n + sec.count, 0) }
-  }, [sections, customerId])
-  const manualCustomerIds = useMemo(
-    () => sections.filter((s) => s.key === 'manual').flatMap((s) => s.groups.map((g) => g.customerId)),
-    [sections],
-  )
+  // The page's own filters: one customer, the typed search, and the Manual / Factored chips.
+  const [typeChip, setTypeChip] = useState<OutstandingSectionKey | null>(null)
+  const baseRows = useMemo(() => filterTableRows(allRows, { customerId, query }), [allRows, customerId, query])
+  const rows = useMemo(() => (typeChip ? baseRows.filter((r) => r.type === typeChip) : baseRows), [baseRows, typeChip])
+  // What the grid leaves after its column filters, search and sort: what the totals, Select all and the bars act on.
+  const [shown, setShown] = useState<OutstandingTableRow[]>([])
+  const onFiltered = useCallback((next: OutstandingTableRow[]) => setShown(next), [])
+
+  const manualCustomerIds = useMemo(() => [...new Set(allRows.filter((r) => r.type === 'manual').map((r) => r.customerId))], [allRows])
   const [factsVersion, setFactsVersion] = useState(0)
   const facts = useCustomerPaymentFacts(manualCustomerIds, factsVersion)
 
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const [tickedAll, setTicked] = useState<Record<string, string>>({})
   const [forms, setForms] = useState<Record<string, BarForm>>({})
-  const [confirm, setConfirm] = useState<{ barKey: string; title: string; draft: ReceiveDraft; plan: ReceivePlan } | null>(null)
+  const [confirm, setConfirm] = useState<{ barKey: OutstandingSectionKey; title: string; draft: ReceiveDraft; plan: ReceivePlan } | null>(null)
   const [posting, setPosting] = useState(false)
   const [errors, setErrors] = useState<Record<string, string[]>>({})
 
-  // A customer or search change can hide invoices that were ticked: they count as unticked, so no bar can post them.
-  const ticked = useMemo(() => {
-    const shown = new Set(visible.flatMap((sec) => sec.groups.flatMap((g) => g.rows.map((r) => r.invoiceId))))
-    return Object.fromEntries(Object.entries(tickedAll).filter(([id]) => shown.has(id)))
-  }, [visible, tickedAll])
+  // A filter change can hide invoices that were ticked: they count as unticked, so no bar can post them.
+  const shownIds = useMemo(() => new Set(shown.map((r) => r.invoiceId)), [shown])
+  const ticked = useMemo(
+    () => Object.fromEntries(Object.entries(tickedAll).filter(([id]) => shownIds.has(id))),
+    [shownIds, tickedAll],
+  )
 
   const [checkAmount, setCheckAmount] = useState('')
   const [applyError, setApplyError] = useState<string | null>(null)
-  const customerRows = useMemo(() => visible.flatMap((sec) => sec.groups.flatMap((g) => g.rows)), [visible])
-  const manualRows = useMemo(() => visible.filter((sec) => sec.key === 'manual').flatMap((sec) => sec.groups.flatMap((g) => g.rows)), [visible])
-  const allCustomerTicked = customerRows.length > 0 && customerRows.every((r) => r.invoiceId in ticked)
+  const manualShown = useMemo(() => shown.filter((r) => r.type === 'manual'), [shown])
+  const allShownTicked = shown.length > 0 && shown.every((r) => r.invoiceId in ticked)
   const applyOldestFirst = () => {
     const cents = parseDollars(checkAmount)
     if (cents == null || cents <= 0) { setApplyError('Enter the check amount first.'); return }
     setApplyError(null)
-    const plan = allocateOldestFirst(manualRows, cents, feeBps)
+    const plan = allocateOldestFirst(manualShown, cents, feeBps)
     setTicked((t) => {
       const next = { ...t }
-      for (const r of manualRows) delete next[r.invoiceId]
+      for (const r of manualShown) delete next[r.invoiceId]
       for (const [id, c] of plan) next[id] = dollars(c)
       return next
     })
   }
 
-  const formOf = (barKey: string, factored: boolean): BarForm =>
-    forms[barKey] ?? { reference: '', receivedAt: asOf, method: factored ? 'FACTOR' : 'CHECK' }
-  const setForm = (barKey: string, factored: boolean, patch: Partial<BarForm>) =>
-    setForms((f) => ({ ...f, [barKey]: { ...formOf(barKey, factored), ...patch } }))
-  const tick = (rows: OutstandingRow[], on: boolean) => setTicked((t) => {
+  const formOf = (barKey: OutstandingSectionKey): BarForm =>
+    forms[barKey] ?? { reference: '', receivedAt: asOf, method: barKey === 'factored' ? 'FACTOR' : 'CHECK' }
+  const setForm = (barKey: OutstandingSectionKey, patch: Partial<BarForm>) =>
+    setForms((f) => ({ ...f, [barKey]: { ...formOf(barKey), ...patch } }))
+  const tick = (list: OutstandingTableRow[], on: boolean) => setTicked((t) => {
     const next = { ...t }
-    for (const r of rows) {
+    for (const r of list) {
       if (!on) delete next[r.invoiceId]
       else if (!(r.invoiceId in next)) next[r.invoiceId] = dollars(prefillCents(r, feeBps))
     }
     return next
   })
-  const toggleRow = (row: OutstandingRow) => tick([row], !(row.invoiceId in ticked))
-  const toggleCollapse = (key: string) => setCollapsed((c) => {
-    const next = new Set(c)
-    if (next.has(key)) next.delete(key)
-    else next.add(key)
-    return next
-  })
+  const toggleRow = (row: OutstandingTableRow) => tick([row], !(row.invoiceId in ticked))
 
-  const pickedIn = (rows: OutstandingRow[]) => rows.filter((r) => r.invoiceId in ticked)
+  const pickedOf = (type: OutstandingSectionKey) => shown.filter((r) => r.type === type && r.invoiceId in ticked)
 
-  const startReceive = (barKey: string, title: string, rows: OutstandingRow[], factored: boolean) => {
-    const f = formOf(barKey, factored)
-    const draft: ReceiveDraft = { lines: pickedIn(rows).map((row) => ({ row, amount: ticked[row.invoiceId] })), feeBps, ...f }
+  const startReceive = (barKey: OutstandingSectionKey) => {
+    const f = formOf(barKey)
+    const draft: ReceiveDraft = { lines: pickedOf(barKey).map((row) => ({ row, amount: ticked[row.invoiceId] })), feeBps, ...f }
     const plan = planReceive(draft)
     setErrors((e) => ({ ...e, [barKey]: plan.errors }))
-    if (plan.ok) setConfirm({ barKey, title, draft, plan })
+    if (!plan.ok) return
+    const names = [...new Set(pickedOf(barKey).map((r) => r.customerName))]
+    setConfirm({ barKey, title: barKey === 'factored' ? 'OTR' : names[0] ?? 'the customer', draft, plan })
   }
 
   const post = async () => {
@@ -173,26 +173,94 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
     }
   }
 
-  if (sections.length === 0) return <p className="tms-muted text-sm" style={{ padding: 16 }}>{loading ? 'Loading…' : 'Nothing is outstanding.'}</p>
-  const filteredOut = visible.length === 0
+  const divLabel = useCallback((key: string) => (key ? (divisionName?.(key) ?? key) : ''), [divisionName])
 
-  const receiveBar = (barKey: string, title: string, rows: OutstandingRow[], factored: boolean) => {
-    const picked = pickedIn(rows)
+  const columns: Array<DenseColumn<OutstandingTableRow>> = useMemo(() => [
+    { key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 44 },
+    { key: 'customer', header: 'Customer', group: 'Invoice', text: (r) => r.customerName, filter: 'multi', optionsOf: (r) => opt(r.customerName) },
+    {
+      key: 'type', header: 'Type', group: 'Invoice', text: (r) => TYPE_LABEL[r.type], filter: 'multi', optionsOf: (r) => opt(TYPE_LABEL[r.type]),
+      fixedOptions: [{ value: TYPE_LABEL.manual, label: TYPE_LABEL.manual }, { value: TYPE_LABEL.factored, label: TYPE_LABEL.factored }],
+    },
+    { key: 'invoice', header: 'Invoice #', group: 'Invoice', text: (r) => r.number },
+    { key: 'pro', header: 'PRO', group: 'Invoice', text: (r) => r.pro },
+    { key: 'po', header: 'PO', group: 'Invoice', text: (r) => r.po ?? '' },
+    { key: 'invoiced', header: 'Invoiced', group: 'Dates', text: (r) => (r.invoiceDate ? formatDay(r.invoiceDate) : ''), filter: 'date', dateOf: (r) => r.invoiceDate || null, sortValue: (r) => r.invoiceDate },
+    { key: 'due', header: 'Due', group: 'Dates', text: (r) => (r.dueAt ? formatDay(r.dueAt) : ''), filter: 'date', dateOf: (r) => r.dueAt || null, sortValue: (r) => r.dueAt },
+    {
+      key: 'daysOut', header: 'Days out', group: 'Dates', align: 'right', text: (r) => `${r.daysOutstanding}d`,
+      sortValue: (r) => r.daysOutstanding, filter: 'number', numberOf: (r) => r.daysOutstanding, numberUnit: 'days',
+    },
+    {
+      key: 'status', header: 'Status', group: 'Dates', text: (r) => (r.daysLate > 0 ? `${r.daysLate} days late` : 'Current'), sortValue: (r) => r.daysLate,
+      filter: 'multi', optionsOf: (r) => opt(lateBucket(r.daysLate)), fixedOptions: LATE_BUCKETS.map((b) => ({ value: b, label: b })),
+    },
+    { key: 'terms', header: 'Terms', group: 'Invoice', text: (r) => r.termsText, filter: 'multi', optionsOf: (r) => opt(r.termsText) },
+    {
+      key: 'amount', header: 'Amount', group: 'Amounts', align: 'right', text: (r) => formatCents(r.totalCents), sortValue: (r) => r.totalCents,
+      filter: 'number', numberOf: (r) => r.totalCents / 100, numberUnit: '$',
+    },
+    {
+      key: 'paid', header: 'Paid', group: 'Amounts', align: 'right', text: (r) => (r.paidCents ? formatCents(r.paidCents) : ''), sortValue: (r) => r.paidCents,
+      filter: 'number', numberOf: (r) => r.paidCents / 100, numberUnit: '$',
+    },
+    {
+      key: 'balance', header: 'Balance', group: 'Amounts', align: 'right', text: (r) => formatCents(r.balanceCents), sortValue: (r) => r.balanceCents,
+      filter: 'number', numberOf: (r) => r.balanceCents / 100, numberUnit: '$',
+    },
+    { key: 'division', header: 'Rev division', group: 'Invoice', text: (r) => divLabel(r.divisionKey), filter: 'multi', optionsOf: (r) => opt(divLabel(r.divisionKey)) },
+    { key: 'sent', header: 'Sent', group: 'Dates', text: (r) => (r.sentOn ? formatDay(r.sentOn) : ''), filter: 'date', dateOf: (r) => r.sentOn || null, sortValue: (r) => r.sentOn },
+    { key: 'amountPaid', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 132 },
+  ], [divLabel])
+
+  const renderCell = (r: OutstandingTableRow, key: string): ReactNode => {
+    switch (key) {
+      case 'select':
+        return <input type="checkbox" aria-label={`Select ${r.pro}`} checked={r.invoiceId in ticked} onChange={() => toggleRow(r)} />
+      case 'amountPaid': {
+        const on = r.invoiceId in ticked
+        return (
+          <TmsInput className="pr-out-amt" inputMode="decimal" aria-label={`Amount paid on ${r.pro}`} disabled={!on}
+            value={on ? ticked[r.invoiceId] : ''} placeholder={on ? '' : 'Amount paid'}
+            onChange={(e) => setTicked((t) => ({ ...t, [r.invoiceId]: e.target.value }))} />
+        )
+      }
+      case 'type':
+        return <TmsBadge tone={r.type === 'factored' ? 'blue' : 'gray'}>{TYPE_LABEL[r.type]}</TmsBadge>
+      case 'invoice':
+        return <Link to={invoicePath(r.invoiceId)}>{r.number}</Link>
+      case 'status':
+        return r.daysLate > 0 ? <TmsBadge tone="red">{r.daysLate} days late</TmsBadge> : <TmsBadge tone="green">Current</TmsBadge>
+      case 'balance':
+        return <strong>{formatCents(r.balanceCents)}</strong>
+      default:
+        return undefined
+    }
+  }
+
+  const receiveBar = (barKey: OutstandingSectionKey) => {
+    const picked = pickedOf(barKey)
     if (picked.length === 0) return null
-    const f = formOf(barKey, factored)
+    const factored = barKey === 'factored'
+    const f = formOf(barKey)
     const running = picked.reduce((s, r) => s + typedCents(ticked[r.invoiceId]), 0)
     const methods = factored ? FACTOR_METHODS : MANUAL_METHODS
     const refLabel = f.method === 'CHECK' ? 'Check number' : factored ? 'OTR remittance or ACH reference' : 'Reference'
+    // A check is one customer's: ticked manual invoices from several customers can't share one payment.
+    const customersPicked = new Set(picked.map((r) => r.customerId)).size
+    const mixed = !factored && customersPicked > 1
     return (
       <div className="pr-out-bar" data-testid={factored ? 'receive-bar-factored' : 'receive-bar'}>
-        <TmsSelect aria-label="Method" value={f.method} onChange={(e) => setForm(barKey, factored, { method: e.target.value as ArPaymentMethod })}>
+        <strong className="pr-out-bar-title">{factored ? 'Factored (OTR) · received from OTR' : `Manual · ${picked[0].customerName}`}</strong>
+        <TmsSelect aria-label={`${TYPE_LABEL[barKey]} method`} value={f.method} onChange={(e) => setForm(barKey, { method: e.target.value as ArPaymentMethod })}>
           {methods.map((m) => <option key={m} value={m}>{m === 'FACTOR' ? 'OTR (factor)' : AR_PAYMENT_METHOD_LABEL[m]}</option>)}
         </TmsSelect>
-        <TmsInput aria-label={refLabel} placeholder={f.method === 'CHECK' ? 'Check #' : factored ? 'OTR remittance #' : 'Reference'}
-          value={f.reference} onChange={(e) => setForm(barKey, factored, { reference: e.target.value })} />
-        <TmsInput type="date" aria-label="Payment date" value={f.receivedAt} onChange={(e) => setForm(barKey, factored, { receivedAt: e.target.value })} />
+        <TmsInput aria-label={`${TYPE_LABEL[barKey]} ${refLabel}`} placeholder={f.method === 'CHECK' ? 'Check #' : factored ? 'OTR remittance #' : 'Reference'}
+          value={f.reference} onChange={(e) => setForm(barKey, { reference: e.target.value })} />
+        <TmsInput type="date" aria-label={`${TYPE_LABEL[barKey]} payment date`} value={f.receivedAt} onChange={(e) => setForm(barKey, { receivedAt: e.target.value })} />
         <span className="pr-out-total">{picked.length} invoice{picked.length === 1 ? '' : 's'} · <strong>{formatCents(running)}</strong></span>
-        <TmsButton variant="primary" size="sm" onClick={() => startReceive(barKey, title, rows, factored)} data-testid="receive-payments">Receive payments</TmsButton>
+        <TmsButton variant="primary" size="sm" disabled={mixed} onClick={() => startReceive(barKey)} data-testid="receive-payments">Receive payments</TmsButton>
+        {mixed && <p className="pr-out-errors" role="alert" data-testid="receive-mixed-customers">A check is one customer&rsquo;s. The ticked manual invoices belong to {customersPicked} customers: pick one customer above, or untick the others.</p>}
         {(errors[barKey] ?? []).length > 0 && (
           <ul className="pr-out-errors" role="alert">
             {errors[barKey].map((e) => <li key={e}>{e}</li>)}
@@ -202,141 +270,28 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
     )
   }
 
-  const groupBlock = (g: OutstandingGroup) => {
-    const isOpen = !collapsed.has(g.key)
-    const picked = pickedIn(g.rows)
-    const allPicked = g.rows.length > 0 && picked.length === g.rows.length
-    const customer = customers.get(g.customerId)
-    const d2p = g.factored ? undefined : facts.daysToPayByCustomer.get(g.customerId)
-    return (
-      <section key={g.key} className="pr-out-group" data-testid="outstanding-group">
-        <header className="pr-out-head">
-          <button type="button" className="pr-out-twisty" aria-expanded={isOpen} onClick={() => toggleCollapse(g.key)}
-            aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${g.label}`}>
-            {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          </button>
-          <strong className="pr-out-name">{g.label}</strong>
-          <span className="tms-muted text-sm">{g.rows.length} invoice{g.rows.length === 1 ? '' : 's'} · {formatCents(g.openCents)} open</span>
-          {g.factored
-            ? <span className="pr-out-d2p text-sm">OTR pays · {feeBps / 100}% fee</span>
-            : <span className="pr-out-d2p text-sm" data-testid="outstanding-days-to-pay">{termsVsActualText(customer?.paymentTermsDays, d2p)}</span>}
-        </header>
-        {isOpen && (
-          <>
-            <div className="pr-out-table-wrap">
-              <table className="pr-out-table" aria-label={`${g.label} open invoices`}>
-                <thead>
-                  <tr>
-                    <th scope="col" className="pr-out-check">
-                      <input type="checkbox" aria-label={`Select all for ${g.label}`} checked={allPicked} onChange={() => tick(g.rows, !allPicked)} />
-                    </th>
-                    <th scope="col">Invoice</th>
-                    <th scope="col">PO</th>
-                    <th scope="col">Invoiced</th>
-                    <th scope="col">Due</th>
-                    <th scope="col" className="pr-right">Days out</th>
-                    <th scope="col" className="pr-right">Amount</th>
-                    <th scope="col" className="pr-right">Paid</th>
-                    <th scope="col" className="pr-right">Balance</th>
-                    <th scope="col" className="pr-right">Amount paid</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {g.rows.map((r) => {
-                    const on = r.invoiceId in ticked
-                    return (
-                      <tr key={r.invoiceId} className={on ? 'pr-out-on' : undefined}>
-                        <td className="pr-out-check">
-                          <input type="checkbox" aria-label={`Select ${r.pro}`} checked={on} onChange={() => toggleRow(r)} />
-                        </td>
-                        <td>
-                          <Link to={invoicePath(r.invoiceId)}>{r.pro}</Link>
-                          {r.factored && <TmsBadge tone="blue" className="pr-out-otr-tag">OTR</TmsBadge>}
-                        </td>
-                        <td>{r.po ?? '—'}</td>
-                        <td>{formatDay(r.invoiceDate)}</td>
-                        <td>{formatDay(r.dueAt)}</td>
-                        <td className="pr-right">{r.daysOutstanding}d</td>
-                        <td className="pr-right">{formatCents(r.totalCents)}</td>
-                        <td className="pr-right">{r.paidCents ? formatCents(r.paidCents) : '—'}</td>
-                        <td className="pr-right"><strong>{formatCents(r.balanceCents)}</strong></td>
-                        <td className="pr-right">
-                          <TmsInput className="pr-out-amt" inputMode="decimal" aria-label={`Amount paid on ${r.pro}`} disabled={!on}
-                            value={on ? ticked[r.invoiceId] : ''} placeholder={on ? '' : '—'}
-                            onChange={(e) => setTicked((t) => ({ ...t, [r.invoiceId]: e.target.value }))} />
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {/* Phones and iPads: the same invoices as cards. */}
-            <ul className="pr-out-cards">
-              {g.rows.map((r) => {
-                const on = r.invoiceId in ticked
-                return (
-                  <li key={r.invoiceId} className={`pr-out-card${on ? ' pr-out-on' : ''}`}>
-                    <div className="pr-out-card-top">
-                      <input type="checkbox" aria-label={`Select ${r.pro}`} checked={on} onChange={() => toggleRow(r)} />
-                      <Link to={invoicePath(r.invoiceId)}>{r.pro}</Link>
-                      {r.factored && <TmsBadge tone="blue">OTR</TmsBadge>}
-                      <strong className="pr-out-card-amt">{formatCents(r.balanceCents)}</strong>
-                    </div>
-                    <div className="tms-muted text-xs">PO {r.po ?? '—'} · Inv {formatDay(r.invoiceDate)} · Due {formatDay(r.dueAt)} · {r.daysOutstanding}d out</div>
-                    {on && (
-                      <TmsInput inputMode="decimal" aria-label={`Amount paid on ${r.pro}`} value={ticked[r.invoiceId]}
-                        onChange={(e) => setTicked((t) => ({ ...t, [r.invoiceId]: e.target.value }))} />
-                    )}
-                  </li>
-                )
-              })}
-            </ul>
-          </>
-        )}
-        {/* A check is one customer's: manual invoices get a bar per customer. */}
-        {!g.factored && receiveBar(g.key, g.label, g.rows, false)}
-      </section>
-    )
-  }
-
-  const sectionBlock = (s: OutstandingSection) => {
-    const key = `section:${s.key}`
-    const isOpen = !collapsed.has(key)
-    const factored = s.key === 'factored'
-    return (
-      <div key={s.key} className={`pr-out-section${factored ? ' pr-out-section-otr' : ''}`} data-testid={`outstanding-section-${s.key}`}>
-        <header className="pr-out-section-head">
-          <button type="button" className="pr-out-twisty" aria-expanded={isOpen} onClick={() => toggleCollapse(key)}
-            aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${s.label}`}>
-            {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-          </button>
-          <h2>{s.label}</h2>
-          <span className="tms-muted text-sm">{s.groups.length} customer{s.groups.length === 1 ? '' : 's'} · {s.count} invoice{s.count === 1 ? '' : 's'} · {formatCents(s.openCents)} open</span>
-          {factored && <span className="tms-muted text-sm">Amount paid starts at the balance less OTR&rsquo;s {feeBps / 100}% fee; the fee is closed on the invoice.</span>}
-        </header>
-        {isOpen && s.groups.map(groupBlock)}
-        {/* One OTR remittance covers many customers: the factored section has one bar. */}
-        {factored && receiveBar(key, 'OTR', s.groups.flatMap((g) => g.rows), true)}
-      </div>
-    )
-  }
-
-  const customerName = customerId ? customers.get(customerId)?.name ?? visible[0]?.groups[0]?.label ?? 'Customer' : ''
+  const customerName = customerId ? customers.get(customerId)?.name ?? shown[0]?.customerName ?? baseRows[0]?.customerName ?? 'Customer' : ''
   const oneDays = customerId ? facts.daysToPayByCustomer.get(customerId) : undefined
+  const oneRows = customerId ? allRows.filter((r) => r.customerId === customerId) : []
+  const oneOpenCents = oneRows.reduce((n, r) => n + r.balanceCents, 0)
+  const shownCents = shown.reduce((n, r) => n + r.balanceCents, 0)
+  const manualCount = baseRows.filter((r) => r.type === 'manual').length
+  const factoredCount = baseRows.filter((r) => r.type === 'factored').length
+
+  if (allRows.length === 0) return <p className="tms-muted text-sm" style={{ padding: 16 }}>{loading ? 'Loading…' : 'Nothing is outstanding.'}</p>
 
   return (
     <div className="pr-out" data-testid="payments-outstanding">
-      {customerId && oneCustomer && (
+      {customerId && (
         <div className="pr-one" data-testid="one-customer-bar">
           <strong className="pr-one-name">{customerName}</strong>
-          <span className="tms-muted text-sm">{oneCustomer.count} open invoice{oneCustomer.count === 1 ? '' : 's'} · {formatCents(oneCustomer.openCents)} open</span>
+          <span className="tms-muted text-sm">{oneRows.length} open invoice{oneRows.length === 1 ? '' : 's'} · {formatCents(oneOpenCents)} open</span>
           <span className="pr-out-d2p text-sm" data-testid="one-customer-days-to-pay">{termsVsActualText(customers.get(customerId)?.paymentTermsDays, oneDays)}</span>
           <div className="pr-one-actions">
-            <TmsButton size="sm" onClick={() => tick(customerRows, !allCustomerTicked)} disabled={customerRows.length === 0} data-testid="select-all-customer">
-              {allCustomerTicked ? 'Clear selection' : `Select all open (${customerRows.length})`}
+            <TmsButton size="sm" onClick={() => tick(shown, !allShownTicked)} disabled={shown.length === 0} data-testid="select-all-customer">
+              {allShownTicked ? 'Clear selection' : `Select all open (${shown.length})`}
             </TmsButton>
-            {manualRows.length > 0 && (
+            {manualShown.length > 0 && (
               <>
                 <TmsInput inputMode="decimal" aria-label="Check amount" placeholder="Check amount" value={checkAmount}
                   onChange={(e) => { setCheckAmount(e.target.value); setApplyError(null) }} />
@@ -347,9 +302,42 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
           {applyError && <p className="pr-out-errors" role="alert">{applyError}</p>}
         </div>
       )}
-      {filteredOut
-        ? <p className="tms-muted text-sm" style={{ padding: 16 }} data-testid="outstanding-no-match">No open invoices match{customerId ? ` for ${customerName}` : ''}{query.trim() ? ` “${query.trim()}”` : ''}.</p>
-        : visible.map(sectionBlock)}
+
+      <div className="pr-out-summary" data-testid="outstanding-summary">
+        <span><strong>{shown.length}</strong> invoice{shown.length === 1 ? '' : 's'} · <strong>{formatCents(shownCents)}</strong> open</span>
+        <button type="button" className="pr-toggle" aria-pressed={typeChip === 'manual'} data-testid="chip-manual"
+          onClick={() => setTypeChip((c) => (c === 'manual' ? null : 'manual'))}>Manual {manualCount}</button>
+        <button type="button" className="pr-toggle" aria-pressed={typeChip === 'factored'} data-testid="chip-factored"
+          onClick={() => setTypeChip((c) => (c === 'factored' ? null : 'factored'))}>Factored (OTR) {factoredCount}</button>
+        {!customerId && shown.length > 0 && (
+          <TmsButton size="sm" variant="ghost" onClick={() => tick(shown, !allShownTicked)} data-testid="select-all-shown">
+            {allShownTicked ? 'Clear selection' : `Select all shown (${shown.length})`}
+          </TmsButton>
+        )}
+        <span className="tms-muted text-sm pr-out-hint">Factored invoices start at the balance less OTR&rsquo;s {feeBps / 100}% fee; the fee is closed on the invoice.</span>
+      </div>
+
+      <ArDenseTable<OutstandingTableRow>
+        grid={{
+          gridId: 'payments-outstanding',
+          label: 'Outstanding invoices',
+          columns,
+          rows,
+          rowKey: (r) => r.invoiceId,
+          renderCell,
+          onFiltered,
+          defaultColumns: ['customer', 'type', 'invoice', 'pro', 'po', 'invoiced', 'due', 'daysOut', 'status', 'amount', 'paid', 'balance'],
+          cardLayout: { title: 'invoice', party: 'customer', amount: 'balance', pills: ['type', 'status'] },
+          empty: loading ? 'Loading…' : `No open invoices match${customerId ? ` for ${customerName}` : ''}${query.trim() ? ` “${query.trim()}”` : ''}.`,
+        }}
+        pageFilters={{ count: typeChip ? 1 : 0, onClear: () => setTypeChip(null) }}
+      />
+
+      {/* One bar per type, only for the type with ticked invoices: Manual and Factored are never received together. */}
+      <div className="pr-out-bars">
+        {receiveBar('manual')}
+        {receiveBar('factored')}
+      </div>
 
       {confirm && (
         <TmsDialog

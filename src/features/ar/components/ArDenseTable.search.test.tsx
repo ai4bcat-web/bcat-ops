@@ -33,4 +33,18 @@ describe('ArDenseTable search', () => {
     expect(screen.getByText('DANISCO US INC.')).toBeInTheDocument()
     expect(screen.queryByText('THE ROYAL GROUP')).toBeNull()
   })
+
+  it('hands the page the rows left after its search (onFiltered), so totals and bulk actions follow what is shown', () => {
+    const seen: string[][] = []
+    render(<ArDenseTable<R> grid={{ ...grid, onFiltered: (shown) => seen.push(shown.map((r) => r.id)) }} />)
+    expect(seen.at(-1)).toEqual(['1', '2'])
+    fireEvent.change(screen.getByTestId('ar-search'), { target: { value: 'danisco' } })
+    expect(seen.at(-1)).toEqual(['2'])
+  })
+
+  it('opens with the default columns a page names, the rest staying in the Columns picker', () => {
+    render(<ArDenseTable<R> grid={{ ...grid, gridId: 'ar-test-defaults', defaultColumns: ['invoice', 'customer'] }} />)
+    expect(screen.getByText('Customer')).toBeInTheDocument()
+    expect(screen.queryByText('Balance')).toBeNull()
+  })
 })

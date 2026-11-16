@@ -42,6 +42,19 @@ export interface OutstandingRow {
   factored: boolean
 }
 
+/** One open invoice as a table row: the grouping is gone, so each row carries what a group header used to say. */
+export interface OutstandingTableRow extends OutstandingRow {
+  customerName: string
+  /** The invoice's own division key (BCAT_LOGISTICS, …); '' when none. */
+  divisionKey: string
+  termsText: string
+  /** YYYY-MM-DD the invoice went out ('' while unsent). */
+  sentOn: string
+  /** Days past the due date (0 when not yet late). */
+  daysLate: number
+  type: OutstandingSectionKey
+}
+
 export interface OutstandingGroup {
   /** `<section>:<customerId>`. */
   key: string
@@ -116,6 +129,59 @@ export function groupOutstanding(
     return { key, label, groups: list, count: list.reduce((n, g) => n + g.rows.length, 0), openCents: list.reduce((n, g) => n + g.openCents, 0) }
   }
   return [section('manual', 'Manually invoiced'), section('factored', 'Factored (OTR)')].filter((s) => s.count > 0)
+}
+
+/** Days past due, 0 when the invoice isn't late yet. */
+export function daysLate(dueYmd: string | null | undefined, asOf: string): number {
+  const due = ymd(dueYmd)
+  if (!due) return 0
+  return daysBetween(due, ymd(asOf) ?? asOf)
+}
+
+/** The status buckets the Status column filters by. */
+export const LATE_BUCKETS = ['Current', '1–30 days late', '31–60 days late', '61–90 days late', '90+ days late'] as const
+export function lateBucket(daysLateCount: number): (typeof LATE_BUCKETS)[number] {
+  if (daysLateCount <= 0) return 'Current'
+  if (daysLateCount <= 30) return '1–30 days late'
+  if (daysLateCount <= 60) return '31–60 days late'
+  if (daysLateCount <= 90) return '61–90 days late'
+  return '90+ days late'
+}
+
+/** Every open invoice as one flat row (Ryne 2026-11-16: a table like Active shipments, not blocks by customer). */
+export function tableRows(
+  invoices: readonly InvoiceRecord[],
+  nameOf: (customerId: string, fallback: string) => string,
+  asOf: string,
+): OutstandingTableRow[] {
+  const out: OutstandingTableRow[] = []
+  for (const inv of invoices) {
+    if (inv.status !== 'ISSUED' && inv.status !== 'PARTIAL') continue
+    if ((inv.balanceCents ?? 0) <= 0) continue
+    const row = outstandingRow(inv, asOf)
+    out.push({
+      ...row,
+      customerName: nameOf(inv.customerId, inv.customerName || inv.customerId),
+      divisionKey: inv.divisionKey ?? '',
+      termsText: inv.termsText?.trim() || (inv.termsDays ? `Net ${inv.termsDays}` : ''),
+      sentOn: ymd(inv.sentAt) ?? ymd(inv.markedSentAt) ?? '',
+      daysLate: daysLate(inv.dueAt, asOf),
+      type: row.factored ? 'factored' : 'manual',
+    })
+  }
+  return out.sort((a, b) => a.customerName.localeCompare(b.customerName) || a.dueAt.localeCompare(b.dueAt) || a.number.localeCompare(b.number, undefined, { numeric: true }))
+}
+
+/** The flat rows narrowed to one customer, a type chip and/or a typed search over invoice #, PRO and PO. */
+export function filterTableRows(
+  rows: readonly OutstandingTableRow[],
+  filter: { customerId?: string | null; query?: string | null; type?: OutstandingSectionKey | null },
+): OutstandingTableRow[] {
+  const q = (filter.query ?? '').trim().toLowerCase()
+  return rows.filter((r) =>
+    (!filter.customerId || r.customerId === filter.customerId)
+    && (!filter.type || r.type === filter.type)
+    && (!q || [r.number, r.pro, r.po ?? '', r.invoiceId].some((v) => v.toLowerCase().includes(q))))
 }
 
 /** Open invoices narrowed to one customer and/or a typed search over invoice #, PRO and PO; empty groups and sections drop out. */
