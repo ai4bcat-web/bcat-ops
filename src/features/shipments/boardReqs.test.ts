@@ -80,25 +80,43 @@ describe('REQS export text', () => {
 })
 
 describe('Ready for review (Active filter + header stat)', () => {
-  it('matches exactly the delivered rows Push to load review would accept', async () => {
-    const { readyForReviewOf, setBoardReqSources } = await import('./boardReqs')
+  // On the board and waiting to be pushed: order at DOCS_NEEDED, linked to a customer.
+  const onBoard = (over: Partial<ShipmentRow>) => row({ arStatus: 'DOCS_NEEDED', customerId: 'c1', ...over } as Partial<ShipmentRow>)
+
+  it('lists only delivered rows the push would accept and REQS shows nothing for', async () => {
+    const { readyForReviewOf, setBoardReqSources, boardReqsOf: reqsOf } = await import('./boardReqs')
     const { pushRefusals } = await import('./batchReview')
     const { matchesFlag } = await import('./boardChips')
     setBoardReqSources(SRC)
     const rows = [
-      row({ id: 'ok' } as Partial<ShipmentRow>),
-      row({ id: 'no-rep', salesRepId: null } as Partial<ShipmentRow>),
-      row({ id: 'moving', status: 'IN_TRANSIT' } as Partial<ShipmentRow>),
-      row({ id: 'no-ap', customerBillingGaps: ['CUSTOMER_AP_EMAIL'] } as Partial<ShipmentRow>),
-      row({ id: 'pushed', loadReviewPushedAt: '2026-11-15T00:00:00Z' } as Partial<ShipmentRow>),
-      row({ id: 'voided', voidedAt: '2026-11-15T00:00:00Z' } as Partial<ShipmentRow>),
+      onBoard({ id: 'ok' }),
+      onBoard({ id: 'no-rep', salesRepId: null }),
+      onBoard({ id: 'moving', status: 'IN_TRANSIT' }),
+      onBoard({ id: 'no-ap', customerBillingGaps: ['CUSTOMER_AP_EMAIL'] }),
+      onBoard({ id: 'pushed', loadReviewPushedAt: '2026-11-15T00:00:00Z' } as Partial<ShipmentRow>),
+      onBoard({ id: 'voided', voidedAt: '2026-11-15T00:00:00Z' }),
+      onBoard({ id: 'no-customer', customerId: null }),
+      onBoard({ id: 'released', arStatus: 'UNPAID' }),
     ]
     const ready = rows.filter((r) => readyForReviewOf(r, SRC)).map((r) => r.id)
     expect(ready).toEqual(['ok'])
-    const live = rows.filter((r) => !r.voidedAt && !(r as { loadReviewPushedAt?: string }).loadReviewPushedAt)
-    const accepted = live.filter((r) => pushRefusals([r], SRC).length === 0).map((r) => r.id)
-    expect(ready).toEqual(accepted)
+    for (const r of rows.filter((x) => ready.includes(x.id))) {
+      expect(pushRefusals([r], SRC)).toEqual([])
+      expect(reqsOf(r, SRC)).toEqual([])
+    }
     expect(rows.filter((r) => matchesFlag(r, 'readyForReview', NOW)).map((r) => r.id)).toEqual(['ok'])
+  })
+
+  it('never lists a load REQS flags (a factored load missing OTR fields, a missing POD)', async () => {
+    const { readyForReviewOf } = await import('./boardReqs')
+    expect(readyForReviewOf(onBoard({ customerFactors: true, factorGaps: ['PICKUP_ZIP'] }), SRC)).toBe(false)
+    expect(readyForReviewOf(onBoard({ docsMissing: ['POD'], docsPresent: ['RATE_CON'] }), SRC)).toBe(false)
+  })
+
+  it('needs the POD known to be on file: a driver page awaiting review counts, an unknown gate does not', async () => {
+    const { readyForReviewOf } = await import('./boardReqs')
+    expect(readyForReviewOf(onBoard({ docsPresent: ['POD', 'RATE_CON'], docsPendingReview: ['POD'] } as Partial<ShipmentRow>), SRC)).toBe(true)
+    expect(readyForReviewOf(onBoard({ docsMissing: null, docsRequired: null, docsPresent: null } as Partial<ShipmentRow>), SRC)).toBe(false)
   })
 
   it('is offered in the Status filter with a count equal to the flag', async () => {
@@ -107,7 +125,7 @@ describe('Ready for review (Active filter + header stat)', () => {
     const { setBoardReqSources } = await import('./boardReqs')
     setBoardReqSources(SRC)
     const statusCol = SHIPMENT_GRID_COLUMNS.find((c) => c.key === 'status')!
-    const rows = [row({ id: 'a' } as Partial<ShipmentRow>), row({ id: 'b' } as Partial<ShipmentRow>), row({ id: 'c', salesRepId: null } as Partial<ShipmentRow>)]
+    const rows = [onBoard({ id: 'a' }), onBoard({ id: 'b' }), onBoard({ id: 'c', salesRepId: null })]
     const facet = facetOptions(rows, statusCol).find((f) => f.value === READY_FOR_REVIEW_FILTER_VALUE)
     expect(facet?.label).toBe('Ready for review')
     expect(facet?.count).toBe(2)

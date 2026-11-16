@@ -20,7 +20,7 @@ import { hasLeftOperations } from '@/lib/shipmentLists'
 import { pastDeliveryOf, registerReadyForReview } from './boardChips'
 import { pushRefusals, requirementsForRow, reviewFactsOfRow } from './batchReview'
 import type { FormIssue, SectionKey } from './form/sectionProps'
-import { MISSING_DOC_LABEL, openFactorGaps, openMissingDocs, registerRowText, type ShipmentRow } from './shipmentViews'
+import { MISSING_DOC_LABEL, docCellOf, openFactorGaps, openMissingDocs, registerRowText, type ShipmentRow } from './shipmentViews'
 
 export interface BoardReq {
   /** Stable id, also how the editor's rail matches an item to the field it focuses. */
@@ -60,6 +60,19 @@ function factorItem(code: FactorGapCode): BoardReq {
   return { key: `factor:${code}`, label: FACTOR_GAP_LABEL[code] }
 }
 
+/**
+ * Whether a POD is on file, as the server's push reads it (reviewFacts: any POD document that counts as present, a
+ * driver's page awaiting review included). The board knows it from the order's document gate (docCellOf); null when
+ * the gate has never run for this load, so the board cannot say.
+ */
+export function podFactOfRow(row: ShipmentRow): boolean | null {
+  const cell = docCellOf(row, 'POD')
+  if (cell === 'PRESENT' || cell === 'REVIEW') return true
+  if (cell === 'MISSING') return false
+  if (cell === 'NA' && Array.isArray(row.docsPresent)) return row.docsPresent.includes('POD')
+  return reviewFactsOfRow(row).podReceived ?? null
+}
+
 export function boardReqsOf(row: ShipmentRow, src: BoardReqSources, nowMs: number = Date.now()): BoardReq[] {
   if (row.voidedAt || row.deletedAt || row.status === 'CANCELED') return []
   // Imported history is exempt from review and already billed or factored in Aljex.
@@ -70,8 +83,9 @@ export function boardReqsOf(row: ShipmentRow, src: BoardReqSources, nowMs: numbe
   const out = new Map<string, BoardReq>()
   const add = (item: BoardReq | null) => { if (item && !out.has(item.key)) out.set(item.key, item) }
 
-  // (a) Push to load review, read exactly as pushRefusals does.
-  const facts = reviewFactsOfRow(row)
+  // (a) Push to load review, read as the server's push reads it: the POD fact from the shipment's documents (the same
+  // presence as the editor's POD box and the board's POD cell; a driver's page awaiting review counts).
+  const facts = { ...reviewFactsOfRow(row), podReceived: podFactOfRow(row) }
   const requirements = requirementsForRow(row, src)
     .filter((key) => key !== 'podReceived' || (pod && facts.podReceived != null))
   for (const f of evaluateReviewRequirements(requirements, facts).failures) add(REVIEW_ITEM[f.requirement])
@@ -110,13 +124,19 @@ export function boardReqsListText(reqs: readonly BoardReq[]): string {
 registerRowText('reqs', (row) => boardReqsListText(boardReqsOfRow(row)))
 
 /**
- * Ready to move to Load Review (Ryne 2026-11-16): a delivered load still on the board that Push to load review would
- * accept, i.e. pushRefusals (the push's own client test) has nothing to say about it. Voided, canceled and loads
- * already in review or released are never "ready".
+ * Ready to move to Load Review (Ryne 2026-11-16): a load Push to load review would accept, never one the server's push
+ * (pushToReviewVerdict) would refuse. It must be delivered, still on the board (its order at DOCS_NEEDED, not in review
+ * or released), linked to a customer, and show nothing in REQS: REQS already holds every push requirement (the customer's
+ * Load Review list, car-shipping and asset rules, billing method and AP e-mail) and, for a factored customer, the OTR
+ * fields the server push also refuses on (factorReviewReasons). The POD must be known to be on file whenever the
+ * load's requirements ask for one: when the board cannot tell (the document gate never ran), the load is not listed.
  */
 export function readyForReviewOf(row: ShipmentRow, src: BoardReqSources = boardSources): boolean {
-  if (row.voidedAt || row.deletedAt || row.status === 'CANCELED') return false
+  if (row.voidedAt || row.deletedAt || row.status === 'CANCELED' || row.legacyImported === true) return false
   if (row.status !== 'DELIVERED' || hasLeftOperations(row)) return false
+  if (row.arStatus !== 'DOCS_NEEDED' || !row.customerId) return false
+  if (requirementsForRow(row, src).includes('podReceived') && podFactOfRow(row) !== true) return false
+  if (boardReqsOf(row, src).length > 0) return false
   return pushRefusals([row], src).length === 0
 }
 registerReadyForReview((row) => readyForReviewOf(row))
