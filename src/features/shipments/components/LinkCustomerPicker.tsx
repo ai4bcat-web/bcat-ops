@@ -22,11 +22,13 @@ export interface LinkCustomerPickerProps {
   /** Called after a customer is created here, so the caller can add it to its own list. */
   onCreated?: (record: CustomerRecord) => void
   placeholder?: string
+  /** Open the create form straight away, seeded with `initialQuery` (the "Create customer…" button in Needs review). */
+  startCreating?: boolean
 }
 
-export function LinkCustomerPicker({ customers, value, initialQuery = '', onChange, onCreated, placeholder }: LinkCustomerPickerProps) {
+export function LinkCustomerPicker({ customers, value, initialQuery = '', onChange, onCreated, placeholder, startCreating = false }: LinkCustomerPickerProps) {
   const canCreate = useCanCreateCustomer()
-  const [creating, setCreating] = useState<string | null>(null)
+  const [creating, setCreating] = useState<string | null>(() => (startCreating && canCreate ? initialQuery : null))
   const [list, setList] = useState<CustomerRecord[]>([])
   const all = list.length ? [...customers, ...list.filter((c) => !customers.some((x) => x.id === c.id))] : customers
 

@@ -6,6 +6,7 @@ import { MemoryRouter, useLocation } from 'react-router-dom'
 import { CustomersPage, LocationsPage } from './DirectoryPages'
 import { CustomerForm } from './components/CustomerForm'
 import { useCustomerForm } from './components/useCustomerForm'
+import { invalidateUnlinkedShipments } from './useUnlinkedShipments'
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
@@ -28,6 +29,7 @@ Object.defineProperty(window, 'matchMedia', {
 const authState: { isAdmin: boolean; user: { email: string; groups?: string[] }; isOwner: boolean } = { isAdmin: true, user: { email: 'admin@bcatcorp.com' }, isOwner: false }
 const crmRows = vi.hoisted(() => ({ value: [] as unknown[] }))
 const crmAction = vi.hoisted(() => vi.fn())
+const listUnlinkedShipments = vi.hoisted(() => vi.fn())
 
 const setCustomerStatus = vi.fn(async (current: CustomerRecord) => current)
 const saveCustomer = vi.fn(async (_current: CustomerRecord, patch: Partial<CustomerRecord>) => patch as CustomerRecord)
@@ -123,6 +125,7 @@ vi.mock('@/hooks/useCustomerAr', () => ({
 }))
 vi.mock('@/lib/apiClient', () => ({
   crmAction,
+  listUnlinkedShipments,
   listUserProfiles: vi.fn(async () => staff),
   listDivisions: vi.fn(async () => [{ id: 'd1', key: 'BCAT_LOGISTICS', name: 'BCAT Logistics', active: true, createdAt: '', updatedAt: '' } satisfies Division]),
   getTmsSettings: vi.fn(async () => settings),
@@ -158,6 +161,9 @@ describe('DirectoryPages', () => {
     authState.user = { email: 'admin@bcatcorp.com' }
     crmRows.value = []
     localStorage.clear()
+    listUnlinkedShipments.mockReset()
+    listUnlinkedShipments.mockResolvedValue({ rows: [], total: 0 })
+    invalidateUnlinkedShipments()
     crmAction.mockReset()
     crmAction.mockImplementation(async (action: string, input: { scope?: string }) => {
       if (action === 'CRM_LIST_ACCOUNTS') {
@@ -468,7 +474,7 @@ describe('DirectoryPages', () => {
     renderCustomers()
     await waitFor(() => expect(screen.getByText('Active Co')).toBeTruthy())
     const tabs = within(screen.getByRole('tablist', { name: 'Customer status' })).getAllByRole('tab')
-    expect(tabs.map((t) => t.textContent?.replace(/\d+$/, ''))).toEqual(['Active', 'Prospects', 'Inactive', 'All'])
+    expect(tabs.map((t) => t.textContent?.replace(/\d+$/, ''))).toEqual(['Active', 'Prospects', 'Inactive', 'All', 'Unlinked loads'])
     expect(tabs[0]?.getAttribute('aria-selected')).toBe('true')
     const before = tabs.map((t) => t.textContent)
     fireEvent.change(screen.getByLabelText('Search customers'), { target: { value: 'Pending' } })
@@ -635,6 +641,35 @@ describe('DirectoryPages', () => {
       expect.objectContaining({ id: 'c-legacy-true' }),
       expect.objectContaining({ operatedById: 'dana@bcatcorp.com' }),
     ))
+  })
+
+  describe('Unlinked loads (Ryne 2026-11-16)', () => {
+    const unlinkedRow = { id: 'shp-9', number: '20007', customerName: 'Active Co Inc', originCity: 'MADISON, WI', destinationCity: 'CHICAGO, IL', pickupAppt: '2026-11-09T14:00:00.000Z', deliveryAppt: null, status: 'DELIVERED', inLoadReview: false, updatedAt: null }
+
+    it('the Directory tab lists every unlinked load with its count, and is never the remembered tab', async () => {
+      listUnlinkedShipments.mockResolvedValue({ rows: [unlinkedRow], total: 1 })
+      renderCustomers()
+      await waitFor(() => expect(screen.getByTestId('customers-tab-unlinked').textContent).toContain('1'))
+      fireEvent.click(screen.getByTestId('customers-tab-unlinked'))
+      expect(await screen.findByTestId('unlinked-loads-directory')).toBeTruthy()
+      expect(screen.getByText('20007')).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Link…' })).toBeTruthy()
+      expect(localStorage.getItem('tms:customers:status-tab')).not.toBe('unlinked')
+      cleanup()
+      localStorage.setItem('tms:customers:status-tab', 'unlinked')
+      renderCustomers()
+      await waitFor(() => expect(screen.getByTestId('customers-tab-active').getAttribute('aria-selected')).toBe('true'))
+    })
+
+    it('a customer profile has an Unlinked loads tab with the loads typed like that customer', async () => {
+      listUnlinkedShipments.mockResolvedValue({ rows: [unlinkedRow], total: 1 })
+      renderCustomers('/tms/customers?customer=c-active')
+      const tab = await screen.findByRole('tab', { name: /Unlinked loads/ })
+      await waitFor(() => expect(tab.textContent).toContain('1'))
+      fireEvent.click(tab)
+      expect(await screen.findByTestId('unlinked-loads-profile')).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Link to this customer' })).toBeTruthy()
+    })
   })
 
   describe('?customer=<id> deep link', () => {

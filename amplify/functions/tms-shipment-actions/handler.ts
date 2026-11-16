@@ -348,6 +348,7 @@ import type {
 } from '../../../src/types/tms'
 import { carryStopState } from './stopCarry'
 import { isOwnerOperatorLoad, ooPodStopOps, type PodStop } from '../../../src/lib/ooPodDelivery'
+import { unlinkedShipments, UNLINKED_SHIPMENT_FIELDS } from './unlinkedShipments'
 
 const dynamo = new DynamoDBClient({})
 const cognito = new CognitoIdentityProviderClient({})
@@ -625,6 +626,7 @@ type Action =
   // shipment was never matched to, and the PRO a leg carries — `aljexId` is read-only
   // to every client token now, so this is the only way one ever changes.
   | 'SET_SHIPMENT_CUSTOMER'
+  | 'LIST_UNLINKED_SHIPMENTS'
   | 'SET_LOAD_PRO'
   // The TMS # and PU # a leg carries: read-only to client tokens (they fall back to the PRO), so this is how the calendar edits them.
   | 'SET_LOAD_REFS'
@@ -1048,6 +1050,12 @@ async function scanTableSegmented(
   }
   const parts = await Promise.all(Array.from({ length: totalSegments }, (_, i) => segment(i)))
   return parts.flat()
+}
+
+/** LIST_UNLINKED_SHIPMENTS: shipments with a typed customer name and no customer record (customer profiles and Needs review link them). */
+async function listUnlinkedShipments(): Promise<Row> {
+  const scanned = await scanTableSegmented(SHIPMENT_TABLE_NAME, UNLINKED_SHIPMENT_FIELDS)
+  return unlinkedShipments(scanned) as unknown as Row
 }
 
 /**
@@ -9675,6 +9683,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return duplicateShipment(input, caller)
     case 'SET_SHIPMENT_CUSTOMER':
       return setShipmentCustomer(input, caller)
+    case 'LIST_UNLINKED_SHIPMENTS':
+      return listUnlinkedShipments()
     case 'SET_LOAD_PRO':
       return setLoadPro(input, caller)
     case 'SET_LOAD_REFS':
