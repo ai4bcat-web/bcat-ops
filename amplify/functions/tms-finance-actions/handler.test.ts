@@ -1579,6 +1579,12 @@ describe('SAVE_AR_SETTINGS', () => {
     expect(number).toBe('S000001')
   })
 
+  it('stores the OTR factoring fee in basis points and refuses more than 10%', async () => {
+    await call('SAVE_AR_SETTINGS', { factorFeeBps: 250 })
+    expect(table(TABLES.settings).get('default')).toMatchObject({ factorFeeBps: 250 })
+    await expect(call('SAVE_AR_SETTINGS', { factorFeeBps: 1500 })).rejects.toThrow(/factorFeeBps/)
+  })
+
   describe('invoice series start (Aljex-exit DECIDED-6)', () => {
     const settingsRow = () => table(TABLES.settings).get('default')!
 

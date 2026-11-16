@@ -1422,7 +1422,7 @@ const TMS_SETTINGS_V6_FIELDS = [
 // Step F's AR settings. Its own flag again, for the same reason.
 const TMS_SETTINGS_V7_FIELDS = [
   'nextInvoiceNumber', 'invoiceTerms', 'invoiceEmailTemplate', 'invoiceAttachTypes',
-  'factorRemitTo', 'arPostingAdminOnly', 'invoiceBatchEmail',
+  'factorRemitTo', 'factorFeeBps', 'arPostingAdminOnly', 'invoiceBatchEmail',
 ]
 // Step G's AP settings. Its own flag again, for the same reason.
 const TMS_SETTINGS_V8_FIELDS = [

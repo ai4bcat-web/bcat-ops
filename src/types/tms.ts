@@ -532,6 +532,8 @@ export interface TmsSettings {
   invoiceAttachTypes?: string[] | null
   /** Where a factored customer pays. Printed instead of the division's remit-to. */
   factorRemitTo?: RemitTo | null
+  /** OTR's fee on a factored invoice in basis points (200 = 2%). Unset means 200. */
+  factorFeeBps?: number | null
   /** Void, payment, credit, write-off and reversal are owner/ADMIN when true. Default true. */
   arPostingAdminOnly?: boolean | null
   /** One e-mail per invoice, or one per customer + bill-to. Default PER_INVOICE. */
@@ -3279,6 +3281,7 @@ export interface ArSettings {
   invoiceEmailTemplate?: string | null
   invoiceAttachTypes?: string[] | null
   factorRemitTo?: RemitTo | null
+  factorFeeBps?: number | null
   arPostingAdminOnly?: boolean | null
   invoiceBatchEmail?: InvoiceBatchEmailMode | null
   defaultPaymentTermsDays?: number | null

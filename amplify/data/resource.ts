@@ -1239,6 +1239,7 @@ const schema = a.schema(stageTypes({
       invoiceEmailTemplate:     a.string(),      // must contain {number}
       invoiceAttachTypes:       a.string().array(),  // ['POD','BOL'] on top of the customer's required docs
       factorRemitTo:            a.json(),        // { name, address, email, noticeText }
+      factorFeeBps:             a.integer(),     // OTR's fee on a factored invoice, basis points; unset = 200 (2%)
       arPostingAdminOnly:       a.boolean(),     // true — void/payment/credit/write-off/reversal
       invoiceBatchEmail:        a.enum(['PER_INVOICE', 'PER_BILL_TO']),
 

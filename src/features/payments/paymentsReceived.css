@@ -145,3 +145,10 @@
   .tms-shell .pr-out-d2p { margin-left: 0; flex-basis: 100%; }
   .tms-shell .pr-out-bar .tms-select, .tms-shell .pr-out-bar .tms-input { flex: 1 1 140px; max-width: none; }
 }
+
+/* Outstanding: Manually invoiced and Factored (OTR) sections, each grouped by customer. */
+.tms-shell .pr-out-section { display: flex; flex-direction: column; gap: 8px; }
+.tms-shell .pr-out-section + .pr-out-section { margin-top: 12px; }
+.tms-shell .pr-out-section-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.tms-shell .pr-out-section-head h2 { margin: 0; font-size: 15px; font-weight: 700; }
+.tms-shell .pr-out-section-otr > .pr-out-bar { border: 1px solid var(--tms-border); border-radius: 8px; }
