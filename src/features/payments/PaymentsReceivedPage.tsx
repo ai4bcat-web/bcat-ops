@@ -1,7 +1,8 @@
 /**
  * `/tms/payments-received` — Accounting → Payments received (Ryne 2026-11-15). The ONE place a customer
- * payment is recorded: every other screen links here with the customer (and invoice) picked. It lists
- * every payment received, all customers, and every credit and debit memo.
+ * payment is recorded: every other screen links here with the customer (and invoice) picked.
+ * Outstanding (the default, Ryne 2026-11-16) lists every open invoice by customer and receives a check
+ * against the ticked ones; Payments received / Credits & debits / All are the ledger.
  *
  * - "Collected this week / month" are the Receivables card's own figures (`computeArSummary` over the
  *   same six months of invoices, by paid date), so this page and the card cannot disagree.
@@ -26,6 +27,8 @@ import { ReasonDialog } from '@/features/ar/components/ReasonDialog'
 import { computeArSummary, divisionKeyOf } from '@/features/ar/arSummary'
 import { formatDay, lastMonths, PAID_LOOKBACK_MONTHS } from '@/features/ar/arViews'
 import { useDirectory } from '@/hooks/useDirectory'
+import { useOpenInvoices } from '@/hooks/useOpenInvoices'
+import { OutstandingView } from './OutstandingView'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { graphqlErrorText, listArPayments, listInvoicesByMonth, listShipmentsByNumber, reversePayment } from '@/lib/apiClient'
 import { listAljexMemoRows } from '@/lib/paymentsClient'
@@ -55,8 +58,11 @@ const PRESET_LABEL: Record<PresetKey, string> = {
   week: 'This week', month: 'This month', last: 'Last month', year: 'This year', all: 'All dates', custom: 'Custom dates',
 }
 
-const VIEW_TABS: Array<{ key: ReceivedView; label: string }> = [
-  { key: 'payments', label: 'Payments' },
+type PageView = 'outstanding' | ReceivedView
+
+const VIEW_TABS: Array<{ key: PageView; label: string }> = [
+  { key: 'outstanding', label: 'Outstanding' },
+  { key: 'payments', label: 'Payments received' },
   { key: 'adjustments', label: 'Credits & debits' },
   { key: 'all', label: 'All' },
 ]
@@ -66,7 +72,20 @@ export function PaymentsReceivedPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [initialPeriod] = useState(() => periodFromParam(searchParams.get('period'), asOf))
   const [preset, setPreset] = useState<PresetKey>(initialPeriod?.preset ?? 'month')
-  const [view, setView] = useState<ReceivedView>('payments')
+  const [view, setViewState] = useState<PageView>(() => {
+    const v = searchParams.get('view')
+    return v === 'payments' || v === 'adjustments' || v === 'all' ? v : 'outstanding'
+  })
+  const setView = (v: PageView) => {
+    setViewState(v)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (v === 'outstanding') next.delete('view')
+      else next.set('view', v)
+      return next
+    }, { replace: true })
+  }
+  const open = useOpenInvoices()
   const [showReversed, setShowReversed] = useState(false)
   const [filter, setFilter] = useState<ReceivedFilter>(() => ({
     ...(initialPeriod?.range ?? monthBounds(asOf)),
@@ -166,7 +185,8 @@ export function PaymentsReceivedPage() {
 
   const filtered = useMemo(() => filterReceived(rows, filter, divisionsOf), [rows, filter, divisionsOf])
   const reversedCount = useMemo(() => filtered.filter((r) => r.reversed).length, [filtered])
-  const listed = useMemo(() => hideReversed(filtered, showReversed).filter((r) => inView(r, view)), [filtered, showReversed, view])
+  const ledgerView: ReceivedView = view === 'outstanding' ? 'payments' : view
+  const listed = useMemo(() => hideReversed(filtered, showReversed).filter((r) => inView(r, ledgerView)), [filtered, showReversed, ledgerView])
   // Totals never count a reversed pair, whatever is shown.
   const totals = useMemo(() => receivedTotals(filtered), [filtered])
 
@@ -220,7 +240,7 @@ export function PaymentsReceivedPage() {
       .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not reverse the payment'))
       .finally(() => setBusy(false))
   }
-  const closeAndRefresh = () => { setDialog(null); void load() }
+  const closeAndRefresh = () => { setDialog(null); void load(); void open.refresh() }
   const startRecord = () => {
     const c = oneCustomer ? customerById.get(oneCustomer) : null
     setDialog(c ? { kind: 'payment', customerId: c.id, customerName: c.name, invoiceIds: [] } : { kind: 'pickCustomer', next: 'payment' })
@@ -263,7 +283,7 @@ export function PaymentsReceivedPage() {
     )
   }
 
-  const showType = view !== 'payments'
+  const showType = ledgerView !== 'payments'
   const columns: Array<DenseColumn<ReceivedRow>> = [
     { key: 'date', header: 'Received', group: 'Payment', text: (r) => formatDay(r.date), filter: 'date', dateOf: (r) => r.date, sortValue: (r) => r.date ?? '' },
     { key: 'customer', header: 'Customer', group: 'Payment', text: (r) => r.customerName },
@@ -326,7 +346,8 @@ export function PaymentsReceivedPage() {
         <TmsSummaryChips aria-label="Payments received at a glance" testId="payments-received-totals" items={summaryItems} />
 
         <div className="pr-toolbar" data-testid="payments-received-filters">
-          <TmsSegmentedTabs aria-label="Show" size="sm" active={view} onSelect={(k) => setView(k as ReceivedView)} tabs={VIEW_TABS} />
+          <TmsSegmentedTabs aria-label="Show" size="sm" active={view} onSelect={(k) => setView(k as PageView)} tabs={VIEW_TABS} />
+          {view !== 'outstanding' && (<>
           <TmsSelect aria-label="Dates" value={preset} onChange={(e) => choosePreset(e.target.value as PresetKey)}>
             {(Object.keys(PRESET_LABEL) as PresetKey[]).map((k) => <option key={k} value={k}>{PRESET_LABEL[k]}</option>)}
           </TmsSelect>
@@ -357,13 +378,18 @@ export function PaymentsReceivedPage() {
               {showReversed ? 'Hide reversed' : `Show reversed (${reversedCount})`}
             </button>
           )}
+          </>)}
         </div>
         {memoError && <p className="text-sm" style={{ color: 'var(--tms-badge-red)' }}>{memoError}</p>}
 
+        {view === 'outstanding' ? (
+          <OutstandingView invoices={open.invoices} customers={customerById} loading={open.loading} asOf={asOf}
+            onReceived={() => { void load(); void open.refresh() }} />
+        ) : (
         <ArDenseTable<ReceivedRow>
-          key={`${view}-${showType}`}
+          key={`${ledgerView}-${showType}`}
           grid={{
-            gridId: `payments-received-${view}`,
+            gridId: `payments-received-${ledgerView}`,
             label: 'Payments received',
             columns,
             rows: listed,
@@ -378,6 +404,7 @@ export function PaymentsReceivedPage() {
             onClear: () => { setCustomer(null); setFilter((f) => ({ ...f, customers: [], methods: [], divisions: [], unappliedOnly: false })) },
           }}
         />
+        )}
       </div>
 
       {dialog?.kind === 'pickCustomer' && (

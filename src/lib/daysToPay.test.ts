@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { customerDaysToPay, paymentLinesByInvoice, settlementOf } from './daysToPay'
+import { customerDaysToPay, paymentLinesByInvoice, settlementOf, termsVsActualText } from './daysToPay'
 import type { ArPaymentRecord, InvoiceRecord } from '@/types/tms'
 
 const inv = (id: string, patch: Partial<InvoiceRecord> = {}): InvoiceRecord => ({
@@ -37,6 +37,22 @@ describe('days to pay', () => {
       pay('p1', '2026-10-11T12:00:00.000Z', [{ invoiceId: 'a', amountCents: 1000 }]),
       pay('p2', '2026-10-31T12:00:00.000Z', [{ invoiceId: 'b', amountCents: 1000 }]),
     ]
-    expect(customerDaysToPay(invoices, payments)).toEqual({ averageDays: 15.5, count: 2 })
+    expect(customerDaysToPay(invoices, payments, '2026-11-16')).toEqual({ averageDays: 15.5, count: 2, recentDays: 15.5, recentCount: 2 })
+  })
+
+  it('leaves factored invoices out and averages the last 90 days separately', () => {
+    const invoices = [
+      inv('a'),
+      inv('old', { invoiceDate: '2026-01-01' }),
+      inv('f', { factored: true }),
+    ]
+    const payments = [
+      pay('p1', '2026-10-11T12:00:00.000Z', [{ invoiceId: 'a', amountCents: 1000 }]),
+      pay('p2', '2026-02-20T12:00:00.000Z', [{ invoiceId: 'old', amountCents: 1000 }]),
+      pay('p3', '2026-10-02T12:00:00.000Z', [{ invoiceId: 'f', amountCents: 1000 }], { method: 'FACTOR' }),
+    ]
+    expect(customerDaysToPay(invoices, payments, '2026-11-16')).toEqual({ averageDays: 30, count: 2, recentDays: 10, recentCount: 1 })
+    expect(termsVsActualText(30, customerDaysToPay(invoices, payments, '2026-11-16'))).toBe('Net 30 · pays in 30 days avg')
+    expect(termsVsActualText(null, { averageDays: null, count: 0 })).toBe('No terms · no paid invoices yet')
   })
 })

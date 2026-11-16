@@ -49,6 +49,8 @@ export interface AgingReportCustomer {
   /** Days since the oldest open invoice's invoice date. */
   oldestDays: number
   lastPaidAt: string | null
+  /** The customer's average days to pay (invoice date → paid), factored invoices left out; null until read. */
+  avgDaysToPay: number | null
   invoices: AgingReportInvoice[]
 }
 
@@ -70,6 +72,7 @@ export function buildAgingReport(
     refOf?: (inv: InvoiceRecord) => string | null
     termsOf?: (customerId: string) => number | null
     lastPaidOf?: (customerId: string) => string | null
+    avgDaysToPayOf?: (customerId: string) => number | null
   } = {},
 ): AgingReport {
   const byCustomer = new Map<string, AgingReportCustomer>()
@@ -108,6 +111,7 @@ export function buildAgingReport(
         count: 0,
         oldestDays: 0,
         lastPaidAt: lookups.lastPaidOf?.(inv.customerId) ?? null,
+        avgDaysToPay: lookups.avgDaysToPayOf?.(inv.customerId) ?? null,
         invoices: [],
       }
       byCustomer.set(inv.customerId, c)
@@ -132,7 +136,7 @@ export function buildAgingReport(
   return report
 }
 
-export type AgingSortKey = 'customer' | AgingReportBucket | 'total' | 'pastDue' | 'oldest' | 'lastPaid' | 'terms' | 'count'
+export type AgingSortKey = 'customer' | AgingReportBucket | 'total' | 'pastDue' | 'oldest' | 'lastPaid' | 'terms' | 'count' | 'daysToPay'
 
 export function sortAgingCustomers(rows: readonly AgingReportCustomer[], key: AgingSortKey, dir: 'asc' | 'desc'): AgingReportCustomer[] {
   const val = (c: AgingReportCustomer): string | number => {
@@ -143,6 +147,7 @@ export function sortAgingCustomers(rows: readonly AgingReportCustomer[], key: Ag
       case 'oldest': return c.oldestDays
       case 'lastPaid': return c.lastPaidAt ?? ''
       case 'terms': return c.termsDays ?? -1
+      case 'daysToPay': return c.avgDaysToPay ?? -1
       case 'count': return c.count
       default: return c.byBucket[key]
     }

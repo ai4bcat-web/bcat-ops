@@ -77,20 +77,46 @@ export function settlementOf(invoice: InvoiceRecord, lines: InvoicePaymentLine[]
 }
 
 export interface CustomerDaysToPay {
-  /** Average over the customer's paid invoices, one decimal; null with none to measure. */
+  /** Simple mean over the customer's paid invoices, one decimal; null with none to measure. */
   averageDays: number | null
   count: number
+  /** The same mean over invoices settled in the last 90 days (by paid date); null with none. */
+  recentDays?: number | null
+  recentCount?: number
 }
 
-export function customerDaysToPay(invoices: InvoiceRecord[], payments: ArPaymentRecord[]): CustomerDaysToPay {
+const RECENT_DAYS = 90
+
+/** A factored invoice is paid by OTR, not the customer, so it never counts toward the customer's days to pay. */
+const isFactoredInvoice = (inv: InvoiceRecord): boolean => Boolean(inv.factored || inv.factoringItemId)
+
+/**
+ * The customer's days to pay: a simple mean of (paid date − invoice date) over their own paid
+ * invoices, factored ones left out (OTR paying is not the customer paying), plus the same mean over
+ * the last 90 days of settlements.
+ */
+export function customerDaysToPay(invoices: InvoiceRecord[], payments: ArPaymentRecord[], asOf: string = new Date().toISOString()): CustomerDaysToPay {
   const lines = paymentLinesByInvoice(payments)
-  return averageDaysToPay(invoices.map((inv) => settlementOf(inv, lines.get(inv.id))))
+  const settlements = invoices.filter((inv) => !isFactoredInvoice(inv)).map((inv) => settlementOf(inv, lines.get(inv.id)))
+  const all = averageDaysToPay(settlements)
+  const today = ymd(asOf)
+  const recent = today
+    ? averageDaysToPay(settlements.filter((s) => s.paidOn != null && daysBetween(s.paidOn, today) <= RECENT_DAYS))
+    : { averageDays: null, count: 0 }
+  return { ...all, recentDays: recent.averageDays, recentCount: recent.count }
 }
 
 export function averageDaysToPay(settlements: InvoiceSettlement[]): CustomerDaysToPay {
   const days = settlements.map((s) => s.daysToPay).filter((d): d is number => d != null)
   if (days.length === 0) return { averageDays: null, count: 0 }
   return { averageDays: Math.round((days.reduce((a, b) => a + b, 0) / days.length) * 10) / 10, count: days.length }
+}
+
+/** "Net 30 · pays in 42 days avg" — the terms against what the customer actually does. */
+export function termsVsActualText(termsDays: number | null | undefined, d: CustomerDaysToPay | undefined): string {
+  const terms = termsDays != null ? `Net ${termsDays}` : 'No terms'
+  if (!d || d.averageDays == null) return `${terms} · no paid invoices yet`
+  return `${terms} · pays in ${Math.round(d.averageDays)} days avg`
 }
 
 export function daysToPayText(d: CustomerDaysToPay): string {
