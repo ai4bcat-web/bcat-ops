@@ -87,6 +87,21 @@ export function stopPlace(stop: StopPlaceStop | null | undefined, location?: Sto
 }
 
 /**
+ * The address a stop takes from the saved place it is moved to: street, city, state and ZIP, so a stop
+ * linked to a place carries them itself and never depends on the place being read later. Null when the
+ * place has none of them.
+ */
+export function stopAddressFromLocation(location: StopPlaceLocation | null | undefined): StopPlaceAddress | null {
+  if (!location) return null
+  const street = text(location.street) ?? text(location.address1)
+  const city = text(location.city)
+  const state = state2(location.state)
+  const zip = text(location.zip)
+  if (!street && !city && !state && !zip) return null
+  return { street, city, state, zip, country: text(location.country) ?? 'US' }
+}
+
+/**
  * A load's `stops` as a list. It is AWSJSON: a list once AppSync parsed it, but the Aljex import stored it as a
  * JSON string (sometimes double-encoded), and iterating that string reads characters, not stops — every stop
  * reader on a raw row goes through this. Garbage reads as no stops.

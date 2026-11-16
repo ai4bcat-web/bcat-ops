@@ -17,6 +17,7 @@ import {
 import { formatDateTime, formatDateTimeInput, formatTime, fromDateTimeInput } from '@/lib/date'
 import type { Stop, StopType } from '@/types'
 import type { LocationRecord } from '@/types/tms'
+import { stopAddressFromLocation } from '@/lib/stopPlace'
 
 export type StopOp =
   | 'ADD' | 'REMOVE' | 'SWAP' | 'SET_APPT' | 'SET_REQUESTED' | 'SET_TIMES' | 'SET_TYPE' | 'SET_REFS' | 'SET_LOCATION'
@@ -291,6 +292,9 @@ function StopDialog({ state, locations, busy, onClose, onSubmit }: {
         name: location?.name,
         city: location?.city && location?.state ? `${location.city}, ${location.state}` : location?.city,
       }
+      // The place's own address rides on the stop, so its street and ZIP reach every page (stopPlace).
+      const address = stopAddressFromLocation(location)
+      if (address) patch.address = address
       if (op === 'ADD') {
         const a = apptPatch()
         if (!a) return

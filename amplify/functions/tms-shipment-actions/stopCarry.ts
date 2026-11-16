@@ -17,6 +17,10 @@ import type { StopShape } from '../_shared/shipmentStore'
  * src/lib/apptStatus.ts): a REQUESTED or CONFIRMED appointment whose date, time, window
  * or type the form changed is a new booking, so its ladder restarts and the old
  * screenshots are cleared rather than carried.
+ *
+ * The address is never lost to a save that did not carry it (Ryne 2026-11-16: what Build captured stays
+ * for the life of the load): at the same place, a missing address keeps the stored one, and an address
+ * that leaves a field out keeps that field. A field sent as null or "" is the user clearing it.
  */
 export function carryStopState(next: StopShape[], previous: StopShape[]): StopShape[] {
   const byId = new Map(previous.filter((s) => s.id).map((s) => [s.id as string, s]))
@@ -27,8 +31,24 @@ export function carryStopState(next: StopShape[], previous: StopShape[]): StopSh
     for (const [key, value] of Object.entries(prev)) {
       if (!(key in stop) && value !== undefined) carried[key] = value
     }
-    return { ...carried, ...stop, ...ladderAfterReschedule(prev, stop) }
+    const address = keptAddress(prev, stop)
+    return { ...carried, ...stop, ...(address !== undefined ? { address } : {}), ...ladderAfterReschedule(prev, stop) }
   })
+}
+
+type AddressRow = Record<string, unknown>
+const isAddress = (v: unknown): v is AddressRow => !!v && typeof v === 'object' && !Array.isArray(v)
+const hasValue = (a: AddressRow): boolean => Object.values(a).some((v) => v != null && v !== '')
+
+/** The address to keep when a save sends a thinner one for the same place; undefined = take the save as is. */
+function keptAddress(prev: StopShape, next: StopShape): AddressRow | undefined {
+  const was = (prev as { address?: unknown }).address
+  if (!isAddress(was) || !hasValue(was)) return undefined
+  const samePlace = ((prev as { locationId?: unknown }).locationId ?? null) === ((next as { locationId?: unknown }).locationId ?? null)
+  if (!samePlace) return undefined
+  const sent = (next as { address?: unknown }).address
+  if (!isAddress(sent)) return was
+  return { ...was, ...sent }
 }
 
 function ladderAfterReschedule(was: StopShape, next: StopShape): Record<string, unknown> {

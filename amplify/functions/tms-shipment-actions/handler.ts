@@ -1221,6 +1221,22 @@ function validateContact(value: unknown, label: string): Row {
 }
 
 /**
+ * The address a SET_LOCATION leaves on a stop. An address the user typed is never lost to a caller that
+ * did not send it (Ryne 2026-11-16: what Build captured stays for the life of the load):
+ *   - same place, no `address` sent: the stop keeps the one it has;
+ *   - same place, `address` sent: its keys replace the stored ones, and a key it leaves out keeps its value
+ *     (an explicit null or "" inside it is the user clearing that field);
+ *   - a different place: the address sent, or none (the old place's street and ZIP are not this one's).
+ */
+export function nextStopAddress(stop: { locationId?: unknown; address?: unknown }, patch: Row, locationId: string | null): Row | null {
+  const previous = stop.address && typeof stop.address === 'object' ? (stop.address as Row) : null
+  const samePlace = (optionalString(stop.locationId, 100) ?? null) === locationId
+  if (patch.address === undefined || patch.address === null) return samePlace ? previous : null
+  const sent = assertRecord(patch.address, 'patch.address')
+  return samePlace && previous ? { ...previous, ...sent } : sent
+}
+
+/**
  * SET_LOCATION replaces a stop's contact wholesale; the hours the form stored on it
  * survive a caller (the detail's stop card) that never sends them. An explicit null
  * or empty `hours` clears them.
@@ -4957,14 +4973,18 @@ function applyStopOp(stopsIn: StopRow[], op: StopOp, stopId: string | null, patc
     }
     case 'SET_LOCATION': {
       const i = indexOfStop()
-      stops = stops.map((s, idx) => idx === i ? {
-        ...s,
-        locationId: optionalString(patch.locationId, 100),
-        name: optionalString(patch.name, 200),
-        city: optionalString(patch.city, 120),
-        address: patch.address == null ? null : assertRecord(patch.address, 'patch.address'),
-        contact: patch.contact == null ? s.contact ?? null : replaceContact(patch.contact, s.contact, 'patch.contact'),
-      } : s)
+      stops = stops.map((s, idx) => {
+        if (idx !== i) return s
+        const locationId = optionalString(patch.locationId, 100)
+        return {
+          ...s,
+          locationId,
+          name: optionalString(patch.name, 200),
+          city: optionalString(patch.city, 120),
+          address: nextStopAddress(s, patch, locationId),
+          contact: patch.contact == null ? s.contact ?? null : replaceContact(patch.contact, s.contact, 'patch.contact'),
+        }
+      })
       break
     }
     case 'SET_DETAILS': {
