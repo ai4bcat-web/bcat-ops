@@ -2035,6 +2035,8 @@ export interface OrderRecord {
   docsMissing?: string[] | null
   /** Every document type on file for the order, as the gate last saw it. */
   docsPresent?: string[] | null
+  /** The subset of docsPresent held only by a driver-app page still waiting for review. */
+  docsPendingReview?: string[] | null
   docsCheckedAt?: string | null
   docsOverrideAt?: string | null
   docsOverrideBy?: string | null
@@ -3041,6 +3043,8 @@ export interface DocGateResult {
   ready: boolean
   /** Free-text entries nobody could map to a type; they never block. */
   unrecognised: string[]
+  /** Present only as driver-app pages still waiting for review ("Driver sent · review"). */
+  pendingReview?: ShipmentDocumentType[]
 }
 
 /** One line of the carrier portal's "we still need" checklist. */

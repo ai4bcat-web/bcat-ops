@@ -70,6 +70,8 @@ export interface ReleaseGateDocument {
   voidedAt?: string | null
   reviewStatus?: string | null
   audience?: string | null
+  /** DRIVER_APP: one of our drivers filed it, and it counts while it waits for review (isDriverDocAwaitingReview). */
+  source?: string | null
 }
 
 export interface ReleaseGateLeg {
@@ -119,7 +121,7 @@ export interface ReleaseGateInput {
    * A filed CUSTOMER_RATE_CON counts, and so does `ownFleetTenderOnLoad`.
    */
   ownFleet?: boolean
-  /** An own-fleet load carries the customer's tender on `Load.rateConfirmKey` (isOutsideRateConKey). */
+  /** The load carries the customer's tender on `Load.rateConfirmKey` (isOutsideRateConKey); counts on any load. */
   ownFleetTenderOnLoad?: boolean
   /**
    * Whether this load needs an outside rate confirmation (rateConRequired, reviewRequirements.ts): the one rule the
@@ -154,11 +156,15 @@ function reason(code: ReleaseGateReasonCode, detail: string | null, message: str
   return { code, detail, message }
 }
 
-/** An ACTIVE row nobody voided, nobody is still reviewing and nobody refused. */
+/**
+ * An ACTIVE row nobody voided and nobody refused, and nobody is still reviewing unless one of our own drivers filed it
+ * from the driver app (the same rule as shipmentDocuments' countsAsPresent; Move to billing accepts those pages).
+ */
 function countsAsPresent(doc: ReleaseGateDocument): boolean {
   if ((doc.status ?? 'ACTIVE') !== 'ACTIVE') return false
   if (doc.voidedAt) return false
-  return doc.reviewStatus !== 'PENDING' && doc.reviewStatus !== 'REJECTED'
+  if (doc.reviewStatus === 'REJECTED') return false
+  return doc.reviewStatus !== 'PENDING' || doc.source === 'DRIVER_APP'
 }
 
 /**
@@ -234,7 +240,8 @@ export function evaluateReleaseGate(input: ReleaseGateInput): ReleaseGateResult 
     }
     // One outside carrier: any signed rate con satisfies RATE_CON, as ever. Two or
     // more: every one must be signed, and a signed one never waives another's.
-    if (input.ownFleet === true && (present.has('CUSTOMER_RATE_CON') || input.ownFleetTenderOnLoad === true)) present.add('RATE_CON')
+    // The customer's own rate confirmation (filed, or the tender on the load) is the one the invoice needs, on any load.
+    if (present.has('CUSTOMER_RATE_CON') || input.ownFleetTenderOnLoad === true) present.add('RATE_CON')
     const carrierLegs = legs.filter((leg) => leg.status === 'ACTIVE' && leg.kind === 'CARRIER')
     const perCarrierRateCon = carrierLegs.length >= 2
     if (!perCarrierRateCon && carrierLegs.some((leg) => leg.rateConStatus === 'SIGNED')) {

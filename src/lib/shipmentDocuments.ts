@@ -14,7 +14,8 @@
  * 1. Only an ACTIVE row that is not awaiting or refused review satisfies a
  *    requirement. A carrier-portal upload lands PENDING and counts for nothing
  *    until a person accepts it, which is also what stops the public role from
- *    ever influencing a billing decision.
+ *    ever influencing a billing decision. The exception is a page our own driver
+ *    filed from the driver app: it counts while it waits (isDriverDocAwaitingReview).
  * 2. A document attached to a BOUNCED or TONU assignment is paperwork about an
  *    attempt that did not happen. It never satisfies the customer's requirements.
  * 3. The rate confirmation is derived, not mirrored. It satisfies RATE_CON when
@@ -362,12 +363,27 @@ export function supersede<
   return null
 }
 
-/** An ACTIVE row that nobody is still reviewing and nobody refused. */
+/**
+ * A POD (or any page) one of our own drivers filed from the driver app, still waiting for someone to accept it.
+ * It is received paperwork (Ryne 2026-11-16: "Ivan Drivers should be uploading them so they should all be in there"):
+ * it counts as on file everywhere, is shown as "Driver sent · review", and Move to billing accepts it.
+ */
+export function isDriverDocAwaitingReview(
+  doc: Pick<ShipmentDocumentRecord, 'status' | 'reviewStatus'> & { source?: string | null },
+): boolean {
+  return doc.status === 'ACTIVE' && doc.reviewStatus === 'PENDING' && doc.source === 'DRIVER_APP'
+}
+
+/**
+ * An ACTIVE row that nobody refused and nobody is still reviewing, except our own drivers' pages (see above).
+ * A carrier-portal upload still counts for nothing until a person accepts it.
+ */
 export function countsAsPresent(
-  doc: Pick<ShipmentDocumentRecord, 'status' | 'reviewStatus'>,
+  doc: Pick<ShipmentDocumentRecord, 'status' | 'reviewStatus'> & { source?: string | null },
 ): boolean {
   if (doc.status !== 'ACTIVE') return false
-  return doc.reviewStatus !== 'PENDING' && doc.reviewStatus !== 'REJECTED'
+  if (doc.reviewStatus === 'REJECTED') return false
+  return doc.reviewStatus !== 'PENDING' || doc.source === 'DRIVER_APP'
 }
 
 export type DocGateScope = 'CUSTOMER' | 'CARRIER'
@@ -382,6 +398,11 @@ export interface PresentDocTypesInput {
   scope: DocGateScope
   /** CUSTOMER scope on an own-fleet (ASSETS) load: the outside rate confirmation rules apply (ownFleetOutsideRateCon). */
   ownFleet?: boolean | null
+  /**
+   * CUSTOMER scope: the shipment has exactly one order, so a file filed on the shipment itself (no order, load or
+   * assignment: the editor's POD / Rate confirmation boxes and intake attachments) is that order's paperwork.
+   */
+  soleOrder?: boolean | null
   /** The order's loads' `rateConfirmKey`s: on an own-fleet load, an uploaded customer tender is the outside rate con. */
   loadRateConKeys?: readonly (string | null | undefined)[] | null
 }
@@ -392,30 +413,44 @@ export interface PresentDocTypesInput {
  * its loads — a POD the carrier sent through the portal is still the POD the
  * customer's invoice needs. Rows on a BOUNCED or TONU assignment are excluded.
  */
-export function presentDocTypes(input: PresentDocTypesInput): ShipmentDocumentType[] {
+/** The rows this scope may count: the order's, its loads', and its ACTIVE assignments' (or one assignment's, CARRIER scope). */
+function scopedDocuments(input: PresentDocTypesInput): ShipmentDocumentRecord[] {
   const activeCarrierIds = new Set(
     input.loadCarriers.filter((lc) => lc.status === 'ACTIVE').map((lc) => lc.id),
   )
   const loadIds = new Set(input.loadIds ?? [])
-  const present = new Set<ShipmentDocumentType>()
+  return input.documents.filter((doc) => {
+    if (input.scope === 'CARRIER') return Boolean(input.loadCarrierId) && doc.loadCarrierId === input.loadCarrierId
+    const onOrder = input.orderId != null && doc.orderId === input.orderId
+    const onLoad = doc.loadId != null && loadIds.has(doc.loadId)
+    const onAssignment = doc.loadCarrierId != null && activeCarrierIds.has(doc.loadCarrierId)
+    if (doc.loadCarrierId != null && !activeCarrierIds.has(doc.loadCarrierId)) return false
+    const onShipmentOnly = input.soleOrder === true && doc.orderId == null && doc.loadId == null && doc.loadCarrierId == null
+    return onOrder || onLoad || onAssignment || onShipmentOnly
+  })
+}
 
-  for (const doc of input.documents) {
-    if (!countsAsPresent(doc)) continue
-    if (input.scope === 'CARRIER') {
-      if (!input.loadCarrierId || doc.loadCarrierId !== input.loadCarrierId) continue
-    } else {
-      const onOrder = input.orderId != null && doc.orderId === input.orderId
-      const onLoad = doc.loadId != null && loadIds.has(doc.loadId)
-      const onAssignment = doc.loadCarrierId != null && activeCarrierIds.has(doc.loadCarrierId)
-      if (doc.loadCarrierId != null && !activeCarrierIds.has(doc.loadCarrierId)) continue
-      if (!onOrder && !onLoad && !onAssignment) continue
-    }
-    present.add(doc.type)
+/**
+ * The types this scope has ONLY as driver-app pages still waiting for review: on file, shown as
+ * "Driver sent · review" until someone accepts one (or Move to billing does).
+ */
+export function driverReviewDocTypes(input: PresentDocTypesInput): ShipmentDocumentType[] {
+  const docs = scopedDocuments(input)
+  const settled = new Set(docs.filter((d) => countsAsPresent(d) && !isDriverDocAwaitingReview(d)).map((d) => d.type))
+  const waiting = new Set(docs.filter((d) => isDriverDocAwaitingReview(d) && !settled.has(d.type)).map((d) => d.type))
+  return SHIPMENT_DOCUMENT_TYPES.filter((type) => waiting.has(type))
+}
+
+export function presentDocTypes(input: PresentDocTypesInput): ShipmentDocumentType[] {
+  const present = new Set<ShipmentDocumentType>()
+  for (const doc of scopedDocuments(input)) {
+    if (countsAsPresent(doc)) present.add(doc.type)
   }
 
-  // Own fleet (Ivan Cartage, ASSETS): the rate confirmation that matters is the customer's or broker's
-  // (Ryne 2026-11-16). A filed customer rate confirmation, or the tender on the load, is it.
-  if (input.scope !== 'CARRIER' && input.ownFleet === true) {
+  // The rate confirmation the customer's invoice (and OTR) needs is the customer's or broker's own (Ryne 2026-11-16).
+  // A filed customer rate confirmation, or the tender attached to the load, is it, on any load: the board's RC cell
+  // has always read the tender this way, and the gate, the board and the shipment's box now agree (14938).
+  if (input.scope !== 'CARRIER') {
     if (present.has('CUSTOMER_RATE_CON')) present.add('RATE_CON')
     if ((input.loadRateConKeys ?? []).some(isOutsideRateConKey)) present.add('RATE_CON')
   }
@@ -483,6 +518,8 @@ export interface DocGateInput {
   ownFleet?: boolean | null
   /** CUSTOMER scope: the order's loads' `rateConfirmKey`s (the tender attached from intake or the Loads drawer). */
   loadRateConKeys?: readonly (string | null | undefined)[] | null
+  /** CUSTOMER scope: the shipment has one order, so shipment-level files count for it (see PresentDocTypesInput). */
+  soleOrder?: boolean | null
   /**
    * CUSTOMER scope: a car-shipping load (isCarShipperLoad). Every other load needs the rate
    * confirmation, own-fleet ones included (the office files it), so it is added unless this is true.
@@ -498,7 +535,14 @@ export interface DocGateInput {
  */
 export function evaluateDocGate(input: DocGateInput): DocGateResult {
   if (input.legacyImported === true) {
-    return { required: [], present: [], missing: [], ready: true, unrecognised: [], legacy: true }
+    // Nothing is required of imported Aljex history, but what IS on file still shows as on file (board POD / RC cells).
+    const presence: PresentDocTypesInput = {
+      documents: input.documents, loadCarriers: input.loadCarriers, orderId: input.order?.id ?? null, loadIds: input.loadIds ?? null,
+      loadCarrierId: input.loadCarrierId ?? null, scope: input.scope, ownFleet: input.ownFleet ?? null,
+      loadRateConKeys: input.loadRateConKeys ?? null, soleOrder: input.soleOrder ?? null,
+    }
+    const present = presentDocTypes(presence)
+    return { required: [], present, missing: [], ready: true, unrecognised: [], legacy: true, pendingReview: driverReviewDocTypes(presence).filter((t) => present.includes(t)) }
   }
   const { types: required, unrecognised } =
     input.scope === 'CARRIER'
@@ -545,10 +589,20 @@ export function evaluateDocGate(input: DocGateInput): DocGateResult {
     scope: input.scope,
     ownFleet: input.ownFleet ?? null,
     loadRateConKeys: input.loadRateConKeys ?? null,
+    soleOrder: input.soleOrder ?? null,
   })
 
   const missing = gated.filter((type) => !present.includes(type))
-  return { required: gated, present, missing, ready: missing.length === 0, unrecognised }
+  const pendingReview = driverReviewDocTypes({
+    documents: input.documents,
+    loadCarriers: input.loadCarriers,
+    orderId: input.order?.id ?? null,
+    loadIds: input.loadIds ?? null,
+    loadCarrierId: input.loadCarrierId ?? null,
+    scope: input.scope,
+    soleOrder: input.soleOrder ?? null,
+  }).filter((type) => present.includes(type))
+  return { required: gated, present, missing, ready: missing.length === 0, unrecognised, pendingReview }
 }
 
 /**
@@ -611,6 +665,49 @@ export function assetRateConTenders(
   return loads
     .filter((load) => !load.voidedAt && !load.deletedAt && isOutsideRateConKey(load.rateConfirmKey))
     .map((load) => ({ loadId: load.id, key: String(load.rateConfirmKey).trim() }))
+}
+
+/** What a shipment's POD or rate-confirmation box says: the same presence rule the order gate (and the board's cache) uses. */
+export type ShipmentDocPresence = 'PRESENT' | 'REVIEW' | 'MISSING'
+
+/**
+ * ONE answer to "is this document on file?" for the shipment editor's POD / Rate confirmation boxes, computed with
+ * presentDocTypes / driverReviewDocTypes exactly as evaluateDocGate does for each order, so the box, the order gate
+ * and the board cell (which reads the gate's cached present / pendingReview) cannot disagree (Ryne 2026-11-16, 14938).
+ * Across the shipment's orders: on file when any order has it; REVIEW when the only copy is a driver page awaiting review.
+ */
+export function shipmentDocPresence(
+  args: {
+    documents: readonly ShipmentDocumentRecord[]
+    orders: readonly { id: string }[]
+    loads: readonly { id: string; orderId?: string | null; rateConfirmKey?: string | null }[]
+    loadCarriers: readonly (Pick<LoadCarrierRecord, 'id' | 'status' | 'rateConStatus'> & { kind?: LoadCarrierRecord['kind']; carrierName?: string | null })[]
+    shipment?: { revDivision?: string | null } | null
+  },
+  docType: ShipmentDocumentType,
+): ShipmentDocPresence {
+  const ownFleet = isOwnFleetLoad(args.shipment ?? null, args.loadCarriers)
+  const orderIds = args.orders.length > 0 ? args.orders.map((o) => o.id) : [null]
+  let present = false
+  let settled = false
+  for (const orderId of orderIds) {
+    const loadIds = orderId == null ? args.loads.map((l) => l.id) : gateLoadIds(args.loads, args.orders, orderId)
+    const input: PresentDocTypesInput = {
+      documents: args.documents,
+      loadCarriers: args.loadCarriers,
+      orderId,
+      loadIds,
+      scope: 'CUSTOMER',
+      ownFleet,
+      loadRateConKeys: args.loads.filter((l) => loadIds.includes(l.id)).map((l) => l.rateConfirmKey ?? null),
+      soleOrder: args.orders.length <= 1,
+    }
+    if (!presentDocTypes(input).includes(docType)) continue
+    present = true
+    if (!driverReviewDocTypes(input).includes(docType)) settled = true
+  }
+  if (!present) return 'MISSING'
+  return settled ? 'PRESENT' : 'REVIEW'
 }
 
 export function legacyRateConDocumentId(loadId: string): string {

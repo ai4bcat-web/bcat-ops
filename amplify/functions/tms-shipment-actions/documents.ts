@@ -67,6 +67,7 @@ import {
   gateLoadIds,
   generatedFilename,
   generatedKey,
+  isDriverDocAwaitingReview,
   isOwnFleetLoad,
   isPointerDocument,
   nextVersion,
@@ -271,6 +272,7 @@ export function customerDocGate(args: {
       args.bundle.shipment as { revDivision?: string | null } | null,
       args.bundle.loadCarriers as unknown as { status?: string | null; kind?: string | null }[],
     ),
+    soleOrder: args.bundle.orders.length === 1,
     loadRateConKeys: (args.bundle.loads as Row[])
       .filter((load) => loadIds.includes(String(load.id)))
       .map((load) => (typeof load.rateConfirmKey === 'string' ? load.rateConfirmKey : null)),
@@ -316,7 +318,7 @@ export async function recacheDocGates(
       updateItemTx(
         deps.store.tables.order,
         String(order.id),
-        { docsRequired: gate.required, docsMissing: gate.missing, docsPresent: gate.present, docsCheckedAt: now },
+        { docsRequired: gate.required, docsMissing: gate.missing, docsPresent: gate.present, docsPendingReview: gate.pendingReview ?? [], docsCheckedAt: now },
         null,
       ),
     )
@@ -1068,8 +1070,19 @@ export async function readyToInvoice(
   // ADMIN bypass: an admin releases from Load Review like everybody else.
   if (!review && bundle.shipment.legacyImported !== true) throw new Error(LOAD_REVIEW_ONLY_MESSAGE)
 
-  const gate = customerDocGate({ bundle, documents: bundle.documents, order, customer, settings })
   const now = nowIso()
+  // Move to billing accepts the driver-app pages still waiting for review on this order (Ryne 2026-11-16: speed). The
+  // reviewer has the POD in front of them in Load Review; the acceptance is recorded under their name.
+  const releaseLoadIds = gateLoadIds(
+    bundle.loads as unknown as { id: string; orderId?: string | null }[],
+    bundle.orders as unknown as { id: string }[],
+    orderId,
+  )
+  const accepted = bundle.documents.filter((doc) => isDriverDocAwaitingReview(doc as unknown as ShipmentDocumentRecord)
+    && ((doc.orderId != null && String(doc.orderId) === orderId) || (doc.loadId != null && releaseLoadIds.includes(String(doc.loadId)))))
+  const acceptPatch: Row = { reviewStatus: 'ACCEPTED', reviewedAt: now, reviewedBy: caller.email, reviewNote: 'Accepted on Move to billing', updatedAt: now }
+  const releaseDocuments = bundle.documents.map((doc) => (accepted.includes(doc) ? { ...doc, ...acceptPatch } : doc))
+  const gate = customerDocGate({ bundle, documents: releaseDocuments, order, customer, settings })
   // The carrier's AP record is made by the move itself, before the order leaves review: if it cannot
   // be written, nothing is released and a second press picks up where this one stopped.
   const apRecords = bundle.shipment.legacyImported === true
@@ -1082,6 +1095,7 @@ export async function readyToInvoice(
     docsRequired: gate.required,
     docsMissing: gate.missing,
     docsPresent: gate.present,
+    docsPendingReview: gate.pendingReview ?? [],
     docsCheckedAt: now,
     updatedBy: caller.email,
     updatedAt: now,
@@ -1090,9 +1104,17 @@ export async function readyToInvoice(
 
   await transact(
     deps.store.db,
-    [updateItemTx(deps.store.tables.order, orderId, patch, expectedUpdatedAt)],
+    [
+      updateItemTx(deps.store.tables.order, orderId, patch, expectedUpdatedAt),
+      ...accepted.map((doc) => updateItemTx(deps.store.tables.shipmentDocument, String(doc.id), acceptPatch, null)),
+    ],
     'order',
   )
+  for (const doc of accepted) {
+    await deps.writeAudit('SHIPMENT_DOCUMENT', String(doc.id), 'REVIEW_DOCUMENT', caller, {
+      shipmentId, decision: 'ACCEPT', type: doc.type, note: 'Accepted on Move to billing',
+    })
+  }
   if (review) {
     const verdict = evaluateLoadReview({
       row: {

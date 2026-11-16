@@ -91,3 +91,10 @@ describe('RC column follows the one rule (Ryne 2026-11-16)', () => {
     expect(docCellOf(row({ customerFactors: false, revDivision: 'ASSETS', rateConStatus: 'SIGNED', docsMissing: ['RATE_CON'] }), 'RATE_CON')).toBe('MISSING')
   })
 })
+
+describe('a driver-app POD waiting for review (Ryne 2026-11-16)', () => {
+  it('shows "Driver sent · review", not NEED, and an accepted or office copy shows on file', () => {
+    expect(docCellOf(row({ docsPresent: ['POD'], docsPendingReview: ['POD'], docsMissing: ['RATE_CON'] }), 'POD')).toBe('REVIEW')
+    expect(docCellOf(row({ docsPresent: ['POD'], docsPendingReview: [], docsMissing: ['RATE_CON'] }), 'POD')).toBe('PRESENT')
+  })
+})

@@ -184,13 +184,16 @@ export async function loadReleaseGateInput(
     if (legId != null && !activeLegIds.includes(legId)) continue
     const onOrder = doc.orderId != null && String(doc.orderId) === orderId
     const onLoad = doc.loadId != null && loadIds.includes(String(doc.loadId))
-    if (!onOrder && !onLoad && legId == null) continue
+    // A file filed on the shipment itself counts for its only order (presentDocTypes' soleOrder rule).
+    const onShipmentOnly = orders.length === 1 && doc.orderId == null && doc.loadId == null && legId == null
+    if (!onOrder && !onLoad && legId == null && !onShipmentOnly) continue
     scoped.push({
       type: String(doc.type ?? ''),
       status: doc.status == null ? null : String(doc.status),
       voidedAt: doc.voidedAt == null ? null : String(doc.voidedAt),
       reviewStatus: doc.reviewStatus == null ? null : String(doc.reviewStatus),
       audience: doc.audience == null ? null : String(doc.audience),
+      source: doc.source == null ? null : String(doc.source),
     })
   }
 
@@ -222,7 +225,8 @@ export async function loadReleaseGateInput(
     shipment as { revDivision?: string | null },
     legRows as unknown as { status?: string | null; kind?: string | null }[],
   )
-  const ownFleetTenderOnLoad = ownFleet && orderLoads.some((load) => isOutsideRateConKey(load.rateConfirmKey as string | null | undefined))
+  // The customer's tender on the load counts on any load (presentDocTypes), so the gate matches the board and the box.
+  const ownFleetTenderOnLoad = orderLoads.some((load) => isOutsideRateConKey(load.rateConfirmKey as string | null | undefined))
 
   const notRequiredDocTypes = customerDocsNotRequired(
     customer as { reviewRequirements?: string[] | null } | null,

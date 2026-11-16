@@ -182,6 +182,8 @@ export type ShipmentRow = ShipmentRecord & {
   docsRequired?: string[] | null
   /** Every document type on file (the order gate's `present`); null until the gate re-caches. */
   docsPresent?: string[] | null
+  /** Of docsPresent, the types held only by a driver-app page still waiting for review. */
+  docsPendingReview?: string[] | null
   docsCheckedAt?: string | null
   docsOverrideAt?: string | null
   docsOverrideBy?: string | null
@@ -824,6 +826,7 @@ export function rateConIn(row: Pick<ShipmentRow, 'rateConSignedAt' | 'rateConSta
   // On an asset load our own truck's signature on our own rate con is not the outside rate confirmation.
   const asset = isAssetLoad({ revDivision: (row as { revDivision?: string | null }).revDivision ?? null, assignmentType: (row as { assignmentType?: string | null }).assignmentType ?? null })
   if (!asset && (Boolean(row.rateConSignedAt) || row.rateConStatus === 'SIGNED')) return true
+  // The customer's tender on the load counts on any load, exactly as the order gate counts it (presentDocTypes).
   if (row.rateConOnFile === true) return true
   if (Array.isArray(row.docsPresent) && row.docsPresent.includes('RATE_CON')) return true
   return Array.isArray(row.docsMissing) && Array.isArray(row.docsRequired)
@@ -840,7 +843,13 @@ export function rowNeedsRateCon(row: { revDivision?: string | null; assignmentTy
   })
 }
 
-export type DocCellState = 'PRESENT' | 'MISSING' | 'NA' | ''
+/** REVIEW: on file, but only as a driver-app page still waiting for someone to accept it ("Driver sent · review"). */
+export type DocCellState = 'PRESENT' | 'REVIEW' | 'MISSING' | 'NA' | ''
+
+/** The cell for a document the cached gate holds: REVIEW when the only copy is a driver page awaiting review. */
+function onFileState(row: { docsPendingReview?: string[] | null }, docType: 'POD' | 'RATE_CON'): DocCellState {
+  return Array.isArray(row.docsPendingReview) && row.docsPendingReview.includes(docType) ? 'REVIEW' : 'PRESENT'
+}
 
 /**
  * The POD and RC board cells (Ryne 2026-11-14: "mapped to the column in the active shipment table so we know
@@ -849,7 +858,7 @@ export type DocCellState = 'PRESENT' | 'MISSING' | 'NA' | ''
  * has neither, and Ivan Cartage's own fleet (ASSETS) has no carrier rate confirmation. '' = not known yet.
  */
 export function docCellOf(
-  row: Pick<ShipmentRow, 'status' | 'voidedAt' | 'deletedAt' | 'assignmentType' | 'revDivision' | 'docsMissing' | 'rateConSignedAt' | 'rateConStatus' | 'rateConOnFile'> & { docsRequired?: string[] | null; docsPresent?: string[] | null; docsNotRequired?: string[] | null },
+  row: Pick<ShipmentRow, 'status' | 'voidedAt' | 'deletedAt' | 'assignmentType' | 'revDivision' | 'docsMissing' | 'rateConSignedAt' | 'rateConStatus' | 'rateConOnFile'> & { docsRequired?: string[] | null; docsPresent?: string[] | null; docsPendingReview?: string[] | null; docsNotRequired?: string[] | null },
   docType: 'POD' | 'RATE_CON',
 ): DocCellState {
   if (row.revDivision === 'CAR_SHIPPING') return 'NA'
@@ -857,11 +866,11 @@ export function docCellOf(
   // factor, on AUTO SHIPPER work and for a customer that waives it; ✓ / NEED on an asset load or a factored customer's.
   if (docType === 'RATE_CON' && !rowNeedsRateCon(row)) return 'NA'
   // The customer does not need this document to invoice (Ryne 2026-11-15: AUTO SHIPPER), unless it is on file anyway.
-  if (row.docsNotRequired?.includes(docType)) return docType === 'POD' && Array.isArray(row.docsPresent) && row.docsPresent.includes('POD') ? 'PRESENT' : 'NA'
+  if (row.docsNotRequired?.includes(docType)) return docType === 'POD' && Array.isArray(row.docsPresent) && row.docsPresent.includes('POD') ? onFileState(row, 'POD') : 'NA'
   const delivered = boardStatusOf(row) === 'DELIVERED'
   if (docType === 'POD') {
     // What is on file wins, whether or not the customer's list requires a POD.
-    if (Array.isArray(row.docsPresent) && row.docsPresent.includes('POD')) return 'PRESENT'
+    if (Array.isArray(row.docsPresent) && row.docsPresent.includes('POD')) return onFileState(row, 'POD')
     const pod = podStatusOf(row)
     if (pod === 'POD_IN') return 'PRESENT'
     if (pod === 'NO_POD') return 'MISSING'
@@ -869,12 +878,13 @@ export function docCellOf(
   }
   // Own fleet (ASSETS) needs the customer's or broker's own rate confirmation like any other load (Ryne 2026-11-16);
   // customers that send none (Batory, Carlyn, Bulk, Rojac) are waived by their own setting above.
+  if (Array.isArray(row.docsPresent) && row.docsPresent.includes('RATE_CON')) return onFileState(row, 'RATE_CON')
   if (rateConIn(row)) return 'PRESENT'
   if (Array.isArray(row.docsMissing) && row.docsMissing.includes('RATE_CON')) return 'MISSING'
   return delivered ? 'MISSING' : ''
 }
 
-export const DOC_CELL_TEXT: Record<DocCellState, string> = { PRESENT: 'Y', MISSING: 'NEED', NA: 'N/A', '': '' }
+export const DOC_CELL_TEXT: Record<DocCellState, string> = { PRESENT: 'Y', REVIEW: 'Driver sent · review', MISSING: 'NEED', NA: 'N/A', '': '' }
 
 /**
  * The documents a shipment is missing (Ryne 2026-11-11): whatever the order's document gate lists, plus, once it is DELIVERED, a POD and a rate
