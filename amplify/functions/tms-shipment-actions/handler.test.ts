@@ -5712,6 +5712,28 @@ describe('READY_TO_INVOICE', () => {
       )
     })
 
+    it('checks imported Aljex freight like any other load once it is in Load Review: a missing POD refuses the release (14860)', async () => {
+      const ids = await reviewable()
+      table(TABLES.shipment).set(ids.shipmentId, {
+        ...table(TABLES.shipment).get(ids.shipmentId)!, legacyImported: true, loadReviewPushedAt: '2026-11-16T15:04:03.540Z',
+      })
+      for (const [id, doc] of [...table(TABLES.shipmentDocument)]) {
+        if (doc.shipmentId === ids.shipmentId && doc.type === 'POD') table(TABLES.shipmentDocument).delete(id)
+      }
+      await expect(ready(ids.orderId, { review: REVIEW })).rejects.toThrow(/^Not ready for accounting: Missing document: POD$/)
+      expect(table(TABLES.order).get(ids.orderId)!.arStatus).toBe('DOCS_NEEDED')
+    })
+
+    it('still exempts imported Aljex history that never went through Load Review', async () => {
+      const ids = await reviewable()
+      table(TABLES.shipment).set(ids.shipmentId, { ...table(TABLES.shipment).get(ids.shipmentId)!, legacyImported: true })
+      for (const [id, doc] of [...table(TABLES.shipmentDocument)]) {
+        if (doc.shipmentId === ids.shipmentId && doc.type === 'POD') table(TABLES.shipmentDocument).delete(id)
+      }
+      const result = (await ready(ids.orderId)) as { bundle: { orders: Row[] } }
+      expect(result.bundle.orders[0].arStatus).toBe('UNBILLED')
+    })
+
     it('refuses a release with no Load Review marker, for every non-admin and admin caller alike', async () => {
       const ids = await reviewable()
       for (const identity of [DISPATCHER, ADMIN]) {

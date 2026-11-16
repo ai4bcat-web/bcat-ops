@@ -11,6 +11,7 @@
  * document router has the whole bundle in hand, and the finance router has its
  * `OrderContext`. Nothing here writes.
  */
+import { isLegacyHistory } from '../../../src/lib/legacyHistory'
 import type { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 
 import {
@@ -252,7 +253,7 @@ export async function loadReleaseGateInput(
       status: shipment.status == null ? null : String(shipment.status),
       voidedAt: shipment.voidedAt == null ? null : String(shipment.voidedAt),
       deletedAt: shipment.deletedAt == null ? null : String(shipment.deletedAt),
-      legacyImported: shipment.legacyImported === true,
+      legacyImported: isLegacyHistory(shipment as { legacyImported?: boolean | null; loadReviewPushedAt?: string | null }),
       revDivision: shipment.revDivision == null ? null : String(shipment.revDivision),
     },
     order: {

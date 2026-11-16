@@ -114,6 +114,7 @@ import {
   reconcileBilling,
   reviewLoad,
   pushToReviewVerdict,
+  recacheAfterReviewPush,
   reviewDocument,
   saveGeneratedDocument,
   updateDocument,
@@ -3419,6 +3420,8 @@ async function pushToReview(shipmentId: string, caller: Caller): Promise<{ reaso
     'load review push',
   )
   await writeAudit('SHIPMENT', shipmentId, 'PUSH_TO_LOAD_REVIEW', caller, { pushedAt: now })
+  // Imported history is checked like any other load once it is in review: work its cached document gate out again.
+  await recacheAfterReviewPush(documentDeps, shipmentId, now).catch((err) => console.error('[push-to-review] doc gate recache failed', shipmentId, String(err)))
   return { reasons: [], already: false }
 }
 

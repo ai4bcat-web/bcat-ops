@@ -829,13 +829,28 @@ describe('release to accounting', () => {
     expect(table(TABLES.invoice).size).toBe(1)
   })
 
-  it('refuses a document the carrier sent but nobody has accepted', async () => {
+  it('counts a POD however it arrived: there is no POD review step (Ryne 2026-11-16)', async () => {
     table(TABLES.document).set('doc-seed-pod', {
       ...table(TABLES.document).get('doc-seed-pod')!,
       source: 'CARRIER_PORTAL',
       reviewStatus: 'PENDING',
     })
-    await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID })).rejects.toThrow(/Missing document: POD/)
+    await call('GENERATE_INVOICE', { orderId: ORDER_ID })
+    expect(table(TABLES.invoice).size).toBe(1)
+  })
+
+  it('still refuses a non-POD document the carrier sent but nobody has accepted', async () => {
+    // The customer asks for a scale ticket; the only one on file came from the carrier portal and nobody has accepted it.
+    table(TABLES.customer).set(CUSTOMER_ID, { ...table(TABLES.customer).get(CUSTOMER_ID)!, requiredDocsForInvoice: ['POD', 'WEIGHT_TICKET'] })
+    table(TABLES.document).set('doc-seed-scale', {
+      ...table(TABLES.document).get('doc-seed-pod')!,
+      id: 'doc-seed-scale',
+      type: 'WEIGHT_TICKET',
+      source: 'CARRIER_PORTAL',
+      reviewStatus: 'PENDING',
+    })
+    await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID })).rejects.toThrow(/Required documents are missing: Weight ticket/)
+    expect(table(TABLES.invoice).size).toBe(0)
   })
 
   it('does not hold an invoice for an outside carrier whose bill is not recorded yet: moving to billing creates it', async () => {
