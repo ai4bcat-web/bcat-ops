@@ -114,17 +114,19 @@
 
 /* ── Top bar on phones (Ryne 2026-11-14: billing and other pages hard to use on a phone) ──────────────
    The section / lifecycle tabs wrap to several rows on a desktop so every tab shows (2026-11-10). On a phone that made the sticky top
-   bar four rows tall (~200px of an 844px screen on Accounting). Here the tabs get their own full-width line under the menu button and
-   scroll sideways in one row; the shell scrolls the lit tab into view. */
+   bar four rows tall (~200px of an 844px screen on Accounting). Here the tabs get their own full-width line under the menu button;
+   oneRowTabs.ts compresses them to fit, and on phones (≤ 640px) they wrap to a second line rather than scroll. */
 @media (max-width: 900px) {
   .tms-shell .tms-topbar:has(.tms-lifecycle) { flex-wrap: wrap; row-gap: 6px; padding-block: 6px; }
   .tms-shell .tms-topbar .tms-lifecycle { order: 10; flex: 1 1 100%; min-width: 0; }
-  .tms-shell .tms-topbar .tms-lifecycle-list {
-    flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
-    -webkit-overflow-scrolling: touch; scrollbar-width: none;
-  }
-  .tms-shell .tms-topbar .tms-lifecycle-list::-webkit-scrollbar { display: none; }
-  .tms-shell .tms-topbar .tms-lifecycle-tab { padding: 6px 12px; }
+  .tms-shell .tms-topbar .tms-lifecycle-list { flex-wrap: nowrap; overflow: hidden; }
+  .tms-shell .tms-topbar .tms-lifecycle-tab { padding-block: 6px; }
+}
+
+/* Phones: every tab still shows (Ryne 2026-11-16). Rather than shrink the text to nothing, the tabs wrap onto a second line. */
+@media (max-width: 640px) {
+  .tms-shell .tms-topbar .tms-lifecycle-list { flex-wrap: wrap; row-gap: 4px; overflow: visible; }
+  .tms-shell .tms-topbar .tms-lifecycle-item { flex: 0 1 auto; min-width: 0; }
 }
 
 /* ── Dense list toolbars on phones ──────────────────────────────────────────────────────────────────
@@ -464,11 +466,7 @@
 @media (min-width: 901px) and (max-width: 1194px) {
   .tms-shell .tms-topbar:has(.tms-lifecycle) { flex-wrap: wrap; row-gap: 6px; padding-block: 6px; }
   .tms-shell .tms-topbar .tms-lifecycle { order: 10; flex: 1 1 100%; min-width: 0; }
-  .tms-shell .tms-topbar .tms-lifecycle-list {
-    flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
-    -webkit-overflow-scrolling: touch; scrollbar-width: none;
-  }
-  .tms-shell .tms-topbar .tms-lifecycle-list::-webkit-scrollbar { display: none; }
+  .tms-shell .tms-topbar .tms-lifecycle-list { flex-wrap: nowrap; overflow: hidden; }
 }
 
 /* ── Accounting on phones: amounts stay inside their cards (Ryne 2026-11-15, "the numbers overlap the cards") ───────────────────── */

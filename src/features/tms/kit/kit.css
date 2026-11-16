@@ -672,31 +672,10 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  /* One row of tabs on every page (Ryne 2026-11-15). Every tab stays reachable (2026-11-10, Accounting hid four): the strip takes
-     its own line when it does not fit beside the search box (oneRowTabs.ts), and scrolls sideways inside itself after that. */
+  /* Every tab visible on one line, no sideways scrolling (Ryne 2026-11-16). When the tabs do not fit, oneRowTabs.ts compresses
+     them step by step via data-fit on the strip (padding, then text size, then truncated labels). */
   flex-wrap: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
-  overscroll-behavior-x: contain;
-  scrollbar-width: none;
-}
-
-.tms-shell .tms-lifecycle-list::-webkit-scrollbar {
-  display: none;
-}
-
-/* A faded edge where more tabs sit past the visible part of the row. */
-.tms-shell .tms-lifecycle[data-fade-end] .tms-lifecycle-list {
-  -webkit-mask-image: linear-gradient(to right, black calc(100% - 32px), transparent);
-  mask-image: linear-gradient(to right, black calc(100% - 32px), transparent);
-}
-.tms-shell .tms-lifecycle[data-fade-start] .tms-lifecycle-list {
-  -webkit-mask-image: linear-gradient(to left, black calc(100% - 32px), transparent);
-  mask-image: linear-gradient(to left, black calc(100% - 32px), transparent);
-}
-.tms-shell .tms-lifecycle[data-fade-start][data-fade-end] .tms-lifecycle-list {
-  -webkit-mask-image: linear-gradient(to right, transparent, black 32px, black calc(100% - 32px), transparent);
-  mask-image: linear-gradient(to right, transparent, black 32px, black calc(100% - 32px), transparent);
+  overflow: hidden;
 }
 
 /* The top bar grows with the strip's own line instead of clipping it. */
@@ -706,7 +685,7 @@
   padding-block: 8px;
 }
 
-/* Too many tabs to sit beside the breadcrumb, search and icons: the strip gets the top bar's second line, full width. */
+/* The strip always gets the top bar's second line, full width, never beside the search box (Ryne 2026-11-16). */
 .tms-shell .tms-topbar.tms-topbar-tabs-own-row {
   flex-wrap: wrap;
   row-gap: 6px;
@@ -716,10 +695,16 @@
   flex: 1 1 100%;
   min-width: 0;
 }
-/* A little tighter on that line so a long section (Accounting, eight tabs) fits a 1440 desktop without scrolling. */
-.tms-shell .tms-topbar.tms-topbar-tabs-own-row .tms-lifecycle-tab {
-  padding-inline: 12px;
-}
+
+/* Compression steps when the tabs do not fit (oneRowTabs.ts). Count badges never shrink away. */
+.tms-shell .tms-lifecycle[data-fit='1'] .tms-lifecycle-tab { padding-inline: 10px; }
+.tms-shell .tms-lifecycle[data-fit='2'] .tms-lifecycle-tab { padding-inline: 8px; gap: 4px; font-size: 13px; }
+.tms-shell .tms-lifecycle[data-fit='3'] .tms-lifecycle-tab { padding-inline: 6px; gap: 4px; font-size: 12.5px; min-width: 0; }
+.tms-shell .tms-lifecycle[data-fit='3'] .tms-lifecycle-item { flex: 0 1 auto; min-width: 0; }
+.tms-shell .tms-lifecycle[data-fit='3'] .tms-lifecycle-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tms-shell .tms-lifecycle[data-fit='3'] .tms-lifecycle-caption { display: none; }
+.tms-shell .tms-lifecycle .tms-count-badge,
+.tms-shell .tms-lifecycle [data-testid^='lifecycle-badge-'] { flex: 0 0 auto; }
 
 .tms-shell .tms-lifecycle-item {
   display: flex;
