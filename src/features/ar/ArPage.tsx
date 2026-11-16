@@ -72,7 +72,6 @@ import {
 } from './arQueue'
 import { CreditMemoDialog } from './components/CreditMemoDialog'
 import { ReasonDialog } from './components/ReasonDialog'
-import { RECORD_PAYMENT_LINK_LABEL, recordPaymentPath } from '@/features/payments/links'
 import { useCustomerPaymentFacts, type CustomerPaymentFacts } from '@/hooks/useCustomerPaymentFacts'
 import { PAYMENT_METHOD_LABEL, averageDaysToPay, daysToPayText, settlementOf } from '@/lib/daysToPay'
 import { SendToFactorDialog } from './components/SendToFactorDialog'
@@ -841,7 +840,6 @@ function queueView({
     onSelect(selected.includes(orderId) ? selected.filter((id) => id !== orderId) : [...selected, orderId])
   }
   // Sent invoices paid by hand. Factored ones are settled by OTR, not marked paid here.
-  const payable = (row: ArQueueRow) => invoiced && !!row.invoice && !row.factored && row.balanceCents > 0
   const settlement = (row: ArQueueRow) => (row.invoice ? settlementOf(row.invoice, paymentFacts.linesByInvoice.get(row.invoice.id)) : null)
   const paymentsText = (row: ArQueueRow) => {
     const lines = row.invoiceId ? paymentFacts.linesByInvoice.get(row.invoiceId) ?? [] : []
@@ -910,7 +908,7 @@ function queueView({
   ]
 
   const columns: Array<Col<ArQueueRow>> = [
-    ...(ready || invoiced ? [{ key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 40 } as Col<ArQueueRow>] : []),
+    ...(ready ? [{ key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 40 } as Col<ArQueueRow>] : []),
     { key: 'shipment', header: 'PRO', group: 'Shipment', text: (row) => row.shipmentNumber ?? row.shipmentId, extraPx: 16 },
     { key: 'invoice', header: 'Invoice #', group: 'Invoice', text: (row) => row.invoiceNumber ?? '—' },
     {
@@ -962,7 +960,7 @@ function queueView({
       } as Col<ArQueueRow>,
     ] : []),
     ...(invoiced ? [{ key: 'factor', header: 'Factor', group: 'Invoice', text: factorText, filter: 'multi', optionsOf: (row: ArQueueRow) => opt(factorText(row)) } as Col<ArQueueRow>] : []),
-    { key: 'actions', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: ready ? 96 : invoiced ? 120 : 48 } as Col<ArQueueRow>,
+    { key: 'actions', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: ready ? 96 : 48 } as Col<ArQueueRow>,
   ]
 
   const renderCell = (row: ArQueueRow, key: string): ReactNode => {
@@ -973,8 +971,8 @@ function queueView({
             type="checkbox"
             aria-label={`Select ${row.shipmentNumber ?? row.orderId}`}
             checked={selected.includes(row.orderId)}
-            disabled={invoiced ? !payable(row) : selectBlocked(row) != null}
-            title={invoiced && !payable(row) ? (row.factored ? 'Factored: OTR settles it' : 'Nothing open to pay') : selectBlocked(row) ?? undefined}
+            disabled={selectBlocked(row) != null}
+            title={selectBlocked(row) ?? undefined}
             onChange={() => toggle(row.orderId)}
           />
         )
@@ -1102,12 +1100,6 @@ function queueView({
         if (!inv) return null
         return (
           <span className="flex items-center justify-end gap-1">
-            {payable(row) && (
-              <Link className="tms-btn tms-btn-secondary tms-btn-sm" to={recordPaymentPath({ customerId: inv.customerId, invoiceId: inv.id })}
-                aria-label={`Record a payment on invoice ${inv.number} in Payments received`} title={RECORD_PAYMENT_LINK_LABEL}>
-                Record payment
-              </Link>
-            )}
             <button type="button" className="tms-icon-btn tms-icon-btn-plain" aria-label={`View or edit invoice ${inv.number}`} title="Open invoice" onClick={() => onEdit(inv)}><Eye size={15} /></button>
           </span>
         )
@@ -1160,28 +1152,9 @@ function queueView({
           </TmsButton>
         </div>
       )}
-      {invoiced && (() => {
-        // Payments are recorded only on Payments received (Ryne 2026-11-15); this hands the ticked invoices over.
-        const picked = rows.filter((row) => selected.includes(row.orderId) && payable(row)).map((row) => row.invoice as InvoiceRecord)
-        const customers = new Set(picked.map((inv) => inv.customerId))
-        const blocked = picked.length === 0 ? 'Tick sent invoices (filter or group by customer to pick one customer\'s)'
-          : customers.size > 1 ? 'One payment is from one customer: tick one customer\'s invoices' : null
-        return (
-          <div className="tms-batch-actions" data-active={picked.length > 0 ? 'true' : undefined}>
-            <span className="text-sm tms-muted">{picked.length} selected</span>
-            {blocked ? (
-              <TmsButton variant="primary" aria-label="Record a payment for the selected invoices" data-testid="ar-record-payment-batch" disabled title={blocked}>
-                Record payment
-              </TmsButton>
-            ) : (
-              <Link className="tms-btn tms-btn-primary tms-btn-sm" data-testid="ar-record-payment-batch" title={RECORD_PAYMENT_LINK_LABEL}
-                to={recordPaymentPath({ customerId: picked[0].customerId, invoiceIds: picked.map((inv) => inv.id) })}>
-                Record payment for {picked.length}
-              </Link>
-            )}
-          </div>
-        )
-      })()}
+      {invoiced && (
+        <span className="text-sm tms-muted" data-testid="payments-recorded-note">Payments are recorded in Payments received.</span>
+      )}
       {status === 'PAID' && (
         <>
           <TmsSelect aria-label="Paid in" value={month} onChange={(e) => onMonth(e.target.value)}>
@@ -1235,8 +1208,6 @@ function queueView({
               ? averageDaysToPay(shown.map((r) => settlement(r)).filter((x): x is NonNullable<typeof x> => x != null))
               : paymentFacts.daysToPayByCustomer.get(customerId))
             : undefined
-          const groupPayable = invoiced ? shown.filter(payable) : []
-          const allPicked = groupPayable.length > 0 && groupPayable.every((r) => selected.includes(r.orderId))
           return (
             <span className="flex items-center gap-3" data-testid="ar-group-head">
               <strong>{key}</strong>
@@ -1244,16 +1215,6 @@ function queueView({
               <span>{formatCents(t.amountCents)}</span>
               {invoiced && <span className="tms-muted">{formatCents(t.balanceCents)} open</span>}
               {dtp && <span className="tms-muted" data-testid="ar-group-days-to-pay" title={status === 'PAID' ? 'Invoices shown on this tab' : 'All of this customer\'s paid invoices'}>{daysToPayText(dtp)}</span>}
-              {groupPayable.length > 0 && (
-                <button type="button" className="tms-link text-sm" data-testid="ar-group-select"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    const ids = groupPayable.map((r) => r.orderId)
-                    onSelect(allPicked ? selected.filter((id) => !ids.includes(id)) : [...new Set([...selected, ...ids])])
-                  }}>
-                  {allPicked ? 'Clear' : `Select all ${groupPayable.length}`}
-                </button>
-              )}
               {invoiced && customerId && onStatement && t.balanceCents > 0 && (
                 <button type="button" className="tms-link text-sm" data-testid="ar-group-statement"
                   onClick={(e) => { e.stopPropagation(); onStatement(customerId, key) }}>

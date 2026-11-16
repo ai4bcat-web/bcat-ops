@@ -436,16 +436,20 @@ describe('the AR dense grid', () => {
     await settle()
     const grid = screen.getByRole('table', { name: 'Invoiced' })
     expect(within(grid).getByText('$2,500.00', { selector: 'span' })).toBeTruthy()
-    // The only link on a row is Record payment, to Payments received (Ryne 2026-11-15) — never the shipment.
-    expect(within(grid).queryAllByRole('link').map((l) => l.getAttribute('href'))).toEqual(['/tms/payments-received?record=1&customer=c1&invoice=INV-000123'])
+    // No payment entry on the AR tabs (Ryne 2026-11-16): no links on a row, no tick boxes, no Record payment.
+    expect(within(grid).queryAllByRole('link')).toHaveLength(0)
+    expect(within(grid).queryAllByRole('checkbox')).toHaveLength(0)
+    expect(screen.queryByText(/Record payment/)).toBeNull()
+    expect(screen.queryByTestId('ar-record-payment-batch')).toBeNull()
+    expect(screen.getByTestId('payments-recorded-note').textContent).toBe('Payments are recorded in Payments received.')
     // Sending, payments and void live in the invoice drawer, not on the row.
     expect(within(grid).queryByRole('button', { name: /^Send invoice/ })).toBeNull()
     expect(within(grid).queryByRole('combobox', { name: /More actions/ })).toBeNull()
     fireEvent.click(within(grid).getByRole('button', { name: 'Open invoice INV-000123' }))
     expect(await screen.findByRole('region', { name: 'Invoice actions' })).toBeTruthy()
-    // Payments are recorded only on Payments received: the drawer links there.
+    // Payments are recorded only on Payments received: the drawer has no payment control, only a note.
     expect(screen.queryByRole('button', { name: 'Receive payment' })).toBeNull()
-    expect(screen.getByRole('link', { name: 'Record payment in Payments received' })).toBeTruthy()
+    expect(screen.queryByRole('link', { name: /Record payment/ })).toBeNull()
     expect(screen.getByTestId('ar-grid-ar-queue-invoiced')).toBeTruthy()
     openSet.splice(0, openSet.length, sentInvoice())
   })
