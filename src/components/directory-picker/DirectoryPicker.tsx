@@ -18,6 +18,8 @@ export interface DirectoryPickerProps {
   noMatchHint?: string
   /** When set (with onCreateNew), the list ends with a clickable "create" row labelled by this. */
   createLabel?: (query: string) => string
+  /** Render the results in the flow instead of a floating popover (inside cards that clip overflow). */
+  inlineResults?: boolean
 }
 
 export function DirectoryPicker({
@@ -31,6 +33,7 @@ export function DirectoryPicker({
   onCreateNew,
   noMatchHint,
   createLabel,
+  inlineResults = false,
 }: DirectoryPickerProps) {
   const [query, setQuery] = useState(initialQuery)
   const [open, setOpen] = useState(false)
@@ -86,7 +89,7 @@ export function DirectoryPicker({
       </div>
 
       {open && (
-        <div className="absolute z-50 left-0 right-0 mt-1 max-h-64 overflow-auto rounded-md border bg-popover text-popover-foreground shadow-md">
+        <div data-testid="directory-picker-results" className={`${inlineResults ? 'relative' : 'absolute z-50 left-0 right-0'} mt-1 max-h-64 overflow-auto rounded-md border bg-popover text-popover-foreground shadow-md`}>
           {query.trim().length === 0 ? (
             <div className="px-3 py-2 text-sm text-muted-foreground">Type to search the directory</div>
           ) : activeMatches.length === 0 && !(onCreateNew && createLabel) ? (

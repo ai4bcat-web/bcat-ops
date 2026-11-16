@@ -39,6 +39,7 @@ export function LinkCustomerPicker({ customers, value, initialQuery = '', onChan
         onCreateNew={canCreate ? ({ name }) => setCreating((name ?? '').trim() || initialQuery) : undefined}
         noMatchHint={canCreate ? undefined : 'No matches. Ask an admin to add this customer.'}
         createLabel={(q) => `Create customer “${q}”`}
+        inlineResults
       />
       {!canCreate && <p className="mt-1 text-xs text-muted-foreground" data-testid="link-customer-no-create">Not in the directory? Ask an admin to add this customer.</p>}
       {creating != null && (
