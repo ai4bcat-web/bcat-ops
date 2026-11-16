@@ -105,3 +105,11 @@ describe('validateBillingFields requireAll (Ryne 2026-11-16)', () => {
     expect(validateBillingFields({ billingMethod: 'FACTOR', apEmail: '' })).toEqual({})
   })
 })
+
+describe('validateBillingFields apEmailRequired', () => {
+  it('lets a waived MANUAL customer save without an AP e-mail, still validates a typed one', () => {
+    expect(validateBillingFields({ billingMethod: 'MANUAL', apEmail: '' }, { requireAll: true, apEmailRequired: false })).toEqual({})
+    expect(validateBillingFields({ billingMethod: 'MANUAL', apEmail: 'nope' }, { apEmailRequired: false }).apEmail).toBe('Enter a valid e-mail address')
+    expect(validateBillingFields({ billingMethod: 'MANUAL', apEmail: '' }, { requireAll: true }).apEmail).toBeTruthy()
+  })
+})

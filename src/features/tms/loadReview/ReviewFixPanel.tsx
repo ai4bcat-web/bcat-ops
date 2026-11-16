@@ -21,6 +21,7 @@ import { FIX_ANCHOR, STATE, ZIP, liveLoad, otrChecks, scrollToFix, text } from '
 import { formatDateTimeInput, fromDateTimeInput } from '@/lib/date'
 import type { CustomerRecord, OrderReference, ShipmentBundle } from '@/types/tms'
 import type { Stop } from '@/types'
+import { DEFAULT_REVIEW_REQUIREMENTS } from '@/lib/reviewRequirements'
 
 function Mark({ ok }: { ok: boolean }) {
   return ok ? <CheckCircle2 size={14} aria-label="OK" className="lr-icon-ok" /> : <XCircle size={14} aria-label="Missing" className="lr-icon-bad" />
@@ -113,9 +114,9 @@ function CustomerFix({ customer, customers, linked, off, flagged, onLink, onSave
   const value = <K extends keyof CustomerPatchFields>(key: K): CustomerPatchFields[K] | undefined => (key in draft ? draft[key] : customer?.[key]) as CustomerPatchFields[K] | undefined
   const factored = isFactorBilled({ ...customer, ...draft } as CustomerRecord)
   const reqs = value('reviewRequirements') ?? null
-  const docOn = (key: 'podReceived' | 'rateConReceived') => factored || reqs == null || reqs.includes(key)
-  const toggleDoc = (key: 'podReceived' | 'rateConReceived', on: boolean) => {
-    const base = reqs ?? ['revDivision', 'referenceNumber', 'salesRep', 'podReceived', 'rateConReceived', 'revenueEntered', 'expenseEntered', 'profitEntered']
+  const docOn = (key: 'podReceived' | 'rateConReceived' | 'apEmail') => factored || reqs == null || reqs.includes(key)
+  const toggleDoc = (key: 'podReceived' | 'rateConReceived' | 'apEmail', on: boolean) => {
+    const base = reqs ?? [...DEFAULT_REVIEW_REQUIREMENTS]
     setDraft((d) => ({ ...d, reviewRequirements: on ? [...new Set([...base, key])] : base.filter((k) => k !== key) }))
   }
   const dirty = Object.keys(draft).length > 0
@@ -138,14 +139,15 @@ function CustomerFix({ customer, customers, linked, off, flagged, onLink, onSave
           </TmsSelect></label>
         <label className={`lr-fix-field ${factored && value('customerType') !== 'SHIPPER' && !text(value('mcNumber')) ? 'lr-fix-flag' : ''}`}>MC #
           <TmsInput aria-label="MC number" value={value('mcNumber') ?? ''} disabled={off} onChange={(e) => setDraft((d) => ({ ...d, mcNumber: e.target.value }))} /></label>
-        <label className={`lr-fix-field ${!factored && !text(value('apEmail')) ? 'lr-fix-flag' : ''}`}>AP / invoice e-mail
+        <label className={`lr-fix-field ${docOn('apEmail') && !text(value('apEmail')) ? 'lr-fix-flag' : ''}`}>AP / invoice e-mail{!docOn('apEmail') && <span className="tms-muted text-xs"> (not required)</span>}
           <TmsInput aria-label="AP e-mail" type="email" value={value('apEmail') ?? ''} disabled={off} onChange={(e) => setDraft((d) => ({ ...d, apEmail: e.target.value }))} /></label>
         <label className={`lr-fix-field ${!value('paymentTermsDays') ? 'lr-fix-flag' : ''}`}>Payment terms (days)
           <TmsInput aria-label="Payment terms days" type="number" min={0} value={value('paymentTermsDays') ?? ''} disabled={off} onChange={(e) => setDraft((d) => ({ ...d, paymentTermsDays: e.target.value === '' ? null : Number(e.target.value) }))} /></label>
-        <fieldset className="lr-fix-field"><legend>Documents required to invoice</legend>
+        <fieldset className="lr-fix-field"><legend>Required to invoice</legend>
           <label><input type="checkbox" checked={docOn('podReceived')} disabled={off || factored} onChange={(e) => toggleDoc('podReceived', e.target.checked)} /> POD</label>
           <label><input type="checkbox" checked={docOn('rateConReceived')} disabled={off || factored} onChange={(e) => toggleDoc('rateConReceived', e.target.checked)} /> RC</label>
-          {factored && <span className="tms-muted text-xs">Factored: OTR needs both.</span>}
+          <label><input type="checkbox" checked={docOn('apEmail')} disabled={off || factored} onChange={(e) => toggleDoc('apEmail', e.target.checked)} /> AP e-mail</label>
+          {factored && <span className="tms-muted text-xs">Factored: OTR needs all three.</span>}
         </fieldset>
       </div>
       <div className="lr-fix-actions">

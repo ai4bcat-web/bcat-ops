@@ -34,6 +34,6 @@ describe('ReviewRequirementsField', () => {
     render(<ReviewRequirementsField value={null} onChange={vi.fn()} />)
     expect(screen.queryByRole('checkbox', { name: 'Use the organization default' })).toBeNull()
     expect(screen.getAllByRole('checkbox').every((box) => (box as HTMLInputElement).checked)).toBe(true)
-    expect(screen.getAllByRole('checkbox')).toHaveLength(8)
+    expect(screen.getAllByRole('checkbox')).toHaveLength(9)
   })
 })

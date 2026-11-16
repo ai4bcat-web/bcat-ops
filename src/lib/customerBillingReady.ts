@@ -1,7 +1,8 @@
 /**
  * Every customer must be billable before a load leaves Load Review (Ryne 2026-11-16): a billing method (Factor or
  * Manual invoice) and at least one AP / invoice e-mail, factored customers included. Pure and import-free, so the
- * board, Load Review and the tms-shipment-actions Lambda read the same rule.
+ * board, Load Review and the tms-shipment-actions Lambda read the same rule. The AP e-mail can be waived per customer
+ * (customerApEmailRequired in reviewRequirements.ts; Ryne 2026-11-16: AUTO SHIPPER); callers pass that in.
  */
 export type CustomerBillingGapCode = 'CUSTOMER_BILLING_METHOD' | 'CUSTOMER_AP_EMAIL'
 
@@ -36,17 +37,23 @@ export function customerBillingMethod(customer: CustomerBillingFacts | null | un
 }
 
 /** What the customer is missing to be billed. No customer = nothing here (the NO_CUSTOMER check owns that). */
-export function customerBillingGaps(customer: CustomerBillingFacts | null | undefined): CustomerBillingGapCode[] {
+export function customerBillingGaps(
+  customer: CustomerBillingFacts | null | undefined,
+  opts: { apEmailRequired?: boolean } = {},
+): CustomerBillingGapCode[] {
   if (!customer) return []
   const gaps: CustomerBillingGapCode[] = []
   if (!customerBillingMethod(customer)) gaps.push('CUSTOMER_BILLING_METHOD')
-  if (customerApEmails(customer).length === 0) gaps.push('CUSTOMER_AP_EMAIL')
+  if (opts.apEmailRequired !== false && customerApEmails(customer).length === 0) gaps.push('CUSTOMER_AP_EMAIL')
   return gaps
 }
 
-/** "Factor · ap@x.com" for the Customer column. */
-export function customerBillingSummary(customer: CustomerBillingFacts | null | undefined): string {
+/** "Factor · ap@x.com" for the Customer column; "Manual invoice · AP e-mail: not required" when waived and blank. */
+export function customerBillingSummary(
+  customer: CustomerBillingFacts | null | undefined,
+  opts: { apEmailRequired?: boolean } = {},
+): string {
   const method = customerBillingMethod(customer)
-  const email = customerApEmails(customer)[0] ?? null
+  const email = customerApEmails(customer)[0] ?? (customer && opts.apEmailRequired === false ? 'AP e-mail: not required' : null)
   return [method === 'FACTOR' ? 'Factor' : method === 'MANUAL' ? 'Manual invoice' : null, email].filter(Boolean).join(' · ')
 }

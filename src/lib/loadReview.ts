@@ -203,6 +203,8 @@ const REQUIREMENT_PLACEMENT: Record<ReviewRequirement, { check: LoadReviewCheckK
   referenceNumber: { check: 'details', action: { kind: 'OPEN_TAB', tab: 'overview' } },
   podReceived: { check: 'documents', action: { kind: 'OPEN_TAB', tab: 'documents' } },
   rateConReceived: { check: 'documents', action: { kind: 'OPEN_TAB', tab: 'documents' } },
+  // Never fails here (a switch only); customerBillingReasons reports a missing AP e-mail against the customer.
+  apEmail: { check: 'details', action: { kind: 'OPEN_TAB', tab: 'overview' } },
   revenueEntered: { check: 'charges', action: { kind: 'OPEN_TAB', tab: 'financials' } },
   expenseEntered: { check: 'charges', action: { kind: 'OPEN_TAB', tab: 'carrierPay' } },
   profitEntered: { check: 'charges', action: { kind: 'OPEN_TAB', tab: 'financials' } },

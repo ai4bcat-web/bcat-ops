@@ -5,7 +5,7 @@ import type { LoadBoardSummary } from '@/lib/apiClient'
 import { loadBoardBundle, peekBoardBundle, type BoardBundle, type BoardView } from '@/lib/boardData'
 import { aggregateApStatus } from '@/lib/carrierTotals'
 import { customerRefOf } from '@/lib/customerRef'
-import { customerDocsNotRequired, customerFactorsForOtr } from '@/lib/reviewRequirements'
+import { customerApEmailRequired, customerDocsNotRequired, customerFactorsForOtr } from '@/lib/reviewRequirements'
 import { isOutsideRateConKey } from '@/lib/shipmentDocuments'
 import { stopPlace, type StopPlaceStop } from '@/lib/stopPlace'
 import { factorGapsForLoad, factoringPoNumber, routeEnds, type FactorGapCode } from '@/lib/factorReadyAtCreate'
@@ -854,8 +854,8 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         customerFactored: customer?.factored ?? null,
         docsNotRequired: customerDocsNotRequired(customer ?? null, null),
         customerFactors: customerFactorsForOtr(customer ?? null),
-        customerBillingGaps: customerBillingGaps(customer ?? null),
-        customerBillingSummary: customerBillingSummary(customer ?? null),
+        customerBillingGaps: customerBillingGaps(customer ?? null, { apEmailRequired: customerApEmailRequired(customer ?? null, null) }),
+        customerBillingSummary: customerBillingSummary(customer ?? null, { apEmailRequired: customerApEmailRequired(customer ?? null, null) }),
         customerPaymentTermsDays: customer?.paymentTermsDays ?? null,
         creditLimitCents: customer?.creditLimitCents ?? null,
         creditHold: customer?.creditHoldFlag ?? null,

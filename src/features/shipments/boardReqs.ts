@@ -44,6 +44,8 @@ const REVIEW_ITEM: Record<ReviewRequirement, BoardReq | null> = {
   podReceived: { key: 'doc:POD', label: MISSING_DOC_LABEL.POD },
   // Never fails on its own (the document checks own the rate con: openMissingDocs below).
   rateConReceived: null,
+  // A per-customer switch too: the customer billing gaps below report a missing AP e-mail (customerBillingReady).
+  apEmail: null,
   salesRep: { key: 'salesRep', label: 'Sales rep' },
   revenueEntered: { key: 'customerRate', label: 'Customer rate' },
   expenseEntered: { key: 'expense', label: 'Carrier cost / expense' },

@@ -34,7 +34,7 @@ import { CUSTOMER_TRACKING_MODES, DRIVER_SMS_TARGETS, TRACKING_METHODS } from '.
 import { CUSTOMER_TYPES } from '../../../src/lib/factorBilling'
 import { customerMcRequiredError } from '../../../src/lib/factorReadyAtCreate'
 import { teamMembership, validateTeams } from '../../../src/lib/teams'
-import { REVIEW_REQUIREMENTS, normalizeReviewRequirements } from '../../../src/lib/reviewRequirements'
+import { REVIEW_REQUIREMENTS, customerApEmailRequired, normalizeReviewRequirements } from '../../../src/lib/reviewRequirements'
 import { SEED_DIVISIONS, SEED_RULES, validateDivisions, validateRules } from '../../../src/lib/ownership'
 import { checkIntakeEmail, normalizeIntakeEmail } from '../../../src/lib/intakeMail'
 import { RETIRED_SEED_VIEWS, SEED_VIEWS, slugify, validateView, BOARD_COLUMN_KEYS } from '../../../src/lib/shipmentViewDefs'
@@ -1118,7 +1118,11 @@ function resolveBillingFields(
     after.noaEmail !== before.noaEmail ||
     JSON.stringify(after.invoiceCopyEmails) !== JSON.stringify(before.invoiceCopyEmails)
   if (changed || (isCreate && (after.billingMethod || after.apEmail || after.invoiceCopyEmails))) {
-    const errors = validateBillingFields(after)
+    // A customer whose Load Review list unticks "AP e-mail" (AUTO SHIPPER) saves as MANUAL without one; never when factored.
+    const reviewRequirements = 'reviewRequirements' in input ? input.reviewRequirements : existing?.reviewRequirements
+    const errors = validateBillingFields(after, {
+      apEmailRequired: customerApEmailRequired({ reviewRequirements: Array.isArray(reviewRequirements) ? (reviewRequirements as string[]) : null, billingMethod: after.billingMethod }, null),
+    })
     const first = Object.values(errors)[0]
     if (first) throw new Error(first)
     if (after.billingNeedsReview === before.billingNeedsReview) after.billingNeedsReview = null

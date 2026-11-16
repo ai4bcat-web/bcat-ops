@@ -15,6 +15,7 @@ import type {
 } from '@/types/tms'
 import { parseEmailList, validateBillingFields, type BillingMethod } from '@/lib/billingMethod'
 import { customerMcRequiredError } from '@/lib/factorReadyAtCreate'
+import { customerApEmailRequired } from '@/lib/reviewRequirements'
 import {
   DEFAULT_NEW_CUSTOMER_CREDIT_LIMIT_CENTS,
   DEFAULT_NEW_CUSTOMER_DIVISION,
@@ -433,7 +434,11 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
       (value.noaEmail.trim().toLowerCase() || null) !== (initial?.noaEmail?.trim().toLowerCase() || null) ||
       copy.join(',') !== (initial?.invoiceCopyEmails ?? []).join(',')
     return changed
-      ? { ...base, ...validateBillingFields({ billingMethod: value.billingMethod || null, apEmail, apEmailsExtra: extra, noaEmail: value.noaEmail, invoiceCopyEmails: copy }, { requireAll: true }) }
+      ? { ...base, ...validateBillingFields({ billingMethod: value.billingMethod || null, apEmail, apEmailsExtra: extra, noaEmail: value.noaEmail, invoiceCopyEmails: copy }, {
+          requireAll: true,
+          // Unticking "AP e-mail" under Load Review requirements waives it (AUTO SHIPPER); a factored customer cannot.
+          apEmailRequired: customerApEmailRequired({ reviewRequirements: value.reviewRequirements, billingMethod: value.billingMethod || null }, null),
+        }) }
       : base
   }, [value, initial, isNew, problems])
   return { value, set, setPartial, toRecord, errors, isNew, missing }
