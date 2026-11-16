@@ -43,7 +43,7 @@ import { DOCUMENT_TYPE_LABELS } from '@/lib/shipmentDocuments'
 import { SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
 import { boardStatusOf, detailValuesFor, type BoardCarrier } from '@/lib/shipmentViewDefs'
 import { assignmentChipText } from './carrierLadder'
-import { isReleasedToInvoicing } from '@/lib/shipmentLists'
+import { isInLoadReview, isReleasedToInvoicing } from '@/lib/shipmentLists'
 import { loadInvoiceStatusOf, loadInvoiceStatusText, type LoadInvoiceStatus } from '@/lib/loadInvoiceStatus'
 import { factorGapSummary, type FactorGapCode } from '@/lib/factorReadyAtCreate'
 import { effectiveShipmentType, shipmentTypeLabel } from '@/lib/shipmentTypes'
@@ -301,15 +301,19 @@ export function isVoided(row: ShipmentRow): boolean {
 
 /** What a delivered shipment already released to invoicing reads as. Display only: the stored status stays DELIVERED. */
 export const RELEASED_LABEL = 'RELEASED'
+/** What a load pushed into Load Review and not released yet reads as (Ryne 2026-11-15). Display only. */
+export const IN_REVIEW_LABEL = 'IN LOAD REVIEW'
 
 /**
  * The board status as the person reads it: a load past Load Review (released to invoicing, the same
  * `isReleasedToInvoicing` rule that takes it off Active) reads RELEASED whatever its stop status (Ryne
  * 2026-11-14); where its money stands is the invoice pill beside it. Voided and canceled loads keep theirs.
  */
-export function displayStatusOf(row: ShipmentRow): BoardStatusKey | 'CANCELED' | typeof RELEASED_LABEL {
+export function displayStatusOf(row: ShipmentRow): BoardStatusKey | 'CANCELED' | typeof RELEASED_LABEL | typeof IN_REVIEW_LABEL {
   const status = boardStatusOf(row)
-  return status !== 'VOIDED' && status !== 'CANCELED' && isReleasedToInvoicing(row) ? RELEASED_LABEL : status
+  if (status === 'VOIDED' || status === 'CANCELED') return status
+  if (isReleasedToInvoicing(row)) return RELEASED_LABEL
+  return isInLoadReview(row) ? IN_REVIEW_LABEL : status
 }
 
 /**
@@ -718,7 +722,7 @@ function apptStatusText(row: ShipmentRow, type: 'pickup' | 'delivery'): string {
  */
 export function statusWithProgress(row: ShipmentRow): string {
   let label: string = isVoided(row) ? 'VOIDED' : displayStatusOf(row)
-  if (label === RELEASED_LABEL) return label
+  if (label === RELEASED_LABEL || label === IN_REVIEW_LABEL) return label
   // A brokerage load that is covered but not moving yet reads where it stands on the carrier ladder (Ryne 2026-11-09):
   // COVERED, RC SENT (rate con out), DISPATCHED (rate con signed and the driver details in).
   if (label === 'COVERED' && row.revDivision === 'BROKERAGE') {

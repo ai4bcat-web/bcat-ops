@@ -16,7 +16,7 @@ export function deliveredText(row: ShipmentRow & { loadDeliveredAt?: string | nu
   return boardStatusOf(row) === 'DELIVERED' ? 'Delivered (no time recorded)' : '—'
 }
 
-/** The shipment's status as the board prints it, "DELIVERED 2/2" style. */
+/** The shipment's status as the board prints it, "DELIVERED 2/2" style. Every row here is in Load Review, so the stop status is what says something. */
 export function reviewStatusText(row: ShipmentRow): string {
-  return statusWithProgress(row)
+  return statusWithProgress({ ...row, loadReviewPushedAt: null })
 }
