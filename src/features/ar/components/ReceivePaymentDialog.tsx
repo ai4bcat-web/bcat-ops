@@ -392,6 +392,7 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, invo
                       placeholder="0.00"
                       onChange={(e) => setAllocations((prev) => ({ ...prev, [row.id]: e.target.value }))}
                       className="w-28"
+                      style={{ width: 112, flex: '0 0 auto' }}
                     />
                   </li>
                 ))}
@@ -419,6 +420,7 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, invo
                       placeholder="0.00"
                       onChange={(e) => setCreditUses((prev) => ({ ...prev, [row.id]: e.target.value }))}
                       className="w-28"
+                      style={{ width: 112, flex: '0 0 auto' }}
                     />
                   </li>
                 ))}
