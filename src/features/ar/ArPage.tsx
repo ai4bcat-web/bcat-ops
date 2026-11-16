@@ -17,6 +17,7 @@ import { readyQueueRows, receivablesSummary, useArSummaryModel } from './useArSu
 import { tabFromUrl } from '@/features/finance/accountingLinks'
 import { divisionKeyOf } from './arSummary'
 import { arCompactItems, arTabs, paidInMonthOf } from './arTabs'
+import { paidTabRedirect, paymentsReceivedPath } from '@/features/payments/links'
 import { ageInvoices } from '@/lib/arAging'
 import { OwedFilterBar } from './components/OwedFilterBar'
 import { OwedSummary } from './components/OwedSummary'
@@ -87,8 +88,8 @@ import { useDeliveredNotReady } from './useDeliveredNotReady'
 import { buildAgingReport, type AgingReport } from './agingReport'
 import { AgingReportTable } from './components/AgingReportTable'
 import { customerRefOf } from '@/lib/customerRef'
-import { ArInvoicedCard, ArPaidCard, ArReadyCard, ProfitCheckCard, ReviewReasonCard } from '@/features/finance/AccountingCards'
-import { arInvoicedStats, arPaidStats, arReadyStats, reviewReasonCounts } from '@/features/finance/accountingStats'
+import { ArInvoicedCard, ArReadyCard, ProfitCheckCard, ReviewReasonCard } from '@/features/finance/AccountingCards'
+import { arInvoicedStats, arReadyStats, reviewReasonCounts } from '@/features/finance/accountingStats'
 import type { CustomerRecord, InvoiceRecord, ShipmentRecord } from '@/types/tms'
 
 /** Which dialog is open, and the one thing it is open about. Mount is the `open` flag. */
@@ -127,16 +128,19 @@ function view<T>(config: Omit<ListView, 'grid'> & { grid: ArGrid<T> }): ListView
   return config as unknown as ListView
 }
 
-/** The three queue statuses, then the two ledger views. */
-export type ArPageTab = 'ready' | 'invoiced' | 'paid' | 'aging' | 'review'
+/**
+ * Two queue statuses, then the two ledger views. There is no Paid tab (Ryne 2026-11-16): what was paid
+ * lives on Accounting → Payments received, and an old `?tab=paid` link goes there.
+ */
+export type ArPageTab = 'ready' | 'invoiced' | 'aging' | 'review'
 
-const AR_PAGE_TABS: readonly ArPageTab[] = ['ready', 'invoiced', 'paid', 'aging', 'review']
+const AR_PAGE_TABS: readonly ArPageTab[] = ['ready', 'invoiced', 'aging', 'review']
 
-const QUEUE_TAB_STATUS: Record<'ready' | 'invoiced' | 'paid', ArQueueStatus> = {
+const QUEUE_TAB_STATUS: Record<'ready' | 'invoiced', ArQueueStatus> = {
   ready: 'READY',
   invoiced: 'INVOICED',
-  paid: 'PAID',
 }
+
 
 const GROUP_BY_KEY = 'tms:ar:groupBy'
 const BILLED_BY_KEY = 'tms:ar:billedBy'
@@ -253,7 +257,6 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   // Paid date / ACH-check / ref # and days to pay, read for the customers on the Invoiced and Paid tabs.
   const [paymentsVersion, setPaymentsVersion] = useState(0)
   const factCustomerIds = useMemo(() => {
-    if (tab === 'paid') return queue.PAID.map((r) => r.customerId ?? '')
     if (tab === 'invoiced' && (groupBy === 'customer' || owed.parties.length > 0)) return queue.INVOICED.map((r) => r.customerId ?? '')
     return []
   }, [tab, queue, groupBy, owed.parties.length])
@@ -324,6 +327,11 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const factorReadiness = useFactorReadiness(queue.READY, tab === 'ready', factorVersion)
   const deliveredNotReady = useDeliveredNotReady(tab === 'ready')
   const navigate = useNavigate()
+  // The Paid tab is gone: an old `?tab=paid` link lands on Payments received instead.
+  useEffect(() => {
+    const to = paidTabRedirect(window.location.search)
+    if (to) navigate(to, { replace: true })
+  }, [navigate])
 
   const runBatchGenerate = () => {
     setBusy(true)
@@ -413,10 +421,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const queueTotal = (status: ArQueueStatus) => formatCents(queue[status].reduce((sum, r) => sum + (status === 'INVOICED' ? r.balanceCents : r.amountCents), 0))
   const tabs = arTabs({
     billedBy,
-    paidMonthLabel: monthLabel(month),
     ready: { count: queue.READY.length, total: queueTotal('READY') },
     invoiced: { count: queue.INVOICED.length, total: queueTotal('INVOICED') },
-    paid: { count: queue.PAID.length, total: queueTotal('PAID') },
     aging: { count: filteredOpen.length, total: formatCents(aging.totalCents) },
     review: needsReview.rows.length,
   })
@@ -465,7 +471,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const current =
     // queueView only builds columns and handlers: onRetryInvoice (which touches refs) runs on a click, never during render.
     // eslint-disable-next-line react-hooks/refs
-    tab === 'ready' || tab === 'invoiced' || tab === 'paid' ? queueView({
+    tab === 'ready' || tab === 'invoiced' ? queueView({
       status: QUEUE_TAB_STATUS[tab],
       rows: queue[QUEUE_TAB_STATUS[tab]],
       groupBy,
@@ -532,7 +538,6 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     : tab === 'invoiced' ? (
       <ArInvoicedCard stats={arInvoicedStats(queue.INVOICED, asOf)} due={owed.due} onDue={(due) => setOwed({ ...owed, due })} parties={owed.parties} onParty={onParty} />
     )
-    : tab === 'paid' ? <ArPaidCard stats={arPaidStats(queue.PAID, paymentFacts.linesByInvoice)} monthLabel={monthLabel(month)} />
     : tab === 'review' ? <ReviewReasonCard counts={reviewReasonCounts(needsReview.rows)} total={needsReview.rows.length} />
     : null
 
@@ -574,6 +579,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
                 summary={summary}
                 division={owed.divisions.length === 1 ? owed.divisions[0] : null}
                 onDivision={(key) => setOwed({ ...owed, divisions: key ? [key] : [], due: owed.due })}
+                onCollected={(period) => navigate(paymentsReceivedPath(period))}
               />
               {tabCard}
               <ProfitCheckCard asOf={asOf} onOpenReport={setReportsOpen} testId="ar-profit-check" />

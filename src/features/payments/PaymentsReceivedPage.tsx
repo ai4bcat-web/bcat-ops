@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import './paymentsReceived.css'
 import { Link, useSearchParams } from 'react-router-dom'
+import { periodFromParam, presetRange, type PresetKey } from './links'
 import { Download, Plus, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -50,18 +51,6 @@ interface ShipmentRef { id: string; division: string }
 
 const proOf = (invoiceId: string) => invoiceId.split('-')[0].trim()
 
-type PresetKey = 'week' | 'month' | 'last' | 'year' | 'all' | 'custom'
-
-function presetRange(key: PresetKey, asOf: string): { from: string; to: string } | null {
-  const d = new Date(`${asOf}T12:00:00Z`)
-  if (key === 'week') return { from: new Date(d.getTime() - ((d.getUTCDay() + 6) % 7) * 86_400_000).toISOString().slice(0, 10), to: asOf }
-  if (key === 'month') return monthBounds(asOf)
-  if (key === 'last') return monthBounds(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 15)).toISOString().slice(0, 10))
-  if (key === 'year') return { from: `${asOf.slice(0, 4)}-01-01`, to: asOf }
-  if (key === 'all') return { from: '', to: '' }
-  return null
-}
-
 const PRESET_LABEL: Record<PresetKey, string> = {
   week: 'This week', month: 'This month', last: 'Last month', year: 'This year', all: 'All dates', custom: 'Custom dates',
 }
@@ -75,11 +64,12 @@ const VIEW_TABS: Array<{ key: ReceivedView; label: string }> = [
 export function PaymentsReceivedPage() {
   const [asOf] = useState(() => chicagoDateStr(new Date()))
   const [searchParams, setSearchParams] = useSearchParams()
-  const [preset, setPreset] = useState<PresetKey>('month')
+  const [initialPeriod] = useState(() => periodFromParam(searchParams.get('period'), asOf))
+  const [preset, setPreset] = useState<PresetKey>(initialPeriod?.preset ?? 'month')
   const [view, setView] = useState<ReceivedView>('payments')
   const [showReversed, setShowReversed] = useState(false)
   const [filter, setFilter] = useState<ReceivedFilter>(() => ({
-    ...monthBounds(asOf),
+    ...(initialPeriod?.range ?? monthBounds(asOf)),
     customers: searchParams.get('customer') ? [searchParams.get('customer')!] : [],
     types: [],
     methods: [],

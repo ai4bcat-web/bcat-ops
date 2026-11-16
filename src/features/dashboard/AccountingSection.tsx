@@ -20,6 +20,7 @@ import { readyQueueUnfiltered, useArSummaryModel } from '@/features/ar/useArSumm
 import { useApSummaryModel } from '@/features/ap/useApSummaryModel'
 import { arReadyStats } from '@/features/finance/accountingStats'
 import { factoredLink, payableLink, receivableLink } from '@/features/finance/accountingLinks'
+import { paymentsReceivedPath } from '@/features/payments/links'
 import { DashboardSummaryCard, type DashboardSummaryRow } from './DashboardSummaryCard'
 
 const n = (count: number, unit: string) => `${count} ${unit}${count === 1 ? '' : 's'}`
@@ -69,7 +70,7 @@ export function ReceivablesCard() {
   const rows: DashboardSummaryRow[] = [
     { key: 'shippers', label: 'Pending with shippers', count: s.pendingShippersCount, cents: s.pendingShippersCents, color: 'var(--tms-primary)', onOpen: () => navigate(receivableLink({ tab: 'invoiced' })) },
     { key: 'late', label: 'Late', count: s.lateCount, cents: s.lateCents, color: 'var(--tms-badge-red)', title: 'Past due, every billing', onOpen: () => navigate(receivableLink({ tab: 'invoiced', due: 'past' })) },
-    { key: 'collected', label: 'Collected this month', count: s.collectedMonthCount, cents: s.collectedMonthCents, color: 'var(--tms-badge-green)', title: 'Paid in full this month, by paid date', onOpen: () => navigate(receivableLink({ tab: 'paid' })) },
+    { key: 'collected', label: 'Collected this month', count: s.collectedMonthCount, cents: s.collectedMonthCents, color: 'var(--tms-badge-green)', title: 'Paid in full this month, by paid date. Opens Payments received.', onOpen: () => navigate(paymentsReceivedPath('month')) },
     { key: 'ready', label: 'Ready to invoice', count: ready.count, cents: ready.cents, color: 'var(--tms-badge-orange)', onOpen: () => navigate(receivableLink({ tab: 'ready' })) },
   ]
   const factoring: DashboardSummaryRow[] = FACTORING_ROWS

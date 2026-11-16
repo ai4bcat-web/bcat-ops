@@ -231,13 +231,15 @@ beforeEach(() => {
 })
 
 describe('the AR board', () => {
-  it('offers the three statuses and Aging, and each one renders', async () => {
+  it('offers Ready, Invoiced and Aging (no Paid tab), and each one renders', async () => {
     await setup({ UNBILLED: [worklistRow()] })
     expect(screen.queryByRole('tab', { name: /^Docs needed/ })).toBeNull()
     expect(screen.queryByRole('tab', { name: /^Ready for billing/ })).toBeNull()
     // Payments, credits and debits moved to their own Accounting page (Ryne 2026-11-15).
     expect(screen.queryByRole('tab', { name: /^Payments & credits/ })).toBeNull()
-    for (const label of ['Ready to invoice', 'Invoiced', 'Paid', 'Aging']) {
+    // Paid moved to Payments received too (Ryne 2026-11-16).
+    expect(screen.queryByRole('tab', { name: /^Paid/ })).toBeNull()
+    for (const label of ['Ready to invoice', 'Invoiced', 'Aging']) {
       const tab = screen.getByRole('tab', { name: new RegExp(`^${label}`) })
       fireEvent.click(tab)
       await settle()
