@@ -151,7 +151,15 @@ export const FACTOR_GAP_LABEL: Record<FactorGapCode, string> = {
  */
 export function factorGapsForLoad(input: FactorReadyInput): FactorGap[] {
   if (!isFactoredLoad(input.customer, input.revDivision)) return []
-  return factorGapsAtCreate(input)
+  const gaps = factorGapsAtCreate(input)
+  // At review the load is about to be factored, and OTR files the invoice under the customer's MC: the factor hand-off
+  // (whyNotFactorable) refuses any non-shipper with no MC, type set or not. Booking only asks it of brokers (Ryne 2026-11-14);
+  // review asks it of every customer that is not a shipper, so Move to billing can never pass a load the factor queue refuses.
+  const { customer } = input
+  if (customer && customer.customerType !== 'SHIPPER' && !text(customer.mcNumber) && !gaps.some((g) => g.code === 'CUSTOMER_MC')) {
+    gaps.push({ code: 'CUSTOMER_MC', message: `${text(customer.name) || 'This customer'} has no MC number. Add it on the customer record — OTR files the invoice under the broker's MC.` })
+  }
+  return gaps
 }
 
 /** "Missing for factoring: PO, Pick Up ZIP"; empty when nothing is missing. */

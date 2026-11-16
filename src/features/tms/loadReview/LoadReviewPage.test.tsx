@@ -249,22 +249,32 @@ describe('LoadReviewPage', () => {
     expect(call.params).toEqual({ review: { source: 'LOAD_REVIEW' } })
   })
 
-  it('releases at most nine at a time: select-all stops at nine and the tenth tick is refused with a message', async () => {
+  it('select all takes every ready row and Move to billing sends them in batches of nine (Ryne 2026-11-16)', async () => {
     const many = Array.from({ length: 10 }, (_, i) => shipment(`m-${i + 1}`))
     mocks.shipments.mockReturnValue({ shipments: many, loading: false, error: null, refresh: mocks.refresh })
     mocks.batch.mockResolvedValue({ results: [] })
     renderPage('/tms/load-review?tab=ready')
     fireEvent.click(screen.getByRole('button', { name: /Select all looks ready/ }))
-    expect(screen.getByRole('button', { name: 'Move 9 to billing' })).toBeTruthy()
-    expect(screen.getByText(/at most 9/)).toBeTruthy()
-    const unticked = many.map((r) => checkbox(r.number)!).find((box) => !box.checked)!
-    fireEvent.click(unticked)
-    expect(unticked.checked).toBe(false)
-    expect(screen.getByRole('button', { name: 'Move 9 to billing' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Move 9 to billing' }))
+    expect(many.every((r) => checkbox(r.number)!.checked)).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Move 10 to billing' }))
     fireEvent.click(screen.getByRole('button', { name: 'Confirm move to billing' }))
-    await waitFor(() => expect(mocks.batch).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mocks.batch).toHaveBeenCalledTimes(2))
     expect(mocks.batch.mock.calls[0][0].shipmentIds).toHaveLength(9)
+    expect(mocks.batch.mock.calls[1][0].shipmentIds).toHaveLength(1)
+  })
+
+  it('the header checkbox selects and deselects every visible row, and Deselect all clears the selection', () => {
+    renderPage('/tms/load-review?tab=all')
+    const all = screen.getByRole('checkbox', { name: 'Select all rows' }) as HTMLInputElement
+    fireEvent.click(all)
+    for (const n of ['S-1', 'S-2', 'S-3']) expect(checkbox(n)!.checked).toBe(true)
+    expect(screen.getByTestId('review-bulk-bar').textContent).toContain('3 selected')
+    fireEvent.click(all)
+    for (const n of ['S-1', 'S-2', 'S-3']) expect(checkbox(n)!.checked).toBe(false)
+    fireEvent.click(screen.getByTestId('review-select-all'))
+    expect(checkbox('S-3')!.checked).toBe(true)
+    fireEvent.click(screen.getByTestId('review-deselect-all'))
+    expect(screen.queryByTestId('review-bulk-bar')).toBeNull()
   })
 
   it('a refused row keeps the server message and stays in the queue; moved rows are reported', async () => {

@@ -114,3 +114,15 @@ describe('factoringPoNumber', () => {
   })
 })
 
+
+describe('review asks a factored customer for its MC unless it is a shipper (14928, Ryne 2026-11-16)', () => {
+  it('flags a factored customer with no type and no MC at review, not at booking', () => {
+    const untyped = { ...full, customer: { ...full.customer, customerType: null, mcNumber: null } }
+    expect(factorGapsAtCreate(untyped).map((g) => g.code)).not.toContain('CUSTOMER_MC')
+    expect(factorGapsForLoad(untyped).map((g) => g.code)).toContain('CUSTOMER_MC')
+  })
+  it('leaves a factored shipper with no MC alone, and a brokered load never asks', () => {
+    expect(factorGapsForLoad({ ...full, customer: { ...full.customer, customerType: 'SHIPPER', mcNumber: null } }).map((g) => g.code)).not.toContain('CUSTOMER_MC')
+    expect(factorGapsForLoad({ ...full, revDivision: 'BROKERAGE', customer: { ...full.customer, customerType: null, mcNumber: null } })).toEqual([])
+  })
+})

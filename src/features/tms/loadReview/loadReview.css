@@ -1,6 +1,10 @@
 .tms-shell .aa-load-review { min-width: 0; }
 .tms-shell .aa-review-checks { display: inline-flex; gap: 2px; }
 .tms-shell .aa-review-actions { position: sticky; bottom: 0; padding: 12px; background: var(--tms-card); border-top: 1px solid var(--tms-border); }
+/* The selection bar docks under the table inside the page (the table shrinks to make room), so it never covers a row. */
+.tms-shell .aa-review-bulk { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 8px 12px; background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: 10px; }
+.tms-shell .aa-review-batch-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tms-shell .aa-review-batch-edit select { width: auto; min-width: 160px; }
 .tms-shell .aa-review-results { padding: 12px; white-space: pre-line; color: var(--tms-text); }
 /* The footer carries Previous/Next beside the page-size and key hints: wrap on a phone instead of widening the page. */
 .tms-shell .aa-load-review .tms-footer { flex-wrap: wrap; }

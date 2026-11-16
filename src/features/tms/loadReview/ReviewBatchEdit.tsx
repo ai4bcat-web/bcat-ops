@@ -18,9 +18,13 @@ export function ReviewBatchEdit({ ids, email, onDone }: { ids: string[]; email: 
   const [busy, setBusy] = useState(false)
   if (ids.length === 0) return null
 
+  // The server takes up to 100 ids per call; larger selections go in chunks so every ticked row is updated.
   const run = (task: 'SET_SALES_REP' | 'SET_REV_DIVISION', params: Record<string, unknown>, what: string) => {
     setBusy(true)
-    batchShipmentTask({ task, shipmentIds: ids, params })
+    const chunks: string[][] = []
+    for (let offset = 0; offset < ids.length; offset += 100) chunks.push(ids.slice(offset, offset + 100))
+    Promise.all(chunks.map((shipmentIds) => batchShipmentTask({ task, shipmentIds, params })))
+      .then((parts) => ({ results: parts.flatMap((p) => p.results) }))
       .then((result) => {
         const failed = result.results.filter((r) => !r.ok)
         if (failed.length === 0) toast.success(`${what} set on ${ids.length} shipment${ids.length === 1 ? '' : 's'}`)
@@ -32,8 +36,7 @@ export function ReviewBatchEdit({ ids, email, onDone }: { ids: string[]; email: 
   }
 
   return (
-    <div className="aa-review-actions flex flex-wrap items-center gap-2" data-testid="review-batch-edit">
-      <strong>{ids.length} selected</strong>
+    <div className="aa-review-batch-edit" data-testid="review-batch-edit">
       <TmsSelect aria-label="Batch sales rep" value={rep} onChange={(e) => setRep(e.target.value)}>
         <option value="">Sales rep…</option>
         {staff.map((p) => <option key={p.id} value={p.id}>{p.name ?? p.email}</option>)}

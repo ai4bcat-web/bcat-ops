@@ -82,6 +82,9 @@ export interface DenseGridProps<T> {
   selectedIds?: ReadonlySet<string>
   onToggle?: (id: string) => void
   onToggleAll?: () => void
+  /** The row checkbox's accessible name and hover text (defaults to "Select row <id>"). */
+  checkLabel?: (row: T) => string
+  checkTitle?: (row: T) => string | undefined
   onRowClick?: (row: T) => void
   onRowDoubleClick?: (row: T) => void
   /** Extra data-* attributes stamped on each <tr>. */
@@ -147,6 +150,8 @@ export function DenseGrid<T>({
   selectedIds,
   onToggle,
   onToggleAll,
+  checkLabel,
+  checkTitle,
   onRowClick,
   onRowDoubleClick,
   rowAttrs,
@@ -527,7 +532,8 @@ export function DenseGrid<T>({
                     <td className="tms-dg-sticky tms-dg-check" style={{ left: 0 }}>
                       <input
                         type="checkbox"
-                        aria-label={`Select row ${id}`}
+                        aria-label={checkLabel ? checkLabel(row) : `Select row ${id}`}
+                        title={checkTitle?.(row)}
                         checked={selected}
                         onChange={() => onToggle?.(id)}
                         // Ticking a row must not also open it.

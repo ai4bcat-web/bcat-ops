@@ -12,7 +12,8 @@ describe('factored rows are never e-mailed (Ryne 2026-11-14)', () => {
 
   it('reads "Factored via OTR" before the queue, "In OTR queue" after, and "Not sent" only for manual invoices', () => {
     const invoice = { id: 'inv-1', factoringItemId: null } as unknown as InvoiceRecord
-    expect(unsentLabel({ invoiceId: 'inv-1', invoice, factorItem: null }, true)).toBe('Factored via OTR')
+    expect(unsentLabel({ invoiceId: 'inv-1', invoice, factorItem: null }, true)).toBe('Not in OTR queue — Send to factor')
+    expect(unsentLabel({ invoiceId: null, invoice: null, factorItem: null }, true)).toBe('Factored via OTR')
     expect(unsentLabel({ invoiceId: 'inv-1', invoice: { ...invoice, factoringItemId: 'fi-1' }, factorItem: null }, true)).toBe('In OTR queue')
     expect(unsentLabel({ invoiceId: null, invoice: null, factorItem: { id: 'fi-1' } as FactoringItem }, true)).toBe('In OTR queue')
     expect(unsentLabel({ invoiceId: 'inv-1', invoice, factorItem: null }, false)).toBe('Not sent')

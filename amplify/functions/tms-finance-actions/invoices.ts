@@ -56,6 +56,7 @@ import { isBrokerageRevDivision } from '../../../src/lib/reviewRequirements'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { isCustomerUnresolved, unresolvedCustomerMessage } from '../../../src/lib/customerResolution'
 import { assetRateConTenders, canEmailTo, evaluateDocGate, gateLoadIds, isOwnFleetLoad } from '../../../src/lib/shipmentDocuments'
+import { loadExtraDocTypes } from '../../../src/lib/loadRequiredDocs'
 import {
   assertNotSquareInvoiced,
   customerPacketIds,
@@ -298,6 +299,10 @@ function docGateFor(context: OrderContext): DocGateResult {
     documents: context.documents,
     order: context.order,
     loadIds: context.gateLoadIds,
+    // Same inputs as the shipment Lambda's gate (Load Review, the board, READY_TO_INVOICE), so invoicing can never refuse
+    // what review passed: a file filed on the shipment itself counts for its only order, and the loads' extra doc types apply.
+    soleOrder: context.orders.length === 1,
+    extraDocTypes: loadExtraDocTypes(context.loads as unknown as { requiredDocTypes?: string[] | null }[]),
     loadCarriers: context.loadCarriers,
     customer: context.customer,
     settings: context.settings,
@@ -1365,15 +1370,27 @@ export async function invoiceAttachmentPlans(input: Row): Promise<Row> {
         const row = await getById(INVOICE_TABLE_NAME, id)
         if (!row) { plans.push({ invoiceId: id, error: 'Invoice not found' }); continue }
         const invoice = row as unknown as InvoiceRecord
-        const [shipmentRow, orderRows, loadRows, documentRows, chargeRows] = await Promise.all([
+        const [shipmentRow, orderRows, loadRows, rawDocumentRows, chargeRows, carrierRows] = await Promise.all([
           getById(SHIPMENT_TABLE_NAME, invoice.shipmentId),
           queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', invoice.shipmentId),
           queryIndex(LOAD_TABLE_NAME, IDX_LOADS_BY_SHIPMENT, 'shipmentId', invoice.shipmentId),
           queryIndex(SHIPMENT_DOCUMENT_TABLE_NAME, IDX_DOCUMENTS_BY_SHIPMENT, 'shipmentId', invoice.shipmentId),
           queryIndex(LOAD_CHARGE_TABLE_NAME, IDX_CHARGES_BY_SHIPMENT, 'shipmentId', invoice.shipmentId),
+          queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_SHIPMENT, 'shipmentId', invoice.shipmentId),
         ])
         const shipment = shipmentRow as unknown as ShipmentRecord
         const loads = gateLoadIds(loadRows as unknown as ShipmentLoad[], orderRows as unknown as OrderRecord[], invoice.orderId)
+        // The asset load's customer tender on the load (Load.rateConfirmKey) is its rate confirmation, as the send and the
+        // review count it (withAssetTenders): without it the AR RC column read "Missing" on loads that went out with one.
+        const order = (orderRows as unknown as OrderRecord[]).find((o) => o.id === invoice.orderId)
+        const documentRows = order
+          ? withAssetTenders(rawDocumentRows as unknown as ShipmentDocumentRecord[], {
+              order,
+              shipment,
+              loads: (loadRows as unknown as ShipmentLoad[]).filter((load) => loads.includes(load.id)),
+              loadCarriers: carrierRows as unknown as LoadCarrierRecord[],
+            })
+          : (rawDocumentRows as unknown as ShipmentDocumentRecord[])
         const scope = attachmentScopeOf(invoice, { shipment, gateLoadIds: loads })
         const plan = invoiceAttachmentPlan(
           documentRows as unknown as ShipmentDocumentRecord[],
