@@ -73,6 +73,7 @@ import {
   supersede,
 } from '../../../src/lib/shipmentDocuments'
 import { isCarShipperLoad } from '../../../src/lib/carShipper'
+import { customerRefOf, type CustomerRefReference } from '../../../src/lib/customerRef'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { planPendingCarrierBills, readPendingBillContext, writePendingBill } from '../_shared/pendingCarrierBill'
 import { hasGap, isReleasedOrder, reconcileReleasedOrder, type ReconcileFinding } from '../../../src/lib/billingReconcile'
@@ -1353,13 +1354,27 @@ function reviewFacts(bundle: Bundle, order: Row): ReviewFacts {
   return {
     revDivision: typeof shipment.revDivision === 'string' ? shipment.revDivision : null,
     salesRepId: typeof shipment.salesRepId === 'string' ? shipment.salesRepId : null,
-    referenceNumber: references.map((ref) => (typeof ref?.value === 'string' ? ref.value : '')).find((value) => value.trim().length > 0) ?? null,
+    referenceNumber: reviewReferenceOf(references, bundle.loads as Row[]),
     podReceived: bundle.documents.some((doc) => doc.type === 'POD' && countsAsPresent(doc as unknown as ShipmentDocumentRecord)),
     revenueCents,
     expenseCents,
     profitCents: profitFromFacts(revenueCents, expenseCents),
     assetLoad: assetLoadOf(bundle),
   }
+}
+
+/**
+ * The load's reference for the `referenceNumber` requirement: the shared Customer Ref (PO, then CUSTOMER_REF,
+ * then a live load's `tmsId`), the same value the board and Load Review show, then any order reference.
+ */
+function reviewReferenceOf(references: Row[], loads: Row[]): string | null {
+  const tmsId = loads
+    .filter((l) => !l.voidedAt && !l.deletedAt)
+    .map((l) => (typeof l.tmsId === 'string' ? l.tmsId : null))
+    .find((v) => customerRefOf(null, v)) ?? null
+  return customerRefOf(references as CustomerRefReference[], tmsId)
+    ?? references.map((ref) => (typeof ref?.value === 'string' ? ref.value.trim() : '')).find((value) => value.length > 0)
+    ?? null
 }
 
 /** isAssetLoad from the raw rows: revenue division ASSETS, or an own-fleet (OWN_ASSET / Ivan Cartage) assignment. */
