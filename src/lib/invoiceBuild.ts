@@ -18,7 +18,7 @@
  */
 import { canEmailTo, DOCUMENT_TYPE_LABELS, normalizeRequiredDocTypes, requiredDocTypesFor } from './shipmentDocuments'
 import { isShipmentVoided } from './shipmentVoid'
-import { isFactorBilled } from './factorBilling'
+import { isFactorBilled, isFactoredLoad } from './factorBilling'
 import type {
   Address,
   BillToParty,
@@ -208,7 +208,7 @@ export function formatCents(cents: number): string {
 
 export interface InvoiceReadinessInput {
   order: Pick<OrderRecord, 'id' | 'arStatus' | 'revenueCents' | 'references'>
-  shipment: Pick<ShipmentRecord, 'number' | 'status' | 'deletedAt' | 'voidedAt'> | null | undefined
+  shipment: (Pick<ShipmentRecord, 'number' | 'status' | 'deletedAt' | 'voidedAt'> & { revDivision?: string | null }) | null | undefined
   customer: Pick<CustomerRecord, 'requiredReferences' | 'factored' | 'billingMethod' | 'name'> | null | undefined
   settings: Pick<TmsSettings, 'defaultRequiredReferences' | 'factorRemitTo'> | null | undefined
   charges: readonly LoadChargeRecord[]
@@ -269,7 +269,7 @@ export function invoiceReadiness(input: InvoiceReadinessInput): InvoiceReadiness
   // A factored customer's bill has to tell them to pay the factor. With no factor
   // remit-to configured it would print our own address, and the customer would pay
   // money the factor has already advanced into the wrong account.
-  if (isFactorBilled(customer) && !trimmed(settings?.factorRemitTo?.name)) {
+  if (isFactoredLoad(customer, shipment?.revDivision) && !trimmed(settings?.factorRemitTo?.name)) {
     reasons.push(
       `${customer?.name ?? 'This customer'} is factored, but no factor remit-to is set up in AR settings; the invoice would tell them to pay us.`,
     )
@@ -627,8 +627,10 @@ function freightText(input: InvoiceDataInput, order: NonNullable<InvoiceDataInpu
  */
 export function invoiceData(input: InvoiceDataInput): InvoiceInput {
   const { invoice, customer, division, settings } = input
-  const factored = invoice.factored === true || isFactorBilled(customer)
-  const remitTo = invoice.remitTo ?? remitToFor(division, customer, settings)
+  // Brokered loads are never factored (Ryne 2026-11-16): a generated invoice's own `factored` decides, then the load.
+  const revDivision = (input.bundle.shipment as { revDivision?: string | null } | null | undefined)?.revDivision ?? null
+  const factored = invoice.factored === true || (invoice.factored !== false && isFactoredLoad(customer, revDivision))
+  const remitTo = invoice.remitTo ?? remitToFor(division, factored ? customer : (customer ? { ...customer, billingMethod: 'MANUAL', factored: false } : customer), settings)
   const billTo: InvoiceBillTo = invoice.billTo ?? {
     name: trimmed(customer?.name) ?? trimmed(invoice.customerName) ?? '',
     address: customer?.billingAddress ?? null,

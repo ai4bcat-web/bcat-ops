@@ -15,7 +15,8 @@
  * on a strict save (as a refusal), so the two cannot disagree about what is missing.
  * Relative imports only: the shipment Lambda bundles this file by path.
  */
-import { isFactorBilled, mcRequiredForFactoring, type CustomerType, type FactorBillingCustomer } from './factorBilling'
+import { isFactorBilled, isFactoredLoad, mcRequiredForFactoring, type CustomerType, type FactorBillingCustomer } from './factorBilling'
+import { isBrokerageRevDivision } from './reviewRequirements'
 import { ordered, placeOf } from './factorHandoff'
 import type { Stop } from '../types'
 import { customerRefOf } from './customerRef'
@@ -53,6 +54,8 @@ export interface FactorReadyInput {
   /** First pick up and last delivery; null when the route has none. */
   pickup: FactorPlace | null
   delivery: FactorPlace | null
+  /** The load's revenue division: a BROKERAGE load is never factored (Ryne 2026-11-16), so it has no factoring gaps. */
+  revDivision?: string | null
 }
 
 const text = (v: string | null | undefined): string => (v ?? '').trim()
@@ -78,7 +81,7 @@ export function factorGapsAtCreate(input: FactorReadyInput): FactorGap[] {
       gaps.push({ code: 'BILLING_METHOD', message: `${name} has no billing method. Set Factor or Manual on the customer record.` })
     }
     // Brokers only (Ryne 2026-11-14): a factored shipper has no MC to give.
-    if (mcRequiredForFactoring(customer) && !text(customer.mcNumber)) {
+    if (mcRequiredForFactoring(customer) && !isBrokerageRevDivision(input.revDivision) && !text(customer.mcNumber)) {
       gaps.push({ code: 'CUSTOMER_MC', message: `${name} has no MC number. Add it on the customer record — OTR looks the broker up by MC.` })
     }
   }
@@ -147,7 +150,7 @@ export const FACTOR_GAP_LABEL: Record<FactorGapCode, string> = {
  * read, never stored, so a fixed field clears the flag on the next read.
  */
 export function factorGapsForLoad(input: FactorReadyInput): FactorGap[] {
-  if (!isFactorBilled(input.customer)) return []
+  if (!isFactoredLoad(input.customer, input.revDivision)) return []
   return factorGapsAtCreate(input)
 }
 

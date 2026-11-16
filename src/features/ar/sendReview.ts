@@ -11,8 +11,14 @@ export function isInternalAddress(address: string): boolean {
   return address.trim().toLowerCase().endsWith('@bcatcorp.com')
 }
 
+/**
+ * A generated invoice records `factored` itself (false on a brokered load, Ryne 2026-11-16: brokered loads are never
+ * factored), so the customer's billing method only decides for an older invoice that never set the flag.
+ */
 export function isFactoredInvoice(inv: InvoiceRecord, customer: CustomerRecord | undefined): boolean {
-  return Boolean(inv.factored || inv.factoringItemId || customer?.billingMethod === 'FACTOR')
+  if (inv.factored === true || inv.factoringItemId) return true
+  if (inv.factored === false) return false
+  return customer?.billingMethod === 'FACTOR'
 }
 
 /** To and CC for a manual send, as SEND_INVOICE decides them. */

@@ -20,6 +20,7 @@ import { assertString, optionalString, assertRecord, type Caller } from '../_sha
 import { assertNotSquareInvoiced } from '../../../src/lib/invoiceDelivery'
 import { emailInvoice, generateInvoice, assertCustomerResolved, readOrderContext } from './invoices'
 import { sendToFactor } from './factor'
+import { isBrokerageRevDivision } from '../../../src/lib/reviewRequirements'
 import type { CustomerRecord, InvoiceRecord, OrderRecord } from '../../../src/types/tms'
 import {
   CARRIED_OVER_MESSAGE,
@@ -28,6 +29,7 @@ import {
   INVOICE_TABLE_NAME,
   LOAD_CHARGE_TABLE_NAME,
   ORDER_TABLE_NAME,
+  SHIPMENT_TABLE_NAME,
   getById,
   getSettings,
   isCarriedOver,
@@ -53,9 +55,14 @@ function refuse(code: string, message: string): never {
   throw new Error(`${code}: ${message}`)
 }
 
-function methodOf(customer: CustomerRecord | null): 'FACTOR' | 'MANUAL' | null {
+/**
+ * How THIS load bills: the customer's billing method, except that a load in the BROKERAGE revenue division is never
+ * factored (Ryne 2026-11-16) — it bills manually with BCAT's own remit-to whatever the customer's method says.
+ */
+function methodOf(customer: CustomerRecord | null, revDivision?: string | null): 'FACTOR' | 'MANUAL' | null {
   const method = (customer as unknown as Row | null)?.billingMethod
-  return method === 'FACTOR' || method === 'MANUAL' ? method : null
+  if (method !== 'FACTOR' && method !== 'MANUAL') return null
+  return method === 'FACTOR' && isBrokerageRevDivision(revDivision) ? 'MANUAL' : method
 }
 
 function apEmailOf(customer: CustomerRecord | null): string | null {
@@ -94,7 +101,7 @@ export async function releaseToBilling(input: Row, caller: Caller): Promise<Row>
   assertNotSquareInvoiced(context.shipment, 'releasing it to billing')
   assertCustomerResolved(context, 'releasing it to billing')
   const { order, shipment, customer } = context
-  const method = methodOf(customer)
+  const method = methodOf(customer, (shipment as unknown as Row).revDivision as string | null | undefined)
 
   if (shipment.legacyImported === true || order.invoiceId && (await isInvoiceCarriedOver(String(order.invoiceId)))) {
     refuse(RELEASE_REFUSALS.CARRIED_OVER, CARRIED_OVER_MESSAGE)
@@ -216,7 +223,10 @@ export async function sendInvoice(input: Row, caller: Caller): Promise<Row> {
 
   const customerRow = invoice.customerId ? await getById(CUSTOMER_TABLE_NAME, invoice.customerId) : null
   const customer = customerRow as unknown as CustomerRecord | null
-  const method = methodOf(customer)
+  const shipmentRow = invoice.shipmentId ? await getById(SHIPMENT_TABLE_NAME, invoice.shipmentId) : null
+  const method = (invoice as unknown as Row).factored === true || (invoice as unknown as Row).factoringItemId
+    ? 'FACTOR'
+    : methodOf(customer, shipmentRow?.revDivision as string | null | undefined)
   if (!method) refuse(RELEASE_REFUSALS.BILLING_METHOD_UNSET, `${invoice.customerName ?? 'This customer'} has no billing method.`)
   if (method === 'FACTOR') {
     throw new Error('FACTOR_NOT_EMAILED: A factored customer is never e-mailed; the bill goes through the factoring queue.')

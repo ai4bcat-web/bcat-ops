@@ -20,7 +20,7 @@ import {
   type ReleaseGateResult,
 } from '../../../src/lib/releaseGate'
 import { assertNotSquareInvoiced } from '../../../src/lib/invoiceDelivery'
-import { isFactorBilled } from '../../../src/lib/factorBilling'
+import { isFactoredLoad } from '../../../src/lib/factorBilling'
 import { factorGapsAtCreate, factoringPoNumber, routeEnds } from '../../../src/lib/factorReadyAtCreate'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { isCustomerUnresolved, unresolvedCustomerMessage } from '../../../src/lib/customerResolution'
@@ -332,7 +332,8 @@ async function factorReadyFor(orderId: string, factorRemitToName: string | null)
   if (!shipmentRow) throw new Error(`Shipment not found: ${shipmentId}`)
   const customer = customerRow as unknown as CustomerRecord | null
   if (!customer) return { orderId, factorBilled: false, ready: false, missing: ['No customer record is linked to this order.'] }
-  if (!isFactorBilled(customer)) return { orderId, factorBilled: false, ready: false, missing: [] }
+  // Brokered loads are never factored (Ryne 2026-11-16), whatever the customer's billing method.
+  if (!isFactoredLoad(customer, (shipmentRow as { revDivision?: string | null }).revDivision)) return { orderId, factorBilled: false, ready: false, missing: [] }
 
   const shipment = shipmentRow as unknown as ShipmentRecord
   const loads = loadRows as unknown as ShipmentLoad[]

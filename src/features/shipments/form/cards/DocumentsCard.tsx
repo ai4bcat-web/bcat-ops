@@ -170,8 +170,8 @@ function DocumentsCardImpl({ values, ctx, documentApi = liveDocumentApi }: CardP
   const rcNeeded = rateConRequired({
     asset: assetLoad,
     carShipper: isCarShipperLoad(ctx.bundle?.shipment ?? null),
-    customerFactors: customerFactorsForOtr(ctx.customer as { billingMethod?: string | null; factored?: boolean | null } | null),
-    customerWaivesRateCon: customerDocsNotRequired(ctx.customer as { reviewRequirements?: string[] | null } | null, null).includes('RATE_CON'),
+    customerFactors: customerFactorsForOtr(ctx.customer as { billingMethod?: string | null; factored?: boolean | null } | null, (ctx.bundle?.shipment as { revDivision?: string | null } | null | undefined)?.revDivision ?? null),
+    customerWaivesRateCon: customerDocsNotRequired(ctx.customer as { reviewRequirements?: string[] | null } | null, null, (ctx.bundle?.shipment as { revDivision?: string | null } | null | undefined)?.revDivision ?? null).includes('RATE_CON'),
   })
   const slotQueued = (docType: ShipmentDocumentType) => queuedAll.map((q, index) => ({ q, index })).filter(({ q }) => q.type === docType)
   const editDisabled = disabled || !saved

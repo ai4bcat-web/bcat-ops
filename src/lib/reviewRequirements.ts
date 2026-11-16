@@ -249,19 +249,43 @@ export function docsNotRequiredFor(requirements: readonly ReviewRequirement[]): 
 export function customerDocsNotRequired(
   customer: { reviewRequirements?: readonly (string | null)[] | null; billingMethod?: string | null; factored?: boolean | null } | null | undefined,
   settings: { reviewRequirements?: readonly (string | null)[] | null } | null | undefined,
+  revDivision?: string | null,
 ): ('POD' | 'RATE_CON')[] {
-  if (customerFactorsForOtr(customer)) return []
+  if (customerFactorsForOtr(customer, revDivision)) return []
   const own = Array.isArray(customer?.reviewRequirements) ? (customer.reviewRequirements.filter((v): v is string => typeof v === 'string')) : null
   const org = Array.isArray(settings?.reviewRequirements) ? (settings.reviewRequirements.filter((v): v is string => typeof v === 'string')) : null
   return docsNotRequiredFor(resolveReviewRequirements(own, org))
 }
 
-/** Billed through the factor (isFactorBilled's rule, restated here so this module stays import-free for the Lambda bundle). */
-export function customerFactorsForOtr(customer: { billingMethod?: string | null; factored?: boolean | null } | null | undefined): boolean {
+/** The BROKERAGE revenue division (Shipment.revDivision). */
+export const BROKERAGE_REV_DIVISION = 'BROKERAGE'
+
+/** A load in the BROKERAGE revenue division. */
+export function isBrokerageRevDivision(revDivision: string | null | undefined): boolean {
+  return String(revDivision ?? '').trim().toUpperCase() === BROKERAGE_REV_DIVISION
+}
+
+/**
+ * Is THIS LOAD billed through the factor (OTR)? The one rule (Ryne 2026-11-16): the customer factors (isFactorBilled's
+ * rule, restated here so this module stays import-free for the Lambda bundle) AND the load is not in the BROKERAGE
+ * revenue division — brokered loads are never factored, whatever the customer's billing method; they invoice manually
+ * with BCAT's own remit-to. Called without a division it answers for the customer alone (customer-level screens).
+ */
+export function customerFactorsForOtr(
+  customer: { billingMethod?: string | null; factored?: boolean | null } | null | undefined,
+  revDivision?: string | null,
+): boolean {
   if (!customer) return false
+  if (isBrokerageRevDivision(revDivision)) return false
   if (customer.billingMethod === 'MANUAL') return false
   return customer.billingMethod === 'FACTOR' || customer.factored === true
 }
+
+/** The same rule under its load-level name. */
+export const isFactoredLoad = (
+  customer: { billingMethod?: string | null; factored?: boolean | null } | null | undefined,
+  revDivision: string | null | undefined,
+): boolean => customerFactorsForOtr(customer, revDivision)
 
 /**
  * Does this customer need an AP e-mail before its loads leave Load Review (Ryne 2026-11-16: not for AUTO SHIPPER)?
@@ -271,9 +295,10 @@ export function customerFactorsForOtr(customer: { billingMethod?: string | null;
 export function customerApEmailRequired(
   customer: { reviewRequirements?: readonly (string | null)[] | null; billingMethod?: string | null; factored?: boolean | null } | null | undefined,
   settings: { reviewRequirements?: readonly (string | null)[] | null } | null | undefined,
+  revDivision?: string | null,
 ): boolean {
   if (!customer) return true
-  if (customerFactorsForOtr(customer)) return true
+  if (customerFactorsForOtr(customer, revDivision)) return true
   const own = Array.isArray(customer.reviewRequirements) ? customer.reviewRequirements.filter((v): v is string => typeof v === 'string') : null
   const org = Array.isArray(settings?.reviewRequirements) ? (settings.reviewRequirements.filter((v): v is string => typeof v === 'string')) : null
   return resolveReviewRequirements(own, org).includes('apEmail')

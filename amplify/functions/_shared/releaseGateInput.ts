@@ -228,20 +228,24 @@ export async function loadReleaseGateInput(
   // The customer's tender on the load counts on any load (presentDocTypes), so the gate matches the board and the box.
   const ownFleetTenderOnLoad = orderLoads.some((load) => isOutsideRateConKey(load.rateConfirmKey as string | null | undefined))
 
+  // Brokered loads are never factored (Ryne 2026-11-16): the load's division is part of every factored check here.
+  const loadRevDivision = shipment.revDivision == null ? null : String(shipment.revDivision)
+  const loadFactors = customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null, loadRevDivision)
   const notRequiredDocTypes = customerDocsNotRequired(
     customer as { reviewRequirements?: string[] | null } | null,
     settings as { reviewRequirements?: string[] | null } | null,
+    loadRevDivision,
   )
 
   return {
     ownFleet,
     ownFleetTenderOnLoad,
     // One rule for every load: car shipping needs none unless the customer factors (OTR), see rateConRequired.
-    customerFactors: customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null),
+    customerFactors: loadFactors,
     rateConRequired: rateConRequired({
       asset: ownFleet,
       carShipper: isCarShipperLoad(shipment as { revDivision?: string | null }),
-      customerFactors: customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null),
+      customerFactors: loadFactors,
       customerWaivesRateCon: notRequiredDocTypes.includes('RATE_CON'),
     }),
     shipment: {
@@ -261,10 +265,7 @@ export async function loadReleaseGateInput(
       settings as Pick<TmsSettings, 'defaultRequiredDocs'> | null,
     ).types,
     // POD / RC the customer does not need to invoice (its Load Review list), e.g. AUTO SHIPPER.
-    notRequiredDocTypes: customerDocsNotRequired(
-      customer as { reviewRequirements?: string[] | null } | null,
-      settings as { reviewRequirements?: string[] | null } | null,
-    ),
+    notRequiredDocTypes,
     // What this order's loads ask for on top of the customer's list (SET_LOAD_REQUIRED_DOCS).
     extraDocTypes: loadExtraDocTypes(orderLoads as { requiredDocTypes?: string[] | null }[]),
     requiredReferenceCodes: codes,
