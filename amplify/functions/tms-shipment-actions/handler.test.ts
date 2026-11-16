@@ -5532,6 +5532,23 @@ describe('READY_TO_INVOICE', () => {
       const extrasOf = async (ids: DocIds) =>
         ((await call('REVIEW_LOAD', { shipmentId: ids.shipmentId }, REVIEWER)) as { extras: { code: string }[] }).extras.map((e) => e.code)
 
+      it('reads the reference the board shows: a load tmsId counts when the order has no references (14932)', async () => {
+        const refOnly = { customer: { reviewRequirements: ['referenceNumber'] } }
+        const ids = await reviewable(refOnly)
+        table(TABLES.order).set(ids.orderId, { ...table(TABLES.order).get(ids.orderId)!, references: [] })
+        table(TABLES.load).set(ids.loadId, { ...table(TABLES.load).get(ids.loadId)!, tmsId: '3733724' })
+        expect(await extrasOf(ids)).toEqual([])
+        // No reference anywhere still fails.
+        table(TABLES.load).set(ids.loadId, { ...table(TABLES.load).get(ids.loadId)!, tmsId: null })
+        expect(await extrasOf(ids)).toEqual(['REFERENCE_NUMBER_MISSING'])
+        // A CUSTOMER_REF reference alone counts too.
+        table(TABLES.order).set(ids.orderId, {
+          ...table(TABLES.order).get(ids.orderId)!,
+          references: [{ code: 'CUSTOMER_REF', label: 'Customer ref', value: '1358596', level: 'ORDER', visibility: 'ALL' }],
+        })
+        expect(await extrasOf(ids)).toEqual([])
+      })
+
       it('reads the customer list first, then the org default, then the built-in seven', async () => {
         const noRep = { rep: false, division: false }
         expect(await extrasOf(await reviewable({ ...noRep, customer: { reviewRequirements: ['salesRep'] } }))).toEqual(['SALES_REP_MISSING'])
