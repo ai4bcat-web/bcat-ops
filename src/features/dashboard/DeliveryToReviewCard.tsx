@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { Timer } from 'lucide-react'
 import { useShipments } from '@/hooks/useShipments'
 import { waitingForReview, weeklyReviewLag } from '@/lib/reviewLag'
-import { DashboardSummaryCard, type DashboardSummaryRow } from './DashboardSummaryCard'
+import { DashboardSummaryCard } from './DashboardSummaryCard'
 
 const days = (n: number | null) => (n == null ? '—' : `${n.toFixed(1)} d`)
 
@@ -45,10 +45,33 @@ export function DeliveryToReviewCard() {
   const lastWeek = weeks[weeks.length - 2]
   const change = thisWeek?.avgDays != null && lastWeek?.avgDays != null ? thisWeek.avgDays - lastWeek.avgDays : null
 
-  const weekRows: DashboardSummaryRow[] = [...weeks].reverse().slice(1).map((w) => ({
-    key: `wk-${w.week}`, label: weekLabel(w.week), count: w.count || null, cents: null, valueText: days(w.avgDays),
-    color: 'var(--tms-muted)', title: w.avgDays == null ? 'Nothing pushed to Load Review that week (or before Load Review existed)' : `${w.count} loads pushed`,
-  }))
+  // Weeks with something pushed, oldest first, as a small bar strip (hover a bar for its week).
+  const shown = weeks.filter((w) => w.avgDays != null)
+  const maxDays = Math.max(1, ...shown.map((w) => w.avgDays ?? 0))
+  const bars = shown.length < 2 ? null : (
+    <div data-testid="review-lag-weeks" style={{ marginTop: 12 }}>
+      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)', marginBottom: 6 }}>
+        Weekly average
+      </div>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 40 }}>
+        {shown.map((w, i) => {
+          const last = i === shown.length - 1
+          return (
+            <div
+              key={w.week}
+              title={`${weekLabel(w.week)} · ${days(w.avgDays)} · ${w.count} pushed`}
+              style={{
+                flex: 1, minWidth: 6, borderRadius: 3,
+                height: `${Math.max(8, Math.round(((w.avgDays ?? 0) / maxDays) * 100))}%`,
+                background: last ? 'var(--tms-primary)' : 'var(--tms-muted)',
+                opacity: last ? 1 : 0.55,
+              }}
+            />
+          )
+        })}
+      </div>
+    </div>
+  )
 
   return (
     <DashboardSummaryCard
@@ -64,7 +87,7 @@ export function DeliveryToReviewCard() {
         color: 'var(--tms-badge-orange)', title: 'Delivered, or past the delivery date, and not pushed to Load Review yet',
         onOpen: () => navigate('/tms/shipments'),
       }]}
-      groups={[{ key: 'weeks', label: 'Earlier weeks', rows: weekRows }]}
+      extra={bars}
       onOpen={() => navigate('/tms/load-review')}
     />
   )
