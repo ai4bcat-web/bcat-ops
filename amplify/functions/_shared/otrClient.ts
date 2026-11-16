@@ -191,8 +191,15 @@ export interface OtrClientConfig {
   password: string
   /** Injected in tests. Defaults to global fetch. */
   fetchImpl?: typeof fetch
+  /** Pause before the one retry of a transient "Login Failed" sign-in. Default 1500. */
+  loginRetryDelayMs?: number
   /** Seconds of headroom before expiry at which we re-auth. Default 300. */
   refreshSkewSeconds?: number
+}
+
+/** OTR's sign-in answers 400 {"error":"Login Failed"} now and then for valid credentials. */
+export function isTransientLoginFailure(e: OtrError): boolean {
+  return e.status === 400 && /login failed/i.test(String(e.body ?? ''))
 }
 
 /** v2 bases are path-versioned as `/carrier-tms/<n>`; v1 was `/CarrierTmsV3`. */
@@ -230,14 +237,36 @@ export class OtrClient {
   /** A token for the upload host, cached separately — v1 and v2 tokens are not swappable. */
   private async uploadAccessToken(): Promise<string> {
     const base = this.cfg.uploadBaseUrl
-    if (!base) return this.accessToken()
+    // Same host as invoices (production: both v2) — one token serves both. Signing in
+    // again for every document is what OTR answered with an intermittent
+    // 400 {"error":"Login Failed"} (14937, 2026-11-16, and ~12 others since 10/20).
+    if (!base || base === this.cfg.baseUrl) return this.accessToken()
     if (this.uploadToken && Date.now() < this.uploadToken.expiresAt - this.skewMs) {
       return this.uploadToken.accessToken
     }
     return this.authenticate(base)
   }
 
+  /**
+   * Sign in, retrying once when OTR answers its intermittent 400 {"error":"Login Failed"}.
+   * The same credentials sign in fine moments later (every failure in the logs succeeded
+   * on the user's next click), so a short pause and one more try is the whole fix.
+   */
   private async authenticate(base = this.cfg.baseUrl): Promise<string> {
+    try {
+      return await this.signIn(base)
+    } catch (e) {
+      if (!(e instanceof OtrError) || !isTransientLoginFailure(e)) throw e
+      await this.pause(this.cfg.loginRetryDelayMs ?? 1500)
+      return this.signIn(base)
+    }
+  }
+
+  private pause(ms: number): Promise<void> {
+    return ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve()
+  }
+
+  private async signIn(base: string): Promise<string> {
     const body = new URLSearchParams({
       username: this.cfg.username,
       password: this.cfg.password,
