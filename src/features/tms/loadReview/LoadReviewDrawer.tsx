@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CheckCircle2, XCircle } from 'lucide-react'
 import { RepPicker } from '@/components/RepPicker'
@@ -19,11 +19,15 @@ import { deliveredText, deliveredTimeOf } from './reviewStatus'
 import { StatusPill } from '@/features/shipments/StatusPill'
 import { LoadReviewDocuments } from './LoadReviewDocuments'
 import { LoadReviewCharges } from './LoadReviewCharges'
+import { ReviewFixPanel } from './ReviewFixPanel'
+import { FIELD_ANCHOR, anchorForReason, scrollToFix } from './reviewFix'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
 
-export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }: {
+export function LoadReviewDrawer({ row, focus, onClose, onRefresh, onMoved, onFailure }: {
   row: ShipmentListRow
+  /** A review column (LoadReviewFieldKey) the reviewer clicked: the rail opens scrolled to its editor. */
+  focus?: string | null
   onClose: () => void
   onRefresh: () => Promise<void>
   onMoved: () => void
@@ -44,6 +48,13 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
       .catch((err: unknown) => { if (live) setError(err instanceof Error ? err.message : String(err)) })
     return () => { live = false }
   }, [row.id])
+  const focused = useRef(false)
+  useEffect(() => {
+    if (!result || focused.current || !focus) return
+    const anchor = FIELD_ANCHOR[focus]
+    focused.current = true
+    if (anchor) window.setTimeout(() => scrollToFix(anchor), 50)
+  }, [result, focus])
   const currentDivision = result?.revDivision ?? row.revDivision
   const verdict = evaluateLoadReview({ row: result ? { ...row, salesRepId: result.salesRepId, revDivision: result.revDivision, pendingDocReviewCount: result.pendingDocReviewCount } : row, gate: result?.releaseGate, extras: result?.extras, revDivisionActive: divisions ? divisions.some((division) => division.code === currentDivision && division.active) : undefined })
   const reasons = failingReasons(verdict)
@@ -144,8 +155,9 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
         {verdict.checks[key].ok ? <CheckCircle2 size={13} aria-label="Passed" /> : <XCircle size={13} aria-label="Needs fixing" />}{LOAD_REVIEW_CHECK_LABEL[key]}
       </li>)}</ul>
     </div>}
+    {result && <ReviewFixPanel shipmentId={row.id} readOnly={released} busy={busy} failing={new Set(reasons.map((r) => r.code))} onSaved={changed} />}
     {LOAD_REVIEW_CHECKS.map((key) => <TmsCard key={key} className={`lr-check ${verdict.checks[key].ok ? 'lr-check-ok' : 'lr-check-bad'}`}
-      title={<span className="lr-check-title">{verdict.checks[key].ok ? <CheckCircle2 size={16} aria-label="Passed" className="lr-icon-ok" /> : <XCircle size={16} aria-label="Needs fixing" className="lr-icon-bad" />}{LOAD_REVIEW_CHECK_LABEL[key]}</span>}
+      title={<span id={`lr-check-${key}`} className="lr-check-title">{verdict.checks[key].ok ? <CheckCircle2 size={16} aria-label="Passed" className="lr-icon-ok" /> : <XCircle size={16} aria-label="Needs fixing" className="lr-icon-bad" />}{LOAD_REVIEW_CHECK_LABEL[key]}</span>}
       actions={<TmsBadge tone={verdict.checks[key].ok ? 'green' : 'red'}>{verdict.checks[key].ok ? 'OK' : `${verdict.checks[key].reasons.length} ${verdict.checks[key].reasons.length === 1 ? 'issue' : 'issues'}`}</TmsBadge>}>
       {key !== 'charges' && <p className="lr-check-value">{values[key]}</p>}
       {verdict.checks[key].reasons.length > 0 && <ul className="lr-reasons">{verdict.checks[key].reasons.map((reason, index) => <li key={`${reason.code}-${index}`}><XCircle size={14} aria-hidden className="lr-icon-bad" />{reason.message}</li>)}</ul>}
@@ -156,7 +168,12 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
         <TmsSelect aria-label="Subdivision" value={subdivision} disabled={busy || !children.length} onChange={(event) => setSubdivision(event.target.value)}><option value="">Whole division</option>{children.map((d) => <option key={d.id} value={d.code}>{d.name}</option>)}</TmsSelect>
         <TmsButton disabled={busy || !division} onClick={() => void fix(() => setRevTag({ shipmentId: row.id, divisionCode: division, subdivisionCode: subdivision || undefined }))}>Set division</TmsButton>
       </div>}
-      {verdict.checks[key].reasons.map((reason, index) => reason.action?.kind === 'OPEN_TAB' ? <p key={`${reason.code}-${index}`}>{shipmentLink(reason.action.tab, `Fix in ${reason.action.tab} tab`, true)}</p> : null)}
+      {verdict.checks[key].reasons.map((reason, index) => {
+        if (reason.action?.kind !== 'OPEN_TAB') return null
+        const anchor = anchorForReason(reason.code, reason.action.tab)
+        // Every fix is made in this rail; the reason jumps to its editor instead of sending the reviewer to another tab.
+        return anchor === key ? null : <p key={`${reason.code}-${index}`}><TmsButton size="sm" variant="ghost" onClick={() => scrollToFix(anchor)}>{`Fix: ${reason.message}`}</TmsButton></p>
+      })}
       {key === 'documents' && <LoadReviewDocuments shipmentId={row.id} readOnly={released} disabled={busy} onChanged={changed} />}
       {key === 'documents' && <p>{canOpen ? <Link to={DOCS_LANDING}>Review uploads</Link> : <span title="Needs the Shipments grant">Review uploads</span>}</p>}
     </TmsCard>)}

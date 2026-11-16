@@ -49,6 +49,14 @@ describe('evaluateReviewRequirements', () => {
     expect(customerDocsNotRequired({ reviewRequirements: ['salesRep', 'podReceived'] }, null)).toEqual(['RATE_CON'])
   })
 
+  it('never waives POD or RC for a customer we factor: OTR needs both', () => {
+    const waived = { reviewRequirements: ['salesRep'] }
+    expect(customerDocsNotRequired({ ...waived, billingMethod: 'MANUAL' }, null)).toEqual(['POD', 'RATE_CON'])
+    expect(customerDocsNotRequired({ ...waived, billingMethod: 'FACTOR' }, null)).toEqual([])
+    expect(customerDocsNotRequired({ ...waived, factored: true }, null)).toEqual([])
+    expect(customerDocsNotRequired({ ...waived, factored: true, billingMethod: 'MANUAL' }, null)).toEqual(['POD', 'RATE_CON'])
+  })
+
   it('judges the same facts differently per customer list', () => {
     const facts = { ...complete, salesRepId: null, expenseCents: null, profitCents: null }
     expect(evaluateReviewRequirements(['revDivision', 'podReceived'], facts).ok).toBe(true)

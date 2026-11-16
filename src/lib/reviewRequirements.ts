@@ -182,12 +182,25 @@ export function docsNotRequiredFor(requirements: readonly ReviewRequirement[]): 
   return out
 }
 
-/** The same, straight from the customer row and the org settings row (either may be absent). */
+/**
+ * The same, straight from the customer row and the org settings row (either may be absent).
+ *
+ * A customer we factor can never waive them: OTR will not buy an invoice without the POD and the rate confirmation
+ * (assembleOtrInvoice's missingDocuments), so Load Review must hold the load until both are on file (Ryne 2026-11-16).
+ */
 export function customerDocsNotRequired(
-  customer: { reviewRequirements?: readonly (string | null)[] | null } | null | undefined,
+  customer: { reviewRequirements?: readonly (string | null)[] | null; billingMethod?: string | null; factored?: boolean | null } | null | undefined,
   settings: { reviewRequirements?: readonly (string | null)[] | null } | null | undefined,
 ): ('POD' | 'RATE_CON')[] {
+  if (customerFactorsForOtr(customer)) return []
   const own = Array.isArray(customer?.reviewRequirements) ? (customer.reviewRequirements.filter((v): v is string => typeof v === 'string')) : null
   const org = Array.isArray(settings?.reviewRequirements) ? (settings.reviewRequirements.filter((v): v is string => typeof v === 'string')) : null
   return docsNotRequiredFor(resolveReviewRequirements(own, org))
+}
+
+/** Billed through the factor (isFactorBilled's rule, restated here so this module stays import-free for the Lambda bundle). */
+export function customerFactorsForOtr(customer: { billingMethod?: string | null; factored?: boolean | null } | null | undefined): boolean {
+  if (!customer) return false
+  if (customer.billingMethod === 'MANUAL') return false
+  return customer.billingMethod === 'FACTOR' || customer.factored === true
 }

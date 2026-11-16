@@ -256,7 +256,7 @@ export function LoadReviewPage() {
         const label = docLink && (value || cell.ok === false) ? <Link to={docLink} onClick={(e) => e.stopPropagation()}>{value || 'NEED'}</Link> : <span>{value || (cell.ok === false ? 'NEED' : '')}</span>
         if (cell.ok === false) {
           const why = cell.reasons.join('; ')
-          return <span className="aa-field aa-check-fail" data-testid={`field-${key}`} data-state="need" title={why} aria-label={`${LOAD_REVIEW_FIELD_LABEL[key]}: ${why}`}>{value && docLink == null ? <><span className="aa-field-value">{value}</span><X size={14} aria-hidden="true" /><span>NEED</span></> : <><X size={14} aria-hidden="true" />{label}</>}</span>
+          return <span className="aa-field aa-check-fail aa-fixable" data-testid={`field-${key}`} data-state="need" title={`${why} — click to fix here`} aria-label={`${LOAD_REVIEW_FIELD_LABEL[key]}: ${why}`} onClick={(e) => { e.stopPropagation(); update({ shipment: row.id, fix: key }) }}>{value && docLink == null ? <><span className="aa-field-value">{value}</span><X size={14} aria-hidden="true" /><span>NEED</span></> : <><X size={14} aria-hidden="true" />{label}</>}</span>
         }
         return <span className="aa-field" data-testid={`field-${key}`} data-state={cell.ok ? 'ok' : 'unknown'} title={cell.ok ? 'Passed' : undefined}>{label}{cell.ok && <Check size={14} aria-label="Passed" className="aa-check-pass" />}</span>
       },
@@ -267,10 +267,11 @@ export function LoadReviewPage() {
         ? <span className="aa-field" data-testid="field-ready" data-state="ok"><Check size={14} aria-label="Ready" className="text-[color:var(--tms-badge-green)]" /><span>Ready</span></span>
         : <span className="aa-field aa-check-fail" data-testid="field-ready" data-state="need" title={failingReasons(verdict).map((r) => r.message).join('; ')}><X size={14} aria-hidden="true" /><span>{reviewReadyText(verdict)}</span></span>
     } },
-    { key: 'whatToFix', header: 'What to fix', render: ({ verdict }) => {
+    { key: 'whatToFix', header: 'What to fix', render: ({ row, verdict }) => {
       const items = verdict ? whatToFixItems(verdict) : []
       if (items.length === 0) return <span className="tms-muted" data-testid="what-to-fix">{verdict ? 'Nothing' : '—'}</span>
-      return <span className="aa-what-to-fix" data-testid="what-to-fix">{items.map((text) => <span key={text} className="aa-fix-item">{text}</span>)}</span>
+      const first = verdict ? LOAD_REVIEW_FIELDS.find((k) => reviewFieldCell(row, verdict, k).ok === false) : undefined
+      return <span className="aa-what-to-fix aa-fixable" data-testid="what-to-fix" title="Click to fix in the rail" onClick={(e) => { e.stopPropagation(); update({ shipment: row.id, fix: first ?? null }) }}>{items.map((text) => <span key={text} className="aa-fix-item">{text}</span>)}</span>
     } },
     { key: 'status', header: tab === 'released' ? 'Released by / at' : 'Status', render: ({ row, verdict }) => { if (tab === 'released') { const entry = audit[row.id] ?? (row.orderIds ?? []).map((id) => audit[id]).find(Boolean); return <>{entry?.user ?? 'Audit unavailable'} · {formatDateTime(entry?.at ?? row.readyToInvoiceAt)} {canOpen && <Link to={`/tms/shipments/${row.id}?tab=invoicing`}>Open invoicing</Link>}</> } return <TmsBadge tone={verdict?.ok ? 'green' : 'orange'}>{verdict?.ok ? 'Looks ready' : `${verdict ? failingReasons(verdict).length : 0} to fix`}</TmsBadge> } },
   ]
@@ -327,7 +328,7 @@ export function LoadReviewPage() {
           onFilterChange={setDenseFilter}
           onReorder={(from, to) => prefs.setColumns(reorderKeys(prefs.columns, from, to))}
           onResize={prefs.setWidth}
-          onRowClick={({ row }) => update({ shipment: row.id })}
+          onRowClick={({ row }) => update({ shipment: row.id, fix: null })}
           empty={loading || partial ? 'Loading review queue…' : queue.length ? 'Nothing here.' : 'Nothing is waiting for review.'}
         />
         {filtered.length > page.length && (
@@ -341,6 +342,6 @@ export function LoadReviewPage() {
     {tab !== 'released' && <ReviewBatchEdit ids={editChosen} email={email} onDone={() => { setSelected(new Set()); void refresh() }} />}
     {!!chosen.length && <div className="aa-review-actions"><TmsButton variant="primary" disabled={!canRelease} title={canRelease ? undefined : LOAD_REVIEW_GRANT_MESSAGE} onClick={() => setConfirm(true)}>Move {chosen.length} to billing</TmsButton>{!canRelease && <p role="note" className="tms-muted">{LOAD_REVIEW_GRANT_MESSAGE}</p>}</div>}
     <TmsDialog open={confirm} onOpenChange={setConfirm} title={`Move ${chosen.length} to billing`} description={`These ${chosen.length} shipments go to accounting. The server re-checks each one.`} footer={<TmsButton disabled={busy || !chosen.length} variant="primary" onClick={() => void releaseBatch()}>Confirm move to billing</TmsButton>} />
-    {openRow && <LoadReviewDrawer key={openRow.id} row={openRow} onClose={() => update({ shipment: null })} onRefresh={refresh} onFailure={(message) => setAttempts((old) => ({ ...old, [openRow.id]: message }))} onMoved={() => { setNotice(`${openRow.number}: Moved to billing`); const index = filtered.findIndex(({ row }) => row.id === openRow.id); update({ shipment: filtered[index + 1]?.row.id ?? null }) }} />}
+    {openRow && <LoadReviewDrawer key={`${openRow.id}:${params.get('fix') ?? ''}`} row={openRow} focus={params.get('fix')} onClose={() => update({ shipment: null, fix: null })} onRefresh={refresh} onFailure={(message) => setAttempts((old) => ({ ...old, [openRow.id]: message }))} onMoved={() => { setNotice(`${openRow.number}: Moved to billing`); const index = filtered.findIndex(({ row }) => row.id === openRow.id); update({ shipment: filtered[index + 1]?.row.id ?? null }) }} />}
   </div>
 }
