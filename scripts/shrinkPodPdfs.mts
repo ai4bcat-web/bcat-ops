@@ -31,13 +31,13 @@ const s3 = new S3Client({ region: 'us-east-1' })
 const t = (model: string) => `${model}-${suffix}`
 const TYPES = new Set(['POD', 'RATE_CON', 'CUSTOMER_RATE_CON'])
 
-async function scanAll(model: string, filter?: { expression: string; values: Row }): Promise<Row[]> {
+async function scanAll(model: string, filter?: { expression: string; values: Row; names?: Record<string, string> }): Promise<Row[]> {
   const out: Row[] = []
   let ExclusiveStartKey: Row | undefined
   do {
     const r = await doc.send(new ScanCommand({
       TableName: t(model), ExclusiveStartKey,
-      ...(filter ? { FilterExpression: filter.expression, ExpressionAttributeValues: filter.values } : {}),
+      ...(filter ? { FilterExpression: filter.expression, ExpressionAttributeValues: filter.values, ...(filter.names ? { ExpressionAttributeNames: filter.names } : {}) } : {}),
     }))
     out.push(...((r.Items ?? []) as Row[]))
     ExclusiveStartKey = r.LastEvaluatedKey as Row | undefined
@@ -51,11 +51,11 @@ async function bytesOf(key: string): Promise<Uint8Array> {
 }
 
 const mb = (n: number) => (n / 1048576).toFixed(2)
-const rows = (await scanAll('ShipmentDocument', { expression: '#s = :a', values: { ':a': 'ACTIVE' } }).catch(() => scanAll('ShipmentDocument')))
+const rows = (await scanAll('ShipmentDocument', { expression: '#s = :a', values: { ':a': 'ACTIVE' }, names: { '#s': 'status' } }))
   .filter((r) => TYPES.has(String(r.type)) && r.status === 'ACTIVE' && /pdf/i.test(String(r.contentType ?? 'application/pdf')) && typeof r.s3Key === 'string')
 let candidates = rows.filter((r) => Number(r.sizeBytes ?? 0) >= MIN_BYTES || Number(r.sizeBytes ?? 0) === 0)
 if (onlyPro) {
-  const ship = (await scanAll('Shipment', { expression: '#n = :n', values: { ':n': onlyPro } }).catch(() => []))
+  const ship = (await scanAll('Shipment', { expression: '#n = :n', values: { ':n': onlyPro }, names: { '#n': 'number' } }))
   const ids = new Set(ship.map((s) => String(s.id)))
   candidates = candidates.filter((r) => ids.has(String(r.shipmentId)))
 }
