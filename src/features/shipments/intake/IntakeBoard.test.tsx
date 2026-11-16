@@ -37,6 +37,8 @@ async function openFlag(testId: 'intake-flag-dup' | 'intake-flag-built' | 'intak
   return screen.findByRole('dialog')
 }
 
+const groupKeys = () => Array.from(document.querySelectorAll('[data-testid="dense-group"]')).map((g) => g.getAttribute('data-group-key'))
+
 function renderBoard(url = '/tms/shipments/intake', isOwner = true) {
   vi.spyOn(auth, 'useAuth').mockReturnValue({ isOwner, isAdmin: false, hasPageAccess: () => true } as unknown as auth.AuthContextValue)
   return render(
@@ -79,26 +81,29 @@ describe('IntakeBoard', () => {
     expect(screen.getAllByText('Brokerage').length).toBeGreaterThanOrEqual(2)
   })
 
-  it('has one sub-tab per active division with its open count, plus Unassigned, and none for archived divisions', async () => {
+  it('By rev division sections the table: a header per active division that has rows, plus Unassigned; no sub-tab chips', async () => {
     renderBoard('/tms/shipments/intake?view=division')
-    expect(await screen.findByRole('tab', { name: /Brokerage/ })).toHaveTextContent('2')
-    expect(screen.getByRole('tab', { name: /Logistics/ })).toHaveTextContent('0')
-    expect(screen.getByRole('tab', { name: /Unassigned/ })).toHaveTextContent('1')
-    expect(screen.queryByRole('tab', { name: /Old division/ })).not.toBeInTheDocument()
     expect(await screen.findByText('First tender')).toBeInTheDocument()
     expect(screen.getByText('Stray tender')).toBeInTheDocument()
+    expect(groupKeys()).toEqual(['BRK', 'unassigned'])
+    expect(screen.getByTestId('intake-group-count-BRK')).toHaveTextContent('2')
+    expect(screen.getByTestId('intake-group-count-unassigned')).toHaveTextContent('1')
+    expect(screen.queryByTestId('intake-group-LOG')).toBeNull()
+    expect(screen.queryByText('Old division')).toBeNull()
+    expect(screen.queryByRole('tablist', { name: 'Rev division' })).toBeNull()
   })
 
-  it('shows the Unrouted rows under the Unrouted tab', async () => {
+  it('an old ?division= link opens the grouped By rev division view with every row', async () => {
     renderBoard('/tms/shipments/intake?division=unrouted')
     expect(await screen.findByText('Stray tender')).toBeInTheDocument()
-    expect(screen.queryByText('First tender')).not.toBeInTheDocument()
+    expect(screen.getByText('First tender')).toBeInTheDocument()
+    expect(screen.getByTestId('intake-view-division')).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('explains a division with no intake address and lists it in a compact owner notice that can be hidden', async () => {
+  it('lists divisions with no intake address in a compact owner notice that can be hidden', async () => {
     window.localStorage.clear()
-    renderBoard('/tms/shipments/intake?division=NOA')
-    expect(await screen.findByText('No intake e-mail set for No address')).toBeInTheDocument()
+    renderBoard('/tms/shipments/intake?view=division')
+    await screen.findByText('First tender')
     expect(screen.getByTestId('intake-divisions-banner')).toHaveTextContent('No address')
     fireEvent.click(screen.getByTestId('intake-divisions-banner-hide'))
     expect(screen.queryByTestId('intake-divisions-banner')).toBeNull()
@@ -109,7 +114,7 @@ describe('IntakeBoard', () => {
     renderBoard('/tms/shipments/intake?view=division', false)
     await screen.findByText('First tender')
     expect(screen.queryByTestId('intake-divisions-banner')).not.toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /Unassigned/ })).toBeInTheDocument()
+    expect(screen.getByTestId('intake-group-unassigned')).toBeInTheDocument()
   })
 
   it('lists open loads only: no Open / Moved / Dismissed tabs, and a row opens the review page', async () => {
@@ -165,7 +170,6 @@ describe('IntakeBoard', () => {
         intakeRow({ id: 'il:d', divisionCode: null, subject: 'Stray tender', fields: intakeFields({ customerId: null, customerName: 'Typed Name' }) }),
       ])
     })
-    const selectedTabs = () => screen.getAllByRole('tab').filter((t) => t.getAttribute('aria-selected') === 'true').map((t) => t.getAttribute('data-testid')).filter((id) => id != null)
 
     it('opens on All loads with every row, even when a different view was remembered', async () => {
       window.localStorage.setItem('tms:intake:view:anon', 'customer')
@@ -176,48 +180,53 @@ describe('IntakeBoard', () => {
       expect(screen.queryByTestId('intake-group-all')).toBeNull()
     })
 
-    it('By rev division: sub-tabs with counts that sum to All, URL reflects the view and group, rows narrow to the group', async () => {
+    it('By rev division: one collapsible section per division with its count; the URL keeps only the view', async () => {
       renderBoard()
       await screen.findByText('First tender')
       fireEvent.click(screen.getByTestId('intake-view-division'))
-      expect(screen.getByTestId('where')).toHaveTextContent('?view=division')
-      expect(screen.getByTestId('intake-group-count-all')).toHaveTextContent('4')
+      expect(screen.getByTestId('where').textContent).toBe('/tms/shipments/intake?view=division')
+      expect(groupKeys()).toEqual(['BRK', 'LOG', 'unassigned'])
       expect(screen.getByTestId('intake-group-count-BRK')).toHaveTextContent('2')
       expect(screen.getByTestId('intake-group-count-LOG')).toHaveTextContent('1')
       expect(screen.getByTestId('intake-group-count-unassigned')).toHaveTextContent('1')
       fireEvent.click(screen.getByTestId('intake-group-LOG'))
-      expect(screen.getByTestId('where')).toHaveTextContent('view=division&group=LOG')
+      expect(screen.getByTestId('intake-group-LOG')).toHaveAttribute('aria-expanded', 'false')
+      expect(screen.queryByText('Zed tender')).not.toBeInTheDocument()
+      expect(screen.getByText('First tender')).toBeInTheDocument()
+      expect(screen.getByTestId('intake-group-count-LOG')).toHaveTextContent('1')
+      expect(screen.getByTestId('where').textContent).toBe('/tms/shipments/intake?view=division')
+      fireEvent.click(screen.getByTestId('intake-group-LOG'))
       expect(screen.getByText('Zed tender')).toBeInTheDocument()
-      expect(screen.queryByText('First tender')).not.toBeInTheDocument()
-      expect(selectedTabs()).toEqual(['intake-view-division', 'intake-group-LOG'])
     })
 
-    it('By customer: most rows first, Not matched last, and the choice is remembered without changing the default', async () => {
+    it('By customer: most rows first, Not matched its own section last, and the choice is remembered without changing the default', async () => {
       renderBoard('/tms/shipments/intake?view=customer')
       await screen.findByText('First tender')
-      const order = screen.getAllByRole('tab').map((t) => t.getAttribute('data-testid')).filter((id) => id?.startsWith('intake-group-') && !id.includes('count'))
-      expect(order).toEqual(['intake-group-all', 'intake-group-c1', 'intake-group-c2', 'intake-group-not-matched'])
+      expect(groupKeys()).toEqual(['c1', 'c2', 'not-matched'])
       expect(screen.getByTestId('intake-group-not-matched')).toHaveTextContent('Not matched')
-      fireEvent.click(screen.getByTestId('intake-group-not-matched'))
-      expect(screen.getByText('Stray tender')).toBeInTheDocument()
-      expect(screen.queryByText('First tender')).not.toBeInTheDocument()
+      for (const t of ['First tender', 'Second tender', 'Zed tender', 'Stray tender']) expect(screen.getByText(t)).toBeInTheDocument()
       expect(window.localStorage.getItem('tms:intake:view:anon')).toBe('customer')
       fireEvent.click(screen.getByTestId('intake-view-all'))
       expect(screen.getByTestId('where').textContent).toBe('/tms/shipments/intake')
+      expect(groupKeys()).toEqual([])
     })
 
-    it('a stale group falls back to All of that view', async () => {
+    it('an old ?group= in the link is ignored: the whole queue shows, grouped', async () => {
       renderBoard('/tms/shipments/intake?view=customer&group=gone')
       expect(await screen.findByText('First tender')).toBeInTheDocument()
-      expect(screen.getByTestId('intake-group-all')).toHaveAttribute('aria-selected', 'true')
       expect(screen.getByText('Stray tender')).toBeInTheDocument()
+      expect(groupKeys()).toEqual(['c1', 'c2', 'not-matched'])
     })
 
-    it('column filters, search and status tabs apply within the chosen tab; counts stay on the unfiltered queue', async () => {
-      renderBoard('/tms/shipments/intake?view=division&group=BRK')
-      await screen.findByTestId('intake-group-count-BRK')
-      expect(screen.getByTestId('intake-group-count-BRK')).toHaveTextContent('2')
-      expect(screen.getByTestId('intake-group-count-all')).toHaveTextContent('4')
+    it('keeps the table sort inside each section: newest received first by default', async () => {
+      vi.mocked(api.listIntakeLoads).mockImplementation(async () => [
+        intakeRow({ id: 'il:old', subject: 'Older tender', receivedAt: '2026-11-01T10:00:00Z' }),
+        intakeRow({ id: 'il:new', subject: 'Newer tender', receivedAt: '2026-11-05T10:00:00Z' }),
+      ])
+      renderBoard('/tms/shipments/intake?view=division')
+      const newer = await screen.findByText('Newer tender')
+      const older = screen.getByText('Older tender')
+      expect(newer.compareDocumentPosition(older) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     })
   })
 

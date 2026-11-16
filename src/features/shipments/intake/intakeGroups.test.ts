@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { intakeFields, intakeRow } from './testFixtures'
-import { groupByCustomer, groupByDivision, parseView, resolveGroup, rowInGroup, withDivisionColumn } from './intakeGroups'
+import { groupByCustomer, groupByDivision, groupKeyOfRow, orderByGroup, parseView, withDivisionColumn } from './intakeGroups'
 
 const row = (id: string, divisionCode: string | null, customerId: string | null, customerName: string | null = null) =>
   intakeRow({ id, divisionCode, fields: intakeFields({ customerId, customerName }) })
@@ -20,18 +20,20 @@ describe('intakeGroups', () => {
     expect(groupByCustomer(rows.slice(0, 3)).some((g) => g.id === 'not-matched')).toBe(false)
   })
 
-  it('group counts partition the rows and rowInGroup agrees with them', () => {
+  it('group counts partition the rows and groupKeyOfRow agrees with them', () => {
     const codes = new Set(divisions.map((d) => d.code))
-    for (const g of groupByDivision(rows, divisions)) expect(rows.filter((r) => rowInGroup(r, 'division', g.id, codes)).length).toBe(g.count)
-    for (const g of groupByCustomer(rows)) expect(rows.filter((r) => rowInGroup(r, 'customer', g.id, codes)).length).toBe(g.count)
-    expect(rows.filter((r) => rowInGroup(r, 'all', 'BRK', codes)).length).toBe(rows.length)
+    for (const g of groupByDivision(rows, divisions)) expect(rows.filter((r) => groupKeyOfRow(r, 'division', codes) === g.id).length).toBe(g.count)
+    for (const g of groupByCustomer(rows)) expect(rows.filter((r) => groupKeyOfRow(r, 'customer', codes) === g.id).length).toBe(g.count)
   })
 
-  it('falls back to All for a stale or missing group, and to the All view for an unknown view', () => {
-    const groups = groupByCustomer(rows)
-    expect(resolveGroup(groups, 'c1')).toBe('c1')
-    expect(resolveGroup(groups, 'gone')).toBe('all')
-    expect(resolveGroup(groups, null)).toBe('all')
+  it('orders rows group by group in the groups\' order, keeping the incoming (sorted) order inside each group', () => {
+    const codes = new Set(divisions.map((d) => d.code))
+    const groups = groupByDivision(rows, divisions)
+    const ordered = orderByGroup(rows, groups, (r) => groupKeyOfRow(r, 'division', codes))
+    expect(ordered.map((r) => r.id)).toEqual(['2', '3', '1', '4', '5'])
+  })
+
+  it('falls back to the All view for an unknown view', () => {
     expect(parseView('bogus')).toBe('all')
     expect(parseView('customer')).toBe('customer')
   })

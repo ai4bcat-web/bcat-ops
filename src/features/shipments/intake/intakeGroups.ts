@@ -1,6 +1,7 @@
 /**
- * Intake page grouping (Step AV feedback 3): the page opens on All loads; "By rev division" and "By customer"
- * split the same already-loaded rows into sub-tabs. Pure, so the counts are derived from the queue with no extra reads.
+ * Intake page grouping (Step AV feedback 3): the page opens on All loads; "By rev division" and "By customer" section
+ * the same table into one group per division or customer (Ryne 2026-11-16: grouped rows, no second row of filter chips).
+ * Pure, so the counts are derived from the queue with no extra reads.
  */
 import type { IntakeLoadRecord } from '@/types/intake'
 
@@ -45,15 +46,23 @@ export function groupByCustomer(rows: IntakeLoadRecord[]): IntakeGroup[] {
   return notMatched > 0 ? [...groups, { id: NOT_MATCHED, label: 'Not matched', count: notMatched }] : groups
 }
 
-/** The requested group when it exists in this view, else All. */
-export function resolveGroup(groups: IntakeGroup[], requested: string | null): string {
-  return requested != null && requested !== ALL_GROUP && groups.some((g) => g.id === requested) ? requested : ALL_GROUP
+/** The group a row sits in for this view: its active division (else Unassigned), or its matched customer (else Not matched). */
+export function groupKeyOfRow(row: IntakeLoadRecord, view: IntakeView, divisionCodes: ReadonlySet<string>): string {
+  if (view === 'division') return row.divisionCode != null && divisionCodes.has(row.divisionCode) ? row.divisionCode : UNASSIGNED
+  if (view === 'customer') return row.fields.customerId || NOT_MATCHED
+  return ALL_GROUP
 }
 
-export function rowInGroup(row: IntakeLoadRecord, view: IntakeView, group: string, divisionCodes: ReadonlySet<string>): boolean {
-  if (view === 'all' || group === ALL_GROUP) return true
-  if (view === 'division') return group === UNASSIGNED ? row.divisionCode == null || !divisionCodes.has(row.divisionCode) : row.divisionCode === group
-  return group === NOT_MATCHED ? !row.fields.customerId : row.fields.customerId === group
+/**
+ * Rows reordered so each group's rows sit together, groups in the given order; within a group the incoming order (the table's
+ * sort, newest received first by default) is kept. A row whose group is not listed goes last.
+ */
+export function orderByGroup<T>(rows: readonly T[], groups: readonly IntakeGroup[], keyOf: (row: T) => string): T[] {
+  const rank = new Map(groups.map((g, i) => [g.id, i]))
+  return rows
+    .map((row, i) => ({ row, i, g: rank.get(keyOf(row)) ?? groups.length }))
+    .sort((a, b) => a.g - b.g || a.i - b.i)
+    .map((x) => x.row)
 }
 
 /**

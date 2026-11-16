@@ -52,3 +52,9 @@
 .tms-intake-note-add textarea { width: 100%; }
 .tms-intake-banner-compact { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; padding: 4px 8px; font-size: 12px; color: var(--tms-text-2); background: var(--tms-badge-orange-tint); border-radius: 6px; }
 .tms-intake-banner-x { margin-left: auto; display: inline-flex; padding: 2px; border: 0; background: none; cursor: pointer; color: var(--tms-muted); }
+
+/* By rev division / By customer: one collapsible header row per group (Ryne 2026-11-16). */
+.tms-intake-group-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 4px; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
+.tms-intake-group-toggle:focus-visible { outline: 2px solid var(--tms-accent, currentColor); outline-offset: 2px; border-radius: 4px; }
+.tms-intake-group-count { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--tms-surface); border: 1px solid var(--tms-border); font-size: 12px; font-weight: 600; text-align: center; font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .tms-intake-group-toggle { min-height: 44px; } }

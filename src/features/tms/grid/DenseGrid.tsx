@@ -90,6 +90,8 @@ export interface DenseGridProps<T> {
   /** Rows must arrive ordered by group; a header row is drawn wherever the key changes. */
   groupKeyOf?: (row: T) => string
   renderGroupHeader?: (key: string, shown: T[]) => ReactNode
+  /** Groups drawn as their header only: their rows are hidden (the header still gets them, for its count). */
+  collapsedGroups?: ReadonlySet<string>
   /** Shown in place of the body when there are no rows. */
   empty?: ReactNode
   /** Scroll returns to the top when this changes (a new filter, sort, tab or search). */
@@ -106,7 +108,7 @@ export interface DenseGridProps<T> {
 
 type Item<T> = { kind: 'row'; row: T } | { kind: 'group'; key: string; rows: T[] }
 
-function buildItems<T>(rows: readonly T[], groupKeyOf: ((row: T) => string) | undefined): Item<T>[] {
+function buildItems<T>(rows: readonly T[], groupKeyOf: ((row: T) => string) | undefined, collapsed?: ReadonlySet<string>): Item<T>[] {
   if (!groupKeyOf) return rows.map((row) => ({ kind: 'row', row }))
   const items: Item<T>[] = []
   let current: { kind: 'group'; key: string; rows: T[] } | null = null
@@ -117,7 +119,7 @@ function buildItems<T>(rows: readonly T[], groupKeyOf: ((row: T) => string) | un
       items.push(current)
     }
     current.rows.push(row)
-    items.push({ kind: 'row', row })
+    if (!collapsed?.has(key)) items.push({ kind: 'row', row })
   }
   return items
 }
@@ -147,6 +149,7 @@ export function DenseGrid<T>({
   toneOf,
   groupKeyOf,
   renderGroupHeader,
+  collapsedGroups,
   empty,
   resetKey,
   recentKey,
@@ -213,7 +216,7 @@ export function DenseGrid<T>({
     return () => cancelAnimationFrame(frame)
   })
 
-  const items = useMemo(() => buildItems(rows, groupKeyOf), [rows, groupKeyOf])
+  const items = useMemo(() => buildItems(rows, groupKeyOf, collapsedGroups), [rows, groupKeyOf, collapsedGroups])
   const win = virtualWindow(items.length, rowHeight, topRow * rowHeight, viewport, OVERSCAN)
   const mounted = items.slice(win.start, win.end)
 
