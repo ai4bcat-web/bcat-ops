@@ -30,6 +30,7 @@ import { useSpotNewCount } from '@/features/spot-quoter/useSpotRequests'
 import { loadReviewCount } from '@/lib/loadReview'
 import { needsCoverCount } from '@/features/tms/carrierSales/carrierSalesQueue'
 import { shipmentListCounts } from '@/lib/shipmentLists'
+import { isOperationsWork, operationsIndex } from '@/lib/operationsWork'
 import type { ShipmentListRow } from '@/hooks/useShipments'
 
 const POLL_MS = 60_000
@@ -94,9 +95,9 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
   const hasBills = modelsAvailable(['CarrierBill', 'LoadCarrier'])
   const hasIntake = modelsAvailable(['IntakeLoad'])
   const hasSpot = modelsAvailable(['SpotRequest'])
-  const { dueCount: checkCallsDueRaw } = useCheckCallWorklist({ enabled: hasPageAccess('loads') && hasAssignments })
+  const { dueCount: checkCallsDueRaw, rows: checkCallRows } = useCheckCallWorklist({ enabled: hasPageAccess('loads') && hasAssignments })
   // Carrier uploads nobody has accepted or refused yet; same page gate as the worklist.
-  const { pendingCount: documentReviewRaw } = useDocumentReviewQueue({ enabled: hasPageAccess('loads') && hasDocuments })
+  const { pendingCount: documentReviewRaw, documents: reviewDocuments } = useDocumentReviewQueue({ enabled: hasPageAccess('loads') && hasDocuments })
   // Delivered orders nobody has billed yet; the hook gates itself on `invoicing`.
   const arToInvoiceRaw = useArToInvoiceCount()
   // Carrier bills sitting on the review rung; the hook gates itself on `carrierPay`.
@@ -130,6 +131,20 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
   const arToInvoiceCount = hasBilling ? arToInvoiceRaw : 0
   const apToReviewCount = hasBills ? apToReviewRaw : 0
   const quotesToReplyCount = hasQuotes ? quotesToReplyRaw : 0
+  // The Track tab counts only work on loads still in operations: a load pushed into Load Review,
+  // released, invoiced or factored has left Tracking (Ryne 2026-11-16), and so have its check calls
+  // and its driver PODs waiting for review.
+  const opsIndex = useMemo(() => operationsIndex(shipments), [shipments])
+  const trackCheckCalls = useMemo(
+    () => (hasAssignments
+      ? (checkCallRows ?? []).filter((r) => (r.state === 'DUE' || r.state === 'OVERDUE') && opsIndex.loadIds.has(r.load.id)).length
+      : 0),
+    [hasAssignments, checkCallRows, opsIndex],
+  )
+  const trackDocuments = useMemo(
+    () => (hasDocuments ? (reviewDocuments ?? []).filter((d) => isOperationsWork(d, opsIndex)).length : 0),
+    [hasDocuments, reviewDocuments, opsIndex],
+  )
 
   return useMemo(() => {
     // Every open intake item, appt-move tasks included: the intake queue lists them all.
@@ -151,8 +166,9 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
       loadReview,
       carrierSales,
       activeShipments,
-      // The parent rows' chores: Load Tracking is the check calls due plus the documents to review.
-      loadTracking: checkCallsDue + documentReviewCount,
+      // The parent rows' chores: Load Tracking is the check calls due plus the documents to review,
+      // on loads still in operations only.
+      loadTracking: trackCheckCalls + trackDocuments,
       accounting: arToInvoiceCount + apToReviewCount,
       spotNew,
       timeOff: timeOffPending,
@@ -163,6 +179,6 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
   }, [
     loads, maintenanceTasks, intakeItems, reviewCount, truckDocAlerts, dispatchUnread,
     checkCallsDue, documentReviewCount, arToInvoiceCount, apToReviewCount, quotesToReplyCount, intakeLoads,
-    loadReview, carrierSales, activeShipments, spotNew, timeOffPending,
+    loadReview, carrierSales, activeShipments, spotNew, timeOffPending, trackCheckCalls, trackDocuments,
   ])
 }

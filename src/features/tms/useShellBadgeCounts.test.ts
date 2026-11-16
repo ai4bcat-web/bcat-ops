@@ -20,8 +20,15 @@ vi.mock('@/hooks/useIntakeItems', () => ({ useIntakeItems: () => ({ items: [{ st
 vi.mock('@/hooks/useReviewQueue', () => ({ useReviewQueue: () => ({ pendingCount: 1 }) }))
 vi.mock('@/hooks/useTruckDocAlerts', () => ({ useTruckDocAlerts: () => ({ outOfDateCount: 1 }) }))
 vi.mock('@/hooks/useDispatch', () => ({ useDispatchUnread: () => 1 }))
-vi.mock('@/hooks/useCheckCallWorklist', () => ({ useCheckCallWorklist: () => ({ dueCount: 1 }) }))
-vi.mock('@/hooks/useDocumentReviewQueue', () => ({ useDocumentReviewQueue: () => ({ pendingCount: 1 }) }))
+vi.mock('@/hooks/useCheckCallWorklist', () => ({ useCheckCallWorklist: () => ({
+  dueCount: 2,
+  // One due on a load still in operations, one on a load already in Load Review.
+  rows: [{ state: 'DUE', load: { id: 'l1' } }, { state: 'OVERDUE', load: { id: 'l3' } }, { state: 'SCHEDULED', load: { id: 'l1' } }],
+}) }))
+vi.mock('@/hooks/useDocumentReviewQueue', () => ({ useDocumentReviewQueue: () => ({
+  pendingCount: 2,
+  documents: [{ shipmentId: 's1' }, { shipmentId: 's3', orderId: 'o3' }],
+}) }))
 vi.mock('@/hooks/useArToInvoiceCount', () => ({ useArToInvoiceCount: () => 1 }))
 vi.mock('@/hooks/useApToReviewCount', () => ({ useApToReviewCount: () => 1 }))
 vi.mock('@/hooks/useQuotesToReplyCount', () => ({ useQuotesToReplyCount: () => 3 }))
@@ -38,8 +45,10 @@ import { LIFECYCLE_TABS } from '@/lib/lifecycleTabs'
 import type { ShipmentListRow } from '@/hooks/useShipments'
 
 const shipments = [
-  { id: 's1', status: 'OPEN', voidedAt: null, dispatcherAssignedId: 'rep@bcatcorp.com', loadStatus: 'IN_TRANSIT' },
+  { id: 's1', status: 'OPEN', voidedAt: null, loadIds: ['l1'], orderIds: ['o1'], dispatcherAssignedId: 'rep@bcatcorp.com', loadStatus: 'IN_TRANSIT' },
   { id: 's2', status: 'OPEN', voidedAt: '2026-01-01', dispatcherAssignedId: 'rep@bcatcorp.com', loadStatus: 'IN_TRANSIT' },
+  // Delivered and pushed into Load Review: it has left operations, so nothing on it is Tracking work.
+  { id: 's3', status: 'DELIVERED', voidedAt: null, loadIds: ['l3'], orderIds: ['o3'], loadReviewPushedAt: '2026-11-13T21:07:26Z' },
 ] as unknown as ShipmentListRow[]
 
 const args = { shipments }
@@ -93,7 +102,7 @@ describe('useShellBadgeCounts', () => {
   it('sums the parent rows from their children', async () => {
     const { result } = renderHook(() => useShellBadgeCounts(args))
     await waitFor(() => expect(result.current.intakeLoads).toBe(2))
-    // checkCalls 1 + documentReview 1.
+    // Only work on loads still in operations: s1's due check call + s1's document. s3 is in Load Review.
     expect(result.current.loadTracking).toBe(2)
     // arToInvoice 1 + apToReview 1.
     expect(result.current.accounting).toBe(2)

@@ -92,6 +92,16 @@ describe('lifecycleOf', () => {
     expect(lifecycleOf(delivered({ docsMissing: [] }))).toBe('closed')
     expect(lifecycleOf(row('V', { voidedAt: '2026-10-01T00:00:00Z' }))).toBe('closed')
   })
+
+  it('closes a load once it has left operations: in Load Review, released, invoiced or factored', () => {
+    // 20020: delivered, POD not yet reviewed, but already pushed into Load Review.
+    expect(lifecycleOf(delivered({ docsMissing: ['POD'], loadReviewPushedAt: '2026-11-13T21:07:26Z' }))).toBe('closed')
+    expect(lifecycleOf(delivered({ docsMissing: ['POD'], invoiceId: 'INV-1' }))).toBe('closed')
+    expect(lifecycleOf(delivered({ docsMissing: ['POD'], factoringItemId: '14878' }))).toBe('closed')
+    expect(lifecycleOf(delivered({ docsMissing: ['POD'], arStatus: 'UNPAID' }))).toBe('closed')
+    expect(lifecycleOf(delivered({ docsMissing: ['POD'], arStatus: 'DOCS_NEEDED' }))).toBe('pod')
+    expect(lifecycleOf(row('M', { invoiceNumber: '14878' }))).toBe('closed')
+  })
 })
 
 describe('etaOf', () => {
