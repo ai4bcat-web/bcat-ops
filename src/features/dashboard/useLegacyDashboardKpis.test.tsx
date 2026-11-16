@@ -23,6 +23,7 @@ vi.mock('@/hooks/useOpenInvoices', () => ({ useOpenInvoices: () => ({ invoices: 
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ hasPageAccess: () => true }) }))
 vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: () => false }))
 vi.mock('./VendorApCard', () => ({ VendorApCard: () => null }))
+vi.mock('./DeliveryToReviewCard', () => ({ DeliveryToReviewCard: () => <div data-testid="widget-DeliveryToReviewCard" /> }))
 vi.mock('./YearProfitWidget', () => { return { YearProfitWidget: () => <div data-testid="widget-YearProfitWidget" /> } })
 vi.mock('./DriverLeaderboardWidget', () => { return { DriverLeaderboardWidget: () => <div data-testid="widget-DriverLeaderboardWidget" /> } })
 vi.mock('./DieselPriceWidget', () => { return { DieselPriceWidget: () => <div data-testid="widget-DieselPriceWidget" /> } })

@@ -42,7 +42,8 @@ import type { FormApi } from './sectionRegistry'
 import { SummaryRail } from './SummaryRail'
 import { useFormActions } from './useFormActions'
 import { useShipmentForm, type RunKind } from './useShipmentForm'
-import { blockingIssues, issueSummary } from './validation'
+import { isFactorBilled } from '@/lib/factorBilling'
+import { blockingIssues, issueSummary, missingOnLoadIssues } from './validation'
 import './form.css'
 import { DetentionSection } from '@/features/shipments/components/Detention'
 
@@ -281,23 +282,33 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   )
   const summary = useMemo(() => railSummary(values, form.customer, settings), [values, form.customer, settings])
 
+  // What the board's MISSING chip counts, as the form sees it: the factoring fields still marked on the load, and its PO.
+  const missingOnLoad = useMemo(() => missingOnLoadIssues(form.issues, existingLoad, isFactorBilled(form.customer)), [form.issues, existingLoad, form.customer])
+  // Opened from the board's MISSING chip (`?missing=1`): go straight to the first missing field, once.
+  const missingFocused = useRef(false)
+  const firstMissing = missingOnLoad[0]?.fieldKey
+  useEffect(() => {
+    if (missingFocused.current || innerSearch.get('missing') !== '1' || !firstMissing) return
+    missingFocused.current = true
+    focusField(firstMissing)
+  }, [innerSearch, firstMissing, focusField])
   const errorsByCard = useMemo(() => {
     const out: Partial<Record<CardKey, number>> = {}
-    for (const i of blockingIssues(form.issues)) {
+    for (const i of [...blockingIssues(form.issues), ...missingOnLoad.filter((m) => m.severity !== 'error')]) {
       const c = cardOfSection(i.section)
       if (c !== 'more' && c !== 'rail' && c !== 'header') out[c] = (out[c] ?? 0) + 1
     }
     return out
-  }, [form.issues])
+  }, [form.issues, missingOnLoad])
   const errorsByTab = useMemo(() => {
     const out: Partial<Record<MoreTabKey, number>> = {}
-    for (const i of blockingIssues(form.issues)) {
+    for (const i of [...blockingIssues(form.issues), ...missingOnLoad.filter((m) => m.severity !== 'error')]) {
       if (cardOfSection(i.section) !== 'more') continue
       const t = moreTabOfIssue(i)
       out[t] = (out[t] ?? 0) + 1
     }
     return out
-  }, [form.issues])
+  }, [form.issues, missingOnLoad])
 
   const togglePanel = useCallback(() => setPanelOpen((o) => !o), [])
   // Leaving on purpose (Discard) lets go of the edit lock; a plain Save does not, so the shipment stays under Currently viewing.
@@ -486,7 +497,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
               })}
             </div>
             <SummaryRail
-              common={common} summary={summary} rows={rows} attempted={attempted}
+              common={common} summary={summary} rows={rows} attempted={attempted} missing={missingOnLoad}
               Roles={RAIL_ROLES} RateHistory={RAIL_RATE_HISTORY} intakeId={intakeId} intake={intake.row}
             />
           </div>

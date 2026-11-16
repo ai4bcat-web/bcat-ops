@@ -924,7 +924,7 @@ function BoardPane({
         return (
           <span className="flex items-center gap-1">
             <StatusPill row={row} />
-            {late && <TmsBadge tone="red" title={late.tooltip} data-testid="past-delivery-pill">Past delivery date</TmsBadge>}
+            {late && <TmsBadge tone="red" title={late.tooltip} data-testid="past-delivery-pill">Past delivery date · {late.daysLate} d</TmsBadge>}
             <DetentionPill flag={row.detentionFlag} onClick={() => { setDialogShipment(row); setDialogKind('detention') }} />
           </span>
         )
@@ -962,7 +962,11 @@ function BoardPane({
       if (columnKey === 'factorInfo') {
         const text = factorInfoText(row)
         if (!text) return null
-        return <TmsBadge tone="orange" title={factorInfoTitle(row)} data-testid="factor-info-pill">{text}</TmsBadge>
+        return (
+          <Link to={`${shipmentEditorPath(row.id)}?missing=1`} className="tms-board-link" title={`${factorInfoTitle(row)} — open the shipment to fill them in`} onClick={(e) => e.stopPropagation()} data-testid="factor-info-link">
+            <TmsBadge tone="orange" title={factorInfoTitle(row)} data-testid="factor-info-pill">{text}</TmsBadge>
+          </Link>
+        )
       }
       if (columnKey === 'invoiceStatus') {
         const inv = invoiceStatusOfRow(row)

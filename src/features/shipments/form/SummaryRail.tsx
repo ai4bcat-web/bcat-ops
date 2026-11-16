@@ -4,7 +4,7 @@
  * recent audit entries) and roles. The actions live in the page's bottom ActionBar. Below 1280 px the same element becomes a collapsible bottom sheet (CSS only), so
  * there is one set of controls, one set of test ids.
  */
-import { Check, ChevronUp, Circle } from 'lucide-react'
+import { AlertCircle, Check, ChevronUp, Circle } from 'lucide-react'
 import { memo, useMemo, useState, type ComponentType } from 'react'
 import { formatCents } from '@/lib/invoiceBuild'
 import type { IntakeLoadRecord } from '@/types/intake'
@@ -18,6 +18,7 @@ import { sliceOf, type CardProps } from './cards/cardRegistry'
 import { carrierBreakdown } from './cards/ratesSummary'
 import { requiredProgress, type RailRow, type RailSummary } from './railModel'
 import type { SliceSectionProps } from './sectionRegistry'
+import type { FormIssue } from './sectionProps'
 
 export interface SummaryRailProps {
   common: CardProps
@@ -31,11 +32,13 @@ export interface SummaryRailProps {
   /** The intake item the create page was opened from (its extractor entries show in Activity). */
   intakeId?: string
   intake?: IntakeLoadRecord | null
+  /** What the board's MISSING chip counts (missingOnLoad): listed at the top of the rail, each a link to its field. */
+  missing?: readonly FormIssue[]
 }
 
 const TONE_WORD = { green: 'On target', amber: 'Near target', red: 'Below target' } as const
 
-function SummaryRailImpl({ common, summary, rows, attempted, Roles, RateHistory, intakeId, intake }: SummaryRailProps) {
+function SummaryRailImpl({ common, summary, rows, attempted, Roles, RateHistory, intakeId, intake, missing = [] }: SummaryRailProps) {
   const [sheetOpen, setSheetOpen] = useState(false)
   const { values, update, ctx, form } = common
   const { money } = summary
@@ -61,6 +64,21 @@ function SummaryRailImpl({ common, summary, rows, attempted, Roles, RateHistory,
       </button>
 
       <div id="rail-body" className="tms-rail-body">
+        {missing.length > 0 ? (
+          <section className="tms-rail-block tms-rail-missing" data-testid="rail-missing" aria-label="What's missing">
+            <h2 className="tms-rail-h">What's missing <span className="tms-rail-count" data-ready="false">{missing.length}</span></h2>
+            <ul className="tms-rail-reqs">
+              {missing.map((i) => (
+                <li key={i.id}>
+                  <button type="button" className="tms-rail-req" data-testid={`rail-missing-${i.id}`} data-done="false" data-missing="true" title={i.message} onClick={() => form.focusField(i.fieldKey)}>
+                    <AlertCircle size={12} aria-hidden="true" />
+                    <span>{i.label}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
         <section className="tms-rail-hero" data-testid="rail-hero" aria-label="At a glance">
           <div className="tms-rail-hero-main">
             <span className="tms-rail-hero-label">Net profit</span>

@@ -297,6 +297,15 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
   return issues
 }
 
+/**
+ * What a saved load is still missing, as the board's MISSING chip counts it (openFactorGaps, from the same
+ * factorGaps* rules): the factoring fields marked on the form, plus the customer ref (PO). Empty on a new load.
+ */
+export function missingOnLoadIssues(issues: readonly FormIssue[], existingLoad: boolean, factored: boolean): FormIssue[] {
+  if (!existingLoad || !factored) return []
+  return issues.filter((i) => i.marked || i.id === 'customer:ref:po')
+}
+
 export const blockingIssues = (issues: readonly FormIssue[]): FormIssue[] => issues.filter((i) => i.severity === 'error')
 
 export function issuesForSection(issues: readonly FormIssue[], key: SectionKey): FormIssue[] {
