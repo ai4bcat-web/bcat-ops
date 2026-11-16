@@ -29,6 +29,8 @@ import { formatDay, lastMonths, PAID_LOOKBACK_MONTHS } from '@/features/ar/arVie
 import { useDirectory } from '@/hooks/useDirectory'
 import { useOpenInvoices } from '@/hooks/useOpenInvoices'
 import { OutstandingView } from './OutstandingView'
+import { DifferencesView } from './DifferencesView'
+import { openCount, differenceRows } from './differences'
 import { isShortPayNote } from '@/lib/paymentDifference'
 import { CustomerSearch } from './CustomerSearch'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
@@ -60,13 +62,14 @@ const PRESET_LABEL: Record<PresetKey, string> = {
   week: 'This week', month: 'This month', last: 'Last month', year: 'This year', all: 'All dates', custom: 'Custom dates',
 }
 
-type PageView = 'outstanding' | ReceivedView
+type PageView = 'outstanding' | 'differences' | ReceivedView
 
 const VIEW_TABS: Array<{ key: PageView; label: string }> = [
   { key: 'outstanding', label: 'Outstanding' },
   { key: 'payments', label: 'Payments Received' },
   { key: 'adjustments', label: 'Credits & debits' },
   { key: 'all', label: 'All' },
+  { key: 'differences', label: 'Differences' },
 ]
 
 export function PaymentsReceivedPage() {
@@ -76,7 +79,7 @@ export function PaymentsReceivedPage() {
   const [preset, setPreset] = useState<PresetKey>(initialPeriod?.preset ?? 'month')
   const [view, setViewState] = useState<PageView>(() => {
     const v = searchParams.get('view')
-    return v === 'payments' || v === 'adjustments' || v === 'all' ? v : 'outstanding'
+    return v === 'payments' || v === 'adjustments' || v === 'all' || v === 'differences' ? v : 'outstanding'
   })
   const setView = (v: PageView) => {
     setViewState(v)
@@ -207,7 +210,12 @@ export function PaymentsReceivedPage() {
 
   const filtered = useMemo(() => filterReceived(rows, filter, divisionsOf), [rows, filter, divisionsOf])
   const reversedCount = useMemo(() => filtered.filter((r) => r.reversed).length, [filtered])
-  const ledgerView: ReceivedView = view === 'outstanding' ? 'payments' : view
+  const ledgerView: ReceivedView = view === 'outstanding' || view === 'differences' ? 'payments' : view
+  const isLedger = view !== 'outstanding' && view !== 'differences'
+  const diffOpen = useMemo(
+    () => openCount(differenceRows(open.invoices, rows, (id, fallback) => customerById.get(id)?.name ?? fallback)),
+    [open.invoices, rows, customerById],
+  )
   const listed = useMemo(() => hideReversed(filtered, showReversed).filter((r) => inView(r, ledgerView)), [filtered, showReversed, ledgerView])
   // Totals never count a reversed pair, whatever is shown.
   const totals = useMemo(() => receivedTotals(filtered), [filtered])
@@ -373,14 +381,15 @@ export function PaymentsReceivedPage() {
         <TmsSummaryChips aria-label="Payments Received at a glance" testId="payments-received-totals" items={summaryItems} />
 
         <div className="pr-toolbar" data-testid="payments-received-filters">
-          <TmsSegmentedTabs aria-label="Show" size="sm" active={view} onSelect={(k) => setView(k as PageView)} tabs={VIEW_TABS} />
+          <TmsSegmentedTabs aria-label="Show" size="sm" active={view} onSelect={(k) => setView(k as PageView)}
+            tabs={VIEW_TABS.map((t) => (t.key === 'differences' && diffOpen > 0 ? { ...t, label: `Differences (${diffOpen})` } : t))} />
           <CustomerSearch customers={customers} openByCustomer={openByCustomer} selectedId={oneCustomer}
             selectedName={oneCustomer ? customerById.get(oneCustomer)?.name : undefined} onSelect={setCustomer} />
           {view === 'outstanding' && (
             <TmsInput type="search" aria-label="Search invoice, PRO or PO" placeholder="Invoice #, PRO or PO" value={outQuery}
               onChange={(e) => changeOutQuery(e.target.value)} />
           )}
-          {view !== 'outstanding' && (<>
+          {isLedger && (<>
           <TmsSelect aria-label="Dates" value={preset} onChange={(e) => choosePreset(e.target.value as PresetKey)}>
             {(Object.keys(PRESET_LABEL) as PresetKey[]).map((k) => <option key={k} value={k}>{PRESET_LABEL[k]}</option>)}
           </TmsSelect>
@@ -416,7 +425,10 @@ export function PaymentsReceivedPage() {
         </div>
         {memoError && <p className="text-sm" style={{ color: 'var(--tms-badge-red)' }}>{memoError}</p>}
 
-        {view === 'outstanding' ? (
+        {view === 'differences' ? (
+          <DifferencesView invoices={open.invoices} ledger={rows} customers={customerById} loading={open.loading} customerId={oneCustomer}
+            onAccepted={() => { void load(); void open.refresh() }} />
+        ) : view === 'outstanding' ? (
           <OutstandingView invoices={open.invoices} customers={customerById} loading={open.loading} asOf={asOf}
             customerId={oneCustomer} query={outQuery} divisionName={divisionName}
             onReceived={() => { void load(); void open.refresh() }} />
