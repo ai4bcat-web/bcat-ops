@@ -304,7 +304,7 @@ export function LoadReviewPage() {
         <TmsButton size="sm" variant="secondary" data-testid="export-load-review" title="Every shipment in Load Review with every field and each check" onClick={() => toast.success(`Exported ${exportRecords('load-review', queue.map((e) => reviewExportRow(e.row, e.verdict)))} shipments in Load Review`)}>
           <Download size={14} aria-hidden="true" /> Export all
         </TmsButton>
-        <ColumnsButton catalog={denseCols.filter((c) => c.key !== 'select')} columns={prefs.columns} widths={prefs.widths} pinned={prefs.pinned} onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })} />
+        <ColumnsButton sharedWithAll={prefs.layoutSharedWithAll} catalog={denseCols.filter((c) => c.key !== 'select')} columns={prefs.columns} widths={prefs.widths} pinned={prefs.pinned} onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })} />
         <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
       </div>
       <DenseKpiStrip open items={[

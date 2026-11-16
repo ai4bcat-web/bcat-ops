@@ -2954,6 +2954,27 @@ describe('SAVE_COLUMN_TEMPLATE and DELETE_COLUMN_TEMPLATE', () => {
     expect(tables.templates.has('t-private')).toBe(true)
   })
 
+  it('lets only the owner write a grid default layout, with that grid\'s own column keys (forced shared)', async () => {
+    const tables = columnTemplateTables()
+    const id = 'grid-default:load-review-v3-all'
+    await expect(
+      handler(event('SAVE_COLUMN_TEMPLATE', { id, name: 'x', columns: ['shipment', 'field-customerRef'], shared: true }, ADMIN)),
+    ).rejects.toThrow(/only the owner/)
+    const saved = (await handler(event('SAVE_COLUMN_TEMPLATE', {
+      id,
+      name: 'Default columns · load-review-v3-all',
+      columns: ['shipment', 'field-customerRef', 'whatToFix'],
+      widths: { whatToFix: 320 },
+      pinned: ['shipment'],
+      shared: false,
+    }, identity({ email: 'ryne@bcatcorp.com', groups: ['ADMIN'] })))) as Record<string, unknown>
+    expect(saved).toMatchObject({ id, shared: true, columns: ['shipment', 'field-customerRef', 'whatToFix'], pinned: ['shipment'] })
+    expect(tables.templates.get(id)).toBeTruthy()
+    await expect(
+      handler(event('DELETE_COLUMN_TEMPLATE', { id }, ADMIN)),
+    ).rejects.toThrow(/only the owner/)
+  })
+
   it('refuses a non-admin write or delete of the team default layout; an admin may write it (forced shared)', async () => {
     const tables = columnTemplateTables()
     await expect(

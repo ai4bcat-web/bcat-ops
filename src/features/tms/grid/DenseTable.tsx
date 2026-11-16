@@ -83,7 +83,7 @@ export function DenseTable<T>({
         <ClearFiltersButton count={filterCount} onClear={() => setFilters({})} />
         <span className="tms-dense-spacer" />
         <span className="tms-muted">{shown.length === rows.length ? `${rows.length} items` : `${shown.length} of ${rows.length} items`}</span>
-        <ColumnsButton
+        <ColumnsButton sharedWithAll={prefs.layoutSharedWithAll}
           catalog={catalog}
           columns={prefs.columns}
           widths={prefs.widths}

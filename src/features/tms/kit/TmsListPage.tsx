@@ -252,7 +252,7 @@ export function TmsListPage<T>({
           <span className="tms-muted">
             {shown.length === rows.length ? `${rows.length} items` : `${shown.length} of ${rows.length} items`}
           </span>
-          <ColumnsButton
+          <ColumnsButton sharedWithAll={prefs.layoutSharedWithAll}
             catalog={dense}
             columns={shownKeys}
             widths={prefs.widths}

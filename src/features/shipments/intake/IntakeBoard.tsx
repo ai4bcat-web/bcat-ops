@@ -411,7 +411,7 @@ export function IntakeBoard() {
         />
         <ClearFiltersButton count={activeFilterCount(filters)} onClear={() => setFilters({})} />
         <span className="tms-dense-spacer" />
-        <ColumnsButton
+        <ColumnsButton sharedWithAll={prefs.layoutSharedWithAll}
           catalog={columns}
           columns={prefs.columns.filter((k) => k !== 'source')}
           widths={prefs.widths}

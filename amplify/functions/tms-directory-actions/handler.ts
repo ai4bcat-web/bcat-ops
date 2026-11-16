@@ -3374,8 +3374,19 @@ const TEAM_DEFAULT_COLUMN_TEMPLATE_IDS: ReadonlySet<string> = new Set([
   `${TEAM_DEFAULT_COLUMN_TEMPLATE_ID}-voided`,
 ])
 
+/**
+ * The owner's shared layout for one dense grid (Load Review tabs, AR/AP lists, …). Keep in step with
+ * GRID_DEFAULT_PREFIX in src/features/tms/grid/orgGridDefault.ts. Only the owner writes these;
+ * their keys are that grid's own columns, not the board's.
+ */
+const GRID_DEFAULT_TEMPLATE_PREFIX = 'grid-default:'
+
+function isGridDefaultTemplate(id: string): boolean {
+  return id.startsWith(GRID_DEFAULT_TEMPLATE_PREFIX)
+}
+
 function isTeamDefaultTemplate(id: string): boolean {
-  return TEAM_DEFAULT_COLUMN_TEMPLATE_IDS.has(id)
+  return TEAM_DEFAULT_COLUMN_TEMPLATE_IDS.has(id) || isGridDefaultTemplate(id)
 }
 
 function isColumnLayoutAdmin(caller: Caller): boolean {
@@ -3383,6 +3394,9 @@ function isColumnLayoutAdmin(caller: Caller): boolean {
 }
 
 function assertCanWriteTeamDefault(id: string, caller: Caller): void {
+  if (isGridDefaultTemplate(id) && caller.email !== OWNER_EMAIL) {
+    throw new Error('Forbidden: only the owner sets the shared column layout')
+  }
   if (isTeamDefaultTemplate(id) && !isColumnLayoutAdmin(caller)) {
     throw new Error('Forbidden: only an admin can set the team default column layout')
   }
@@ -3405,13 +3419,19 @@ function authorizeColumnTemplateMutation(
   }
 }
 
-function assertColumnTemplateColumns(value: unknown): string[] {
+function assertColumnTemplateColumns(value: unknown, anyGridKeys = false): string[] {
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error('columns cannot be empty')
   }
+  if (anyGridKeys && value.length > 150) throw new Error('too many columns')
   const columns: string[] = []
   for (let i = 0; i < value.length; i++) {
     const key = assertString(value[i], `columns[${i}]`)
+    if (anyGridKeys) {
+      if (key.length > 80) throw new Error(`"${key.slice(0, 20)}…" is not a column key`)
+      columns.push(key)
+      continue
+    }
     if (!BOARD_COLUMN_KEYS_LOOKUP[key]) {
       throw new Error(`"${key}" is not a board column`)
     }
@@ -3425,16 +3445,19 @@ async function saveColumnTemplate(
   caller: Caller,
 ): Promise<Record<string, unknown>> {
   const name = assertString(input.name, 'name')
-  const columns = assertColumnTemplateColumns(input.columns)
+  // A grid default's keys belong to its own grid; its id can be longer than a template's.
+  const rawId = typeof input.id === 'string' ? input.id : ''
+  const gridDefault = isGridDefaultTemplate(rawId)
+  const columns = assertColumnTemplateColumns(input.columns, gridDefault)
   const widths = optionalJsonObject(input.widths) ?? {}
   // Pins are part of the layout, not a second list of columns: a pinned key that is
   // not among the chosen columns would render nowhere, so it is refused here.
   // No pins is normal (nothing is locked): an empty list is valid here, unlike `columns`.
-  const pinned = input.pinned == null || (Array.isArray(input.pinned) && input.pinned.length === 0) ? [] : assertColumnTemplateColumns(input.pinned)
+  const pinned = input.pinned == null || (Array.isArray(input.pinned) && input.pinned.length === 0) ? [] : assertColumnTemplateColumns(input.pinned, gridDefault)
   for (const key of pinned) {
     if (!columns.includes(key)) throw new Error(`"${key}" is pinned but is not one of the template's columns`)
   }
-  const id = optionalString(input.id, 64) ?? newId()
+  const id = optionalString(input.id, gridDefault ? 120 : 64) ?? newId()
   assertCanWriteTeamDefault(id, caller)
   // The team default is read by everyone by definition.
   const shared = isTeamDefaultTemplate(id) ? true : optionalBoolean(input.shared) ?? false

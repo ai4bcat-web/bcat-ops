@@ -1044,9 +1044,9 @@ export function VendorApPage() {
           <span className="tms-dense-spacer" />
           <TmsButton size="sm" variant="secondary" onClick={refreshAll}>Refresh</TmsButton>
           {byVendor ? (
-            <ColumnsButton catalog={vendorCols} columns={vendorPrefs.columns} widths={vendorPrefs.widths} pinned={vendorPrefs.pinned} onApply={(next) => vendorPrefs.applyLayout({ ...next, replaceWidths: true })} />
+            <ColumnsButton sharedWithAll={vendorPrefs.layoutSharedWithAll} catalog={vendorCols} columns={vendorPrefs.columns} widths={vendorPrefs.widths} pinned={vendorPrefs.pinned} onApply={(next) => vendorPrefs.applyLayout({ ...next, replaceWidths: true })} />
           ) : (
-            <ColumnsButton catalog={billCols} columns={billPrefs.columns} widths={billPrefs.widths} pinned={billPrefs.pinned} onApply={(next) => billPrefs.applyLayout({ ...next, replaceWidths: true })} />
+            <ColumnsButton sharedWithAll={billPrefs.layoutSharedWithAll} catalog={billCols} columns={billPrefs.columns} widths={billPrefs.widths} pinned={billPrefs.pinned} onApply={(next) => billPrefs.applyLayout({ ...next, replaceWidths: true })} />
           )}
           <DensityToggle density={activePrefs.density} onChange={(d) => { billPrefs.setDensity(d); vendorPrefs.setDensity(d) }} />
         </div>

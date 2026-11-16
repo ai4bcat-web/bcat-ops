@@ -106,6 +106,7 @@ export function ColumnsButton<T>({
   widths,
   pinned,
   onApply,
+  sharedWithAll = false,
 }: {
   catalog: readonly DenseColumn<T>[]
   columns: string[]
@@ -113,6 +114,8 @@ export function ColumnsButton<T>({
   pinned: string[]
   /** The dialog's complete layout; its widths replace the saved ones. */
   onApply: (layout: ColumnsDialogResult) => void
+  /** The owner's changes become everyone's layout (useDenseGridPrefs `layoutSharedWithAll`). */
+  sharedWithAll?: boolean
 }) {
   const [open, setOpen] = useState(false)
   return (
@@ -128,6 +131,7 @@ export function ColumnsButton<T>({
         widths={widths}
         pinned={pinned}
         onApply={onApply}
+        note={sharedWithAll ? 'Changes apply to all users.' : undefined}
       />
     </>
   )

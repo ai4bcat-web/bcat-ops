@@ -909,7 +909,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           <ClearFiltersButton count={filterCount} onClear={() => { setSearch(''); setOtrFilter(null); setDense({}); resetPaging() }} />
           <span className="tms-dense-spacer" />
           <TmsButton size="sm" variant="secondary" onClick={() => { void refresh() }}>Refresh</TmsButton>
-          <ColumnsButton catalog={denseCols} columns={prefs.columns} widths={prefs.widths} pinned={prefs.pinned} onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })} />
+          <ColumnsButton sharedWithAll={prefs.layoutSharedWithAll} catalog={denseCols} columns={prefs.columns} widths={prefs.widths} pinned={prefs.pinned} onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })} />
           <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
         </div>
         <p className="text-sm tms-muted" data-testid="factor-moved-note">
