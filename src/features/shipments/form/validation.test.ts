@@ -18,8 +18,8 @@ describe('required fields by action', () => {
   it('Create on an empty form lists exactly the Aljex reds, plus what OTR needs to factor it', () => {
     const all = blockingIssues(validateForm(emptyValues(), { ...base, level: 'create', customer: null }))
     expect(all.filter((i) => i.id.includes(':factor:')).map((i) => i.id)).toEqual([
-      'rates:factor:RATE_MISSING', 'pickup:factor:PICKUP_CITY', 'pickup:factor:PICKUP_STATE', 'pickup:factor:PICKUP_ZIP',
-      'consignee:factor:DELIVERY_CITY', 'consignee:factor:DELIVERY_STATE', 'consignee:factor:DELIVERY_ZIP',
+      'rates:factor:RATE_MISSING', 'pickup:factor:PICKUP_CITY', 'pickup:factor:PICKUP_STATE',
+      'consignee:factor:DELIVERY_CITY', 'consignee:factor:DELIVERY_STATE',
     ])
     const issues = all.filter((i) => !i.id.includes(':factor:'))
     expect(issues.map((i) => i.label)).toEqual(
@@ -28,7 +28,7 @@ describe('required fields by action', () => {
     expect(labels).toContain('pickup:Name')
     expect(labels).toContain('pickup:Appt')
     expect(issues).toHaveLength(8)
-    expect(issueSummary(all)).toMatch(/^15 required fields missing — /)
+    expect(issueSummary(all)).toMatch(/^13 required fields missing — /)
   })
 
   it('factor-ready at booking: MC and billing method for the customer, and the rule only warns on a load past draft', () => {
@@ -40,10 +40,11 @@ describe('required fields by action', () => {
     const unset = { ...CUSTOMER, billingMethod: null }
     expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: unset })).map((i) => i.id)).toEqual(['customer:factor:BILLING_METHOD'])
     v.stops[2].zip = ''
-    expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: CUSTOMER })).map((i) => i.id)).toEqual(['consignee:factor:DELIVERY_ZIP'])
+    // A missing ZIP no longer blocks factoring: OTR's v2 create takes city and state only (Ryne 2026-11-16).
+    expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: CUSTOMER })).map((i) => i.id)).toEqual([])
     const old = validateForm(v, { ...base, mode: 'edit', level: 'create', customer: noMc, existingLoad: true })
     expect(blockingIssues(old)).toEqual([])
-    expect(old.filter((i) => i.id.includes(':factor:')).map((i) => i.severity)).toEqual(['warn', 'warn'])
+    expect(old.filter((i) => i.id.includes(':factor:')).map((i) => i.severity)).toEqual(['warn'])
     // A factored load past draft keeps its gaps marked as required on the field (Ryne 2026-11-14), still never blocking a save.
     expect(old.filter((i) => i.id.includes(':factor:')).every((i) => i.marked === true)).toBe(true)
     const manual = validateForm(v, { ...base, mode: 'edit', level: 'create', customer: { ...CUSTOMER, billingMethod: 'MANUAL' }, existingLoad: true })
@@ -105,7 +106,7 @@ describe('required fields by action', () => {
     expect(ids).toEqual(expect.arrayContaining(['consignee:state:2', 'consignee:zip:2']))
     // Create used to let these through; the consignee is now needed to factor the load.
     expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: CUSTOMER })).map((i) => i.id))
-      .toEqual(['consignee:factor:DELIVERY_STATE', 'consignee:factor:DELIVERY_ZIP'])
+      .toEqual(['consignee:factor:DELIVERY_STATE'])
   })
 
   it('the form → RequiredFieldSubject adapter agrees with the gate on what is missing', () => {

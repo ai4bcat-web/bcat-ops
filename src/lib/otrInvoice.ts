@@ -47,6 +47,12 @@ export const OTR_REQUIRED_FIELDS = [
 ] as const
 export type OtrRequiredField = (typeof OTR_REQUIRED_FIELDS)[number]
 
+/**
+ * Collected and shown, but not needed to factor (Ryne 2026-11-16): OTR's v2 create body has no ZIP fields
+ * (otrClient.createInvoice), so a missing ZIP never holds a load back from OTR.
+ */
+export const OTR_OPTIONAL_FIELDS: readonly OtrRequiredField[] = ['FromZip', 'ToZip']
+
 /** Labels shown to a human when a field is missing. */
 export const OTR_FIELD_LABEL: Record<OtrRequiredField, string> = {
   InvoiceNo: 'Invoice number (PRO)',
@@ -432,7 +438,7 @@ export function assembleOtrInvoice(input: AssembleInput): OtrReadiness {
     (v) => normalizeZip(v),
   )
 
-  const missingFields = OTR_REQUIRED_FIELDS.filter((f) => payload[f] === undefined)
+  const missingFields = OTR_REQUIRED_FIELDS.filter((f) => payload[f] === undefined && !OTR_OPTIONAL_FIELDS.includes(f))
 
   const missingDocuments: OtrReadiness['missingDocuments'] = []
   if (!input.hasPod) missingDocuments.push('POD')

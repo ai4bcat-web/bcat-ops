@@ -4,7 +4,7 @@
  */
 import { factorGapsForLoad, factoringPoNumber, routeEnds, FACTOR_GAP_LABEL } from '@/lib/factorReadyAtCreate'
 import { isFactoredLoad } from '@/lib/factorBilling'
-import { countsAsPresent } from '@/lib/shipmentDocuments'
+import { countsAsPresent, isOutsideRateConKey } from '@/lib/shipmentDocuments'
 import { stopsList } from '@/lib/stopPlace'
 import type { CustomerRecord, ShipmentBundle } from '@/types/tms'
 import type { Stop } from '@/types'
@@ -80,14 +80,16 @@ export function otrChecks(bundle: ShipmentBundle, customer: CustomerRecord | nul
   const fields: { code: keyof typeof FACTOR_GAP_LABEL; anchor: FixAnchor }[] = [
     { code: 'BILLING_METHOD', anchor: 'customer' }, { code: 'CUSTOMER_MC', anchor: 'customer' }, { code: 'PO_MISSING', anchor: 'ref' },
     { code: 'RATE_MISSING', anchor: 'charges' },
-    { code: 'PICKUP_CITY', anchor: 'stops' }, { code: 'PICKUP_STATE', anchor: 'stops' }, { code: 'PICKUP_ZIP', anchor: 'stops' },
-    { code: 'DELIVERY_CITY', anchor: 'stops' }, { code: 'DELIVERY_STATE', anchor: 'stops' }, { code: 'DELIVERY_ZIP', anchor: 'stops' },
+    // City and state only: OTR's v2 create takes no ZIP (Ryne 2026-11-16).
+    { code: 'PICKUP_CITY', anchor: 'stops' }, { code: 'PICKUP_STATE', anchor: 'stops' },
+    { code: 'DELIVERY_CITY', anchor: 'stops' }, { code: 'DELIVERY_STATE', anchor: 'stops' },
   ]
   const has = (type: string) => bundle.documents.some((d) => d.type === type && countsAsPresent(d))
   return [
     ...fields.map((f) => ({ key: f.code, label: FACTOR_GAP_LABEL[f.code], ok: !gaps.has(f.code), anchor: f.anchor })),
     { key: 'POD', label: 'POD on file', ok: has('POD'), anchor: 'documents' as const },
-    { key: 'RATE_CON', label: 'Rate confirmation on file', ok: has('RATE_CON'), anchor: 'documents' as const },
+    // The customer's rate con: a filed one, or the tender attached to the load (the same rule as the gate and the board).
+    { key: 'RATE_CON', label: 'Rate confirmation on file', ok: has('RATE_CON') || has('CUSTOMER_RATE_CON') || (bundle.loads as { rateConfirmKey?: string | null }[]).some((l) => isOutsideRateConKey(l.rateConfirmKey)), anchor: 'documents' as const },
   ]
 }
 

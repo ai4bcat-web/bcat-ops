@@ -513,13 +513,17 @@ export async function generateInvoice(input: Row, caller: Caller): Promise<Row> 
   assertNotSquareInvoiced(context.shipment, 'invoicing it')
   assertCustomerResolved(context, 'invoicing it')
   const gate = docGateFor(context)
+  // Ryne 2026-11-16: moving to billing always makes the invoice. Load Review is the paperwork gate (the same shared checks),
+  // so an order it released is never refused here for a document: the POD and rate con travel with the e-mail or the OTR
+  // submission, not with the making of the bill. An order that never went through review still meets the document gate.
+  const reviewReleased = typeof context.order.readyToInvoiceAt === 'string' && context.order.readyToInvoiceAt !== ''
   const readiness = invoiceReadiness({
     order: context.order,
     shipment: context.shipment,
     customer: context.customer,
     settings: context.settings,
     charges: context.charges,
-    gate,
+    gate: reviewReleased ? null : gate,
   })
   // Which rung the order is on, and whether its money adds up, first — those are
   // about this bill. Then the release gate, which is about the shipment and is the
@@ -527,7 +531,8 @@ export async function generateInvoice(input: Row, caller: Caller): Promise<Row> 
   // POD can be voided or a leg bounced between READY_TO_INVOICE and this press.
   if (!readiness.ready) throw new Error(readiness.reasons.join(' '))
   const releaseGate = await releaseGateFor(context)
-  if (!releaseGate.ok) throw releaseGateError(releaseGate.missing)
+  const gateMissing = reviewReleased ? releaseGate.missing.filter((r) => r.code !== 'DOC_MISSING') : releaseGate.missing
+  if (gateMissing.length > 0) throw releaseGateError(gateMissing)
 
   if (attachDocumentIds) {
     for (const id of attachDocumentIds) {

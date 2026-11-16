@@ -818,6 +818,17 @@ describe('release to accounting', () => {
     expect(table(TABLES.order).get(ORDER_ID)!.arStatus).toBe('UNBILLED')
   })
 
+  it('makes the invoice for an order Load Review released, without re-checking its documents (Ryne 2026-11-16)', async () => {
+    table(TABLES.document).set('doc-seed-pod', {
+      ...table(TABLES.document).get('doc-seed-pod')!,
+      status: 'VOID',
+      voidedAt: '2026-10-22T09:00:00.000Z',
+    })
+    table(TABLES.order).set(ORDER_ID, { ...table(TABLES.order).get(ORDER_ID)!, readyToInvoiceAt: '2026-10-21T09:00:00.000Z' })
+    await call('GENERATE_INVOICE', { orderId: ORDER_ID })
+    expect(table(TABLES.invoice).size).toBe(1)
+  })
+
   it('refuses a document the carrier sent but nobody has accepted', async () => {
     table(TABLES.document).set('doc-seed-pod', {
       ...table(TABLES.document).get('doc-seed-pod')!,

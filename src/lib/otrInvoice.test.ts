@@ -392,7 +392,7 @@ describe('what a rate confirmation fills in', () => {
     })
     expect(r.payload.PoNumber).toBeUndefined()
     expect(r.missingFields).toContain('PoNumber')
-    expect(r.missingFields).toContain('FromZip')
+    expect(r.missingFields).not.toContain('FromZip') // not needed by OTR's v2 create (Ryne 2026-11-16)
   })
 
   it('never takes the broker MC from the rate con', () => {

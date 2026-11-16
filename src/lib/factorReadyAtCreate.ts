@@ -59,7 +59,6 @@ export interface FactorReadyInput {
 }
 
 const text = (v: string | null | undefined): string => (v ?? '').trim()
-const ZIP = /^\d{5}(-?\d{4})?$/
 const STATE = /^[A-Za-z]{2}$/
 
 function placeGaps(place: FactorPlace | null, end: 'PICKUP' | 'DELIVERY'): FactorGap[] {
@@ -67,7 +66,7 @@ function placeGaps(place: FactorPlace | null, end: 'PICKUP' | 'DELIVERY'): Facto
   const gaps: FactorGap[] = []
   if (!text(place?.city)) gaps.push({ code: `${end}_CITY`, message: `${label} needs a city — OTR needs it to factor the load.` })
   if (!STATE.test(text(place?.state))) gaps.push({ code: `${end}_STATE`, message: `${label} needs a two-letter state — OTR needs it to factor the load.` })
-  if (!ZIP.test(text(place?.zip))) gaps.push({ code: `${end}_ZIP`, message: `${label} needs a ZIP code — OTR needs it to factor the load.` })
+  // No ZIP (Ryne 2026-11-16): OTR's v2 create takes city and state only, so a ZIP is not a factoring requirement.
   return gaps
 }
 

@@ -13,7 +13,7 @@ describe('requiredRows', () => {
     expect(rows.map((r) => r.key)).toEqual(['customer', 'shipmentType', 'pickup', 'ready', 'equipment', 'weight', 'description', 'division', 'customer:ref:po', 'factorReady'])
     expect(rows.filter((r) => r.done).map((r) => r.key)).toEqual(['shipmentType'])
     expect(requiredProgress(rows)).toEqual({ done: 1, total: 10, ready: false })
-    expect(rows.find((r) => r.key === 'factorReady')).toMatchObject({ label: 'Ready to factor (7 missing)', card: 'rates' })
+    expect(rows.find((r) => r.key === 'factorReady')).toMatchObject({ label: 'Ready to factor (5 missing)', card: 'rates' })
     expect(rows.find((r) => r.key === 'customer')?.card).toBe('header')
   })
 
