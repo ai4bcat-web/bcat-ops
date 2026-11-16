@@ -2,6 +2,9 @@
  * Email aging report: shows exactly what will go out (To, CC, subject, attachment, body and the
  * statement PDF) before anything is sent, then sends it. Built from AGING_STATEMENT's preview,
  * so the dialog never guesses at recipients or wording.
+ *
+ * `previewOnly` is the Aging tab's "Preview email": the same preview with the statement PDF shown
+ * inline, and no Send button. Nothing is e-mailed from it.
  */
 import { useEffect, useState } from 'react'
 import { Eye, Loader2 } from 'lucide-react'
@@ -10,11 +13,12 @@ import { TmsButton, TmsDialog } from '@/features/tms/kit'
 import { agingStatement, graphqlErrorText, type AgingStatementResult } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
 
-export function AgingStatementDialog({ customerId, customerName, onClose, onSent }: {
+export function AgingStatementDialog({ customerId, customerName, onClose, onSent, previewOnly = false }: {
   customerId: string
   customerName: string
   onClose: () => void
-  onSent: (result: AgingStatementResult) => void
+  onSent?: (result: AgingStatementResult) => void
+  previewOnly?: boolean
 }) {
   const [preview, setPreview] = useState<AgingStatementResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -29,13 +33,14 @@ export function AgingStatementDialog({ customerId, customerName, onClose, onSent
   }, [customerId])
 
   const send = () => {
+    if (previewOnly) return
     setSending(true)
     setError(null)
     agingStatement({ customerId, send: true })
       .then((row) => {
         if (row.emailStatus === 'SENT') {
           toast.success(`Aging report sent to ${row.to.join(', ')}`)
-          onSent(row)
+          onSent?.(row)
         } else {
           setError(row.emailError || `Not sent (${row.emailStatus ?? 'unknown'})`)
         }
@@ -50,17 +55,20 @@ export function AgingStatementDialog({ customerId, customerName, onClose, onSent
     <TmsDialog
       open
       onOpenChange={(open) => { if (!open) onClose() }}
-      title={`Email aging report — ${customerName}`}
+      title={previewOnly ? `Preview aging email — ${customerName}` : `Email aging report — ${customerName}`}
       className="tms-dialog-wide"
-      footer={
+      footer={previewOnly ? (
+        <TmsButton variant="ghost" onClick={onClose}>Close</TmsButton>
+      ) : (
         <>
           <TmsButton variant="ghost" onClick={onClose} disabled={sending}>Cancel</TmsButton>
           <TmsButton variant="primary" onClick={send} disabled={!preview || sending || noTo || nothingOpen}>
             {sending ? 'Sending…' : 'Send'}
           </TmsButton>
         </>
-      }
+      )}
     >
+      {previewOnly && <p className="text-xs tms-muted" data-testid="statement-preview-only">Preview only: nothing is sent from here.</p>}
       {!preview && !error && <p className="flex items-center gap-2 tms-muted"><Loader2 size={14} className="animate-spin" /> Building the statement…</p>}
       {preview && (
         <dl className="grid gap-2 text-sm" style={{ gridTemplateColumns: 'max-content 1fr' }}>
@@ -80,6 +88,10 @@ export function AgingStatementDialog({ customerId, customerName, onClose, onSent
           <dt className="tms-muted">Body</dt>
           <dd aria-label="Statement body" style={{ whiteSpace: 'pre-wrap' }}>{preview.body}</dd>
         </dl>
+      )}
+      {previewOnly && preview && (
+        <iframe src={preview.url} title={`Aging statement for ${customerName}`} data-testid="statement-pdf-preview"
+          style={{ width: '100%', height: '60vh', border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)', marginTop: 8 }} />
       )}
       {preview && (preview.statement.factoredExcluded ?? 0) > 0 && (
         <p className="text-xs tms-muted" data-testid="statement-factored-note">
