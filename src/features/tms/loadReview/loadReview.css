@@ -65,3 +65,29 @@
 .tms-shell .aa-what-to-fix { display: flex; flex-wrap: wrap; gap: 4px; white-space: normal; }
 .tms-shell .aa-fix-item { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 12px; line-height: 18px; color: var(--tms-badge-red); background: color-mix(in srgb, var(--tms-badge-red) 10%, transparent); white-space: normal; overflow-wrap: anywhere; }
 .tms-shell .tms-dg-table tbody tr:not(.tms-dg-group):not(.tms-dg-spacer) td[data-col="whatToFix"] { white-space: normal; max-height: none; padding-block: 4px; }
+
+/* Fixes made in the rail (Ryne 2026-11-16): every failing item has its editor here. */
+.tms-portal .lr-fix { display: flex; flex-direction: column; gap: 12px; }
+.tms-portal .lr-fix-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-block: 6px; }
+.tms-portal .lr-fix-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--tms-muted); min-width: 0; border: 0; padding: 0; margin: 0; }
+.tms-portal .lr-fix-field label { display: inline-flex; gap: 6px; align-items: center; color: inherit; }
+.tms-portal .lr-fix-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tms-portal .lr-fix-row > :first-child:not(.lr-fix-label) { flex: 1 1 200px; min-width: 0; }
+.tms-portal .lr-fix-label { font-size: 12px; font-weight: 600; }
+.tms-portal .lr-fix-actions { display: flex; gap: 8px; margin-top: 6px; }
+.tms-portal .lr-fix-error { color: var(--tms-badge-red); font-size: 13px; }
+/* A missing field: red outline plus a "Missing" note, the same flag on every section. */
+.tms-portal .lr-fix-flag input, .tms-portal .lr-fix-flag select { border-color: var(--tms-badge-red); box-shadow: 0 0 0 1px var(--tms-badge-red); }
+.tms-portal .lr-fix-field.lr-fix-flag::after { content: 'Missing'; color: var(--tms-badge-red); font-size: 11px; font-weight: 600; }
+.tms-portal .lr-stop { border-top: 1px solid var(--tms-border); padding-block: 8px; }
+.tms-portal .lr-stop:first-child { border-top: 0; }
+.tms-portal .lr-stop-title { font-weight: 600; font-size: 13px; }
+.tms-portal .lr-otr-list { display: grid; gap: 4px; margin: 6px 0 0; padding: 0; list-style: none; }
+.tms-portal .lr-otr-list li { display: flex; gap: 6px; align-items: center; font-size: 13px; min-height: 32px; }
+.tms-portal .lr-fix-flash { outline: 2px solid var(--tms-badge-red); outline-offset: 4px; border-radius: 6px; }
+.tms-shell .aa-fixable { cursor: pointer; }
+.tms-shell .aa-fixable:hover { text-decoration: underline; }
+@media (max-width: 1024px) {
+  .tms-portal .lr-fix-grid { grid-template-columns: 1fr 1fr; }
+  .tms-portal .lr-fix button, .tms-portal .lr-fix input, .tms-portal .lr-fix select { min-height: 44px; }
+}

@@ -78,7 +78,7 @@ import { hasGap, isReleasedOrder, reconcileReleasedOrder, type ReconcileFinding 
 import { evaluateReleaseGate, releaseGateError, type ReleaseGateResult } from '../../../src/lib/releaseGate'
 import { factorGapsForLoad, factoringPoNumber, routeEnds, type FactorReadyInput } from '../../../src/lib/factorReadyAtCreate'
 import { evaluateLoadReview, isOwnFleetReviewLoad, loadReviewExtras, loadReviewRefusal, type LoadReviewReason } from '../../../src/lib/loadReview'
-import { profitFromFacts, resolveReviewRequirements, type ReviewFacts, type ReviewRequirement } from '../../../src/lib/reviewRequirements'
+import { customerFactorsForOtr, profitFromFacts, resolveReviewRequirements, type ReviewFacts, type ReviewRequirement } from '../../../src/lib/reviewRequirements'
 import {
   isCustomerUnresolved,
   unresolvedCustomerMessage,
@@ -1323,10 +1323,15 @@ export async function computeReleaseGate(
 
 /** The customer's Load Review list, then the org default, then the built-in seven. */
 function reviewRequirementsFor(customer: Row | null, settings: Row | null): ReviewRequirement[] {
-  return resolveReviewRequirements(
+  const list = resolveReviewRequirements(
     Array.isArray(customer?.reviewRequirements) ? (customer.reviewRequirements as string[]) : null,
     Array.isArray(settings?.reviewRequirements) ? (settings.reviewRequirements as string[]) : null,
   )
+  // A customer we factor cannot waive the POD or the RC: OTR needs both (customerDocsNotRequired says the same).
+  if (customerFactorsForOtr(customer as { billingMethod?: string | null; factored?: boolean | null } | null)) {
+    for (const key of ['podReceived', 'rateConReceived'] as const) if (!list.includes(key)) list.push(key)
+  }
+  return list
 }
 
 /** What the requirements are checked against, read from the rows this Lambda holds. */
