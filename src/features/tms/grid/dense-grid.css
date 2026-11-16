@@ -327,6 +327,7 @@
 }
 
 .tms-shell .tms-dg-table tbody tr[data-tone='delivered'] { --tms-row-bg: var(--tms-row-delivered); --tms-row-fg: var(--tms-row-ink); }
+.tms-shell .tms-dg-table tbody tr[data-tone='ready'] { --tms-row-bg: var(--tms-row-delivered); --tms-row-fg: var(--tms-row-ink); }
 .tms-shell .tms-dg-table tbody tr[data-tone='dispatched'] { --tms-row-bg: var(--tms-row-dispatched); --tms-row-fg: var(--tms-row-ink); }
 .tms-shell .tms-dg-table tbody tr[data-tone='departed'] { --tms-row-bg: var(--tms-row-departed); --tms-row-fg: var(--tms-row-ink); }
 .tms-shell .tms-dg-table tbody tr[data-tone='arrived'] { --tms-row-bg: var(--tms-row-arrived); --tms-row-fg: var(--tms-row-ink); }
@@ -713,6 +714,8 @@
 .tms-shell .tms-dg-card[data-selected='true'] { background: var(--tms-surface-selected); border-color: var(--tms-primary); }
 .tms-shell .tms-dg-card[data-tone='voided'] .tms-dg-card-title,
 .tms-shell .tms-dg-card[data-tone='canceled'] .tms-dg-card-title { text-decoration: line-through; }
+/* Load Review "All": a load that passes every check reads green, like a delivered board row. */
+.tms-shell .tms-dg-card[data-tone='ready'] { background: var(--tms-row-delivered); box-shadow: inset 4px 0 0 var(--tms-row-delivered-text); }
 
 .tms-shell .tms-dg-card-check,
 .tms-shell .tms-dg-card-lead input[type='checkbox'] { width: 20px; height: 20px; margin-top: 2px; accent-color: var(--tms-primary); flex: 0 0 auto; }
