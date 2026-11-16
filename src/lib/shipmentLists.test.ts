@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { inLoadReviewQueue } from './loadReview'
 import {
+  hasLeftOperations,
+  isInLoadReview,
   inShipmentList,
   inShipmentYear,
   monthsOfYear,
@@ -137,5 +140,34 @@ describe('year facet', () => {
     expect(shipmentListCounts(rows, 2026)).toEqual({ active: 2, all: 2 })
     expect(shipmentListCounts(rows, 'all')).toEqual({ active: 2, all: 4 })
     expect(shipmentListCounts(rows)).toEqual({ active: 2, all: 4 })
+  })
+})
+
+describe('Load Review and the board never share a load (Ryne 2026-11-15)', () => {
+  const base = { status: 'DELIVERED' as ShipmentStatus, arStatus: 'DOCS_NEEDED' as ArStatus }
+  const rows = [
+    { ...base },
+    { ...base, loadReviewPushedAt: '2026-11-15T00:00:00Z' },
+    { ...base, loadReviewPushedAt: '2026-11-15T00:00:00Z', readyToInvoiceAt: '2026-11-15T01:00:00Z' },
+    { ...base, arStatus: 'UNPAID' as ArStatus },
+  ]
+
+  it('a pushed load leaves Active and stays on All', () => {
+    const pushed = rows[1]
+    expect(isInLoadReview(pushed)).toBe(true)
+    expect(inShipmentList(pushed, 'active')).toBe(false)
+    expect(inShipmentList(pushed, 'all')).toBe(true)
+  })
+
+  it('no row is both on Active and in the Load Review queue', () => {
+    for (const row of rows) {
+      const inQueue = inLoadReviewQueue({ id: 'x', ...row } as Parameters<typeof inLoadReviewQueue>[0])
+      expect(inQueue && inShipmentList(row, 'active')).toBe(false)
+    }
+  })
+
+  it('counts follow the same rule', () => {
+    expect(shipmentListCounts(rows)).toEqual({ active: 1, all: 4 })
+    expect(rows.filter(hasLeftOperations)).toHaveLength(3)
   })
 })

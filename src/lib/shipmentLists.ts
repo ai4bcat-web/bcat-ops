@@ -1,9 +1,10 @@
 /**
  * The Shipments page's three lists, as pure functions of facts already on the board row.
  *
- *   Active = not released to invoicing, not canceled, not voided.
+ *   Active = still with operations: not in Load Review, not released to invoicing, not canceled, not voided.
  *   All    = every row that is not voided (the Statuses facet still decides CANCELED visibility),
- *            narrowed to one year or all years. A released shipment is listed here and only here.
+ *            narrowed to one year or all years. A shipment in Load Review or released is listed here and only here
+ *            (Ryne 2026-11-15: a load is never in Load Review and on the board's working view at once).
  *   Voided = voided shipments and nothing else. A voided row is listed here and NEVER in Active or All.
  *
  * Released to invoicing = the order has left DOCS_NEEDED: `readyToInvoiceAt` or
@@ -24,6 +25,8 @@ export interface ListRow {
   arStatus?: ArStatus | null
   readyToInvoiceAt?: string | null
   invoiceId?: string | null
+  /** The Load Review push stamp: once set, the load belongs to Load Review, not the board's working view. */
+  loadReviewPushedAt?: string | null
   pickupMonth?: string | null
   pickupAppt?: string | null
   createdAt?: string | null
@@ -75,13 +78,23 @@ export function isReleasedToInvoicing(row: ListRow): boolean {
     || (row.arStatus != null && row.arStatus !== 'DOCS_NEEDED')
 }
 
+/** Pushed into Load Review and not released yet: the load sits in Load Review's queue. */
+export function isInLoadReview(row: ListRow): boolean {
+  return Boolean(row.loadReviewPushedAt) && !isReleasedToInvoicing(row)
+}
+
+/** Handed from operations to accounting: in Load Review or already released. Such a load is off Active. */
+export function hasLeftOperations(row: ListRow): boolean {
+  return Boolean(row.loadReviewPushedAt) || isReleasedToInvoicing(row)
+}
+
 /** The scope applied BEFORE matchesBoardFilters. */
 export function inShipmentList(row: ListRow, list: ShipmentList, year: ShipmentYear = 'all'): boolean {
   const voided = boardStatusOf(row) === 'VOIDED'
   if (list === 'voided') return voided
   if (voided) return false
   if (list === 'all') return inShipmentYear(row, year)
-  return !isReleasedToInvoicing(row) && boardStatusOf(row) !== 'CANCELED'
+  return !hasLeftOperations(row) && boardStatusOf(row) !== 'CANCELED'
 }
 
 /** Voided rows are excluded from both counts (they live on the Voided list). `year` narrows the All count the way the All tab narrows its rows. */

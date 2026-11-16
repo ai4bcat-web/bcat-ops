@@ -62,7 +62,7 @@ const NUMBER_FIELDS: Record<string, { value: (row: ShipmentRow) => number | null
   openIncidentCount: { value: (r) => r.openIncidentCount ?? 0, unit: '' },
 }
 
-const BOARD_STATUS_ORDER = ['OPEN', 'COVERED', 'DISPATCHED', 'ARRIVED', 'DEPARTED', 'DELIVERED', 'RELEASED', 'HOLD', 'RESERVED', 'VOIDED']
+const BOARD_STATUS_ORDER = ['OPEN', 'COVERED', 'DISPATCHED', 'ARRIVED', 'DEPARTED', 'DELIVERED', 'IN LOAD REVIEW', 'RELEASED', 'HOLD', 'RESERVED', 'VOIDED']
 
 export const STATUS_OPTIONS: DenseOption[] = BOARD_STATUS_ORDER.map((s) => ({ value: s, label: sentence(s) }))
 
