@@ -133,13 +133,25 @@ describe('LoadReviewPage', () => {
     expect(screen.getAllByTestId('field-ready').every((el) => el.getAttribute('data-state') === 'ok')).toBe(true)
   })
 
-  it('Needs fixes marks the failing field NEED and the Ready column lists what is missing', () => {
+  it('every review tab puts the pass mark or NEED inside the column of the field it checks, with no separate check columns', () => {
     window.localStorage.clear()
-    window.localStorage.setItem('tms:grid:load-review::v1', JSON.stringify({ columns: ['shipment', 'field-pod', 'ready'] }))
     renderPage('/tms/load-review?tab=fixes')
+    const headers = screen.getAllByRole('columnheader').map((h) => (h.textContent ?? '').trim())
+    for (const gone of ['Checks (preliminary)', 'Load details', 'Charges', 'Documents', 'Revenue division', 'Division']) expect(headers.some((h) => h === gone)).toBe(false)
+    expect(headers.filter((h) => h === 'Sales rep').length).toBe(1)
     const pods = screen.getAllByTestId('field-pod')
-    expect(pods.some((el) => el.getAttribute('data-state') === 'need')).toBe(true)
-    expect(screen.getAllByText(/^NEED .*POD/).length).toBeGreaterThan(0)
+    const need = pods.find((el) => el.getAttribute('data-state') === 'need')
+    expect(need?.getAttribute('title')).toMatch(/POD/)
+    expect(screen.getAllByText(/^1 to fix: POD$/).length).toBeGreaterThan(0)
+    const reps = screen.getAllByTestId('field-salesRep')
+    expect(reps.every((el) => el.getAttribute('data-state') === 'ok')).toBe(true)
+  })
+
+  it('a passing POD the document cache has not confirmed says what the check trusted', () => {
+    window.localStorage.clear()
+    renderPage('/tms/load-review?tab=ready')
+    const texts = screen.getAllByTestId('field-pod').map((el) => el.textContent)
+    expect(texts.every((t) => t === 'Doc check OK (file not seen)' || t === 'On file')).toBe(true)
   })
 
   it('clicking a column heading sorts the rows A to Z, then Z to A', () => {
