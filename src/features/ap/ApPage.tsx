@@ -61,7 +61,7 @@ import { SetBillDatesDialog } from './components/SetBillDatesDialog'
 import { UpdateCarrierChargesDialog } from './components/UpdateCarrierChargesDialog'
 import { BillDrawer } from './components/BillDrawer'
 import { ApReportDialog, CashRequirementsDialog } from './components/ApReportDialogs'
-import { estimatedDueAt, isAljexBill, payablesQueue, proOf, termsLabel, type ApReportKind, type BillFactsIndex } from './apQueue'
+import { estimatedDueAt, proOf, termsLabel, type ApReportKind, type BillFactsIndex } from './apQueue'
 import { payablesSummary, useApSummaryModel } from './useApSummaryModel'
 import { tabFromUrl } from '@/features/finance/accountingLinks'
 
@@ -79,7 +79,7 @@ import {
   inDueBucket, owedFilterActive, owedFilterCount, owedSelectionLabel, partyOptions,
   readOwedFilter, summarizeOwed, writeOwedFilter, type OwedFilter, type OwedOption,
 } from '@/features/ar/owedFilters'
-import { apSummary, inDivision } from './apQueue'
+import { apSummary, billLabel, inDivision } from './apQueue'
 import type { ApInboxItemRecord } from '@/lib/apInbox/types'
 import type { ApPaymentRecord, ApSettings, CarrierBillRecord, CarrierRecord } from '@/types/tms'
 import { ApInboxDigest } from './inbox/ApInboxDigest'
@@ -234,9 +234,9 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     [owed.parties])
   const byDivision = useCallback((b: CarrierBillRecord) => owed.divisions.length === 0 || owed.divisions.some((key) => inDivision(b, facts, key)),
     [owed.divisions, facts])
-  const [includeAljex, setIncludeAljex] = useState(false)
-  const aljexOpen = useMemo(() => open.bills.filter((b) => isAljexBill(b) && b.status !== 'PAID' && b.status !== 'VOID').length, [open.bills])
-  const queueAll = useMemo(() => payablesQueue(open.bills, facts, { includeAljex }), [open.bills, facts, includeAljex])
+  // Lists and totals read the same bills, Aljex imports always included (Ryne 2026-11-16: "include
+  // them all always"), so every tab badge ties to its summary line.
+  const queueAll = totalsAll
   const partyQueue = useMemo(() => queueAll.filter(byParty), [queueAll, byParty])
   const ownedQueue = useMemo(() => partyQueue.filter(byDivision), [partyQueue, byDivision])
   const queueBills = useMemo(() => ownedQueue.filter((b) => inDueBucket(b.dueAt, asOf, owed.due)), [ownedQueue, asOf, owed.due])
@@ -434,13 +434,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     <>
       {errorBanner}
       <div className="flex flex-wrap items-center gap-3 text-sm">
-        <span className="tms-muted">Loads moved to billing from Load review, delivered loads only.</span>
-        {aljexOpen > 0 && (
-          <label className="flex items-center gap-1">
-            <input type="checkbox" checked={includeAljex} onChange={(e) => setIncludeAljex(e.target.checked)} />
-            Include {aljexOpen} open bill{aljexOpen === 1 ? '' : 's'} brought over from Aljex
-          </label>
-        )}
+        <span className="tms-muted">Delivered loads only.</span>
         <TmsButton variant="ghost" size="sm" onClick={() => setDialog({ kind: 'report', report: tab === 'aging' ? 'aging' : tab === 'selected' ? 'selected' : 'expected' })}>Report</TmsButton>
         <TmsButton variant="ghost" size="sm" onClick={() => setDialog({ kind: 'cash' })}>Cash requirements</TmsButton>
       </div>
@@ -1081,11 +1075,11 @@ function reviewView({
     {
       key: 'bill',
       header: 'BILL',
-      text: (bill) => `${bill.billNumber ?? bill.id}${pendingDates(bill) ? ' · Needs invoice date' : ''}${flagOf(bill) ? ' · Needs review' : ''}`,
+      text: (bill) => `${billLabel(bill)}${pendingDates(bill) ? ' · Needs invoice date' : ''}${flagOf(bill) ? ' · Needs review' : ''}`,
       extraPx: 40,
       render: (bill) => (
         <>
-          <Link to={`/tms/invoicing/payable/bills/${bill.id}`}>{bill.billNumber ?? bill.id}</Link>
+          <Link to={`/tms/invoicing/payable/bills/${bill.id}`} title={bill.id}>{billLabel(bill)}</Link>
           <VerifyPaymentBadge bill={bill} />
           {pendingDates(bill) && <> <TmsBadge tone="orange">Needs invoice date</TmsBadge></>}
           {flagOf(bill) && <> <TmsBadge tone="red" title={flagText(bill)}>Needs review</TmsBadge></>}
@@ -1253,11 +1247,11 @@ function payableView({
     {
       key: 'bill',
       header: 'BILL',
-      text: (bill) => bill.billNumber ?? bill.id,
+      text: (bill) => billLabel(bill),
       extraPx: 90,
       render: (bill) => (
         <>
-          <Link to={`/tms/invoicing/payable/bills/${bill.id}`}>{bill.billNumber ?? bill.id}</Link>
+          <Link to={`/tms/invoicing/payable/bills/${bill.id}`} title={bill.id}>{billLabel(bill)}</Link>
           <VerifyPaymentBadge bill={bill} />
         </>
       ),

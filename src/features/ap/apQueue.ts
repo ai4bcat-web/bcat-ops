@@ -74,6 +74,18 @@ export function payablesQueue(
   })
 }
 
+/**
+ * The name a bill row prints. The carrier's own invoice number when there is one; the import's
+ * internal ids ("cb:lcr-…:1") are not names, so those rows read "PRO 20027 · SHERIFAJ" instead.
+ */
+export function billLabel(bill: Pick<CarrierBillRecord, 'id' | 'billNumber' | 'shipmentNumber' | 'loadNumber' | 'carrierName'>): string {
+  const number = bill.billNumber?.trim()
+  if (number && number !== bill.id && !/^cb:/i.test(number) && !/^lcr-/i.test(number)) return number
+  const pro = bill.shipmentNumber ?? bill.loadNumber
+  const carrier = bill.carrierName?.trim()
+  return [pro ? `PRO ${pro}` : null, carrier || null].filter(Boolean).join(' · ') || bill.id
+}
+
 /** The PRO a row prints: the shipment number, else the number snapshotted on the bill. */
 export function proOf(bill: Pick<CarrierBillRecord, 'shipmentId' | 'shipmentNumber' | 'loadNumber'>, facts: BillFactsIndex): string {
   return facts.get(bill.shipmentId)?.shipmentNumber ?? bill.shipmentNumber ?? bill.loadNumber ?? bill.shipmentId

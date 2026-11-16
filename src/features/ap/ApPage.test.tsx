@@ -214,14 +214,14 @@ beforeEach(() => {
 describe('the AP board', () => {
   it('offers every view of the money, and each one renders', async () => {
     await setup({ rowsByTab: { AWAITING_INVOICE: [worklistRow()] } })
-    for (const label of ['Expected', 'Aging(?! report)', 'Selected', 'Paid', 'Payments & credits', 'Aging report', 'AP inbox']) {
+    for (const label of ['Expected', 'Aging(?! by carrier)', 'Selected', 'Paid', 'Payments & credits', 'Aging by carrier', 'AP inbox']) {
       const tab = screen.getByRole('tab', { name: new RegExp(`^${label}`) })
       fireEvent.click(tab)
       expect(tab.getAttribute('aria-selected')).toBe('true')
     }
     // The last click landed on the AP inbox, whose empty queue says so; the aging report's body is the strip.
     expect(screen.getByText(/Invoice e-mails the AP inbox finds/)).toBeTruthy()
-    fireEvent.click(screen.getByRole('tab', { name: /^Aging report/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Aging by carrier/ }))
     expect(screen.getByLabelText('AP totals')).toBeTruthy()
   })
 
@@ -235,7 +235,7 @@ describe('the AP board', () => {
       rowsByTab: { IN_REVIEW: [worklistRow()] },
       bills: [bill({ status: 'IN_REVIEW', billedCents: 175_000, varianceCents: 25_000 })],
     })
-    fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! report)/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
 
     expect(screen.getByText('$250.00 variance')).toBeTruthy()
     expect(screen.getByText(/fix the lines or void the bill/)).toBeTruthy()
@@ -263,7 +263,7 @@ describe('the AP board', () => {
   /** The pay run is worked oldest first, so how late a bill already is has to be on it. */
   it('ages an approved bill on the row that pays it', async () => {
     await setup()
-    fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! report)/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
 
     expect(screen.getByText('10 days late')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Pay bill BL-7788' })).toBeTruthy()
@@ -276,7 +276,7 @@ describe('the AP board', () => {
    */
   it('leads the aging view with the lib\'s own totals', async () => {
     await setup({ rowsByTab: { AWAITING_INVOICE: [worklistRow()] } })
-    fireEvent.click(screen.getByRole('tab', { name: /^Aging report/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Aging by carrier/ }))
 
     const strip = within(screen.getByLabelText('AP totals'))
     // One open bill of $1,500.00, ten days past due.
@@ -309,13 +309,13 @@ describe('the AP board', () => {
       billNumber: 'RL-1', dueAt: daysAgo(45), balanceCents: 80_000, grossCents: 80_000, netCents: 80_000, billedCents: 80_000,
     })
     await setup({ bills: [a, b] })
-    fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! report)/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
     expect(screen.getByRole('button', { name: 'Pay bill BL-1' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Pay bill RL-1' })).toBeTruthy()
     expect(screen.getAllByText('Shared PRO · 2 carriers')).toHaveLength(2)
 
     // Aging report: two carriers, two buckets, the shipment is counted once per bill and not twice.
-    fireEvent.click(screen.getByRole('tab', { name: /^Aging report/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Aging by carrier/ }))
     const strip = within(screen.getByLabelText('AP totals'))
     expect(within(strip.getByText('Open AP').closest('.tms-kpi-card') as HTMLElement).getByText('$2,300.00')).toBeTruthy()
     expect(screen.getByText('Blue Line Trucking')).toBeTruthy()
@@ -331,7 +331,7 @@ describe('the AP board', () => {
     await setup({ bills: [a, b], url: '/?carrier=car2' })
     const owed = within(screen.getByLabelText('Owed by Red Line Freight'))
     expect(owed.getByText('Past due').closest('.tms-list-row')?.querySelector('.tms-list-row-value')?.textContent).toBe('$800.00')
-    fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! report)/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
     expect(screen.getByRole('button', { name: 'Pay bill RL-1' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Pay bill BL-1' })).toBeNull()
   })
@@ -350,7 +350,7 @@ describe('the AP board', () => {
 
     it('draws every view as the shared dense table with the Columns, density and summary controls', async () => {
       await setup({ bills: two() })
-      fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! report)/ }))
+      fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
       expect(screen.getByRole('table', { name: 'AP aging' })).toBeTruthy()
       expect(screen.getByRole('button', { name: /Columns/ })).toBeTruthy()
       expect(screen.getByRole('button', { name: /Summary/ })).toBeTruthy()
@@ -361,7 +361,7 @@ describe('the AP board', () => {
 
     it('sorts a money column by its cents when the header is clicked', async () => {
       await setup({ bills: two() })
-      fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! report)/ }))
+      fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
       const header = within(screen.getByRole('table', { name: 'AP aging' })).getByRole('columnheader', { name: /BALANCE/ })
       fireEvent.click(within(header).getAllByRole('button')[0])
       expect(order()).toEqual(['RL-1', 'BL-1'])
@@ -371,7 +371,7 @@ describe('the AP board', () => {
 
     it('puts ticked approved bills on the pay run from the Aging tab, any number of carriers', async () => {
       await setup({ bills: two() })
-      fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! report)/ }))
+      fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
       expect((screen.getByRole('button', { name: 'Select for payment' }) as HTMLButtonElement).disabled).toBe(true)
       fireEvent.click(screen.getByLabelText('Select bill BL-1'))
       expect(screen.getByText('1 selected ($1,500.00)')).toBeTruthy()
@@ -382,7 +382,7 @@ describe('the AP board', () => {
 
     it('does not let a bill still in review be ticked for payment', async () => {
       await setup({ bills: [bill({ status: 'IN_REVIEW', billNumber: 'IR-1' })] })
-      fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! report)/ }))
+      fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
       expect((screen.getByLabelText(/Bill IR-1 must be approved/) as HTMLInputElement).disabled).toBe(true)
     })
 
@@ -399,7 +399,7 @@ describe('the AP board', () => {
 
     it('shows a payment info link, the pay-to and the remittance e-mail on every row', async () => {
       await setup({ bills: [bill({ billNumber: 'BL-1', payeeKind: 'FACTOR', remitTo: { name: 'Blue Line', factorName: 'Triumph', payeeEmail: 'ap@triumph.test' } })] })
-      fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! report)/ }))
+      fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
       expect(screen.getByText('Factor — Triumph')).toBeTruthy()
       expect(screen.getByText('ap@triumph.test')).toBeTruthy()
       expect(screen.getByRole('button', { name: 'Payment info for bill BL-1' })).toBeTruthy()
@@ -407,7 +407,7 @@ describe('the AP board', () => {
 
     it('shows the summary strip figures in cents-exact dollars when opened', async () => {
       await setup({ bills: two() })
-      fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! report)/ }))
+      fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
       expect(screen.queryByRole('region', { name: 'Summary' })).toBeNull()
       fireEvent.click(screen.getByRole('button', { name: /Summary/ }))
       const strip = within(screen.getByRole('region', { name: 'Summary' }))
