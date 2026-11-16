@@ -47,6 +47,9 @@ export interface ReceivedRow {
   note: string | null
   /** True once a later reversal has undone this row. */
   reversed: boolean
+  /** The reversal's date and reason, when it was read. */
+  reversedOn: string | null
+  reversedReason: string | null
   /** The BCAT row itself, for Reverse. Null on Aljex history. */
   payment: ArPaymentRecord | null
 }
@@ -60,7 +63,12 @@ const KIND_TYPE: Record<ArPaymentRecord['kind'], ReceivedType> = {
 
 const ymd = (iso: string | null | undefined): string | null => (iso && /^\d{4}-\d{2}-\d{2}/.test(iso) ? iso.slice(0, 10) : null)
 
-export function fromArPayment(p: ArPaymentRecord, customerName: (id: string) => string): ReceivedRow {
+export function fromArPayment(
+  p: ArPaymentRecord,
+  customerName: (id: string) => string,
+  reversalOf: (paymentId: string) => ArPaymentRecord | undefined = () => undefined,
+): ReceivedRow {
+  const reversal = p.reversedByPaymentId ? reversalOf(p.id) : undefined
   const type = KIND_TYPE[p.kind] ?? 'payment'
   const sign = type === 'payment' ? 1 : -1
   const invoices: ReceivedInvoiceRef[] = (p.applications ?? []).map((a) => ({ invoiceId: a.invoiceId, amountCents: a.amountCents }))
@@ -81,6 +89,8 @@ export function fromArPayment(p: ArPaymentRecord, customerName: (id: string) => 
     recordedBy: p.createdBy || null,
     note: p.note || null,
     reversed: Boolean(p.reversedByPaymentId),
+    reversedOn: ymd(reversal?.receivedAt ?? reversal?.createdAt),
+    reversedReason: reversal?.note || null,
     payment: p,
   }
 }
@@ -150,8 +160,27 @@ export function fromAljexMemo(row: AljexMemoRow, customerIdByName: (name: string
     recordedBy: by ? `${by} (Aljex)` : 'Aljex',
     note: f.get('Description') ?? null,
     reversed: false,
+    reversedOn: null,
+    reversedReason: null,
     payment: null,
   }
+}
+
+/** The list's segmented control: cash receipts, adjustments (credits, debits, write-offs), or both. */
+export type ReceivedView = 'payments' | 'adjustments' | 'all'
+
+export function inView(row: ReceivedRow, view: ReceivedView): boolean {
+  if (view === 'all') return true
+  const cash = row.type === 'payment' || (row.type === 'reversal' && row.payment != null)
+  return view === 'payments' ? cash : !cash
+}
+
+/**
+ * Reversed rows are hidden by default (Ryne 2026-11-15): a payment that was reversed and the
+ * reversal that undid it cancel out, so the pair only shows with "Show reversed".
+ */
+export function hideReversed(rows: readonly ReceivedRow[], show: boolean): ReceivedRow[] {
+  return show ? [...rows] : rows.filter((r) => !r.reversed && r.type !== 'reversal')
 }
 
 export interface ReceivedFilter {
@@ -197,7 +226,7 @@ export function filterReceived(
 
 export interface ReceivedTotals {
   count: number
-  /** Payments in (positive), net of reversals of payments. */
+  /** Payments in that still stand (not reversed). */
   paymentsCents: number
   paymentsCount: number
   creditsCents: number
@@ -205,7 +234,7 @@ export interface ReceivedTotals {
   debitsCents: number
   debitsCount: number
   writeOffsCents: number
-  reversalsCents: number
+  /** Reversal rows listed; they and the rows they reversed are left out of every total. */
   reversalsCount: number
   unappliedCents: number
   /** Σ signed amounts: what the rows in view add up to. */
@@ -215,16 +244,18 @@ export interface ReceivedTotals {
 export function receivedTotals(rows: readonly ReceivedRow[]): ReceivedTotals {
   const t: ReceivedTotals = {
     count: rows.length, paymentsCents: 0, paymentsCount: 0, creditsCents: 0, creditsCount: 0, debitsCents: 0, debitsCount: 0,
-    writeOffsCents: 0, reversalsCents: 0, reversalsCount: 0, unappliedCents: 0, netCents: 0,
+    writeOffsCents: 0, reversalsCount: 0, unappliedCents: 0, netCents: 0,
   }
   for (const r of rows) {
+    // A reversal and the row it undid cancel out: the pair is listed, but neither is counted as money in.
+    if (r.type === 'reversal') { t.reversalsCount += 1; continue }
+    if (r.reversed) continue
     t.netCents += r.amountCents
     t.unappliedCents += r.unappliedCents
     if (r.type === 'payment') { t.paymentsCents += r.amountCents; t.paymentsCount += 1 }
     else if (r.type === 'credit') { t.creditsCents += r.amountCents; t.creditsCount += 1 }
     else if (r.type === 'debit') { t.debitsCents += r.amountCents; t.debitsCount += 1 }
-    else if (r.type === 'write-off') t.writeOffsCents += r.amountCents
-    else { t.reversalsCents += r.amountCents; t.reversalsCount += 1 }
+    else t.writeOffsCents += r.amountCents
   }
   return t
 }

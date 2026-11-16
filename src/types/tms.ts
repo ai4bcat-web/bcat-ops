@@ -3205,7 +3205,7 @@ export interface InvoiceRecord {
 
 export type ArPaymentKind = 'PAYMENT' | 'CREDIT_MEMO' | 'WRITE_OFF' | 'REVERSAL'
 
-export type ArPaymentMethod = 'CHECK' | 'ACH' | 'WIRE' | 'CARD' | 'FACTOR' | 'OTHER'
+export type ArPaymentMethod = 'CHECK' | 'ACH' | 'WIRE' | 'CARD' | 'ZELLE' | 'FACTOR' | 'OTHER'
 
 /** Money from this row put against one invoice. */
 export interface PaymentApplication {

@@ -70,8 +70,7 @@ import {
 } from './arQueue'
 import { CreditMemoDialog } from './components/CreditMemoDialog'
 import { ReasonDialog } from './components/ReasonDialog'
-import { ReceivePaymentDialog } from './components/ReceivePaymentDialog'
-import { MarkPaidDialog } from './components/MarkPaidDialog'
+import { RECORD_PAYMENT_LINK_LABEL, recordPaymentPath } from '@/features/payments/links'
 import { useCustomerPaymentFacts, type CustomerPaymentFacts } from '@/hooks/useCustomerPaymentFacts'
 import { PAYMENT_METHOD_LABEL, averageDaysToPay, daysToPayText, settlementOf } from '@/lib/daysToPay'
 import { SendToFactorDialog } from './components/SendToFactorDialog'
@@ -99,12 +98,10 @@ type ArDialog =
   | { kind: 'statement'; customerId: string; customerName: string }
   | { kind: 'statementPreview'; customerId: string; customerName: string }
   | { kind: 'bulkStatement'; customers: BulkStatementCustomer[] }
-  | { kind: 'payment'; customerId: string; customerName: string; invoiceId?: string }
   | { kind: 'credit'; customerId: string; customerName: string }
   | { kind: 'factor'; invoiceId: string }
   | { kind: 'batchFactor'; rows: ArQueueRow[] }
   | { kind: 'void'; invoice: InvoiceRecord }
-  | { kind: 'markPaid'; invoices: InvoiceRecord[] }
 
 /** One shipment the batch would not bill, and exactly what the release gate said. */
 interface BatchRefusal {
@@ -506,7 +503,6 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onBatchFactor: (rows) => setDialog({ kind: 'batchFactor', rows }),
       onReview: (invs) => setDialog({ kind: 'review', invoices: invs }),
       onEdit: (inv) => setDialog({ kind: 'edit', invoice: inv }),
-      onMarkPaid: (invs) => setDialog({ kind: 'markPaid', invoices: invs }),
       onStatement: (customerId, customerName) => setDialog({ kind: 'statement', customerId, customerName }),
       paymentFacts,
     })
@@ -610,23 +606,6 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       </div>
 
       {reportsOpen && <AccountingReportsDialog side="AR" asOf={asOf} initialKind={reportsOpen === 'menu' ? null : reportsOpen} onClose={() => setReportsOpen(null)} />}
-      {dialog?.kind === 'payment' && (
-        <ReceivePaymentDialog
-          customerId={dialog.customerId}
-          customerName={dialog.customerName}
-          invoiceId={dialog.invoiceId}
-          busy={busy}
-          onClose={() => setDialog(null)}
-          onDone={closeAndRefresh}
-        />
-      )}
-      {dialog?.kind === 'markPaid' && (
-        <MarkPaidDialog
-          invoices={dialog.invoices}
-          onClose={() => setDialog(null)}
-          onDone={() => { setSelected([]); void refreshAll() }}
-        />
-      )}
       {dialog?.kind === 'edit' && (
         <InvoiceEditDrawer
           invoice={dialog.invoice}
@@ -639,8 +618,6 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           onSaved={() => void refreshAll()}
           onSend={(inv) => setDialog({ kind: 'review', invoices: [inv] })}
           onFactor={(inv) => setDialog({ kind: 'factor', invoiceId: inv.id })}
-          onPayment={(inv) => setDialog({ kind: 'payment', customerId: inv.customerId, customerName: inv.customerName ?? '', invoiceId: inv.id })}
-          onMarkPaid={(inv) => setDialog({ kind: 'markPaid', invoices: [inv] })}
           onVoid={(inv) => setDialog({ kind: 'void', invoice: inv })}
         />
       )}
@@ -810,7 +787,7 @@ function dateCol<T>(key: string, header: string, of: (row: T) => string | null, 
 function queueView({
   status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, factorByItemId, customerById,
   attachmentPlans, boardById, shipmentsById, months, month, paidLoading, onMonth, onSelect, invoiceErrors, invoicesRunning, onRetryInvoice, onBatchGenerate, onReview, onEdit,
-  onMarkPaid, onStatement, paymentFacts,
+  onStatement, paymentFacts,
   factorReadiness, onBatchFactor,
 }: {
   status: ArQueueStatus
@@ -843,7 +820,6 @@ function queueView({
   onBatchFactor?: (rows: ArQueueRow[]) => void
   onReview: (invoices: InvoiceRecord[]) => void
   onEdit: (invoice: InvoiceRecord) => void
-  onMarkPaid: (invoices: InvoiceRecord[]) => void
   /** Invoiced, grouped by customer: e-mail that customer's aging report from the group header. */
   onStatement?: (customerId: string, customerName: string) => void
   paymentFacts: CustomerPaymentFacts
@@ -1116,7 +1092,10 @@ function queueView({
         return (
           <span className="flex items-center justify-end gap-1">
             {payable(row) && (
-              <TmsButton size="sm" aria-label={`Mark invoice ${inv.number} paid`} disabled={busy} onClick={() => onMarkPaid([inv])}>Mark paid</TmsButton>
+              <Link className="tms-btn tms-btn-secondary tms-btn-sm" to={recordPaymentPath({ customerId: inv.customerId, invoiceId: inv.id })}
+                aria-label={`Record a payment on invoice ${inv.number} in Payments received`} title={RECORD_PAYMENT_LINK_LABEL}>
+                Record payment
+              </Link>
             )}
             <button type="button" className="tms-icon-btn tms-icon-btn-plain" aria-label={`View or edit invoice ${inv.number}`} title="Open invoice" onClick={() => onEdit(inv)}><Eye size={15} /></button>
           </span>
@@ -1171,16 +1150,24 @@ function queueView({
         </div>
       )}
       {invoiced && (() => {
+        // Payments are recorded only on Payments received (Ryne 2026-11-15); this hands the ticked invoices over.
         const picked = rows.filter((row) => selected.includes(row.orderId) && payable(row)).map((row) => row.invoice as InvoiceRecord)
+        const customers = new Set(picked.map((inv) => inv.customerId))
+        const blocked = picked.length === 0 ? 'Tick sent invoices (filter or group by customer to pick one customer\'s)'
+          : customers.size > 1 ? 'One payment is from one customer: tick one customer\'s invoices' : null
         return (
           <div className="tms-batch-actions" data-active={picked.length > 0 ? 'true' : undefined}>
             <span className="text-sm tms-muted">{picked.length} selected</span>
-            <TmsButton variant="primary" aria-label="Mark selected invoices paid" data-testid="ar-mark-paid-batch"
-              disabled={busy || picked.length === 0}
-              title={picked.length === 0 ? 'Tick sent invoices (filter or group by customer to pick one customer\'s)' : undefined}
-              onClick={() => onMarkPaid(picked)}>
-              Mark {picked.length || ''} paid
-            </TmsButton>
+            {blocked ? (
+              <TmsButton variant="primary" aria-label="Record a payment for the selected invoices" data-testid="ar-record-payment-batch" disabled title={blocked}>
+                Record payment
+              </TmsButton>
+            ) : (
+              <Link className="tms-btn tms-btn-primary tms-btn-sm" data-testid="ar-record-payment-batch" title={RECORD_PAYMENT_LINK_LABEL}
+                to={recordPaymentPath({ customerId: picked[0].customerId, invoiceIds: picked.map((inv) => inv.id) })}>
+                Record payment for {picked.length}
+              </Link>
+            )}
           </div>
         )
       })()}

@@ -433,13 +433,16 @@ describe('the AR dense grid', () => {
     await settle()
     const grid = screen.getByRole('table', { name: 'Invoiced' })
     expect(within(grid).getByText('$2,500.00', { selector: 'span' })).toBeTruthy()
-    expect(within(grid).queryAllByRole('link')).toHaveLength(0)
+    // The only link on a row is Record payment, to Payments received (Ryne 2026-11-15) — never the shipment.
+    expect(within(grid).queryAllByRole('link').map((l) => l.getAttribute('href'))).toEqual(['/tms/payments-received?record=1&customer=c1&invoice=INV-000123'])
     // Sending, payments and void live in the invoice drawer, not on the row.
     expect(within(grid).queryByRole('button', { name: /^Send invoice/ })).toBeNull()
     expect(within(grid).queryByRole('combobox', { name: /More actions/ })).toBeNull()
     fireEvent.click(within(grid).getByRole('button', { name: 'Open invoice INV-000123' }))
     expect(await screen.findByRole('region', { name: 'Invoice actions' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Receive payment' })).toBeTruthy()
+    // Payments are recorded only on Payments received: the drawer links there.
+    expect(screen.queryByRole('button', { name: 'Receive payment' })).toBeNull()
+    expect(screen.getByRole('link', { name: 'Record payment in Payments received' })).toBeTruthy()
     expect(screen.getByTestId('ar-grid-ar-queue-invoiced')).toBeTruthy()
     openSet.splice(0, openSet.length, sentInvoice())
   })

@@ -152,6 +152,7 @@ export const AR_PAYMENT_METHOD_LABEL: Record<ArPaymentMethod, string> = {
   ACH: 'ACH',
   WIRE: 'Wire',
   CARD: 'Card',
+  ZELLE: 'Zelle',
   FACTOR: 'Factor',
   OTHER: 'Other',
 }

@@ -5,7 +5,8 @@
  * and a sent invoice becomes 'Rev N'. Send / Resend hands it to the review carousel.
  *
  * This drawer is where a single invoice is sent from (Ryne, 2026-11-12): its Actions bar holds
- * Send / Resend, Regenerate, Send to factor, Receive payment and Void (admin). The preview is the
+ * Send / Resend, Regenerate, Send to factor and Void (admin). Payments are recorded only on Payments received
+ * (Ryne 2026-11-15); an open sent invoice links there. The preview is the
  * invoice exactly as it goes out — one PDF with the POD pages merged in. Nothing here links to
  * the shipment.
  */
@@ -21,6 +22,7 @@ import { renderInvoiceEmail } from '@/lib/shipmentNotices'
 import type { FactoringItem } from '@/types'
 import type { CustomerRecord, InvoiceAdjustment, InvoiceRecord, ShipmentRecord, TmsSettings } from '@/types/tms'
 import { centsFromInput, inputFromCents } from './money'
+import { RECORD_PAYMENT_LINK_LABEL, recordPaymentPath } from '@/features/payments/links'
 import { InvoicePacketFrame } from './InvoicePacketFrame'
 import { useCustomerPaymentFacts } from '@/hooks/useCustomerPaymentFacts'
 import { PAYMENT_METHOD_LABEL, settlementOf } from '@/lib/daysToPay'
@@ -30,7 +32,7 @@ import { AttachmentInfo, AttachmentRow, AttachmentsSection, InvoiceEnvelope, Mes
 
 interface Draft { kind: 'CREDIT' | 'DEBIT'; description: string; amount: string; reason: string }
 
-export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, canEdit, canVoid = false, onClose, onSaved, onSend, onFactor, onPayment, onMarkPaid, onVoid }: {
+export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, canEdit, canVoid = false, onClose, onSaved, onSend, onFactor, onVoid }: {
   invoice: InvoiceRecord
   customer: CustomerRecord | undefined
   shipment: ShipmentRecord | undefined
@@ -42,9 +44,6 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
   /** Owner / ADMIN (Ryne or Jenny): Void shows. */
   canVoid?: boolean
   onFactor?: (invoice: InvoiceRecord) => void
-  onPayment?: (invoice: InvoiceRecord) => void
-  /** Paid date, ACH or check, check # — the same dialog as the Invoiced tab's batch. */
-  onMarkPaid?: (invoice: InvoiceRecord) => void
   onVoid?: (invoice: InvoiceRecord) => void
 }) {
   const [current, setCurrent] = useState(invoice)
@@ -154,11 +153,10 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
           {canEdit && onFactor && !factored && !sent && current.status !== 'VOID' && current.status !== 'PAID' && (
             <TmsButton aria-label="Send to factor instead" disabled={saving} onClick={() => onFactor(current)}>Send to factor</TmsButton>
           )}
-          {onMarkPaid && sent && !factored && current.status !== 'VOID' && current.status !== 'PAID' && current.balanceCents > 0 && (
-            <TmsButton variant="primary" aria-label="Mark paid" disabled={saving} onClick={() => onMarkPaid(current)}>Mark paid</TmsButton>
-          )}
-          {onPayment && sent && current.status !== 'VOID' && current.status !== 'PAID' && (
-            <TmsButton variant="ghost" aria-label="Receive payment" disabled={saving} onClick={() => onPayment(current)}>Receive payment</TmsButton>
+          {sent && !factored && current.status !== 'VOID' && current.status !== 'PAID' && current.balanceCents > 0 && (
+            <Link className="tms-btn tms-btn-secondary tms-btn-sm" to={recordPaymentPath({ customerId: current.customerId, invoiceId: current.id })}>
+              {RECORD_PAYMENT_LINK_LABEL}
+            </Link>
           )}
           {canVoid && onVoid && current.status !== 'VOID' && (
             <TmsButton variant="ghost" aria-label="Void invoice" disabled={saving} onClick={() => onVoid(current)}>Void</TmsButton>

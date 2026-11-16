@@ -30,9 +30,11 @@ import { formatCents } from '@/lib/invoiceBuild'
 import { planPayment, suggestAllocation, type PlanCredit, type PlanDocument } from '@/lib/paymentApply'
 import { formatDateInput } from '@/lib/date'
 import { centsFromInput, inputFromCents } from './money'
+import { poReferenceOf } from '@/lib/customerRef'
+import { AR_PAYMENT_METHOD_LABEL, formatDay } from '../arViews'
 import type { ArPaymentMethod, ArPaymentRecord, CreditApplication, InvoiceRecord, PaymentApplication } from '@/types/tms'
 
-const METHODS: ArPaymentMethod[] = ['CHECK', 'ACH', 'WIRE', 'CARD', 'FACTOR', 'OTHER']
+const METHODS: ArPaymentMethod[] = ['CHECK', 'ACH', 'WIRE', 'CARD', 'ZELLE', 'FACTOR', 'OTHER']
 
 /** Typed dollar boxes, keyed by the row they belong to. Blank means "nothing applied". */
 type AmountDrafts = Record<string, string>
@@ -46,11 +48,15 @@ function appliedRows(drafts: AmountDrafts): { id: string; amountCents: number }[
   return rows
 }
 
-export function ReceivePaymentDialog({ customerId, customerName, invoiceId, method: initialMethod, busy, onClose, onDone }: {
+export function ReceivePaymentDialog({ customerId, customerName, invoiceId, invoiceIds, method: initialMethod, busy, onClose, onDone, onChangeCustomer }: {
   customerId: string
   customerName?: string
   invoiceId?: string
+  /** Opened with several invoices ticked (Payments received, from the Invoiced tab): each paid in full. */
+  invoiceIds?: readonly string[]
   method?: ArPaymentMethod
+  /** Payments received: a link beside the title to pick another customer. */
+  onChangeCustomer?: () => void
   busy?: boolean
   onClose: () => void
   onDone: () => void
@@ -74,6 +80,8 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, meth
   const [loading, setLoading] = useState(true)
   const [posting, setPosting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Enter the payment, then read back what will be saved before it is.
+  const [step, setStep] = useState<'edit' | 'confirm'>('edit')
 
   // Non-async on purpose: `react-hooks/set-state-in-effect` cannot see through an
   // `async` function, so every state write lives in an explicit promise chain.
@@ -81,19 +89,23 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, meth
     Promise.all([listInvoicesByCustomer(customerId), listArPaymentsByCustomer(customerId)])
       .then(([invoiceRows, paymentRows]) => {
         const open = invoiceRows.filter((row) => row.status !== 'VOID' && row.balanceCents > 0)
+          .sort((a, b) => String(a.dueAt).localeCompare(String(b.dueAt)))
         setInvoices(open)
         setPayments(paymentRows)
-        // Opened from one invoice: that bill is the one being paid, in full, unless
+        // Opened from invoices: those bills are the ones being paid, in full, unless
         // the person says otherwise.
-        const target = invoiceId ? open.find((row) => row.id === invoiceId) : undefined
-        if (target) {
-          setAllocations({ [target.id]: inputFromCents(target.balanceCents) })
-          setAmount(inputFromCents(target.balanceCents))
+        const wanted = new Set([...(invoiceId ? [invoiceId] : []), ...(invoiceIds ?? [])])
+        const targets = open.filter((row) => wanted.has(row.id))
+        if (targets.length > 0) {
+          setAllocations(Object.fromEntries(targets.map((row) => [row.id, inputFromCents(row.balanceCents)])))
+          setAmount(inputFromCents(targets.reduce((sum, row) => sum + row.balanceCents, 0)))
         }
         setError(null)
       })
       .catch((err: unknown) => { setError(graphqlErrorText(err)) })
       .finally(() => setLoading(false)),
+  // invoiceIds is read once, on open; a new array each render must not reload the account.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   [customerId, invoiceId])
 
   useEffect(() => { load() }, [load])
@@ -226,16 +238,30 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, meth
     <TmsDialog
       open
       onOpenChange={(open) => { if (!open) onClose() }}
-      title={`Receive payment${customerName ? ` — ${customerName}` : ''}`}
+      title={
+        <span className="flex flex-wrap items-baseline gap-2">
+          <span>Record payment{customerName ? ` — ${customerName}` : ''}</span>
+          {onChangeCustomer && step === 'edit' && (
+            <TmsButton variant="ghost" size="sm" onClick={onChangeCustomer} disabled={posting}>Change customer</TmsButton>
+          )}
+        </span>
+      }
       className="tms-dialog-wide"
-      footer={
+      footer={step === 'edit' ? (
         <>
           <TmsButton variant="ghost" onClick={onClose} disabled={posting}>Cancel</TmsButton>
-          <TmsButton variant="primary" onClick={submit} disabled={disabled || !plan.ok || ignoreBlocked}>
-            {posting ? 'Posting…' : 'Post'}
+          <TmsButton variant="primary" onClick={() => setStep('confirm')} disabled={disabled || !plan.ok || ignoreBlocked || amountCents + plan.fromCreditsCents <= 0}>
+            Review
           </TmsButton>
         </>
-      }
+      ) : (
+        <>
+          <TmsButton variant="ghost" onClick={() => setStep('edit')} disabled={posting}>Back</TmsButton>
+          <TmsButton variant="primary" onClick={submit} disabled={disabled || !plan.ok || ignoreBlocked}>
+            {posting ? 'Saving…' : 'Save payment'}
+          </TmsButton>
+        </>
+      )}
     >
       {loading && (
         <p className="flex items-center gap-2 tms-muted">
@@ -243,7 +269,41 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, meth
         </p>
       )}
 
-      {!loading && (
+      {!loading && step === 'confirm' && (
+        <div className="flex flex-col gap-3" data-testid="record-payment-confirm">
+          <p className="text-sm">
+            <strong>{formatCents(amountCents)}</strong> by {AR_PAYMENT_METHOD_LABEL[method].toLowerCase()}
+            {reference.trim() ? <> · ref <strong>{reference.trim()}</strong></> : null} · received {formatDay(receivedAt)}
+            {customerName ? <> · from <strong>{customerName}</strong></> : null}
+          </p>
+          <ul className="flex flex-col gap-1 text-sm" style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)', padding: 8 }}>
+            {applications.length === 0 && creditApplications.length === 0 && <li className="tms-muted">Nothing applied: the whole amount stays as customer credit.</li>}
+            {applications.map((row) => {
+              const inv = invoices.find((candidate) => candidate.id === row.invoiceId)
+              const rest = inv ? inv.balanceCents - row.amountCents : 0
+              return (
+                <li key={row.invoiceId} className="flex justify-between gap-3">
+                  <span>Invoice {inv?.number ?? row.invoiceId}{rest > 0 ? <span className="tms-muted"> · {formatCents(rest)} {ignoreRest[row.invoiceId] !== undefined ? 'ignored' : 'stays open'}</span> : <span className="tms-muted"> · paid in full</span>}</span>
+                  <strong>{formatCents(row.amountCents)}</strong>
+                </li>
+              )
+            })}
+            {creditApplications.map((row) => (
+              <li key={row.paymentId} className="flex justify-between gap-3">
+                <span>From credit {credits.find((c) => c.id === row.paymentId)?.reference ?? row.paymentId}</span>
+                <strong>{formatCents(row.amountCents)}</strong>
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm">
+            Applied <strong>{formatCents(plan.appliedCents)}</strong>
+            {plan.unappliedCents > 0 && <> · Unapplied <strong>{formatCents(plan.unappliedCents)}</strong> {overage === 'ACCEPT' ? '(accepted as paid in full)' : '(kept as customer credit)'}</>}
+          </p>
+          {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
+        </div>
+      )}
+
+      {!loading && step === 'edit' && (
         <div className="flex flex-col gap-4">
           <div className="tms-grid tms-grid-4">
             <TmsField label="Received">
@@ -262,7 +322,7 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, meth
                 disabled={disabled}
                 onChange={(e) => setMethod(e.target.value as ArPaymentMethod)}
               >
-                {METHODS.map((row) => <option key={row} value={row}>{row.toLowerCase()}</option>)}
+                {METHODS.map((row) => <option key={row} value={row}>{AR_PAYMENT_METHOD_LABEL[row]}</option>)}
               </TmsSelect>
             </TmsField>
             <TmsField label="Reference">
@@ -300,8 +360,8 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, meth
           <div>
             <div className="flex items-center justify-between">
               <p className="text-[11px] font-semibold uppercase tracking-wider tms-muted">Open invoices</p>
-              <TmsButton size="sm" aria-label="Auto-allocate" onClick={autoAllocate} disabled={disabled}>
-                <Wand2 size={12} /> Auto-allocate
+              <TmsButton size="sm" aria-label="Apply oldest first" onClick={autoAllocate} disabled={disabled}>
+                <Wand2 size={12} /> Apply oldest first
               </TmsButton>
             </div>
             {invoices.length === 0 ? (
@@ -312,9 +372,17 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, meth
                 style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
               >
                 {invoices.map((row) => (
-                  <li key={row.id} className="flex items-center gap-3 px-2 py-1.5">
-                    <span className="w-32 shrink-0 font-medium">{row.number}</span>
-                    <span className="w-24 shrink-0 text-xs tms-muted">due {row.dueAt}</span>
+                  <li key={row.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 py-1.5">
+                    <input
+                      type="checkbox"
+                      aria-label={`Pay invoice ${row.number} in full`}
+                      checked={(centsFromInput(allocations[row.id] ?? '') ?? 0) > 0}
+                      disabled={disabled}
+                      onChange={(e) => setAllocations((prev) => ({ ...prev, [row.id]: e.target.checked ? inputFromCents(row.balanceCents) : '' }))}
+                    />
+                    <span className="w-28 shrink-0 font-medium">{row.number}</span>
+                    <span className="w-28 shrink-0 text-xs tms-muted" title="PO">{poReferenceOf(row.references) ?? '—'}</span>
+                    <span className="w-24 shrink-0 text-xs tms-muted">due {formatDay(row.dueAt)}</span>
                     <span className="flex-1 text-right text-xs tms-muted">{formatCents(row.balanceCents)} open</span>
                     <TmsInput
                       aria-label={`Apply to invoice ${row.number}`}

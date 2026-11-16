@@ -2505,7 +2505,7 @@ const schema = a.schema(stageTypes({
       // The typed date at noon UTC, so the customer index sorts by the day the money
       // arrived and a timezone cannot slide a receipt into the previous month.
       receivedAt:      a.datetime().required(),
-      method:          a.enum(['CHECK', 'ACH', 'WIRE', 'CARD', 'FACTOR', 'OTHER']),
+      method:          a.enum(['CHECK', 'ACH', 'WIRE', 'CARD', 'ZELLE', 'FACTOR', 'OTHER']),
       reference:       a.string(),
       amountCents:     a.integer().required(),
       appliedCents:    a.integer().required(),

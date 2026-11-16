@@ -102,6 +102,7 @@ export const PAYMENT_METHOD_LABEL: Partial<Record<ArPaymentMethod, string>> = {
   CHECK: 'Paper check',
   WIRE: 'Wire',
   CARD: 'Card',
+  ZELLE: 'Zelle',
   FACTOR: 'Factor',
   OTHER: 'Other',
 }

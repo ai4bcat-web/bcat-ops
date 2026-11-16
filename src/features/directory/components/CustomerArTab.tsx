@@ -17,7 +17,7 @@ import { TmsBadge, TmsButton, TmsEmptyState, TmsStatRow } from '@/features/tms/k
 import type { TmsTone } from '@/features/tms/kit'
 import { AGING_BUCKET_LABEL, agingBucket, type AgingBucket } from '@/lib/arAging'
 import { formatCents } from '@/lib/invoiceBuild'
-import { ReceivePaymentDialog } from '@/features/ar/components/ReceivePaymentDialog'
+import { RECORD_PAYMENT_LINK_LABEL, recordPaymentPath } from '@/features/payments/links'
 import { CreditMemoDialog } from '@/features/ar/components/CreditMemoDialog'
 import type { ArPaymentRecord, InvoiceRecord } from '@/types/tms'
 
@@ -77,9 +77,10 @@ export function CustomerArTab({
           ]}
         />
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <TmsButton variant="primary" size="sm" onClick={() => setDialog('payment')}>
-            <Banknote size={14} />Receive payment
-          </TmsButton>
+          {/* Payments are recorded only on Payments received (Ryne 2026-11-15). */}
+          <Link className="tms-btn tms-btn-primary tms-btn-sm" to={recordPaymentPath({ customerId })}>
+            <Banknote size={14} />{RECORD_PAYMENT_LINK_LABEL}
+          </Link>
           <TmsButton size="sm" onClick={() => setDialog('credit')}>
             <Plus size={14} />New credit
           </TmsButton>
@@ -142,14 +143,6 @@ export function CustomerArTab({
         )}
       </section>
 
-      {dialog === 'payment' && (
-        <ReceivePaymentDialog
-          customerId={customerId}
-          customerName={customerName}
-          onClose={() => setDialog(null)}
-          onDone={() => { setDialog(null); void onRefresh() }}
-        />
-      )}
       {dialog === 'credit' && (
         <CreditMemoDialog
           customerId={customerId}
