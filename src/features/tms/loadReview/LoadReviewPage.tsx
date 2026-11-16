@@ -30,6 +30,8 @@ import { DetentionPill } from '@/features/shipments/components/Detention'
 
 type ReviewEntry = { row: ShipmentListRow; verdict?: LoadReviewVerdict }
 const PAGE_STEP = 50
+/** On the All tab a load that passes every check reads green (Ryne 2026-11-15: "highlight the rows in green that are ready to go"). */
+const reviewRowTone = (entry: ReviewEntry): string => (entry.verdict?.ok ? 'ready' : '')
 /**
  * Every review tab opens on one column per checked field: the value with its own pass mark or NEED, then Ready
  * (Ryne 2026-11-15: "have the checkmarks sit in the same column as the check they are reviewing"). Released has no
@@ -285,7 +287,7 @@ export function LoadReviewPage() {
         aria-label="Load review filters"
         active={tab}
         onSelect={(key) => { update({ tab: key, page: null }); setSelected(new Set()); setCapMessage(null); setPageSize(PAGE_STEP) }}
-        tabs={[{ key: 'fixes', label: 'Needs fixes', count: needs.length }, { key: 'ready', label: 'Looks ready', count: ready.length }, { key: 'all', label: 'All in review', count: queue.length }, { key: 'released', label: 'Released (14 d)', count: released.length }]}
+        tabs={[{ key: 'all', label: 'All in review', count: queue.length }, { key: 'fixes', label: 'Needs fixes', count: needs.length }, { key: 'ready', label: 'Looks ready', count: ready.length }, { key: 'released', label: 'Released (14 d)', count: released.length }]}
       />
       <div className="tms-dense-bar">
         <span className="tms-dense-title"><ClipboardCheck size={18} aria-hidden="true" /> Review · Load review</span>
@@ -318,6 +320,7 @@ export function LoadReviewPage() {
           fitRows={filtered}
           rowKey={({ row }) => row.id}
           renderCell={renderReviewCell}
+          toneOf={tab === 'all' ? reviewRowTone : undefined}
           density={prefs.density}
           rowHeights={fixRowHeights}
           userWidths={prefs.widths}

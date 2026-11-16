@@ -104,13 +104,21 @@ describe('LoadReviewPage inactive revenue division', () => {
     renderPage('/tms/load-review?tab=all')
     expect(checkbox('S-1')!.disabled).toBe(false)
   })
+
+  it('the All tab tints ready rows green and leaves the rest plain (Ryne 2026-11-15)', () => {
+    renderPage('/tms/load-review?tab=all')
+    const rows = Array.from(document.querySelectorAll('tbody tr'))
+    const toned = rows.filter((tr) => tr.getAttribute('data-tone') === 'ready')
+    expect(checkbox('S-1')!.closest('tr')!.getAttribute('data-tone')).toBe('ready')
+    expect(toned.length).toBeLessThan(rows.length)
+  })
 })
 
 describe('LoadReviewPage', () => {
   it('filters by status in the folder tab strip, with no Demo chip and no stray expression text in the toolbar', () => {
     renderPage('/tms/load-review?tab=all')
     const strip = screen.getByRole('tablist', { name: 'Load review filters' })
-    expect(within(strip).getAllByRole('tab').map((t) => t.textContent?.replace(/\d+$/, ''))).toEqual(['Needs fixes', 'Looks ready', 'All in review', 'Released (14 d)'])
+    expect(within(strip).getAllByRole('tab').map((t) => t.textContent?.replace(/\d+$/, ''))).toEqual(['All in review', 'Needs fixes', 'Looks ready', 'Released (14 d)'])
     expect(within(strip).getByRole('tab', { name: /All in review/ }).getAttribute('aria-selected')).toBe('true')
     expect(screen.queryByText(/demo/i)).toBeNull()
     expect(screen.queryByText(/!==/)).toBeNull()
