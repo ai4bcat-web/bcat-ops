@@ -35,7 +35,7 @@ export function InvoicingPage() {
     onSelect: (key: string) => navigate(key === 'payable' ? '/tms/invoicing/payable' : key === 'factored' ? '/tms/invoicing/factored' : '/tms/invoicing'),
   }
 
-  // Receivable's old "Payments & credits" tab is the Payments received page now (Ryne 2026-11-15).
+  // Receivable's old "Payments & credits" tab is the Payments Received page now (Ryne 2026-11-15).
   const query = new URLSearchParams(search)
   if (!payable && !factored && query.get('tab') === 'payments') {
     const customer = query.get('customer')

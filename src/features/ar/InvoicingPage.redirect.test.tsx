@@ -15,8 +15,8 @@ function Where() {
   return <p>at {pathname}{search}</p>
 }
 
-describe('Invoicing → Payments received redirect', () => {
-  it('sends the old Payments & credits tab link to the Payments received page, keeping the customer', () => {
+describe('Invoicing → Payments Received redirect', () => {
+  it('sends the old Payments & credits tab link to the Payments Received page, keeping the customer', () => {
     render(
       <MemoryRouter initialEntries={['/tms/invoicing?tab=payments&customer=c1']}>
         <Routes>

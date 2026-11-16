@@ -7616,7 +7616,7 @@ export async function listInvoicesByMonth(month: string): Promise<InvoiceRecord[
 
 /**
  * Every customer cash row (receipts, credits, write-offs, reversals), all customers — the
- * Payments received report. A paginated list: the table is small (≈1.6k rows) and has no
+ * Payments Received report. A paginated list: the table is small (≈1.6k rows) and has no
  * index by date, so one read covers any range without a per-customer fan-out.
  */
 export async function listArPayments(): Promise<ArPaymentRecord[]> {

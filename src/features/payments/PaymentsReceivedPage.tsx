@@ -1,8 +1,8 @@
 /**
- * `/tms/payments-received` — Accounting → Payments received (Ryne 2026-11-15). The ONE place a customer
+ * `/tms/payments-received` — Accounting → Payments Received (Ryne 2026-11-15). The ONE place a customer
  * payment is recorded: every other screen links here with the customer (and invoice) picked.
  * Outstanding (the default, Ryne 2026-11-16) lists every open invoice by customer and receives a check
- * against the ticked ones; Payments received / Credits & debits / All are the ledger.
+ * against the ticked ones; Payments Received / Credits & debits / All are the ledger.
  *
  * - "Collected this week / month" are the Receivables card's own figures (`computeArSummary` over the
  *   same six months of invoices, by paid date), so this page and the card cannot disagree.
@@ -62,7 +62,7 @@ type PageView = 'outstanding' | ReceivedView
 
 const VIEW_TABS: Array<{ key: PageView; label: string }> = [
   { key: 'outstanding', label: 'Outstanding' },
-  { key: 'payments', label: 'Payments received' },
+  { key: 'payments', label: 'Payments Received' },
   { key: 'adjustments', label: 'Credits & debits' },
   { key: 'all', label: 'All' },
 ]
@@ -260,7 +260,7 @@ export function PaymentsReceivedPage() {
     { key: 'month', label: 'Collected this month', value: formatCents(collected.collectedMonthCents), sub: n(collected.collectedMonthCount, 'invoice'),
       title: 'Invoices paid this month, by paid date. Same as the Receivables card.' },
     { key: 'payments', label: `Payments · ${rangeLabel}`, value: formatCents(totals.paymentsCents), sub: n(totals.paymentsCount, 'payment'),
-      title: 'Payments received in the range and filters below. A payment that was later reversed is not counted.' },
+      title: 'Payments Received in the range and filters below. A payment that was later reversed is not counted.' },
     { key: 'credits', label: 'Credits', value: formatCents(Math.abs(totals.creditsCents)), sub: n(totals.creditsCount, 'credit') },
     { key: 'debits', label: 'Debits', value: formatCents(totals.debitsCents), sub: n(totals.debitsCount, 'debit') },
     { key: 'unapplied', label: 'Unapplied', value: formatCents(totals.unappliedCents), tone: totals.unappliedCents > 0 ? 'warn' : 'default',
@@ -325,7 +325,7 @@ export function PaymentsReceivedPage() {
     <>
       <div className="tms-page" data-testid="payments-received-page">
         <div className="tms-page-head">
-          <h1>Payments received</h1>
+          <h1>Payments Received</h1>
           <div className="tms-page-actions">
             <button type="button" className="tms-icon-btn tms-icon-btn-plain" aria-label="Refresh" onClick={() => { setLoading(true); void load() }}>
               <RefreshCw size={15} />
@@ -343,7 +343,7 @@ export function PaymentsReceivedPage() {
           </div>
         </div>
 
-        <TmsSummaryChips aria-label="Payments received at a glance" testId="payments-received-totals" items={summaryItems} />
+        <TmsSummaryChips aria-label="Payments Received at a glance" testId="payments-received-totals" items={summaryItems} />
 
         <div className="pr-toolbar" data-testid="payments-received-filters">
           <TmsSegmentedTabs aria-label="Show" size="sm" active={view} onSelect={(k) => setView(k as PageView)} tabs={VIEW_TABS} />
@@ -390,7 +390,7 @@ export function PaymentsReceivedPage() {
           key={`${ledgerView}-${showType}`}
           grid={{
             gridId: `payments-received-${ledgerView}`,
-            label: 'Payments received',
+            label: 'Payments Received',
             columns,
             rows: listed,
             rowKey: (r) => r.id,

@@ -289,9 +289,9 @@ export function ArCard({ bundle, onReload }: ArCardProps) {
             <TmsButton size="sm" onClick={() => setDialog({ kind: 'email' })}>
               <Mail size={13} className="mr-1" />E-mail
             </TmsButton>
-            {/* Payments are recorded only on Payments received (Ryne 2026-11-15). */}
+            {/* Payments are recorded only on Payments Received (Ryne 2026-11-15). */}
             {invoice && invoice.balanceCents > 0 && !invoice.factored && (
-              <span className="text-sm tms-muted" data-testid="payments-recorded-note">Payments are recorded in Payments received.</span>
+              <span className="text-sm tms-muted" data-testid="payments-recorded-note">Payments are recorded in Payments Received.</span>
             )}
             {order.factoringItemId || invoice?.factoringItemId ? (
               <TmsBadge tone="purple" data-testid="ar-factor-status">

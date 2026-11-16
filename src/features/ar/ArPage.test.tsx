@@ -238,7 +238,7 @@ describe('the AR board', () => {
     expect(screen.queryByRole('tab', { name: /^Ready for billing/ })).toBeNull()
     // Payments, credits and debits moved to their own Accounting page (Ryne 2026-11-15).
     expect(screen.queryByRole('tab', { name: /^Payments & credits/ })).toBeNull()
-    // Paid moved to Payments received too (Ryne 2026-11-16).
+    // Paid moved to Payments Received too (Ryne 2026-11-16).
     expect(screen.queryByRole('tab', { name: /^Paid/ })).toBeNull()
     for (const label of ['Ready to Invoice', 'Invoiced', 'Aging']) {
       const tab = screen.getByRole('tab', { name: new RegExp(`^${label}`) })
@@ -441,13 +441,13 @@ describe('the AR dense grid', () => {
     expect(within(grid).queryAllByRole('checkbox')).toHaveLength(0)
     expect(screen.queryByText(/Record payment/)).toBeNull()
     expect(screen.queryByTestId('ar-record-payment-batch')).toBeNull()
-    expect(screen.getByTestId('payments-recorded-note').textContent).toBe('Payments are recorded in Payments received.')
+    expect(screen.getByTestId('payments-recorded-note').textContent).toBe('Payments are recorded in Payments Received.')
     // Sending, payments and void live in the invoice drawer, not on the row.
     expect(within(grid).queryByRole('button', { name: /^Send invoice/ })).toBeNull()
     expect(within(grid).queryByRole('combobox', { name: /More actions/ })).toBeNull()
     fireEvent.click(within(grid).getByRole('button', { name: 'Open invoice INV-000123' }))
     expect(await screen.findByRole('region', { name: 'Invoice actions' })).toBeTruthy()
-    // Payments are recorded only on Payments received: the drawer has no payment control, only a note.
+    // Payments are recorded only on Payments Received: the drawer has no payment control, only a note.
     expect(screen.queryByRole('button', { name: 'Receive payment' })).toBeNull()
     expect(screen.queryByRole('link', { name: /Record payment/ })).toBeNull()
     expect(screen.getByTestId('ar-grid-ar-queue-invoiced')).toBeTruthy()

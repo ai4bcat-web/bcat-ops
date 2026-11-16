@@ -1,7 +1,7 @@
 import { monthBounds } from './paymentsReceived'
 
 /**
- * Payments are recorded in one place only (Ryne 2026-11-15): Accounting → Payments received.
+ * Payments are recorded in one place only (Ryne 2026-11-15): Accounting → Payments Received.
  * Every other screen links there with the customer, and the invoice when there is one, picked.
  */
 export function recordPaymentPath(input: { customerId?: string | null; invoiceId?: string | null; invoiceIds?: readonly string[] } = {}): string {
@@ -11,12 +11,12 @@ export function recordPaymentPath(input: { customerId?: string | null; invoiceId
   return `/tms/payments-received?${q.toString()}`
 }
 
-export const RECORD_PAYMENT_LINK_LABEL = 'Record payment in Payments received'
+export const RECORD_PAYMENT_LINK_LABEL = 'Record payment in Payments Received'
 
-/** A period on Payments received: `week` / `month` / `last` month, or a `YYYY-MM` month. */
+/** A period on Payments Received: `week` / `month` / `last` month, or a `YYYY-MM` month. */
 export type PaymentsPeriod = 'week' | 'month' | 'last' | string
 
-/** Payments received opened on a period (the Receivables "Collected" figures and old `?tab=paid` links). */
+/** Payments Received opened on a period (the Receivables "Collected" figures and old `?tab=paid` links). */
 export function paymentsReceivedPath(period?: PaymentsPeriod | null): string {
   return period ? `/tms/payments-received?period=${encodeURIComponent(period)}` : '/tms/payments-received'
 }
@@ -49,7 +49,7 @@ export function periodFromParam(period: string | null, asOf: string): { preset: 
 }
 
 
-/** `?tab=paid` (the removed Paid tab) → Payments received, on the same month when one is given. */
+/** `?tab=paid` (the removed Paid tab) → Payments Received, on the same month when one is given. */
 export function paidTabRedirect(search: string): string | null {
   const q = new URLSearchParams(search)
   if (q.get('tab') !== 'paid') return null

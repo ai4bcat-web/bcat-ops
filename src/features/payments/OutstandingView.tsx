@@ -1,5 +1,5 @@
 /**
- * Payments received → Outstanding: every open invoice grouped by customer. Tick the invoices a check
+ * Payments Received → Outstanding: every open invoice grouped by customer. Tick the invoices a check
  * pays, adjust each amount, enter the check # and date, and "Receive payments" posts ONE payment for
  * that customer (RECORD_PAYMENT, through a read-back first). Factored invoices sit in their own group
  * with no tick boxes: OTR collects those.

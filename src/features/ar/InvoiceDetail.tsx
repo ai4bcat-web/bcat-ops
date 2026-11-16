@@ -176,9 +176,9 @@ export function InvoiceDetail() {
           <TmsButton variant="primary" aria-label="E-mail invoice" disabled={busy || !canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => setDialog({ kind: 'email' })}>
             E-mail
           </TmsButton>
-          {/* Payments are recorded only on Payments received (Ryne 2026-11-15). */}
+          {/* Payments are recorded only on Payments Received (Ryne 2026-11-15). */}
           {invoice.status !== 'VOID' && invoice.status !== 'PAID' && invoice.balanceCents > 0 && (
-            <span className="text-sm tms-muted" data-testid="payments-recorded-note">Payments are recorded in Payments received.</span>
+            <span className="text-sm tms-muted" data-testid="payments-recorded-note">Payments are recorded in Payments Received.</span>
           )}
           <TmsButton aria-label="Send to factor" disabled={busy || !canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => setDialog({ kind: 'factor' })}>
             Send to Factor

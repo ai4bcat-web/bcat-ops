@@ -48,7 +48,7 @@ export const LINK_SOURCES: readonly LinkSource[] = [
   { key: 'orders', label: 'Orders', model: 'Order', index: 'ordersByCustomerIdAndPickupAppt', nameField: 'customerName' },
   { key: 'loads', label: 'Loads', model: 'Load', index: 'loadsByCustomerId', nameField: 'customer' },
   { key: 'invoices', label: 'Invoices', model: 'Invoice', index: 'invoicesByCustomerIdAndIssuedAt' },
-  { key: 'arPayments', label: 'Payments received', model: 'ArPayment', index: 'arPaymentsByCustomerIdAndReceivedAt' },
+  { key: 'arPayments', label: 'Payments Received', model: 'ArPayment', index: 'arPaymentsByCustomerIdAndReceivedAt' },
   { key: 'factoringItems', label: 'Factoring items', model: 'FactoringItem' },
   { key: 'quotes', label: 'Quotes', model: 'Quote', index: 'quotesByCustomerIdAndQuoteDate', nameField: 'customerName' },
   { key: 'laneRateSamples', label: 'Lane rate history', model: 'LaneRateSample', nameField: 'customerName' },
