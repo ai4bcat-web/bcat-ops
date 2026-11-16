@@ -40,7 +40,8 @@ export interface ArGrid<T> {
   /** Optional grouping: rows are re-ordered by group after sort and filter, a header row per group. */
   group?: {
     keyOf: (row: T) => string
-    order: (rows: T[]) => T[]
+    /** `sorted` is true when the user picked a sort: groups then follow the sorted rows instead of their default order. */
+    order: (rows: T[], sorted?: boolean) => T[]
     header: (key: string, rows: T[]) => ReactNode
   }
 }
@@ -90,7 +91,7 @@ export function ArDenseTable<T>({ grid, pageFilters }: {
 
   const filtered = useMemo(() => {
     const sorted = sortDenseRows(filterRows(searchRows(rows, catalogAll, search), catalogAll, filters), catalogAll, prefs.sort)
-    return group ? group.order(sorted) : sorted
+    return group ? group.order(sorted, prefs.sort != null) : sorted
   }, [rows, catalogAll, filters, prefs.sort, search, group])
 
   return (

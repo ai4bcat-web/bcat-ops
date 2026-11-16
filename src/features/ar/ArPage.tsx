@@ -1228,7 +1228,7 @@ function queueView({
       kpis,
       group: groupBy === 'none' ? undefined : {
         keyOf: (row) => groupKeyOf(row, groupBy),
-        order: (shown) => orderByGroup(shown, groupBy),
+        order: (shown, sorted) => orderByGroup(shown, groupBy, sorted),
         header: (key, shown) => {
           const t = groupTotals(shown)
           const customerId = groupBy === 'customer' ? shown.find((r) => r.customerId)?.customerId ?? null : null
