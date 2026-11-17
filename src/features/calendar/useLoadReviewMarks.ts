@@ -53,11 +53,13 @@ export function useLoadReviewMarks(loads: readonly Load[]): Load[] {
   const windowRead = useShipments({ kind: 'window', months: monthsKey ? monthsKey.split(',') : [] })
   const windowed = windowRead.shipments
   // Not settled = still loading, only part read, or the read failed: in each case a missing row proves nothing, so it must not read as "no division".
+  const refreshWorking = workingRead.refresh
+  const refreshWindow = windowRead.refresh
   useEffect(() => {
-    const refresh = () => { void workingRead.refresh(); void windowRead.refresh() }
+    const refresh = () => { void refreshWorking?.(); void refreshWindow?.() }
     flagRefreshers.add(refresh)
     return () => { flagRefreshers.delete(refresh) }
-  }, [workingRead.refresh, windowRead.refresh])
+  }, [refreshWorking, refreshWindow])
   const shipmentsLoading = [workingRead, windowRead].some((r) => r.loading || r.partial || r.error != null)
   const shipments = useMemo(() => [...working, ...windowed], [working, windowed])
   const { marked, offCalendar, known, flags } = useMemo(() => {
