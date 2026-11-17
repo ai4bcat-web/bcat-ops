@@ -57,4 +57,18 @@ describe('updateLoad', () => {
 
     expect(sentInput()).toMatchObject({ id: 'l1', notes: 'moved the delivery', miles: 412 })
   })
+
+  it('never sends the driver mirrors: the stops carry the drivers and the shipment actions own both mirrors', async () => {
+    // What an appointment-screenshot save sends: stops re-derived, and the mirrors with them.
+    await updateLoad('l1', {
+      stops: [{ id: 's1', type: 'pickup', sequence: 0, appt: '2026-11-17T09:00:00.000Z', apptProofs: { screenshot: 'k' } }],
+      pickupDriverId: null,
+      deliveryDriverId: 'd-2',
+    } as never)
+
+    const input = sentInput()
+    expect(input).not.toHaveProperty('pickupDriverId')
+    expect(input).not.toHaveProperty('deliveryDriverId')
+    expect(input).toHaveProperty('stops')
+  })
 })
