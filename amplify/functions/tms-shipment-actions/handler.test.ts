@@ -5668,6 +5668,23 @@ describe('READY_TO_INVOICE', () => {
         expect(again.results[0]).toMatchObject({ ok: false, reasons: ['Missing sales rep'] })
       })
 
+      it('refuses a push while nobody is assigned, on the manual and the automatic path', async () => {
+        const ids = await reviewable()
+        const carriers = table(TABLES.carrier)
+        const saved = [...carriers.entries()]
+        for (const [id] of saved) carriers.delete(id)
+        const pushed = (await call('BATCH_SHIPMENT_TASK', { task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: [ids.shipmentId] }, REVIEWER)) as { results: { ok: boolean; reasons?: string[] }[] }
+        expect(pushed.results[0].ok).toBe(false)
+        expect(pushed.results[0].reasons).toContain('No carrier or driver assigned')
+        expect(table(TABLES.shipment).get(ids.shipmentId)!.loadReviewPushedAt).toBeUndefined()
+        // The sweep that pushes every ready delivered load leaves it alone too.
+        await call('PUSH_READY_TO_LOAD_REVIEW', {})
+        expect(table(TABLES.shipment).get(ids.shipmentId)!.loadReviewPushedAt).toBeUndefined()
+        for (const [id, row] of saved) carriers.set(id, row)
+        const again = (await call('BATCH_SHIPMENT_TASK', { task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: [ids.shipmentId] }, REVIEWER)) as { results: { ok: boolean; reasons?: string[] }[] }
+        expect(again.results[0].ok).toBe(true)
+      })
+
       it('pushes the clean rows, reports each refused row with its reasons, and stamps only the pushed', async () => {
         const good = await reviewable()
         const bad = await reviewable({ rep: false, division: false })

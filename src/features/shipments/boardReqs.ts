@@ -136,6 +136,8 @@ export function readyForReviewOf(row: ShipmentRow, src: BoardReqSources = boardS
   if (row.voidedAt || row.deletedAt || row.status === 'CANCELED' || row.legacyImported === true) return false
   if (row.status !== 'DELIVERED' || hasLeftOperations(row)) return false
   if (row.arStatus !== 'DOCS_NEEDED' || !row.customerId) return false
+  // Nobody assigned: the server's push refuses it, so the board never lists it as ready.
+  if (row.assignmentType == null || row.assignmentType === 'NEED_TO_COVER') return false
   if (requirementsForRow(row, src).includes('podReceived') && podFactOfRow(row) !== true) return false
   if (boardReqsOf(row, src).length > 0) return false
   return pushRefusals([row], src).length === 0

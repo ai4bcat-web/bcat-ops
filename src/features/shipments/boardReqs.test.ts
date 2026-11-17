@@ -133,7 +133,7 @@ describe('REQS export text', () => {
 
 describe('Ready for review (Active filter + header stat)', () => {
   // On the board and waiting to be pushed: order at DOCS_NEEDED, linked to a customer.
-  const onBoard = (over: Partial<ShipmentRow>) => row({ arStatus: 'DOCS_NEEDED', customerId: 'c1', ...over } as Partial<ShipmentRow>)
+  const onBoard = (over: Partial<ShipmentRow>) => row({ arStatus: 'DOCS_NEEDED', customerId: 'c1', assignmentType: 'CARRIER', ...over } as Partial<ShipmentRow>)
 
   it('lists only delivered rows the push would accept and REQS shows nothing for', async () => {
     const { readyForReviewOf, setBoardReqSources, boardReqsOf: reqsOf } = await import('./boardReqs')
@@ -149,6 +149,8 @@ describe('Ready for review (Active filter + header stat)', () => {
       onBoard({ id: 'voided', voidedAt: '2026-11-15T00:00:00Z' }),
       onBoard({ id: 'no-customer', customerId: null }),
       onBoard({ id: 'released', arStatus: 'UNPAID' }),
+      onBoard({ id: 'uncovered', assignmentType: 'NEED_TO_COVER' }),
+      onBoard({ id: 'unassigned', assignmentType: null }),
     ]
     const ready = rows.filter((r) => readyForReviewOf(r, SRC)).map((r) => r.id)
     expect(ready).toEqual(['ok'])

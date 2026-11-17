@@ -1538,6 +1538,12 @@ export async function pushToReviewVerdict(deps: DocumentDeps, shipmentId: string
     reasons.push(unresolvedCustomerMessage(order as unknown as CustomerResolvable, 'pushing it to Load Review'))
   }
   reasons.push(...reviewExtras(bundle, order, customer, settings, false).map((item) => item.message))
+  // Ryne 2026-11-16: a load with nobody assigned (or an own-fleet leg missing its driver) never goes to Load Review, on any path.
+  // Only the assignment codes are taken from the release gate; the gate's document verdict stays with the release itself.
+  const gate = await computeReleaseGate(deps, order, bundle, customer, settings)
+  for (const item of gate.missing) {
+    if ((item.code === 'CARRIER_NOT_ASSIGNED' || item.code === 'DRIVER_MISSING') && !reasons.includes(item.message)) reasons.push(item.message)
+  }
   return { shipment, reasons }
 }
 
