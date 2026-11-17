@@ -98,6 +98,10 @@ export function windowFromRows(rows: readonly RawRollupRow[], from: string, to: 
       return null
     }
     const known = row.schemaVersion === ROLLUP_SCHEMA_VERSION && !!row.payload && typeof row.payload === 'object' && !rollupSourceEmpty(row.sourceCounts)
+    // A month after the current one is never required: a row for it that holds nothing (the sweep writes the pad
+    // month under a window, empty, before any load is booked in it) is the same as no row, not a reason to distrust
+    // every figure (the Brokerage cards showed "still being recomputed" for weeks because of an empty December row).
+    if (!known && month > current) continue
     if (!known || (recent.has(month) && !isUsableRow(row, now)) || !row.computedAt) return null
     months.push({ id: row.id, schemaVersion: row.schemaVersion as number, computedAt: row.computedAt, payload: row.payload as MonthPayload })
   }

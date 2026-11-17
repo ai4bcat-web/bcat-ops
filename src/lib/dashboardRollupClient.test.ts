@@ -20,6 +20,13 @@ describe('windowFromRows', () => {
     expect(windowFromRows(rows, '2026-11-01', '2026-11-30', NOW)?.months.map((m) => m.id)).toEqual(['M:2026-10', 'M:2026-11'])
   })
 
+  it('ignores an empty row for a month after the current one (the sweep writes the padding month empty)', () => {
+    const empty = row('M:2026-12', 9000, { sourceCounts: { shipments: 0, samples: 0 } })
+    expect(windowFromRows([...rows, empty], '2026-11-01', '2026-11-30', NOW)?.months.map((m) => m.id)).toEqual(['M:2026-10', 'M:2026-11'])
+    // An empty row for the current month (or any past month) is still not trusted.
+    expect(windowFromRows([rows[0]!, row('M:2026-11', 2, { sourceCounts: { shipments: 0, samples: 0 } }), rows[2]!], '2026-11-01', '2026-11-30', NOW)).toBeNull()
+  })
+
   it('rejects a missing past month, the padding month included', () => {
     expect(windowFromRows(rows.filter((r) => r.id !== 'M:2026-10'), '2026-11-01', '2026-11-30', NOW)).toBeNull()
   })
