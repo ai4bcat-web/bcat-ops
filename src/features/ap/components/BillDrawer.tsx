@@ -164,7 +164,8 @@ export function BillDrawer({ bill, facts, infos, onClose, onChanged, onAdjustPay
                 aria-checked={current === opt.days}
                 disabled={busy || quickLock != null}
                 onClick={() => chooseQuickPay(opt.days)}
-                className={`tms-btn tms-btn-sm flex h-auto flex-col items-start gap-0.5 whitespace-normal px-3 py-2 text-left ${current === opt.days ? 'tms-btn-primary' : 'tms-btn-secondary'}`}
+                style={{ height: 'auto', minHeight: '3rem', lineHeight: 1.3 }}
+                className={`tms-btn tms-btn-sm flex flex-col items-start justify-center gap-0.5 whitespace-normal px-3 py-2 text-left ${current === opt.days ? 'tms-btn-primary' : 'tms-btn-secondary'}`}
               >
                 <span className="font-medium">{opt.label}</span>
                 <span className="text-xs opacity-80">{opt.sub}</span>
