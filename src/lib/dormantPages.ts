@@ -73,6 +73,7 @@ export const DORMANT_ROUTES: readonly { path: string; page: DormantPageKey }[] =
   { path: '/tms/invoicing/*', page: 'invoicingAr' },
   { path: '/tms/carriers', page: 'carriers' },
   { path: '/tms/carriers/find', page: 'carriers' },
+  { path: '/tms/carriers/remit', page: 'carriers' },
   { path: '/tms/carriers/:id', page: 'carrierProfile' },
   { path: '/tms/customers/billing-setup', page: 'billingSetup' },
   { path: '/tms/workflows', page: 'workflows' },

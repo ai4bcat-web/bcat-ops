@@ -53,6 +53,7 @@ vi.mock('@/lib/apiClient', () => ({
   unapproveBill: vi.fn(),
   reverseApPayment: vi.fn(),
   listCarrierPaymentInfo: vi.fn().mockResolvedValue([]),
+  getFactorRemitEmails: vi.fn().mockResolvedValue({}),
   selectBillsForPayment: vi.fn(),
   unselectBills: vi.fn(),
 }))

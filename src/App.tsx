@@ -182,6 +182,7 @@ export default function App() {
                   <Route path="invoicing/payable/bills/:id" element={<RequirePage page={['carrierPay']}><DormantPage page="invoicingAp"><BillDetail /></DormantPage></RequirePage>} />
                   <Route path="carriers" element={<RequirePage page={['carriers', 'tms']}><DormantPage page="carriers"><CarriersHub tab="list" /></DormantPage></RequirePage>} />
                   <Route path="carriers/find" element={<RequirePage page={['carriers', 'loads', 'tms']}><DormantPage page="carriers"><CarriersHub tab="find" /></DormantPage></RequirePage>} />
+                  <Route path="carriers/remit" element={<RequirePage page={['carriers', 'tms']}><DormantPage page="carriers"><CarriersHub tab="remit" /></DormantPage></RequirePage>} />
                   <Route path="carriers/:id" element={<RequirePage page={['carriers', 'tms']}><DormantPage page="carrierProfile"><CarriersPage /></DormantPage></RequirePage>} />
                   <Route path="invoicing/factored" element={<RequirePage page={['factoring']}><DormantPage page="invoicingAr"><InvoicingPage /></DormantPage></RequirePage>} />
                   <Route path="factors" element={<Navigate to="/tms/invoicing/factored" replace />} />

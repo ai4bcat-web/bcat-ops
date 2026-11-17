@@ -1,7 +1,7 @@
 /**
  * The e-mail a carrier's (or their factor's) remittance goes to. Opened from the Remit to column when
- * nothing is on file. It saves onto the payee's payment method, the same address the carrier profile and
- * the automatic remittance read.
+ * nothing is on file. A carrier paid directly saves onto its own payment method; one paid through a factor
+ * saves the factoring company's one address, which every carrier it funds and the automatic remittance read.
  */
 import { useState } from 'react'
 import { toast } from 'sonner'
@@ -48,7 +48,7 @@ export function RemitEmailDialog({ payee, billId, carrierId, initial, open, onOp
       )}
     >
       <p className="tms-muted">
-        Remittance advice is e-mailed here each time {payee} is paid. It is saved on their payment info, so the carrier profile shows it too.
+        Remittance advice is e-mailed here each time {payee} is paid. A factoring company has one address, used for every carrier it funds; a carrier paid directly keeps its own.
       </p>
       <TmsField label="Remit e-mail">
         <TmsInput

@@ -11,6 +11,7 @@
 import { isVerifyPaymentBill } from '@/lib/verifyPayment'
 import { approvalReadiness, PENDING_DATES_BLOCK, type ApprovalWarning } from '@/lib/carrierBill'
 import { daysLate } from '@/lib/arAging'
+import { paysThroughFactor } from '@/lib/factorRemit'
 import type { ApWorklistRow } from '@/hooks/useApWorklist'
 import type { CarrierPaymentInfo } from '@/lib/apiClient'
 import type {
@@ -191,12 +192,19 @@ export function paymentInfoFor(
   return mine.find((i) => i.isPreferred) ?? mine[0] ?? null
 }
 
-/** The e-mail remittance goes to: the address snapshotted on the bill, else the payment method's. */
+/**
+ * The e-mail remittance goes to. A carrier paid through a factor goes to the factor's one address (the
+ * payment infos handed in already carry it, see `applyFactorRemit`); anyone else, the address snapshotted
+ * on the bill, else their payment method's.
+ */
 export function remitEmailOf(
   bill: Pick<CarrierBillRecord, 'remitTo' | 'carrierId' | 'paymentMethodId'>,
   infos: readonly CarrierPaymentInfo[],
 ): string {
-  return bill.remitTo?.payeeEmail?.trim() || paymentInfoFor(bill, infos)?.payeeEmail?.trim() || ''
+  const info = paymentInfoFor(bill, infos)
+  const live = info?.payeeEmail?.trim() || ''
+  if (paysThroughFactor(info) && live) return live
+  return bill.remitTo?.payeeEmail?.trim() || live
 }
 
 /** The remit address for a whole carrier (the Aging by carrier rows): their preferred active payment method's. */
@@ -205,12 +213,16 @@ export function remitEmailOfCarrier(carrierId: string, infos: readonly CarrierPa
   return (mine.find((i) => i.isPreferred) ?? mine[0])?.payeeEmail?.trim() || ''
 }
 
-/** The remit address on a payment row: the one snapshotted when it was paid, else the carrier's current one. */
+/** The remit address on a payment row: the carrier's factor address if they are paid through one, else the one snapshotted when it was paid, else the carrier's current one. */
 export function remitEmailOfPayment(
   payment: { carrierId: string; remitTo?: { payeeEmail?: string | null } | null },
   infos: readonly CarrierPaymentInfo[],
 ): string {
-  return payment.remitTo?.payeeEmail?.trim() || remitEmailOfCarrier(payment.carrierId, infos)
+  const mine = infos.filter((i) => i.carrierId === payment.carrierId && i.status !== 'INACTIVE')
+  const info = mine.find((i) => i.isPreferred) ?? mine[0]
+  const live = info?.payeeEmail?.trim() || ''
+  if (paysThroughFactor(info) && live) return live
+  return payment.remitTo?.payeeEmail?.trim() || live
 }
 
 export interface RemittanceStatus {

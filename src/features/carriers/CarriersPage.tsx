@@ -31,7 +31,8 @@ import {
 import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import { useAuth } from '@/hooks/useAuth'
 import { useCarriers } from '@/hooks/useCarriers'
-import { getTmsSettings, graphqlErrorText, upsertCarrier, listCarrierRemitEmails } from '@/lib/apiClient'
+import { getFactorRemitEmails, getTmsSettings, graphqlErrorText, upsertCarrier, listCarrierRemitEmails } from '@/lib/apiClient'
+import { applyFactorRemit } from '@/lib/factorRemit'
 import { effectiveCarrierStatus } from '@/lib/carrierStatus'
 import { CarrierProfile } from './components/CarrierProfile'
 import { CARRIER_TYPES } from './components/carrierFormModel'
@@ -59,7 +60,7 @@ export function CarriersPage() {
   const [methodsVersion, setMethodsVersion] = useState(0)
   useEffect(() => {
     let live = true
-    listCarrierRemitEmails().then((rows) => { if (live) { setMethods(rows); setMethodsError(null) } })
+    Promise.all([listCarrierRemitEmails(), getFactorRemitEmails()]).then(([rows, factorEmails]) => { if (live) { setMethods(applyFactorRemit(rows, factorEmails)); setMethodsError(null) } })
       .catch(() => { if (live) { setMethods(null); setMethodsError('Remittance e-mail flags unavailable — refresh to retry.') } })
     return () => { live = false }
   }, [methodsVersion])

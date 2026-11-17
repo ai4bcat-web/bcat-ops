@@ -11,6 +11,7 @@ function ctx(over: Partial<Ctx> & { payment?: Record<string, unknown> } = {}): C
     carrier: over.carrier ?? null,
     contacts: over.contacts ?? [],
     methods: over.methods ?? [{ id: 'pm1', carrierId: 'car1', status: 'ACTIVE', payeeEmail: 'ap@blue.com' } as CarrierPaymentMethodRecord],
+    factorEmails: over.factorEmails,
   }
 }
 
@@ -31,6 +32,24 @@ describe('autoRemittanceDecision', () => {
   it('prefers the address snapshotted when the payment went out', () => {
     const decision = autoRemittanceDecision(ctx({ payment: { remitTo: { payeeEmail: 'factor@bank.com' } } }), undefined)
     expect(decision).toEqual({ action: 'SEND', to: ['factor@bank.com'] })
+  })
+
+  it('sends a carrier paid through a factor to the factor\'s one address, over the snapshot and the carrier\'s own copy', () => {
+    const methods = [{ id: 'pm1', carrierId: 'car1', status: 'ACTIVE', recipientType: 'FACTOR', factorName: 'OTR Capital LLC', payeeEmail: 'old@otr.com' }] as CarrierPaymentMethodRecord[]
+    const factorEmails = { 'OTR CAPITAL': { name: 'OTR Capital LLC', email: 'remit@otr.com' } }
+    const decision = autoRemittanceDecision(ctx({ methods, factorEmails, payment: { remitTo: { payeeEmail: 'stale@otr.com' } } }), undefined)
+    expect(decision).toEqual({ action: 'SEND', to: ['remit@otr.com'] })
+  })
+
+  it('falls back to the carrier\'s copy when the factor has no address of its own', () => {
+    const methods = [{ id: 'pm1', carrierId: 'car1', status: 'ACTIVE', recipientType: 'FACTOR', factorName: 'OTR Capital LLC', payeeEmail: 'old@otr.com' }] as CarrierPaymentMethodRecord[]
+    expect(autoRemittanceDecision(ctx({ methods, factorEmails: {} }), undefined)).toEqual({ action: 'SEND', to: ['old@otr.com'] })
+  })
+
+  it('never lets a factor\'s address reach a carrier that is paid directly', () => {
+    const methods = [{ id: 'pm1', carrierId: 'car1', status: 'ACTIVE', recipientType: 'CARRIER', factorName: 'OTR Capital LLC', payeeEmail: 'ap@blue.com' }] as CarrierPaymentMethodRecord[]
+    const factorEmails = { 'OTR CAPITAL': { name: 'OTR Capital LLC', email: 'remit@otr.com' } }
+    expect(autoRemittanceDecision(ctx({ methods, factorEmails }), undefined)).toEqual({ action: 'SEND', to: ['ap@blue.com'] })
   })
 
   it('skips, and says so, when nobody is on file', () => {

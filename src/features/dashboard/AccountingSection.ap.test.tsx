@@ -40,6 +40,7 @@ vi.mock('@/lib/apiClient', () => ({
   listBillsByMonth: vi.fn().mockResolvedValue([]),
   listOwnershipDivisions: vi.fn().mockResolvedValue([]),
   listCarrierPaymentInfo: vi.fn().mockResolvedValue([]),
+  getFactorRemitEmails: vi.fn().mockResolvedValue({}),
 }))
 
 const TODAY = chicagoDateStr(new Date())

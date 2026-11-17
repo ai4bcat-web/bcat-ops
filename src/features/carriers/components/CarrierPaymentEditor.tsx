@@ -5,10 +5,13 @@
  * Full account and routing numbers are never typed here and never stored — only the last
  * four, which is all anyone needs to tell two bank accounts apart on a settlement.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Plus, Trash2 } from 'lucide-react'
 import { CityInput, TmsBadge, TmsButton, TmsField, TmsIconButton, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { useAddressAutofill } from '@/hooks/useAddressAutofill'
+import { getFactorRemitEmails } from '@/lib/apiClient'
+import { factorEmailFor, type FactorRemitMap } from '@/lib/factorRemit'
 import { formatCents } from '@/lib/invoiceBuild'
 import type { CarrierPayeeType, CarrierPaymentMethodKind, CarrierPaymentMethodRecord } from '@/types/tms'
 
@@ -45,6 +48,16 @@ interface CarrierPaymentEditorProps {
 
 export function CarrierPaymentEditor({ methods, awaitingPayment, onSave, onArchive, disabled }: CarrierPaymentEditorProps) {
   const [adding, setAdding] = useState(false)
+  // A factoring company has one remittance address, set on Carriers › Remit e-mails; carriers paid through it inherit it.
+  const [factorEmails, setFactorEmails] = useState<FactorRemitMap>({})
+  useEffect(() => {
+    let live = true
+    void Promise.resolve()
+      .then(() => getFactorRemitEmails())
+      .then((map) => { if (live && map) setFactorEmails(map) })
+      .catch(() => {})
+    return () => { live = false }
+  }, [])
   const active = methods.filter((m) => m.status !== 'INACTIVE')
   const waiting = awaitingPayment?.count ?? 0
 
@@ -63,6 +76,7 @@ export function CarrierPaymentEditor({ methods, awaitingPayment, onSave, onArchi
         <PaymentRow
           key={method.id}
           method={method}
+          factorEmails={factorEmails}
           disabled={disabled}
           onSave={onSave}
           onArchive={() => onArchive(method)}
@@ -72,6 +86,7 @@ export function CarrierPaymentEditor({ methods, awaitingPayment, onSave, onArchi
       {adding && (
         <PaymentRow
           method={null}
+          factorEmails={factorEmails}
           disabled={disabled}
           onSave={async (draft) => { await onSave(draft); setAdding(false) }}
           onCancel={() => setAdding(false)}
@@ -94,8 +109,9 @@ function addressField(method: CarrierPaymentMethodRecord | null, key: string): s
   return typeof value === 'string' ? value : ''
 }
 
-function PaymentRow({ method, disabled, onSave, onArchive, onCancel }: {
+function PaymentRow({ method, factorEmails, disabled, onSave, onArchive, onCancel }: {
   method: CarrierPaymentMethodRecord | null
+  factorEmails: FactorRemitMap
   disabled?: boolean
   onSave: (draft: CarrierPaymentDraft) => Promise<void>
   onArchive?: () => Promise<void>
@@ -116,6 +132,8 @@ function PaymentRow({ method, disabled, onSave, onArchive, onCancel }: {
   const [isPreferred, setIsPreferred] = useState(method?.isPreferred === true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const inheritedEmail = recipientType === 'FACTOR' ? factorEmailFor(factorEmails, factorName) : ''
 
   const { hint: addressHint, pickCity } = useAddressAutofill({
     zip, city, state, upper: true,
@@ -201,7 +219,17 @@ function PaymentRow({ method, disabled, onSave, onArchive, onCancel }: {
           <TmsInput aria-label="Routing last 4" maxLength={4} value={routingLast4} disabled={disabled} onChange={(e) => setRoutingLast4(e.target.value)} />
         </TmsField>
         <TmsField label="Payee email">
-          <TmsInput aria-label="Payee email" value={payeeEmail} disabled={disabled} onChange={(e) => setPayeeEmail(e.target.value)} />
+          {inheritedEmail ? (
+            <span data-testid="factor-remit-inherited">
+              <TmsInput aria-label="Payee email" value={inheritedEmail} disabled readOnly />
+              <span className="tms-muted" style={{ fontSize: 12 }}>
+                Remittance to {factorName.trim()} goes here for every carrier it funds. Change it on{' '}
+                <Link className="tms-link" to="/tms/carriers/remit">Carriers › Remit e-mails</Link>.
+              </span>
+            </span>
+          ) : (
+            <TmsInput aria-label="Payee email" value={payeeEmail} disabled={disabled} onChange={(e) => setPayeeEmail(e.target.value)} />
+          )}
         </TmsField>
       </div>
 

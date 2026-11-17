@@ -27,7 +27,7 @@ import { useCarrierAp } from '@/hooks/useCarrierAp'
 import { useCarriers } from '@/hooks/useCarriers'
 import { exportOutstandingPayables } from '@/lib/opsExports'
 import {
-  getShipmentDocumentUrl, getTmsSettings, graphqlErrorText, listBillsByMonth, listCarrierPaymentInfo, reverseApPayment,
+  getFactorRemitEmails, getShipmentDocumentUrl, getTmsSettings, graphqlErrorText, listBillsByMonth, listCarrierPaymentInfo, reverseApPayment,
   returnBillToExpected, selectBillsForPayment, unapproveBill, unselectBills, voidBill, type CarrierPaymentInfo, type FinanceReviewShipment,
 } from '@/lib/apiClient'
 import {
@@ -55,6 +55,7 @@ import { ApproveBillDialog } from './components/ApproveBillDialog'
 import { PayCarrierDialog } from './components/PayCarrierDialog'
 import { RemitEmailDialog } from './components/RemitEmailDialog'
 import { RemitToCell } from './components/RemitToCell'
+import { applyFactorRemit } from '@/lib/factorRemit'
 import { PaymentInfoDialog } from './components/PaymentInfoDialog'
 import { RecordBillDialog, type RecordBillPrefill } from './components/RecordBillDialog'
 import { SendRemittanceDialog } from './components/SendRemittanceDialog'
@@ -212,8 +213,9 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const [infosKey, setInfosKey] = useState(0)
   useEffect(() => {
     let alive = true
-    listCarrierPaymentInfo()
-      .then((rows) => { if (alive) setPayInfos(rows) })
+    // A factoring company has one remittance address; it is laid over every carrier paid through it.
+    Promise.all([listCarrierPaymentInfo(), getFactorRemitEmails()])
+      .then(([rows, factorEmails]) => { if (alive) setPayInfos(applyFactorRemit(rows, factorEmails)) })
       .catch(() => {})
     return () => { alive = false }
   }, [infosKey])

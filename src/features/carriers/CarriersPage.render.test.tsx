@@ -75,6 +75,7 @@ const staff = vi.hoisted(() => [
 vi.mock('@/lib/apiClient', () => ({
   getTmsSettings: vi.fn(async () => null),
   listCarrierRemitEmails: vi.fn(async () => [{ carrierId: 'Charlie Freight', payeeEmail: 'pay@example.test' }]),
+  getFactorRemitEmails: vi.fn(async () => ({})),
   listUserProfiles: vi.fn(async () => staff),
   upsertCarrier,
   graphqlErrorText: () => '',

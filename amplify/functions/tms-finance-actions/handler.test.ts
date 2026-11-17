@@ -2863,6 +2863,50 @@ describe('SET_REMIT_EMAIL', () => {
   })
 })
 
+describe('one remit e-mail per factoring company', () => {
+  const FACTOR_METHOD = { recipientType: 'FACTOR', factorName: 'OTR Capital LLC', payeeEmail: 'old@otr.test' }
+  const mapOf = () => (table(TABLES.settings).get('default') as Row | undefined)?.factorRemitEmails as Record<string, Row> | undefined
+
+  it('saves a factor-paid carrier\'s address on the factor, not on the carrier\'s method', async () => {
+    seedAssignment({ method: FACTOR_METHOD })
+    const bill = await recordBill({ approve: true })
+    const saved = (await call('SET_REMIT_EMAIL', { billId: bill.id, email: ' remit@otr.test ' })) as Row
+    expect(saved.email).toBe('remit@otr.test')
+    expect(mapOf()?.['OTR CAPITAL']).toMatchObject({ name: 'OTR Capital LLC', email: 'remit@otr.test' })
+    expect((table(TABLES.carrierMethod).get('cpm-1') as Row).payeeEmail).toBe('old@otr.test')
+    expect([...table(TABLES.audit).values()].some((row) => row.action === 'SET_FACTOR_REMIT_EMAIL')).toBe(true)
+  })
+
+  it('sets, changes and clears a factor\'s address from the Profiles list, one entry per factor', async () => {
+    await call('SET_FACTOR_REMIT_EMAIL', { factorName: 'OTR Capital LLC', email: 'a@otr.test' })
+    await call('SET_FACTOR_REMIT_EMAIL', { factorName: 'RTS Financial', email: 'cash@rts.test' })
+    await call('SET_FACTOR_REMIT_EMAIL', { factorName: 'otr capital', email: 'b@otr.test' })
+    expect(Object.keys(mapOf() ?? {}).sort()).toEqual(['OTR CAPITAL', 'RTS FINANCIAL'])
+    expect(mapOf()?.['OTR CAPITAL']).toMatchObject({ name: 'OTR Capital LLC', email: 'b@otr.test' })
+    await call('SET_FACTOR_REMIT_EMAIL', { factorName: 'OTR Capital', email: '' })
+    expect(Object.keys(mapOf() ?? {})).toEqual(['RTS FINANCIAL'])
+  })
+
+  it('refuses a bad address or no name, and is closed to a user who may only invoice', async () => {
+    await expect(call('SET_FACTOR_REMIT_EMAIL', { factorName: 'OTR Capital', email: 'a@b.com, c@d.com' })).rejects.toThrow(/valid e-mail/)
+    await expect(call('SET_FACTOR_REMIT_EMAIL', { factorName: '  ', email: 'a@b.com' })).rejects.toThrow()
+    await expect(call('SET_FACTOR_REMIT_EMAIL', { factorName: 'OTR Capital', email: 'a@b.com' }, BILLER)).rejects.toThrow(/Forbidden/)
+  })
+
+  it('e-mails the factor\'s one address when a carrier it funds is paid, whatever the carrier\'s own copy says', async () => {
+    seedAssignment({ method: FACTOR_METHOD })
+    await call('SET_FACTOR_REMIT_EMAIL', { factorName: 'OTR Capital', email: 'remit@otr.test' })
+    const bill = await recordBill({ approve: true })
+    await call('RECORD_AP_PAYMENT', {
+      carrierId: CARRIER_ID, paidAt: '2026-10-25', method: 'ACH', reference: 'ACH-1',
+      amountCents: 180_000, applications: [{ billId: bill.id, amountCents: 180_000 }],
+    })
+    expect(sesSend).toHaveBeenCalledTimes(1)
+    const input = sesSend.mock.calls[0][0] as { input: { Destination: { ToAddresses: string[] } } }
+    expect(input.input.Destination.ToAddresses).toEqual(['remit@otr.test'])
+  })
+})
+
 describe('AP authorization', () => {
   it('refuses every AP action to a user who may only invoice, naming the page', async () => {
     seedAssignment()
