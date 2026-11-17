@@ -14,6 +14,8 @@ import { TmsAlert, TmsButton, TmsDialog } from '@/features/tms/kit'
 import { flattenDivisions } from '@/features/tms/settings/taxonomyDrafts'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { useAuth } from '@/hooks/useAuth'
+import { ShipmentToolsPanel } from '../components/ShipmentToolsPanel'
+import { normalizeDetailTab } from '../components/detailTabs'
 import { useCarriers } from '@/hooks/useCarriers'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useShipment } from '@/hooks/useShipment'
@@ -194,7 +196,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
       // Submitting a NEW shipment straight from the intake pre-fill is a create too: without this the intake row stayed in Intake.
       linkIntake(b)
       toast.success(`Shipment ${b.shipment.number} submitted`)
-      navigate(`/tms/shipments/${b.shipment.id}`)
+      navigate(`/tms/shipments/${b.shipment.id}/edit`)
     },
     onBlocked: (issues) => { if (issues[0]) focusField(issues[0].fieldKey) },
   })
@@ -536,6 +538,16 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
             />
           </div>
         </FromEmailContext.Provider>
+        {mode === 'edit' && bundle ? (
+          <ShipmentToolsPanel
+            shipmentId={bundle.shipment.id}
+            options={{ customers: directory.customers, locations, settings, isAdmin, currentUser: email }}
+            initialTab={normalizeDetailTab(innerSearch.get('tab'))}
+            onOpen={ensureLocations}
+            onChanged={() => { void refreshBundle() }}
+            onDeleted={() => navigate('/tms/shipments')}
+          />
+        ) : null}
       </div>
 
       <ActionBar

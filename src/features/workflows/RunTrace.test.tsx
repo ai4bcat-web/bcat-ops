@@ -123,7 +123,7 @@ describe('RunTrace', () => {
     draw()
 
     const link = await screen.findByRole('link', { name: 'Open Carrier Pay' })
-    expect(link).toHaveAttribute('href', '/tms/shipments/shp-1?tab=carrierPay')
+    expect(link).toHaveAttribute('href', '/tms/shipments/shp-1/edit?tab=carrierPay')
     expect(screen.getByText('INV-77')).toBeInTheDocument()
   })
 

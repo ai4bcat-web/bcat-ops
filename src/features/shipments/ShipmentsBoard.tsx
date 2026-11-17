@@ -87,7 +87,6 @@ import { chicagoYear, formatBoardDate } from '@/lib/date'
 import { currentMonth, monthsCovering } from '@/lib/shipmentWindows'
 import { SEED_DIVISIONS, topLevelOf } from '@/lib/ownership'
 import { cn } from '@/lib/utils'
-import { ShipmentDrawer } from './components/ShipmentDrawer'
 import { DetentionDialog, DetentionPill } from './components/Detention'
 import { TonuDialog, TonuPill } from './components/Tonu'
 import { detentionStopGuess } from './detentionStop'
@@ -138,7 +137,7 @@ import {
   type TeamColumnLayout,
 } from './teamColumnLayout'
 import { GRID_DEFAULT_PREFIX } from '@/features/tms/grid/orgGridDefault'
-import type { BatchShipmentTask, CustomerRecord, LocationRecord, ShipmentColumnTemplateRecord, TmsSettings, UserProfileRecord } from '@/types/tms'
+import type { BatchShipmentTask, CustomerRecord, ShipmentColumnTemplateRecord, TmsSettings, UserProfileRecord } from '@/types/tms'
 import { REVIEW_BILLING_LABEL, needsBillingReview, reviewBillingNote } from '@/lib/reviewBilling'
 import { matchesFlags, pastDeliveryOf, pastDueDaysOf, type BoardFlag } from './boardChips'
 import { boardReqsOfRow, boardReqsText, readyForReviewOf, setBoardReqSources } from './boardReqs'
@@ -298,7 +297,7 @@ export function ShipmentsBoard() {
   const { isAdmin, isOwner, user } = useAuth()
   const email = user?.email ?? ''
   const { shipments: workingRows, loading: workingLoading, partial: workingPartial, error: workingError, refresh: refreshWorking } = useShipments({ kind: 'working' })
-  const { customers, locations } = useDirectory()
+  const { customers } = useDirectory()
   const staff = useStaff(email)
   const [params, setListParams] = useSearchParams()
   const list = parseShipmentList(params.get('list'))
@@ -485,14 +484,12 @@ export function ShipmentsBoard() {
           error={error}
           refresh={refresh}
           customers={customers}
-          locations={locations}
           settings={settings}
           staff={{ staff: staff.staff, me: staff.me, nameOf: staff.nameOf }}
           columnTemplates={columnTemplates}
           refreshTemplates={loadTemplates}
           isOwner={isOwner}
           isAdmin={isAdmin}
-          currentUser={email}
           email={email}
           userId={user?.userId ?? null}
           onSplit={() => setSplit((s) => !s)}
@@ -512,14 +509,12 @@ export function ShipmentsBoard() {
             error={error}
             refresh={refresh}
             customers={customers}
-            locations={locations}
             settings={settings}
             staff={{ staff: staff.staff, me: staff.me, nameOf: staff.nameOf }}
             columnTemplates={columnTemplates}
             refreshTemplates={loadTemplates}
             isOwner={isOwner}
             isAdmin={isAdmin}
-            currentUser={email}
             email={email}
             userId={user?.userId ?? null}
             onSplit={() => setSplit((s) => !s)}
@@ -558,14 +553,12 @@ interface BoardPaneProps {
   error?: string | null
   refresh: () => Promise<void>
   customers: CustomerRecord[]
-  locations: LocationRecord[]
   settings: TmsSettings | null
   staff: StaffSnapshot
   columnTemplates: ShipmentColumnTemplateRecord[]
   refreshTemplates: () => void
   isOwner: boolean
   isAdmin: boolean
-  currentUser: string
   email: string
   /** Cognito sub: the key the board remembers this person's filters under. */
   userId: string | null
@@ -583,14 +576,12 @@ function BoardPane({
   allRows,
   refresh,
   customers,
-  locations,
   settings,
   staff,
   columnTemplates,
   refreshTemplates,
   isOwner,
   isAdmin,
-  currentUser,
   email,
   userId,
   onSplit,
@@ -1205,8 +1196,6 @@ function BoardPane({
     [renderCell, rowHandlers, isAdmin, settings?.cancelDeleteAdminOnly],
   )
 
-  const [openDrawerId, setOpenDrawerId] = useState<string | null>(null)
-
   const exceptionsForKey = useMemo<BoardExceptionKey[]>(() => {
     const meanings = new Map<string, ReactNode>()
     for (const row of shownRows) {
@@ -1457,7 +1446,7 @@ function BoardPane({
         </TmsButton>
       </div>
       <DenseKpiStrip open items={kpis} />
-      <CurrentlyViewing rows={allRows} onOpen={(id) => setOpenDrawerId(id)} onChanged={handleRefresh} />
+      <CurrentlyViewing rows={allRows} onOpen={(id) => navigate(shipmentEditorPath(id))} onChanged={handleRefresh} />
       {isOwner && selectedIds.length > 0 && (
         <div className="tms-dense-bar" data-testid="delete-selected-bar">
           <TmsButton size="sm" variant="destructive" data-testid="delete-selected" onClick={() => setDeleteTargets(selectedRows.map((r) => ({ id: r.id, number: r.number })))}>
@@ -1489,7 +1478,7 @@ function BoardPane({
             rows={shownRows}
             apiKey={MAPS_KEY}
             mapId={MAPS_MAP_ID}
-            onOpenShipment={(id) => { openShipmentFromRow(id); setOpenDrawerId(id) }}
+            onOpenShipment={(id) => { openShipmentFromRow(id); navigate(shipmentEditorPath(id)) }}
           />
         ) : (
           <DenseGrid<ShipmentRow>
@@ -1586,19 +1575,6 @@ function BoardPane({
             setLayoutDraft({ columns: next.columns, widths: next.widths, pinned: next.pinned })
             toast.success(`Applied: ${next.columns.length} columns, ${next.pinned.length} frozen. Click Save as team default to keep it for everyone.`)
           }}
-        />
-      )}
-
-      {openDrawerId && (
-        <ShipmentDrawer
-          shipmentId={openDrawerId}
-          onClose={() => setOpenDrawerId(null)}
-          onChanged={handleRefresh}
-          customers={customers}
-          locations={locations}
-          settings={settings}
-          isAdmin={isAdmin}
-          currentUser={currentUser}
         />
       )}
 

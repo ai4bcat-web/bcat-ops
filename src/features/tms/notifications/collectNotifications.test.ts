@@ -40,7 +40,7 @@ describe('collectNotifications', () => {
     const g = find(groups, 'CHECK_CALLS')!
     expect(g.total).toBe(2)
     expect(g.items.map((i) => [i.id, i.severity])).toEqual([['cc:b', 'critical'], ['cc:a', 'warn']])
-    expect(g.items[0].to).toBe('/tms/shipments/b?tab=tracking')
+    expect(g.items[0].to).toBe('/tms/shipments/b/edit?tab=tracking')
   })
 
   it('flags a POD only for delivered, unvoided shipments with POD on the gate', () => {

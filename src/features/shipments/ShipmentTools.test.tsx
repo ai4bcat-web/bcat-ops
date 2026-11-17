@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
-import { ShipmentDetail } from './components/ShipmentDetail'
+import { ShipmentTools } from './components/ShipmentTools'
 import { normalizeDetailTab } from './components/detailTabs'
 import type { ShipmentActions } from './useShipmentActions'
 import type {
@@ -216,13 +216,13 @@ function Where() {
 
 async function renderDetail(
   status: ShipmentStatus = 'BOOKED',
-  over: Partial<React.ComponentProps<typeof ShipmentDetail>> = {},
+  over: Partial<React.ComponentProps<typeof ShipmentTools>> = {},
   bundleOver: Partial<ShipmentBundle> = {},
 ) {
   render(
     <MemoryRouter>
       <Where />
-      <ShipmentDetail
+      <ShipmentTools
         bundle={bundle(status, bundleOver)}
         customer={null}
         customers={[]}
@@ -274,39 +274,25 @@ describe('a shipment with no customer record', () => {
     await waitFor(() => expect(actions.setCustomer).toHaveBeenCalledWith('cust-9'))
   })
 
-  it('offers the same link above the draft editor, where it is commonest', async () => {
-    await renderUnresolved('DRAFT')
-    expect(screen.getByTestId('unresolved-customer-note')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Link customer' })).toBeTruthy()
-  })
-
   it('says nothing of the sort once a customer is linked', async () => {
     await renderDetail('BOOKED', { customers: [directDrive] })
     expect(screen.queryByTestId('unresolved-customer-note')).toBeNull()
   })
 })
 
-describe('ShipmentDetail tabs', () => {
-  it('opens on Overview with the facts the old Summary and Details tabs both held', async () => {
+describe('ShipmentTools tabs', () => {
+  it('opens on Division & actions', async () => {
     await renderDetail()
-    expect(screen.getByRole('tab', { name: 'Overview' }).getAttribute('aria-selected')).toBe('true')
-    expect(screen.getByText('Acme Freight')).toBeTruthy()
-    expect(screen.getByText('Chicago, IL')).toBeTruthy()
-    expect(within(screen.getByText('Revenue').closest('.tms-kpi-card') as HTMLElement).getByText('$2000.00')).toBeTruthy()
-    // Previously the Details tab: one record, one set of facts.
-    expect(screen.getByText('S000001-1')).toBeTruthy()
-    expect(screen.getByText("53' Dry Van")).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Division & actions' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByText('Load actions')).toBeTruthy()
   })
 
-  it('shows the nine tabs and switches between them', async () => {
+  it('shows the eight tabs and switches between them', async () => {
     await renderDetail()
     const names = [
-      'Overview', 'Stops', 'Carrier/Driver', 'Tracking', 'Documents', 'Financials', 'Invoicing', 'Carrier Pay', 'History',
+      'Division & actions', 'Carrier/Driver', 'Tracking', 'Documents', 'Financials', 'Invoicing', 'Carrier Pay', 'History',
     ]
     for (const name of names) expect(screen.getByRole('tab', { name })).toBeTruthy()
-
-    fireEvent.click(screen.getByRole('tab', { name: 'Stops' }))
-    await waitFor(() => expect(screen.getByText('Acme Dock 4')).toBeTruthy())
 
     fireEvent.click(screen.getByRole('tab', { name: 'Documents' }))
     await waitFor(() => expect(screen.getByText('docs:POD')).toBeTruthy())
@@ -322,9 +308,10 @@ describe('ShipmentDetail tabs', () => {
     await waitFor(() => expect(listAuditLogsFor).toHaveBeenCalled())
   })
 
-  it('maps the pre-merge deep links onto Overview and keeps the new keys', async () => {
+  it('maps the pre-merge deep links onto Division & actions and keeps the new keys', async () => {
     expect(normalizeDetailTab('summary')).toBe('overview')
     expect(normalizeDetailTab('details')).toBe('overview')
+    expect(normalizeDetailTab('stops')).toBe('overview')
     expect(normalizeDetailTab('carrierPay')).toBe('carrierPay')
     expect(normalizeDetailTab('nonsense')).toBeUndefined()
   })
@@ -339,41 +326,7 @@ describe('ShipmentDetail tabs', () => {
     expect(screen.queryByText(/\bOrder\b/)).toBeNull()
   })
 
-  it('shows the draft editor instead of tabs while the shipment is a draft', async () => {
-    await renderDetail('DRAFT')
-    expect(screen.queryByRole('tab', { name: 'Overview' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Submit shipment' })).toBeTruthy()
-  })
 
-  it('opens the Aljex form from Edit, on a draft and on a live shipment, but not on a voided one', async () => {
-    await renderDetail('DRAFT')
-    fireEvent.click(screen.getByTestId('shipment-edit'))
-    expect(screen.getByTestId('where').textContent).toBe(`/tms/shipments/${bundle('BOOKED').shipment.id}/edit`)
-    cleanup()
-    await renderDetail('BOOKED')
-    fireEvent.click(screen.getByTestId('shipment-edit'))
-    expect(screen.getByTestId('where').textContent).toBe(`/tms/shipments/${bundle('BOOKED').shipment.id}/edit`)
-    cleanup()
-    await renderDetail('BOOKED', {}, { shipment: { ...bundle('BOOKED').shipment, voidedAt: '2026-04-04T10:00:00.000Z' } })
-    expect((screen.getByTestId('shipment-edit') as HTMLButtonElement).disabled).toBe(true)
-  })
-
-  it('refuses stop edits on a canceled shipment', async () => {
-    await renderDetail('CANCELED')
-    fireEvent.click(screen.getByRole('tab', { name: 'Stops' }))
-    await waitFor(() => expect((screen.getByLabelText('Stop 1 actions') as HTMLButtonElement).disabled).toBe(true))
-  })
-
-  it('freezes stop edits on a voided shipment', async () => {
-    await renderDetail('BOOKED', {}, {
-      shipment: {
-        ...bundle('BOOKED').shipment,
-        voidedAt: '2026-04-04T10:00:00.000Z', voidedBy: 'ryne@bcatcorp.com', voidReason: 'Duplicate of S000002',
-      },
-    })
-    fireEvent.click(screen.getByRole('tab', { name: 'Stops' }))
-    await waitFor(() => expect((screen.getByLabelText('Stop 1 actions') as HTMLButtonElement).disabled).toBe(true))
-  })
 })
 
 /*
@@ -396,7 +349,7 @@ describe('the AI Agent tab', () => {
   it('sends a ?tab=aiAgent deep link to Overview when there is no such tab', async () => {
     await renderDetail('BOOKED', { initialTab: 'aiAgent' })
     await waitFor(() => expect(listWorkflowRunsForShipment).toHaveBeenCalled())
-    expect(screen.getByRole('tab', { name: 'Overview' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('tab', { name: 'Division & actions' }).getAttribute('aria-selected')).toBe('true')
     expect(screen.queryByTestId('shipment-workflow-runs')).toBeNull()
   })
 
@@ -578,7 +531,7 @@ describe('the Overview Integrations card', () => {
     const voided = { ...bundle('DELIVERED').shipment, voidedAt: '2026-02-01T00:00:00.000Z' }
     await renderDetail('DELIVERED', { isAdmin: true }, { shipment: voided })
 
-    await waitFor(() => expect(screen.getByText('Shipment')).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Division & actions' })).toBeTruthy())
     expect(screen.queryByText('Integrations')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Expand integrations' })).toBeNull()
   })
@@ -586,7 +539,7 @@ describe('the Overview Integrations card', () => {
   it('is not rendered — and the list is never asked for — for a non-admin viewer', async () => {
     await renderDetail('BOOKED', { isAdmin: false })
 
-    await waitFor(() => expect(screen.getByText('Shipment')).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Division & actions' })).toBeTruthy())
     expect(screen.queryByText('Integrations')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Expand integrations' })).toBeNull()
     // LIST_INTEGRATIONS is owner/ADMIN only; a rep must not fire a refused call at all.

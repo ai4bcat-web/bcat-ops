@@ -10,7 +10,7 @@ import { checkCredit } from '@/lib/apiClient'
 import { useShipment } from '@/hooks/useShipment'
 import { useShipmentActions, type ShipmentActions } from './useShipmentActions'
 import type { CreditSummary } from '@/lib/customerCredit'
-import type { ShipmentDetailProps } from './components/ShipmentDetail'
+import type { ShipmentToolsProps } from './components/ShipmentTools'
 import type {
   ChargeCodeDef, CustomerRecord, LocationRecord, PricingDefaults, RequiredReference, ShipmentBundle, TmsSettings,
 } from '@/types/tms'
@@ -29,7 +29,7 @@ export interface ShipmentContext {
   error: string | null
   cancelDeleteAdminOnly: boolean
   actions: ShipmentActions
-  detailProps: ShipmentDetailProps
+  detailProps: ShipmentToolsProps
 }
 
 export function useShipmentContext(

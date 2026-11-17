@@ -106,7 +106,7 @@ export function CustomerPicker({ values, update, ctx, form }: CardProps) {
               ) : ctx.bundle && isAdmin ? (
                 <button type="button" className="ship-link" data-testid="f-customer-change" onClick={() => setChanging(true)}>Change customer…</button>
               ) : ctx.bundle ? (
-                <Link className="ship-link" to={`/tms/shipments/${ctx.bundle.shipment.id}`}>Change customer…</Link>
+                <Link className="ship-link" to={`/tms/shipments/${ctx.bundle.shipment.id}/edit?tab=overview`}>Change customer…</Link>
               ) : null}
             </div>
           ) : (

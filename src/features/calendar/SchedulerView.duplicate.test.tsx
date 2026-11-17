@@ -45,9 +45,10 @@ vi.mock('./EventCard', () => ({
   ),
 }))
 
-vi.mock('@/features/shipments/components/ShipmentDrawer', () => ({
-  ShipmentDrawer: ({ shipmentId }: { shipmentId: string | null }) =>
-    shipmentId ? <div data-testid="shipment-detail">{shipmentId}</div> : null,
+const navigateMock = vi.fn()
+vi.mock('react-router-dom', async (orig) => ({
+  ...(await orig<typeof import('react-router-dom')>()),
+  useNavigate: () => navigateMock,
 }))
 
 vi.mock('@/hooks/useLoads', () => ({ useLoads: () => ({ loads: [], allLoads: [], updateLoad: vi.fn() }) }))
@@ -105,7 +106,7 @@ const duplicateLeg = async () => {
   fireEvent.contextMenu(screen.getByRole('button', { name: 'leg load-2' }))
   fireEvent.click(await screen.findByText('Duplicate'))
   // The copy opening is the last thing the click does; wait for it so no update lands after the test.
-  await screen.findByTestId('shipment-detail')
+  await waitFor(() => expect(navigateMock).toHaveBeenCalled())
 }
 
 describe('scheduler duplicate', () => {
@@ -134,10 +135,10 @@ describe('scheduler duplicate', () => {
     expect(JSON.stringify(duplicateShipmentMock.mock.calls[0][0])).not.toContain('-copy')
   })
 
-  it('opens the copy on its own shipment detail', async () => {
+  it('opens the copy on its own edit page', async () => {
     renderScheduler()
     await duplicateLeg()
 
-    await waitFor(() => expect(screen.getByTestId('shipment-detail').textContent).toBe('shp-2'))
+    expect(navigateMock).toHaveBeenCalledWith('/tms/shipments/shp-2/edit')
   })
 })

@@ -177,7 +177,7 @@ function FeedbackCard({ run, onChanged }: { run: WorkflowRunRecord; onChanged: (
 /**
  * The shipment a person created from this run, read-only.
  *
- * `ShipmentDrawer` is an editor — it owns dialogs, saves and a void button — so it is
+ * The old shipment drawer was an editor — it owns dialogs, saves and a void button — so it is
  * not forked into a viewer here. The facts a reader needs to recognise the shipment are
  * a card, and the link goes to the real detail for everything else.
  */

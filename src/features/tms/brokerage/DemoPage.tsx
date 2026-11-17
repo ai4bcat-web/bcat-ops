@@ -25,7 +25,7 @@ function stepTarget(
   const prefix = step.opensOn.split('.')[0]
   if (prefix === 'shipment') {
     const search = step.tab ? `?tab=${step.tab}` : undefined
-    return { to: `/tms/shipments/${recordId}`, search }
+    return { to: `/tms/shipments/${recordId}/edit`, search }
   }
   if (prefix === 'intake') {
     return { to: `/tms/shipments/intake/${encodeURIComponent(recordId)}` }

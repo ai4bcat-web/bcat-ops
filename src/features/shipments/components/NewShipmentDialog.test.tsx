@@ -46,11 +46,11 @@ vi.mock('@/lib/apiClient', () => ({
   assignAsset: (...a: unknown[]) => assignAssetMock(...a),
 }))
 
-// The detail is a whole page of its own; the only thing these tests care about is THAT it
-// is what a created shipment hands over to, never the load drawer.
-vi.mock('./ShipmentDrawer', () => ({
-  ShipmentDrawer: ({ shipmentId }: { shipmentId: string | null }) =>
-    shipmentId ? <div data-testid="shipment-detail">{shipmentId}</div> : null,
+// Opening the new shipment is a navigation to its edit page; the tests only care THAT it happens.
+const navigateMock = vi.fn()
+vi.mock('react-router-dom', async (orig) => ({
+  ...(await orig<typeof import('react-router-dom')>()),
+  useNavigate: () => navigateMock,
 }))
 
 const addCustomerMock = vi.fn()
@@ -153,7 +153,7 @@ describe('nothing is written until Save', () => {
     expect(createShipmentMock).not.toHaveBeenCalled()
   })
 
-  it('creates exactly once on Save and opens the shipment detail', async () => {
+  it('creates exactly once on Save and opens the shipment edit page', async () => {
     render(<NewShipmentDialog open onClose={vi.fn()} prefill={{ dateStr: '2026-10-09' }} />)
     pickCustomer('Axle Logistics, LLC')
     fillStopDates('2026-10-09')
@@ -161,7 +161,7 @@ describe('nothing is written until Save', () => {
 
     await waitFor(() => expect(createShipmentMock).toHaveBeenCalledTimes(1))
     expect(createShipmentMock.mock.calls[0][0]).toMatchObject({ customerId: 'cust-axle', source: 'MANUAL' })
-    await waitFor(() => expect(screen.getByTestId('shipment-detail').textContent).toBe('shp-9'))
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/tms/shipments/shp-9/edit'))
   })
 })
 
@@ -479,7 +479,7 @@ describe('an Ivan Cartage driver on the create form (Step W)', () => {
     fillStopDates('2026-10-09')
     save()
 
-    await waitFor(() => expect(screen.getByTestId('shipment-detail').textContent).toBe('shp-9'))
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/tms/shipments/shp-9/edit'))
     expect(toastWarningMock.mock.calls[0][0]).toContain('created, but the driver was not booked: Dana Driver is inactive')
   })
 

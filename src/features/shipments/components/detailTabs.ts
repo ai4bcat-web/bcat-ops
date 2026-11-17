@@ -12,7 +12,7 @@
  * valid key that still falls back to Overview on a shipment no agent ever touched.
  */
 export const DETAIL_TAB_KEYS = [
-  'overview', 'stops', 'carrier', 'tracking', 'documents', 'financials', 'invoicing', 'carrierPay', 'history',
+  'overview', 'carrier', 'tracking', 'documents', 'financials', 'invoicing', 'carrierPay', 'history',
   'aiAgent',
 ] as const
 
@@ -20,8 +20,7 @@ export type DetailTabKey = (typeof DETAIL_TAB_KEYS)[number]
 
 /** The labels, in the order the detail draws them. */
 export const DETAIL_TABS: readonly { key: DetailTabKey; label: string }[] = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'stops', label: 'Stops' },
+  { key: 'overview', label: 'Division & actions' },
   { key: 'carrier', label: 'Carrier/Driver' },
   { key: 'tracking', label: 'Tracking' },
   { key: 'documents', label: 'Documents' },
@@ -36,6 +35,7 @@ export const DETAIL_TABS: readonly { key: DetailTabKey; label: string }[] = [
 const LEGACY_TABS: Record<string, DetailTabKey> = {
   summary: 'overview',
   details: 'overview',
+  stops: 'overview',
 }
 
 export function isDetailTabKey(value: string | null | undefined): value is DetailTabKey {

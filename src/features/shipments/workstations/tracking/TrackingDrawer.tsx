@@ -37,7 +37,7 @@ export function TrackingDrawer({ shipmentId, onClose, onChanged }: {
       headerExtra={shipment ? (
         <>
           <Link to="/tms/tracking/links" className="tms-link">Manage links</Link>
-          <Link to={`/tms/shipments/${shipment.id}?tab=tracking`} className="tms-icon-btn" aria-label="Open full page" title="Open full page">
+          <Link to={`/tms/shipments/${shipment.id}/edit?tab=tracking`} className="tms-icon-btn" aria-label="Open full page" title="Open full page">
             <ExternalLink size={14} />
           </Link>
         </>

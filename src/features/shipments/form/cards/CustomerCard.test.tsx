@@ -126,7 +126,7 @@ describe('CustomerPicker — typed name, lock', () => {
       bundle: { shipment: { id: 'sh-9', customerId: ACME.id } }, customer: ACME,
     })
     expect((screen.getByTestId('f-customer-name') as HTMLInputElement).readOnly).toBe(true)
-    expect(screen.getByText('Change customer…').getAttribute('href')).toBe('/tms/shipments/sh-9')
+    expect(screen.getByText('Change customer…').getAttribute('href')).toBe('/tms/shipments/sh-9/edit?tab=overview')
   })
 
   it('a created shipment with only typed customer text offers "Link customer…" to anyone, and marks it not matched', () => {

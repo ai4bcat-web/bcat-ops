@@ -139,7 +139,7 @@ export async function processEvent(deps: IntakeThreadDeps, e: IntakeThreadEvent)
   }
   const text = threadMessage(e, {
     pro: str(shipment?.number) ?? str(intake.shipmentNumber),
-    shipmentUrl: shipmentId ? `${deps.portalOrigin.replace(/\/$/, '')}/tms/shipments/${encodeURIComponent(shipmentId)}` : null,
+    shipmentUrl: shipmentId ? `${deps.portalOrigin.replace(/\/$/, '')}/tms/shipments/${encodeURIComponent(shipmentId)}/edit` : null,
     carrierName: e.kind === 'carrierBooked' ? await carrierNameOf(deps, shipment) : null,
   })
   if (!text) return 'skipped'

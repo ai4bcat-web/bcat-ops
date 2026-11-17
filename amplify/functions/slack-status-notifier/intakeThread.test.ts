@@ -56,7 +56,7 @@ describe('handleIntakeThreadStream', () => {
       { ...intake, status: 'PROMOTING' },
       { ...intake, status: 'MOVED', shipmentId: 's9', shipmentNumber: '20101', updatedBy: 'ruben@bcatcorp.com' })], id)
     expect(out.posted).toBe(1)
-    expect(posts).toEqual([{ channel: 'C_BCAT', ts: '1794519549.86', text: ':white_check_mark: Shipment created: PRO *20101* by Ruben · <https://ops.bcatcorp.com/tms/shipments/s9|Open in BCAT Ops>' }])
+    expect(posts).toEqual([{ channel: 'C_BCAT', ts: '1794519549.86', text: ':white_check_mark: Shipment created: PRO *20101* by Ruben · <https://ops.bcatcorp.com/tms/shipments/s9/edit|Open in BCAT Ops>' }])
     expect(deps.saveThread).toHaveBeenCalledWith('il:1', 'C_BCAT', '1794519549.86')
     expect(deps.copyThreadToShipment).toHaveBeenCalledWith('s9', 'il:1', 'C_BCAT', '1794519549.86')
   })

@@ -383,7 +383,7 @@ function LoadOffers({ load, postingRateCents, onChanged }: { load: HubLoad; post
           {postingRateCents ? <span className="tms-muted">Posted at {formatCents(postingRateCents)}</span> : null}
           {(load.postedBoards ?? []).length > 0 ? <TmsBadge tone="blue">Posted: {(load.postedBoards ?? []).join(', ')}</TmsBadge> : null}
           {covered ? <TmsBadge tone="green">Covered{load.carrierName ? ` — ${load.carrierName}` : ''}</TmsBadge> : <TmsBadge tone="orange">Needs cover</TmsBadge>}
-          <Link to={`/tms/shipments/${load.id}?tab=carrier`}>Open shipment</Link>
+          <Link to={`/tms/shipments/${load.id}/edit?tab=carrier`}>Open shipment</Link>
         </div>
       </TmsCard>
 

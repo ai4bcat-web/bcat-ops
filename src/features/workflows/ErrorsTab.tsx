@@ -280,7 +280,7 @@ function ErrorsTabBody({ integrations, integrationsVisible }: {
                   key={action.key}
                   size="sm"
                   disabled={!row.shipmentId}
-                  onClick={() => { if (row.shipmentId) navigate(`/tms/shipments/${row.shipmentId}?tab=tracking`) }}
+                  onClick={() => { if (row.shipmentId) navigate(`/tms/shipments/${row.shipmentId}/edit?tab=tracking`) }}
                 >
                   {action.label}
                 </TmsButton>

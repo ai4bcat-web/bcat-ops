@@ -1,34 +1,23 @@
 /**
- * The body of a shipment, shared by the drawer and the full page: Overview · Stops ·
- * Carrier/Driver · Tracking · Documents · Financials · Invoicing · Carrier Pay ·
- * History. A DRAFT shipment shows the draft editor instead of the tabs, because a draft
- * has nothing to track yet — that is the only shape difference between the two.
- *
- * Step R merged the old Summary and Details tabs into Overview: there is one record and
- * one vocabulary, so the customer's fields and the load's fields are one set of facts
- * with no "Order" heading between them.
- *
- * Step K added AI Agent, the one tab that is not always there: it is drawn only while an
- * agent run is linked to this shipment, so it never offers an empty trace of work nobody
- * asked for.
+ * The tools under the shipment edit form: Division & actions, Carrier sourcing, Tracking,
+ * Documents, Financials, Invoicing, Carrier Pay, History (and AI Agent while a run is linked).
+ * Everything the old shipment drawer held that the edit form does not already have; the
+ * drawer itself is gone, so every link to a shipment lands on the edit page.
  */
 import { useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { AuthContext } from '@/hooks/useAuth'
-import { formatCents } from '@/lib/tmsDirectory'
-import { customerDisplayName, isCustomerUnresolved } from '@/lib/customerResolution'
+import { isCustomerUnresolved } from '@/lib/customerResolution'
 import { formatDateTime } from '@/lib/date'
-import { computeFinancials } from '@/lib/shipmentCharges'
 import { liveCarriersOf, primaryCarrierOf } from '@/lib/carrierTotals'
 import { laneKey3For, laneKeyFor } from '@/lib/laneKey'
-import { SHIPMENT_STATUS_LABELS, LOAD_WORKFLOW_STATUS_LABELS } from '@/lib/shipmentStatus'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useTrucks } from '@/hooks/useTrucks'
 import { LaneHistoryPanel } from '@/features/quotes/components/LaneHistoryPanel'
 import { UnresolvedCustomerCard } from '@/features/workflows/IdentifyCustomerDialog'
 import {
-  TmsAlert, TmsBadge, TmsButton, TmsCard, TmsIconButton, TmsKeyHint, TmsMetaList, TmsStatRow, TmsTabs, TmsTimeline,
+  TmsAlert, TmsBadge, TmsButton, TmsCard, TmsIconButton, TmsKeyHint, TmsTabs, TmsTimeline,
   statusTone,
 } from '@/features/tms/kit'
 import { useIntegrations } from '@/hooks/useIntegrations'
@@ -38,9 +27,6 @@ import { PROVIDERS, isApplicable, liveCapabilitiesOf } from '@/lib/integrations/
 import { badgeOf } from '@/lib/integrations/health'
 import type { Capability, IntegrationRecord, ProviderDescriptor } from '@/lib/integrations/types'
 import type { CreditSummary } from '@/lib/customerCredit'
-import { aljexCodeItems, referenceLabel, shipmentFlagLabels, shippingRequirementRows } from '../aljexDisplay'
-import { readExtras } from '../form/model'
-import { StopCards } from './StopCards'
 import { FinancialLines } from './FinancialLines'
 import { BuildingBanner } from './BuildingBanner'
 import { CarrierSection } from './CarrierSection'
@@ -52,12 +38,8 @@ import { ApCard } from './ApCard'
 import { DivisionCard } from './DivisionCard'
 import { TrackerCard } from './TrackerCard'
 import { ReleaseGateCard } from './ReleaseGateCard'
-import { DetentionSection } from './Detention'
-import { TonuSection } from './Tonu'
 import { HistorySection } from './HistorySection'
 import { LoadActions } from './StatusActions'
-import { DraftOrderEditor } from './DraftOrderEditor'
-import { AssignDriverDialog } from './AssignDriverDialog'
 import { DETAIL_TABS, type DetailTabKey } from './detailTabs'
 import type { ShipmentActions } from '../useShipmentActions'
 import type {
@@ -65,7 +47,7 @@ import type {
   WorkflowRunRecord,
 } from '@/types/tms'
 
-export interface ShipmentDetailProps {
+export interface ShipmentToolsProps {
   bundle: ShipmentBundle
   customer: CustomerRecord | null
   /** The directory, so a shipment carrying only typed customer text can be linked to a record. */
@@ -83,9 +65,9 @@ export interface ShipmentDetailProps {
   actions: ShipmentActions
 }
 
-export function ShipmentDetail(props: ShipmentDetailProps) {
+export function ShipmentTools(props: ShipmentToolsProps) {
   const {
-    bundle, customer, customers, locations, catalog, pricing, marginFloorBps, requiredReferences, credit,
+    bundle, customer, customers, locations, catalog, pricing, marginFloorBps,
     currentUser, isAdmin, initialTab, actions,
   } = props
   const [tab, setTab] = useState<DetailTabKey>(initialTab ?? 'overview')
@@ -93,7 +75,6 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
   const { equipment } = useTrucks()
   const trucks = equipment.filter((e) => e.type === 'truck')
   const trailers = equipment.filter((e) => e.type === 'trailer')
-  const [assignOpen, setAssignOpen] = useState(false)
   // A refused "Move load to…" is tied to the status the load had, so it disappears by
   // itself once the load actually moves (no effect needed to clear it).
   const [actionError, setActionError] = useState<{ message: string; status: string | null } | null>(null)
@@ -102,7 +83,6 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
   // Same optional read as `useAuthUser`: the detail renders inside drawers, dialogs and
   // tests that do not always sit under AuthProvider, and the router is the real gate.
   const auth = useContext(AuthContext)
-  const navigate = useNavigate()
   const canTag = isAdmin || (auth?.isOwner ?? false) || (auth?.hasPageAccess('tms') ?? false)
   // LIST_INTEGRATIONS is owner/ADMIN only, the same gate the Integrations tab carries.
   // Anyone else must not even mount the hook: the refused list would read as "every
@@ -113,25 +93,9 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
   const order = bundle.orders[0]
   const load = bundle.loads[0]
   const voided = Boolean(shipment.voidedAt)
-  // The Aljex-style form edits every shipment, not only drafts; a voided one is frozen.
-  const editButton = (
-    <TmsButton
-      size="sm"
-      variant="secondary"
-      data-testid="shipment-edit"
-      disabled={voided}
-      onClick={() => navigate(`/tms/shipments/${shipment.id}/edit`)}
-    >
-      Edit
-    </TmsButton>
-  )
   // The primary (lowest sequence) carrier is the one the single-driver surfaces speak for.
   const liveCarriers = liveCarriersOf(bundle.loadCarriers, load?.id ?? '')
   const activeCarrier = primaryCarrierOf(liveCarriers)
-  const totals = useMemo(
-    () => computeFinancials(bundle.charges, { miles: load?.miles ?? null }, pricing, marginFloorBps),
-    [bundle.charges, load?.miles, pricing, marginFloorBps],
-  )
 
   // Once the order is invoiced the numbers are frozen; the grid stays readable but every
   // input goes away rather than offering a write the Lambda will refuse. A voided
@@ -198,44 +162,6 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
     />
   ) : null
 
-  if (shipment.status === 'DRAFT') {
-    return (
-      <div className="space-y-4">
-        {unresolvedCustomer}
-        <div className="flex justify-end">{editButton}</div>
-        <DraftOrderEditor
-          bundle={bundle}
-          customer={customer}
-          requiredReferences={requiredReferences}
-          catalog={catalog}
-          pricing={pricing}
-          marginFloorBps={marginFloorBps}
-          locations={locations}
-          credit={credit}
-          currentUser={currentUser}
-          onSaveForm={actions.saveForm}
-          onSubmit={actions.submit}
-          onStopAction={actions.stopAction}
-          onSaveCharges={actions.saveCharges}
-          driverRow={load ? {
-            driverName: activeCarrier?.kind === 'OWN_ASSET' ? activeCarrier.driverName ?? null : null,
-            assignmentType: load.assignmentType ?? null,
-            voided,
-            onOpen: () => setAssignOpen(true),
-          } : undefined}
-        />
-        {assignOpen && load && (
-          <AssignDriverDialog
-            load={load} activeLeg={activeCarrier} drivers={drivers} trucks={trucks} trailers={trailers}
-            isAdmin={isAdmin} busy={actions.busy}
-            onClose={() => setAssignOpen(false)}
-            onConfirm={actions.load.onAssignAsset}
-          />
-        )}
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-4" ref={rootRef} data-testid="shipment-detail">
       {unresolvedCustomer}
@@ -250,8 +176,6 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
         </div>
       )}
       <BuildingBanner shipment={shipment} onReload={actions.reload} />
-      <DetentionSection shipment={shipment} onChanged={actions.reload} canEdit={!voided} />
-      <TonuSection shipment={shipment} onChanged={actions.reload} canEdit={!voided} />
       <div className="flex items-center gap-2">
         <TmsTabs
           tabs={visibleTabs.map((t) => ({ key: t.key, label: t.label }))}
@@ -267,146 +191,25 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
 
       {activeTab === 'overview' && (
         <div className="space-y-3">
-          <TmsCard
-            title="Shipment"
-            actions={(
-              <div className="flex items-center gap-2">
-                {editButton}
-                {load ? (
-                  <LoadActions
-                    load={load}
-                    mode={shipment.mode}
-                    bundle={bundle}
-                    activeCarrier={activeCarrier}
-                    drivers={drivers}
-                    trucks={trucks}
-                    trailers={trailers}
-                    arStatus={order?.arStatus ?? null}
-                    isAdmin={isAdmin}
-                    voided={voided}
-                    handlers={actions.load}
-                    onRateCon={() => setTab('carrier')}
-                    onError={(message) => setActionError({ message, status: load.status ?? null })}
-                  />
-                ) : null}
-              </div>
-            )}
-          >
-            <TmsStatRow
-              compact
-              columns={3}
-              aria-label="Shipment financial summary"
-              items={[
-                { key: 'revenue', label: 'Revenue', value: `$${formatCents(totals.revenueCents)}` },
-                { key: 'cost', label: 'Cost', value: `$${formatCents(totals.costCents)}` },
-                {
-                  key: 'profit',
-                  label: 'Profit',
-                  value: `$${formatCents(totals.profitCents)}`,
-                  sub: `${(totals.marginBps / 100).toFixed(1)}%`,
-                  tone: totals.profitCents < 0 ? 'bad' : 'default',
-                },
-              ]}
-            />
-            <div className="mt-3">
-              <TmsMetaList
-                columns={3}
-                items={[
-                  { label: 'Status', value: SHIPMENT_STATUS_LABELS[shipment.status] },
-                  { label: 'Customer', value: customerDisplayName(shipment) },
-                  { label: 'Mode', value: shipment.mode },
-                  { label: 'Origin', value: shipment.originCity },
-                  { label: 'Destination', value: shipment.destinationCity },
-                  { label: 'Pickup', value: shipment.pickupAppt ? formatDateTime(shipment.pickupAppt) : null },
-                  { label: 'Delivery', value: shipment.deliveryAppt ? formatDateTime(shipment.deliveryAppt) : null },
-                  { label: 'Load status', value: load?.status ? LOAD_WORKFLOW_STATUS_LABELS[load.status] : null },
-                  {
-                    label: 'Last update',
-                    value: load?.lastKnownAt || load?.lastCheckCallAt
-                      ? [
-                          formatDateTime(load.lastKnownAt ?? load.lastCheckCallAt),
-                          [load.lastKnownCity, load.lastKnownState].filter(Boolean).join(', '),
-                        ].filter(Boolean).join(' · ')
-                      : null,
-                  },
-                  { label: 'Next check call', value: load?.nextCheckCallAt ? formatDateTime(load.nextCheckCallAt) : null },
-                  { label: 'Load number', value: load?.loadNumber },
-                  { label: 'Leg', value: load?.leg != null ? String(load.leg) : null },
-                  { label: 'Assignment', value: load?.assignmentType },
-                  { label: 'Equipment', value: order?.equipmentType ?? load?.equipmentType },
-                  { label: 'Rate type', value: order?.rateType },
-                  { label: 'Tracking', value: load?.trackingProvider },
-                  { label: 'Carrier rep', value: load?.carrierRepId },
-                  { label: 'Miles', value: load?.miles != null ? String(load.miles) : null },
-                ]}
+          {load ? (
+            <TmsCard title="Load actions">
+              <LoadActions
+                load={load}
+                mode={shipment.mode}
+                bundle={bundle}
+                activeCarrier={activeCarrier}
+                drivers={drivers}
+                trucks={trucks}
+                trailers={trailers}
+                arStatus={order?.arStatus ?? null}
+                isAdmin={isAdmin}
+                voided={voided}
+                handlers={actions.load}
+                onRateCon={() => setTab('carrier')}
+                onError={(message) => setActionError({ message, status: load.status ?? null })}
               />
-            </div>
-
-            {(order?.references?.length ?? 0) > 0 && (
-              <div className="mt-3">
-                <p className="tms-field-label">References</p>
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {order?.references?.map((r, i) => (
-                    <TmsBadge key={`${r.code}-${i}`} tone="gray">{referenceLabel(r)}: {r.value}</TmsBadge>
-                  ))}
-                </div>
-              </div>
-            )}
-            {shipmentFlagLabels(shipment.osd, order?.specialRequirements).length > 0 && (
-              <div className="mt-3" data-testid="shipment-flags">
-                <p className="tms-field-label">Flags</p>
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {shipmentFlagLabels(shipment.osd, order?.specialRequirements).map((f) => <TmsBadge key={f} tone="orange">{f}</TmsBadge>)}
-                </div>
-              </div>
-            )}
-            {aljexCodeItems(shipment).length > 0 && (
-              <div className="mt-3" data-testid="aljex-codes">
-                <TmsMetaList columns={4} items={aljexCodeItems(shipment)} />
-              </div>
-            )}
-            {shippingRequirementRows(readExtras(order)).length > 0 && (
-              <div className="mt-3" data-testid="shipping-requirements">
-                <p className="tms-field-label">Shipping requirements</p>
-                <TmsMetaList columns={4} items={shippingRequirementRows(readExtras(order))} />
-              </div>
-            )}
-            {(order?.freight?.length ?? 0) > 0 && (
-              <div className="mt-3">
-                <p className="tms-field-label">Freight</p>
-                <ul className="mt-1 space-y-1 text-sm">
-                  {order?.freight?.map((f) => (
-                    <li key={f.id}>
-                      {f.qty} × {f.handlingUnit.toLowerCase()}{f.description ? ` — ${f.description}` : ''}
-                      {f.weightLbs != null ? ` · ${f.weightLbs} lb` : ''}
-                      {f.hazmat ? ' · HAZMAT' : ''}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {order?.customerNotes && <Note label="Customer notes" text={order.customerNotes} />}
-            {order?.internalNotes && <Note label="Internal notes" text={order.internalNotes} />}
-            {shipment.holdReason && <Note label="On hold" text={shipment.holdReason} />}
-            {shipment.cancelReason && <Note label="Canceled" text={shipment.cancelReason} />}
-            {shipment.tenderRejectReason && <Note label="Tender rejected" text={shipment.tenderRejectReason} />}
-          </TmsCard>
-
-          {liveCarriers.length > 0 && (
-            <TmsCard title="Assigned">
-              {liveCarriers.map((lc) => (
-                <div key={lc.id} data-testid="assigned-carrier" data-load-carrier-id={lc.id} className={liveCarriers.length > 1 ? 'mt-2 first:mt-0' : undefined}>
-                  <p className="text-sm font-medium">
-                    {lc.kind === 'OWN_ASSET' ? lc.driverName ?? 'Own asset' : lc.carrierName ?? 'Carrier'}
-                  </p>
-                  <p className="tms-muted text-xs">
-                    {[lc.truckNumber && `Truck ${lc.truckNumber}`, lc.trailerNumber && `Trailer ${lc.trailerNumber}`, lc.driverPhone]
-                      .filter(Boolean).join(' · ') || '—'}
-                  </p>
-                </div>
-              ))}
             </TmsCard>
-          )}
+          ) : null}
 
           <DeliveryCard bundle={bundle} onReload={actions.reload} />
 
@@ -430,15 +233,6 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
             <ShipmentIntegrationsCard onOpenTracking={() => setTab('tracking')} />
           )}
         </div>
-      )}
-
-      {activeTab === 'stops' && (
-        <StopCards
-          stops={load?.stops ?? []}
-          locations={locations}
-          readOnly={voided || shipment.status === 'CANCELED'}
-          onAction={actions.stopAction}
-        />
       )}
 
       {activeTab === 'carrier' && <CarrierSection bundle={bundle} actions={actions} isAdmin={isAdmin} />}
@@ -673,12 +467,3 @@ function AiAgentRuns({ runs }: { runs: WorkflowRunRecord[] }) {
   )
 }
 
-function Note({ label, text }: { label: string; text: string }) {
-  return (
-    <div className="mt-3">
-      <TmsAlert tone="orange" icon={false} role="status">
-        <span className="font-medium">{label}: </span>{text}
-      </TmsAlert>
-    </div>
-  )
-}

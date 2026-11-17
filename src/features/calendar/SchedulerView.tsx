@@ -9,16 +9,13 @@ import { toast } from 'sonner'
 import { Copy, X } from 'lucide-react'
 import { useLoads } from '@/hooks/useLoads'
 import { useAppStore } from '@/store/useAppStore'
-import { useAuth } from '@/hooks/useAuth'
-import { useDirectory } from '@/hooks/useDirectory'
-import { ShipmentDrawer } from '@/features/shipments/components/ShipmentDrawer'
-import { duplicateShipment, getTmsSettings } from '@/lib/apiClient'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
+import { duplicateShipment } from '@/lib/apiClient'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { getColor, UNASSIGNED_COLOR } from '@/lib/driverColors'
 import { updateStop } from '@/lib/stops'
 import { EventCard } from './EventCard'
 import type { Load, Driver, ViewMode, Stop } from '@/types'
-import type { TmsSettings } from '@/types/tms'
 import { formatTime } from '@/lib/date'
 import { prettyPhone } from '@/lib/dispatch'
 import { useDriverPhones } from '@/hooks/useTruckConfigs'
@@ -88,12 +85,6 @@ export function SchedulerView({
   const navigate = useNavigate()
   // One create page: the same form the Shipments page opens.
   const openNewShipment = useCallback((_prefill?: { driverId: string | null; dateStr: string }) => navigate('/tms/shipments/new'), [navigate])
-  const directory = useDirectory()
-  const { user, isAdmin } = useAuth()
-  // Where a duplicate lands: the copy's own shipment detail, never a load drawer.
-  const [openShipmentId, setOpenShipmentId] = useState<string | null>(null)
-  const [settings, setSettings] = useState<TmsSettings | null>(null)
-  useEffect(() => { getTmsSettings().then(setSettings).catch(() => setSettings(null)) }, [])
 
   const dragModifierRef = useRef<'none' | 'shift' | 'alt'>('none')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -441,7 +432,7 @@ export function SchedulerView({
       })
       toast.success(`Duplicated ${ctxLoad.aljexId}`)
       const copy = result.created[0]
-      if (copy) setOpenShipmentId(copy)
+      if (copy) navigate(shipmentEditorPath(copy))
     } catch (err) {
       toast.error(errorMessage(err))
     }
@@ -568,18 +559,6 @@ export function SchedulerView({
           </button>
         </div>
       )}
-
-      {/* Where a duplicate lands. One record, one detail surface. */}
-      <ShipmentDrawer
-        shipmentId={openShipmentId}
-        onClose={() => setOpenShipmentId(null)}
-        onChanged={() => {}}
-        customers={directory.customers}
-        locations={directory.locations}
-        settings={settings}
-        isAdmin={isAdmin}
-        currentUser={user?.email ?? ''}
-      />
     </div>
   )
 }
