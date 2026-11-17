@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
-import { ChevronLeft, ChevronRight, Plus, X, CheckCircle2, CircleDashed, HelpCircle, SplitSquareHorizontal, Search, AlertCircle, SlidersHorizontal } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, X, CheckCircle2, CircleDashed, HelpCircle, SplitSquareHorizontal, Search, AlertCircle, SlidersHorizontal, Hourglass, PackageX } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { useAppStore } from '@/store/useAppStore'
 import { DriverFilterMenu } from '@/components/DriverFilterMenu'
@@ -37,6 +37,8 @@ const FILTER_CHIPS = [
   { key: 'notReadyToInvoice' as const, label: 'Not Ready to Invoice', Icon: CircleDashed,          activeColor: 'var(--tms-badge-turquoise)', activeBg: 'var(--tms-badge-turquoise-tint)'   },
   { key: 'split'          as const, label: 'Split Assignment',  Icon: SplitSquareHorizontal, activeColor: 'var(--tms-badge-purple)', activeBg: 'var(--tms-badge-purple-tint)' },
   { key: 'unassigned'     as const, label: 'Unassigned',        Icon: HelpCircle,            activeColor: 'var(--tms-badge-orange)', activeBg: 'var(--tms-badge-orange-tint)'  },
+  { key: 'waitingDetention' as const, label: 'Waiting for Detention', Icon: Hourglass,        activeColor: 'var(--tms-badge-orange)', activeBg: 'var(--tms-badge-orange-tint)' },
+  { key: 'waitingTonu'    as const, label: 'Waiting for TONU',  Icon: PackageX,              activeColor: 'var(--tms-badge-purple)', activeBg: 'var(--tms-badge-purple-tint)' },
   { key: 'needsAppt'      as const, label: 'Needs Appt',        Icon: AlertCircle,           activeColor: 'var(--tms-badge-red)', activeBg: 'var(--tms-badge-red-tint)'    },
 ] as const
 

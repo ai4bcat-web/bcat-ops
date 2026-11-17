@@ -49,6 +49,7 @@ import { reqsAsIssues, type BoardReq } from '../boardReqs'
 import { useOwnBoardReqs } from './useOwnBoardReqs'
 import './form.css'
 import { DetentionSection } from '@/features/shipments/components/Detention'
+import { TonuSection } from '@/features/shipments/components/Tonu'
 
 const NEW_PATH = '/tms/shipments'
 
@@ -429,7 +430,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
       <div className="tms-ship-form-scroll" data-locked={heldBy ? 'true' : undefined}>
         {voided ? <TmsAlert tone="red" className="tms-ship-banner">{locked.fields.all}</TmsAlert> : null}
 
-        {bundle ? <div className="tms-ship-banner"><DetentionSection shipment={bundle.shipment} onChanged={() => { void refreshBundle() }} canEdit={!voided} /></div> : null}
+        {bundle ? <div className="tms-ship-banner"><DetentionSection shipment={bundle.shipment} onChanged={() => { void refreshBundle() }} canEdit={!voided} /><TonuSection shipment={bundle.shipment} onChanged={() => { void refreshBundle() }} canEdit={!voided} /></div> : null}
 
         {heldBy ? (
           <TmsAlert tone="orange" className="tms-ship-banner">

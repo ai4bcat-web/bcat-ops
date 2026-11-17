@@ -66,4 +66,15 @@ describe('board chips', () => {
     const rows = [row('a', { salesRepId: null, salesRepCode: 'PERLA LOPEZ' }), row('b', { salesRepId: null }), row('c', { salesRepId: null, salesRepCode: null })]
     expect(flagCounts(rows, NOW).missingSalesRep).toBe(2)
   })
+  it('matches the waiting-for-detention and waiting-for-TONU flags on the stored flag only, each on its own', () => {
+    const stamp = { flaggedAt: '2026-11-16T10:00:00.000Z', flaggedBy: 'a@b.c' }
+    const det = row('d', { detentionFlag: { stopType: 'pickup', ...stamp } })
+    const ton = row('t', { tonuFlag: { amount: 250, ...stamp } })
+    const both = row('b', { detentionFlag: { stopType: 'delivery', ...stamp }, tonuFlag: { ...stamp } })
+    const none = row('n')
+    const only = (flag: BoardFlag) => [det, ton, both, none].filter((r) => matchesFlags(r, new Set([flag]), NOW)).map((r) => r.id)
+    expect(only('detention')).toEqual(['d', 'b'])
+    expect(only('tonu')).toEqual(['t', 'b'])
+    expect(BOARD_FLAG_LABELS.tonu).toBe('TONU')
+  })
 })

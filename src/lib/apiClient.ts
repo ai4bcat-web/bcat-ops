@@ -64,6 +64,7 @@ import { cachedList, invalidateLists } from '@/lib/listCache'
 import { withDefaultChargeCodes } from '@/lib/chargeCodeDefaults'
 import { parseTrackingPrefs, type TrackingPrefsOverride } from '@/lib/trackingPrefs'
 import { parseDetentionFlag, type DetentionFlagInput } from '@/lib/detentionFlag'
+import { parseTonuFlag, type TonuFlagInput } from '@/lib/tonuFlag'
 import { batchByIndex, batchByIndexPairs, batchGet, setDefaultGraphqlRunner } from '@/lib/aliasBatch'
 import { costMonthIds, parseJsonField, toMeta, toMonthRow, type CostManualEntry, type CostMeta, type CostMonthRow } from '@/lib/costToRun'
 import { LOAD_WORKFLOW_STATUSES } from '@/lib/shipmentStatus'
@@ -2407,6 +2408,9 @@ let shipmentsHaveTrackingPrefs = true
 // Detention flag (Ryne 2026-11-13): one JSON field. Own flag, same reason.
 const SHIPMENT_DETENTION_FIELDS = ['detentionFlag']
 let shipmentsHaveDetention = true
+// TONU flag (Ryne 2026-11-16): one JSON field. Own flag, same reason.
+const SHIPMENT_TONU_FIELDS = ['tonuFlag']
+let shipmentsHaveTonu = true
 /** AppSync hands the AWSJSON back as a string, the Lambda bundle as an object: normalise both so consumers see `TrackingPrefsOverride | null`. */
 function withParsedPrefs<T>(result: T): T {
   const fix = (row: unknown) => {
@@ -2415,6 +2419,9 @@ function withParsedPrefs<T>(result: T): T {
     }
     if (row && typeof row === 'object' && 'detentionFlag' in row) {
       row.detentionFlag = parseDetentionFlag(row.detentionFlag)
+    }
+    if (row && typeof row === 'object' && 'tonuFlag' in row) {
+      row.tonuFlag = parseTonuFlag(row.tonuFlag)
     }
   }
   if (Array.isArray(result)) result.forEach(fix)
@@ -2439,6 +2446,7 @@ async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T>
         shipmentsHaveTracker ? SHIPMENT_TRACKER_FIELDS.join(' ') : '',
         shipmentsHaveTrackingPrefs ? SHIPMENT_TRACKING_PREFS_FIELDS.join(' ') : '',
         shipmentsHaveDetention ? SHIPMENT_DETENTION_FIELDS.join(' ') : '',
+        shipmentsHaveTonu ? SHIPMENT_TONU_FIELDS.join(' ') : '',
         shipmentsHaveRevTag ? SHIPMENT_REV_FIELDS.join(' ') : '',
         shipmentsHaveCoverage ? SHIPMENT_COVERAGE_FIELDS.join(' ') : '',
         shipmentsHaveAssignment ? SHIPMENT_ASSIGNMENT_FIELDS.join(' ') : '',
@@ -2459,6 +2467,10 @@ async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T>
       }
       if (shipmentsHaveDetention && fieldNamed(SHIPMENT_DETENTION_FIELDS, err)) {
         shipmentsHaveDetention = false
+        continue
+      }
+      if (shipmentsHaveTonu && fieldNamed(SHIPMENT_TONU_FIELDS, err)) {
+        shipmentsHaveTonu = false
         continue
       }
       if (shipmentsHaveTrackingPrefs && fieldNamed(SHIPMENT_TRACKING_PREFS_FIELDS, err)) {
@@ -9871,6 +9883,14 @@ export async function setDetentionFlag(
   input: { shipmentId: string; flag: DetentionFlagInput | null },
 ): Promise<{ shipment: ShipmentRecord }> {
   const r = await shipmentAction<{ shipment: ShipmentRecord }>('SET_DETENTION_FLAG', input)
+  return { shipment: withParsedPrefs(r.shipment) }
+}
+
+/** Flag a shipment as waiting for a TONU (or clear it with `flag: null`). The Lambda stamps who and when and logs it in Activity. */
+export async function setTonuFlag(
+  input: { shipmentId: string; flag: TonuFlagInput | null },
+): Promise<{ shipment: ShipmentRecord }> {
+  const r = await shipmentAction<{ shipment: ShipmentRecord }>('SET_TONU_FLAG', input)
   return { shipment: withParsedPrefs(r.shipment) }
 }
 

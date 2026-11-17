@@ -2303,6 +2303,34 @@ describe('tracker assignee', () => {
     expect(actions).toContain('CLEAR_DETENTION')
   })
 
+  it('flags and clears waiting-for-TONU: the server stamps who and when, both flags can stand together, and each is logged in Activity', async () => {
+    const a = await createDraft()
+    const other = await createDraft()
+    await call('SET_DETENTION_FLAG', { shipmentId: a.shipmentId, flag: { stopType: 'pickup' } }, TMS_USER)
+    const set = (await call('SET_TONU_FLAG', {
+      shipmentId: a.shipmentId,
+      flag: { note: 'Shipper cancelled', amount: '250', flaggedBy: 'spoof@x.com' },
+    }, TMS_USER)) as { shipment: Row }
+    const stored = set.shipment.tonuFlag as Record<string, unknown>
+    expect(stored).toMatchObject({ note: 'Shipper cancelled', amount: 250 })
+    expect(stored.flaggedBy).not.toBe('spoof@x.com')
+    expect(typeof stored.flaggedAt).toBe('string')
+    // Detention stays put, and the other shipment is untouched.
+    expect(table(TABLES.shipment).get(a.shipmentId)!.detentionFlag).toMatchObject({ stopType: 'pickup' })
+    expect(table(TABLES.shipment).get(other.shipmentId)!.tonuFlag ?? null).toBeNull()
+
+    await expect(call('SET_TONU_FLAG', { shipmentId: a.shipmentId, flag: { amount: -1 } }, TMS_USER)).rejects.toThrow(/amount/)
+    await expect(call('SET_TONU_FLAG', { shipmentId: a.shipmentId }, TMS_USER)).rejects.toThrow(/flag is required/)
+
+    await call('SET_TONU_FLAG', { shipmentId: a.shipmentId, flag: null }, TMS_USER)
+    expect(table(TABLES.shipment).get(a.shipmentId)!.tonuFlag ?? null).toBeNull()
+    expect(table(TABLES.shipment).get(a.shipmentId)!.detentionFlag).toMatchObject({ stopType: 'pickup' })
+
+    const actions = [...table(TABLES.audit).values()].filter((row) => row.entityId === a.shipmentId).map((row) => row.action)
+    expect(actions).toContain('FLAG_TONU')
+    expect(actions).toContain('CLEAR_TONU')
+  })
+
   it('confirms a load\'s tracking mode: the server stamps who and when, later edits keep it, clearing drops it, NONE is allowed', async () => {
     const a = await createDraft()
     const done = (await call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, prefs: { mode: 'NONE', confirmed: true } }, TMS_USER)) as { shipment: Row }

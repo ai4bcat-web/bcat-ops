@@ -19,6 +19,7 @@ export type {
 } from '../lib/trackingAutomation'
 import type { DriverSmsTarget, TrackingMethod, TrackingMode, TrackingPrefsOverride } from '../lib/trackingPrefs'
 import type { DetentionFlag } from '../lib/detentionFlag'
+import type { TonuFlag } from '../lib/tonuFlag'
 export type { DriverSmsTarget, TrackingMethod, TrackingMode, TrackingPrefsOverride } from '../lib/trackingPrefs'
 export type { RateViewAnswer } from '../lib/integrations/rateView'
 // Step AL: the Carrier Sales inbox shapes ride ShipmentMessage.offer and SpotSettings. Type-only cycle.
@@ -1990,6 +1991,8 @@ export interface ShipmentRecord {
   financeReviewApNote?: string | null
   /** Detention flag (Ryne 2026-11-13); null = not flagged. Parse with `parseDetentionFlag`. */
   detentionFlag?: DetentionFlag | null
+  /** TONU flag (Ryne 2026-11-16); null = not flagged. Parse with `parseTonuFlag`. */
+  tonuFlag?: TonuFlag | null
   /** Step AJ. Per-shipment tracking override; absent/null = inherit the customer (`effectiveTrackingPrefs`). */
   trackingPrefs?: TrackingPrefsOverride | null
   createdBy: string
@@ -2251,6 +2254,11 @@ export type BatchShipmentTask =
   | 'SET_STATUS'
   | 'ASSIGN_DRIVER'
   | 'PUSH_TO_LOAD_REVIEW'
+  // Ryne 2026-11-16: flag or clear waiting-for-detention / waiting-for-TONU on every selected shipment.
+  | 'FLAG_DETENTION'
+  | 'CLEAR_DETENTION'
+  | 'FLAG_TONU'
+  | 'CLEAR_TONU'
 
 export interface BatchShipmentTaskRowResult {
   shipmentId: string

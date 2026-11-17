@@ -33,6 +33,8 @@ export const ACTION_SENTENCE: Record<string, string> = {
   SET_TRACKING_PREFS: 'changed the tracking preferences',
   FLAG_DETENTION: 'flagged detention',
   CLEAR_DETENTION: 'cleared the detention flag',
+  FLAG_TONU: 'flagged waiting for TONU',
+  CLEAR_TONU: 'cleared the TONU flag',
   RECALC_CHARGES: 'recalculated the charges',
   PUSH_TO_LOAD_REVIEW: 'pushed the shipment to Load Review',
   LOAD_REVIEW_RELEASED: 'released the shipment from Load Review',

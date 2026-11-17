@@ -209,6 +209,8 @@ export function CalendarPage() {
     if (filters.notReadyToInvoice && l.readyToInvoice) return false
     if (filters.split && l.pickupDriverId === l.deliveryDriverId) return false
     if (filters.unassigned && l.pickupDriverId !== null) return false
+    if (filters.waitingDetention && !l.detentionFlag) return false
+    if (filters.waitingTonu && !l.tonuFlag) return false
     if (filters.needsAppt && l.pickupApptType !== 'tbd' && l.deliveryApptType !== 'tbd') return false
     if (searchQuery.trim() && !loadMatchesQuery(loadHaystack(l), searchQuery)) return false
     return true
