@@ -21,6 +21,8 @@ export const BATCH_TASK_ACTIONS = {
   CLEAR_DETENTION: 'SET_DETENTION_FLAG',
   FLAG_TONU: 'SET_TONU_FLAG',
   CLEAR_TONU: 'SET_TONU_FLAG',
+  // Ryne 2026-11-16: the same people who push into Load Review can send a load back to Active.
+  RETURN_TO_ACTIVE: 'REVIEW_LOAD',
 } as const
 
 /** Statuses after pickup, where a truck held at a stop is held at the delivery. */
@@ -42,6 +44,8 @@ export interface BatchShipmentDeps {
   writeAudit: (entityType: string, entityId: string, action: string, caller: Caller, changes: Row) => Promise<void>
   /** Step AP: the verdict and, when it is clean, the write. `reasons` non-empty = refused, nothing written. */
   pushToReview: (shipmentId: string, caller: Caller) => Promise<{ reasons: string[]; already: boolean }>
+  /** Reverses the push stamp (and holds the auto-push). Throws when the load is already in billing or invoiced. */
+  returnToActive: (shipmentId: string, note: string | null, caller: Caller) => Promise<{ already: boolean }>
 }
 
 export async function batchShipmentTask(deps: BatchShipmentDeps, input: Row, caller: Caller): Promise<BatchShipmentTaskResult> {
@@ -51,7 +55,7 @@ export async function batchShipmentTask(deps: BatchShipmentDeps, input: Row, cal
   const params = input.params == null ? {} : assertRecord(input.params, 'params')
   if (!deps.authorize(BATCH_TASK_ACTIONS[task], caller)) throw new Error(`Forbidden: ${task}`)
   // Step AP: pushes and releases carry the Load Review gate, so a batch is small enough to read.
-  if ((task === 'PUSH_TO_LOAD_REVIEW' || task === 'RELEASE_TO_BILLING') && shipmentIds.length > MAX_REVIEW_BATCH) {
+  if ((task === 'PUSH_TO_LOAD_REVIEW' || task === 'RELEASE_TO_BILLING' || task === 'RETURN_TO_ACTIVE') && shipmentIds.length > MAX_REVIEW_BATCH) {
     throw new Error(batchCapMessage())
   }
   // Releasing to billing is Load Review's act alone: the marker is required, never optional.
@@ -124,6 +128,12 @@ export async function batchShipmentTask(deps: BatchShipmentDeps, input: Row, cal
         case 'CLEAR_TONU':
           await deps.setTonuFlag({ shipmentId, flag: null }, caller)
           break
+        case 'RETURN_TO_ACTIVE': {
+          const reason = typeof params.note === 'string' && params.note.trim() ? params.note.trim().slice(0, 500) : null
+          const returned = await deps.returnToActive(shipmentId, reason, caller)
+          note = returned.already ? 'Was not in Load Review' : null
+          break
+        }
         case 'PUSH_TO_LOAD_REVIEW': {
           const pushed = await deps.pushToReview(shipmentId, caller)
           if (pushed.reasons.length > 0) {

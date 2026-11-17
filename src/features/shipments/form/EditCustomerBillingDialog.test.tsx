@@ -40,4 +40,25 @@ describe('EditCustomerBillingDialog (the What\'s missing customer items)', () =>
     await screen.findByText('This customer was changed by someone else')
     expect(onClose).not.toHaveBeenCalled()
   })
+
+  it('saves a typed MC as digits only, and says where the change applies', async () => {
+    const onClose = vi.fn()
+    render(<EditCustomerBillingDialog customer={{ ...customer, mcNumber: null } as CustomerRecord} onClose={onClose} onSaved={vi.fn()} context="3 loads are in Ready to Invoice for this customer." source="AR_READY_TO_INVOICE" reason="Fixed from Ready to Invoice" />)
+    expect(screen.getByText('3 loads are in Ready to Invoice for this customer.')).toBeTruthy()
+    fireEvent.change(screen.getByTestId('edit-customer-mc'), { target: { value: 'MC 654321' } })
+    fireEvent.click(screen.getByTestId('edit-customer-save'))
+    await waitFor(() => expect(h.patchCustomer).toHaveBeenCalledTimes(1))
+    const patch = (h.patchCustomer.mock.calls[0] as unknown as [string, Record<string, unknown>])[1]
+    expect(patch).toMatchObject({ mcNumber: '654321', changeSource: 'AR_READY_TO_INVOICE', changeReason: 'Fixed from Ready to Invoice' })
+  })
+
+  it('refuses an MC with letters and warns about an odd length', async () => {
+    render(<EditCustomerBillingDialog customer={customer} onClose={vi.fn()} onSaved={vi.fn()} />)
+    fireEvent.change(screen.getByTestId('edit-customer-mc'), { target: { value: 'ABC12' } })
+    fireEvent.click(screen.getByTestId('edit-customer-save'))
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    expect(h.patchCustomer).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByTestId('edit-customer-mc'), { target: { value: '12' } })
+    expect(screen.getByText(/does not look like an MC number/)).toBeTruthy()
+  })
 })

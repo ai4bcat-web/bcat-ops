@@ -1,4 +1,5 @@
 import { ReviewBatchEdit } from './ReviewBatchEdit'
+import { ReturnToActiveDialog } from './ReturnToActiveDialog'
 import { PodPreviewButton } from './PodPreviewButton'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -73,6 +74,7 @@ export function LoadReviewPage() {
   const canOpen = hasPageAccess('loads') || hasPageAccess('tms')
   const canRelease = useBillingGrant('loadReview')
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [returnOpen, setReturnOpen] = useState(false)
   const [confirm, setConfirm] = useState(false)
   const [busy, setBusy] = useState(false)
   const [attempts, setAttempts] = useState<Record<string, string>>({})
@@ -364,11 +366,13 @@ export function LoadReviewPage() {
           <ReviewBatchEdit ids={editChosen} email={email} onDone={() => { setSelected(new Set()); void refresh() }} />
           <span className="tms-dense-spacer" />
           <TmsButton size="sm" onClick={() => setSelected(new Set())}>Deselect all</TmsButton>
+          <TmsButton size="sm" data-testid="review-return-active" title="Send the ticked loads back to the Active shipments board" onClick={() => setReturnOpen(true)}>Move {editChosen.length} back to Active</TmsButton>
           <TmsButton variant="primary" disabled={!canRelease || chosen.length === 0} title={!canRelease ? LOAD_REVIEW_GRANT_MESSAGE : chosen.length === 0 ? 'Only shipments that look ready can move to billing' : chosen.length > MAX_REVIEW_BATCH ? `Sent in batches of ${MAX_REVIEW_BATCH}` : undefined} onClick={() => setConfirm(true)}>Move {chosen.length} to billing</TmsButton>
           {!canRelease && <p role="note" className="tms-muted">{LOAD_REVIEW_GRANT_MESSAGE}</p>}
         </div>
       )}
     </div>
+    <ReturnToActiveDialog open={returnOpen} onOpenChange={setReturnOpen} ids={editChosen} label={editChosen.length === 1 ? (filtered.find(({ row }) => row.id === editChosen[0])?.row.number ?? '1 load') : `${editChosen.length} loads`} onDone={() => { setSelected(new Set()); void refresh() }} />
     <TmsDialog open={confirm} onOpenChange={setConfirm} title={`Move ${chosen.length} to billing`} description={`These ${chosen.length} shipments go to accounting. The server re-checks each one.`} footer={<TmsButton disabled={busy || !chosen.length} variant="primary" onClick={() => void releaseBatch()}>Confirm move to billing</TmsButton>} />
     {openRow && <LoadReviewDrawer key={`${openRow.id}:${params.get('fix') ?? ''}`} row={openRow} focus={params.get('fix')} onClose={() => update({ shipment: null, fix: null })} onRefresh={refresh} onFailure={(message) => setAttempts((old) => ({ ...old, [openRow.id]: message }))} onMoved={() => { setNotice(`${openRow.number}: Moved to billing`); const index = filtered.findIndex(({ row }) => row.id === openRow.id); update({ shipment: filtered[index + 1]?.row.id ?? null }) }} />}
   </div>

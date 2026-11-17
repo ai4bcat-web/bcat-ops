@@ -18,6 +18,7 @@ const openInvoicesMock = vi.hoisted(() => vi.fn())
 const customerArMock = vi.hoisted(() => vi.fn())
 const invoiceMock = vi.hoisted(() => vi.fn())
 const authGroups = vi.hoisted(() => ({ current: [] as string[] }))
+const directoryCustomers = vi.hoisted(() => ({ current: [] as Array<Record<string, unknown>> }))
 vi.mock('@/hooks/useAuth', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/hooks/useAuth')>()),
   useAuth: () => ({ isAdmin: false, isOwner: false, hasPageAccess: () => true }),
@@ -28,7 +29,7 @@ vi.mock('@/hooks/useArWorklist', () => ({ useArWorklist: worklistMock }))
 vi.mock('@/hooks/useOpenInvoices', () => ({ useOpenInvoices: openInvoicesMock }))
 vi.mock('@/hooks/useCustomerAr', () => ({ useCustomerAr: customerArMock }))
 vi.mock('@/hooks/useInvoice', () => ({ useInvoice: invoiceMock }))
-vi.mock('@/hooks/useDirectory', () => ({ useDirectory: () => ({ customers: [], locations: [] }) }))
+vi.mock('@/hooks/useDirectory', () => ({ useDirectory: () => ({ customers: directoryCustomers.current, locations: [], refresh: vi.fn() }) }))
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({
   useOwnershipDivisions: () => ({ divisions: [{ code: 'BROKERAGE', name: 'BCAT Logistics' }], loading: false, error: null, refresh: vi.fn() }),
 }))
@@ -584,5 +585,34 @@ describe('Ready to invoice: batch Factor', () => {
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText(/Missing document: RATE_CON/)).toBeTruthy()
     factorReady.current = {}
+  })
+
+  it('Ready to Invoice shows each customer\'s payment method and MC, and edits them in place (Ryne 2026-11-16)', async () => {
+    authGroups.current = ['page-invoicing']
+    directoryCustomers.current = [{ id: 'c1', name: 'Acme Foods', billingMethod: null, mcNumber: null, apEmail: 'ap@acme.test', paymentTermsDays: 30, updatedAt: '2026-11-16T10:00:00.000Z' }]
+    await setup({ UNBILLED: [worklistRow()] })
+    await settle()
+    expect(screen.getByTestId('ar-edit-billing').textContent).toBe('Set')
+    expect(screen.getByTestId('ar-edit-mc').textContent).toBe('Set')
+    fireEvent.click(screen.getByTestId('ar-edit-mc'))
+    const dialog = await screen.findByTestId('edit-customer-dialog')
+    expect(within(dialog.closest('[role="dialog"]') as HTMLElement).getByText(/changes Acme Foods for all of its loads/)).toBeTruthy()
+    expect(within(dialog.closest('[role="dialog"]') as HTMLElement).getByText(/Setting Factor does not send anything to OTR/)).toBeTruthy()
+    directoryCustomers.current = []
+    authGroups.current = []
+  })
+
+  it('the Why? dialog offers the customer editor when the blocker is the customer\'s MC', async () => {
+    authGroups.current = ['page-invoicing']
+    directoryCustomers.current = [{ id: 'c1', name: 'Acme Foods', billingMethod: 'FACTOR', mcNumber: null, apEmail: 'ap@acme.test', updatedAt: '2026-11-16T10:00:00.000Z' }]
+    factorReady.current = { o1: { orderId: 'o1', factorBilled: true, ready: false, missing: ['Broker MC'] } }
+    await setup({ UNBILLED: [worklistRow()] })
+    await settle()
+    fireEvent.click(screen.getByTestId('ar-why'))
+    fireEvent.click(await screen.findByTestId('ar-why-edit-customer'))
+    expect(await screen.findByTestId('edit-customer-dialog')).toBeTruthy()
+    factorReady.current = {}
+    directoryCustomers.current = []
+    authGroups.current = []
   })
 })
