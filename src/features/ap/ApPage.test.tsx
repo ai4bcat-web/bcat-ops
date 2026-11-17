@@ -59,7 +59,7 @@ vi.mock('@/lib/apiClient', () => ({
 // The dialogs fetch their own context and have their own tests; here they would only drag
 // the finance Lambda into a test about the board.
 vi.mock('./components/RecordBillDialog', () => ({ RecordBillDialog: () => null }))
-vi.mock('./components/ApproveBillDialog', () => ({ ApproveBillDialog: () => null }))
+vi.mock('./components/ApproveBillDialog', () => ({ ApproveBillDialog: ({ bill }: { bill: { id: string } }) => <p>approve dialog for {bill.id}</p> }))
 vi.mock('./components/UpdateCarrierChargesDialog', () => ({ UpdateCarrierChargesDialog: () => null }))
 vi.mock('./components/PayCarrierDialog', () => ({ PayCarrierDialog: () => null }))
 vi.mock('./components/ApCreditDialog', () => ({ ApCreditDialog: () => null }))
@@ -214,7 +214,7 @@ beforeEach(() => {
 describe('the AP board', () => {
   it('offers every view of the money, and each one renders', async () => {
     await setup({ rowsByTab: { AWAITING_INVOICE: [worklistRow()] } })
-    for (const label of ['Expected', 'Aging(?! by carrier)', 'Selected', 'Paid', 'Payments & credits', 'Aging by carrier', 'AP inbox']) {
+    for (const label of ['Expected', 'Aging(?! by carrier)', 'Selected', 'Cash requirements', 'Paid', 'Payments & credits', 'Aging by carrier', 'AP inbox']) {
       const tab = screen.getByRole('tab', { name: new RegExp(`^${label}`) })
       fireEvent.click(tab)
       expect(tab.getAttribute('aria-selected')).toBe('true')
@@ -226,19 +226,19 @@ describe('the AP board', () => {
   })
 
   /**
-   * A bill that does not match its own lines cannot be approved at all. Showing the
-   * variance beside the Approve button is how somebody knows to fix the lines instead of
-   * opening the dialog to be refused.
+   * Aging is the short list Ryne asked for (Pro #, carrier, pay to, dates, amount and two links). A bill still in review
+   * says so on its amount, and "Move to Selected" does not skip approval: it opens the approval dialog first.
    */
-  it('shows the variance on a bill whose carrier invoice disagrees with the lines', async () => {
+  it('marks a bill still in review on the Aging tab, and Move to Selected goes through approval', async () => {
     await setup({
       rowsByTab: { IN_REVIEW: [worklistRow()] },
-      bills: [bill({ status: 'IN_REVIEW', billedCents: 175_000, varianceCents: 25_000 })],
+      bills: [bill({ status: 'IN_REVIEW', billedCents: 175_000, varianceCents: 25_000, billNumber: 'IR-9' })],
     })
     fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
 
-    expect(screen.getByText('$250.00 variance')).toBeTruthy()
-    expect(screen.getByText(/fix the lines or void the bill/)).toBeTruthy()
+    expect(screen.getByText('In review')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Move bill IR-9 to Selected' }))
+    expect(screen.getByText(/approve dialog for/)).toBeTruthy()
   })
 
   /**
@@ -253,20 +253,17 @@ describe('the AP board', () => {
     fireEvent.click(screen.getByRole('tab', { name: /^Expected/ }))
 
     expect(screen.getAllByText('Needs invoice date').length).toBeGreaterThan(0)
-    // The invoice date is pending; the due date shows as an estimate from the delivery date and terms.
-    expect(screen.getAllByText('Pending').length).toBe(1)
-    expect(screen.getByText(/Set the invoice date and due date from the carrier/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /^Add invoice date for bill/ }))
     expect(screen.getByText(/dates dialog for/)).toBeTruthy()
   })
 
   /** The pay run is worked oldest first, so how late a bill already is has to be on it. */
-  it('ages an approved bill on the row that pays it', async () => {
+  it('offers Return to Expected and Move to Selected on an approved bill', async () => {
     await setup()
     fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
 
-    expect(screen.getByText('10 days late')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Pay bill BL-7788' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Move bill BL-7788 to Selected' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Return bill BL-7788 to Expected' })).toBeTruthy()
   })
 
   /**
@@ -302,6 +299,37 @@ describe('the AP board', () => {
     expect(screen.getByText('Due next 7 days')).toBeTruthy()
   })
 
+  /** Ryne 2026-11-16: the Payable section has no Needs review tab; its flags ride on the bill rows instead. */
+  it('has no Needs review tab, and a Cash requirements tab whose lines add up to the open AP total', async () => {
+    const a = bill({ id: 'cb:lc1:1', billNumber: 'BL-1', dueAt: daysAgo(10), balanceCents: 150_000 })
+    const b = bill({
+      id: 'cb:lc2:1', loadCarrierId: 'lc2', carrierId: 'car2', carrierName: 'Red Line Freight',
+      billNumber: 'RL-1', dueAt: '2999-01-01', balanceCents: 80_000, grossCents: 80_000, netCents: 80_000, billedCents: 80_000,
+    })
+    await setup({ bills: [a, b] })
+    expect(screen.queryByRole('tab', { name: /^Needs review/ })).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: /^Cash requirements/ }))
+    const table = within(screen.getByRole('table', { name: 'Cash requirements by Friday' }))
+    // The 10-days-late bill is on the Past due line, the far-future one under Later, and the total is the open AP.
+    expect(table.getByText(/^Past due/).closest('tr')?.textContent).toContain('$1,500.00')
+    expect(table.getByText(/^Later/).closest('tr')?.textContent).toContain('$800.00')
+    expect(table.getByText('Total open AP').closest('tr')?.textContent).toContain('$2,300.00')
+    expect(screen.getByText(/How this is counted/)).toBeTruthy()
+  })
+
+  it('draws Aging by carrier like the receivables aging: a row per carrier whose twisty opens its bills', async () => {
+    const a = bill({ id: 'cb:lc1:1', billNumber: 'BL-1', dueAt: daysAgo(10), balanceCents: 150_000 })
+    await setup({ bills: [a] })
+    fireEvent.click(screen.getByRole('tab', { name: /^Aging by carrier/ }))
+    const row = screen.getByTestId('ap-aging-carrier-row')
+    expect(row.textContent).toContain('Blue Line Trucking')
+    expect(row.textContent).toContain('$1,500.00')
+    expect(screen.queryByTestId('ap-aging-bill-row')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Blue Line Trucking' }))
+    expect(screen.getAllByTestId('ap-aging-bill-row')).toHaveLength(1)
+    expect(screen.getByTestId('ap-aging-total-row').textContent).toContain('$1,500.00')
+  })
+
   it('pays, ages and shows each carrier bill of one load on its own row', async () => {
     const a = bill({ id: 'cb:lc1:1', billNumber: 'BL-1', dueAt: daysAgo(10), balanceCents: 150_000 })
     const b = bill({
@@ -310,16 +338,16 @@ describe('the AP board', () => {
     })
     await setup({ bills: [a, b] })
     fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
-    expect(screen.getByRole('button', { name: 'Pay bill BL-1' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Pay bill RL-1' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Move bill BL-1 to Selected' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Move bill RL-1 to Selected' })).toBeTruthy()
     expect(screen.getAllByText('Shared PRO · 2 carriers')).toHaveLength(2)
 
     // Aging report: two carriers, two buckets, the shipment is counted once per bill and not twice.
     fireEvent.click(screen.getByRole('tab', { name: /^Aging by carrier/ }))
     const strip = within(screen.getByLabelText('AP totals'))
     expect(within(strip.getByText('Open AP').closest('.tms-kpi-card') as HTMLElement).getByText('$2,300.00')).toBeTruthy()
-    expect(screen.getByText('Blue Line Trucking')).toBeTruthy()
-    expect(screen.getByText('Red Line Freight')).toBeTruthy()
+    expect(screen.getAllByText('Blue Line Trucking').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Red Line Freight').length).toBeGreaterThan(0)
   })
 
   it('filters by carrier from the URL and shows what that carrier is owed by due date', async () => {
@@ -332,8 +360,8 @@ describe('the AP board', () => {
     const owed = within(screen.getByLabelText('Owed by Red Line Freight'))
     expect(owed.getByText('Past due').closest('.tms-list-row')?.querySelector('.tms-list-row-value')?.textContent).toBe('$800.00')
     fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
-    expect(screen.getByRole('button', { name: 'Pay bill RL-1' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Pay bill BL-1' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Move bill RL-1 to Selected' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Move bill BL-1 to Selected' })).toBeNull()
   })
 
   describe('the dense grid', () => {
@@ -346,7 +374,7 @@ describe('the AP board', () => {
       return [a, b]
     }
     const order = () => within(screen.getByRole('table', { name: 'AP aging' })).getAllByRole('row')
-      .map((r) => r.textContent ?? '').filter((t) => /BL-1|RL-1/.test(t)).map((t) => (t.includes('BL-1') ? 'BL-1' : 'RL-1'))
+      .map((r) => r.textContent ?? '').filter((t) => /Blue Line|Red Line/.test(t)).map((t) => (t.includes('Blue Line') ? 'BL-1' : 'RL-1'))
 
     it('draws every view as the shared dense table with the Columns, density and summary controls', async () => {
       await setup({ bills: two() })
@@ -362,7 +390,7 @@ describe('the AP board', () => {
     it('sorts a money column by its cents when the header is clicked', async () => {
       await setup({ bills: two() })
       fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
-      const header = within(screen.getByRole('table', { name: 'AP aging' })).getByRole('columnheader', { name: /BALANCE/ })
+      const header = within(screen.getByRole('table', { name: 'AP aging' })).getByRole('columnheader', { name: /AMOUNT/ })
       fireEvent.click(within(header).getAllByRole('button')[0])
       expect(order()).toEqual(['RL-1', 'BL-1'])
       fireEvent.click(within(header).getAllByRole('button')[0])
@@ -398,8 +426,8 @@ describe('the AP board', () => {
     })
 
     it('shows a payment info link, the pay-to and the remittance e-mail on every row', async () => {
-      await setup({ bills: [bill({ billNumber: 'BL-1', payeeKind: 'FACTOR', remitTo: { name: 'Blue Line', factorName: 'Triumph', payeeEmail: 'ap@triumph.test' } })] })
-      fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
+      await setup({ bills: [bill({ billNumber: 'BL-1', selectedForPayment: true, payeeKind: 'FACTOR', remitTo: { name: 'Blue Line', factorName: 'Triumph', payeeEmail: 'ap@triumph.test' } })] })
+      fireEvent.click(screen.getByRole('tab', { name: /^Selected/ }))
       expect(screen.getByText('Factor — Triumph')).toBeTruthy()
       expect(screen.getByText('ap@triumph.test')).toBeTruthy()
       expect(screen.getByRole('button', { name: 'Payment info for bill BL-1' })).toBeTruthy()

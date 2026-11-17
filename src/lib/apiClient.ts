@@ -8344,8 +8344,15 @@ export async function setBillDates(input: {
   billDate: string
   dueAt: string
   billNumber?: string | null
+  /** Set quick pay in the same write: 2 or 10 days, or null for standard terms. Left out, quick pay is untouched. */
+  quickPayDays?: 2 | 10 | number | null
 }): Promise<{ bill: CarrierBillRecord }> {
   return financeAction<{ bill: CarrierBillRecord }>('SET_BILL_DATES', input)
+}
+
+/** Send a bill back to Expected: dates and quick pay cleared, an approved bill taken back to review. Refused once money has moved or the bill is on a pay run. */
+export async function returnBillToExpected(input: { billId: string; reason?: string }): Promise<{ bill: CarrierBillRecord }> {
+  return financeAction<{ bill: CarrierBillRecord }>('RETURN_BILL_TO_EXPECTED', input)
 }
 
 /** Put a bill on AP quick pay (2 days at 6%, 10 days at 3%), or back on standard terms with `quickPayDays: null`. */
