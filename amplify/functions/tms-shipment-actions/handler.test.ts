@@ -4729,6 +4729,125 @@ describe('documents', () => {
     expect(options).toEqual({ expiresIn: 300, signableHeaders: new Set(['content-type']) })
   })
 
+  // ── A POD delivers an own-fleet load (Ryne 2026-11-16) ─────────────────────
+  describe('POD delivers owner operator, local and box-truck loads', () => {
+    /** A submitted load on the road with `fleetGroup`'s driver on it (undefined: an outside carrier, no driver). */
+    async function onTheRoad(fleetGroup?: string): Promise<DocIds> {
+      const ids = await createDraft()
+      await saveForm(ids.shipmentId)
+      await call('SUBMIT_ORDER', {
+        shipmentId: ids.shipmentId,
+        expectedUpdatedAt: table(TABLES.shipment).get(ids.shipmentId)!.updatedAt,
+        order: { equipmentType: "53' VAN" },
+        stops: [PICKUP, DELIVERY],
+      })
+      for (const status of ['BOOKED', 'DISPATCHED']) await call('SET_LOAD_STATUS', { loadId: ids.loadId, status })
+      if (fleetGroup) {
+        seedDriver('drv-fleet', { fleetGroup })
+        table(TABLES.load).set(ids.loadId, { ...table(TABLES.load).get(ids.loadId)!, pickupDriverId: 'drv-fleet', deliveryDriverId: 'drv-fleet' })
+      }
+      return ids
+    }
+    async function filePod(ids: DocIds): Promise<void> {
+      const prepared = await prepare(ids.shipmentId)
+      putS3Object(prepared.s3Key, { ContentLength: 1024, ContentType: 'application/pdf' })
+      await commit(ids, prepared)
+    }
+    const loadOf = (ids: DocIds): Row => table(TABLES.load).get(ids.loadId)!
+    const shipmentOf = (ids: DocIds): Row => table(TABLES.shipment).get(ids.shipmentId)!
+
+    it.each([
+      ['OWNER_OPERATOR', 'owner operator'],
+      ['LOCAL', 'local driver'],
+      ['BOX_TRUCK', 'box truck'],
+    ])('a POD on a %s load moves it all the way to Delivered, silently', async (fleetGroup, label) => {
+      const ids = await onTheRoad(fleetGroup)
+      await filePod(ids)
+      expect(loadOf(ids).status).toBe('DELIVERED')
+      expect(shipmentOf(ids).status).toBe('DELIVERED')
+      const stops = JSON.parse(String(loadOf(ids).stops)) as Row[]
+      for (const stop of stops) {
+        expect(stop.arrivedAt).toBeTruthy()
+        expect(stop.departedAt).toBeTruthy()
+      }
+      // Silent: the notifier skips a BACKFILL status, so no milestone e-mail and no carrier POD request.
+      expect(loadOf(ids).statusSource).toBe('BACKFILL')
+      const audit = [...table(TABLES.audit).values()].find((row) => row.action === 'POD_AUTO_DELIVERED')
+      expect(String(audit?.changes)).toContain(`Delivered automatically: POD received (${label})`)
+    })
+
+    it('leaves a brokerage load on an outside carrier as it is', async () => {
+      const ids = await onTheRoad()
+      await filePod(ids)
+      expect(loadOf(ids).status).toBe('DISPATCHED')
+      expect(shipmentOf(ids).status).not.toBe('DELIVERED')
+    })
+
+    it('never overwrites a time that is already there', async () => {
+      const ids = await onTheRoad('LOCAL')
+      const stops = JSON.parse(String(loadOf(ids).stops)) as Row[]
+      stops[0] = { ...stops[0], arrivedAt: '2026-03-02T13:41:00.000Z' }
+      table(TABLES.load).set(ids.loadId, { ...loadOf(ids), stops: JSON.stringify(stops) })
+      await filePod(ids)
+      const after = JSON.parse(String(loadOf(ids).stops)) as Row[]
+      expect(after[0].arrivedAt).toBe('2026-03-02T13:41:00.000Z')
+      expect(loadOf(ids).status).toBe('DELIVERED')
+    })
+
+    it('a relay shipment completes only through its final leg', async () => {
+      const ids = await onTheRoad('LOCAL')
+      const first = loadOf(ids)
+      table(TABLES.load).set(ids.loadId, { ...first, leg: 1 })
+      table(TABLES.load).set('lod-leg2', { ...first, id: 'lod-leg2', leg: 2, loadNumber: `${first.loadNumber}-2`, stops: first.stops })
+      table(TABLES.shipment).set(ids.shipmentId, { ...shipmentOf(ids), loadIds: [ids.loadId, 'lod-leg2'] })
+      await filePod(ids)
+      expect(table(TABLES.load).get('lod-leg2')!.status).toBe('DELIVERED')
+      expect(loadOf(ids).status).toBe('DISPATCHED')
+      const earlier = JSON.parse(String(loadOf(ids).stops)) as Row[]
+      expect(earlier.every((st) => !st.arrivedAt && !st.departedAt)).toBe(true)
+    })
+
+    it('the carrier portal and the sweep use the same rule', async () => {
+      const ids = await onTheRoad('LOCAL')
+      await handler({ arguments: { action: 'DELIVER_ON_POD', input: JSON.stringify({ shipmentId: ids.shipmentId, podAt: '2026-03-03T18:00:00.000Z' }) }, systemCaller: 'tracking-api' } as never)
+      expect(loadOf(ids).status).toBe('DELIVERED')
+      // An ordinary dispatcher may not run the sweep.
+      await expect(call('SWEEP_POD_DELIVERIES', {})).rejects.toThrow(/owner or ADMIN/)
+    })
+
+    it('the sweep delivers a load whose stops are all stamped but never moved, after a dry run', async () => {
+      const ids = await onTheRoad('LOCAL')
+      const stops = (JSON.parse(String(loadOf(ids).stops)) as Row[]).map((st, i) => ({ ...st, arrivedAt: `2026-03-0${2 + i}T14:00:00.000Z`, departedAt: `2026-03-0${2 + i}T15:00:00.000Z` }))
+      table(TABLES.load).set(ids.loadId, { ...loadOf(ids), status: 'SOURCING', stops: JSON.stringify(stops) })
+      table(TABLES.shipment).set(ids.shipmentId, { ...shipmentOf(ids), status: 'OPEN' })
+      seedPortalUpload(ids, { id: 'sdoc-pod', type: 'POD', reviewStatus: undefined })
+      const admin = ADMIN
+      const dry = (await call('SWEEP_POD_DELIVERIES', { shipmentIds: [ids.shipmentId] }, admin)) as { dryRun: boolean; delivered: Row[] }
+      expect(dry.dryRun).toBe(true)
+      expect(dry.delivered).toHaveLength(1)
+      expect(loadOf(ids).status).toBe('SOURCING')
+      await call('SWEEP_POD_DELIVERIES', { shipmentIds: [ids.shipmentId], dryRun: false }, admin)
+      expect(loadOf(ids).status).toBe('DELIVERED')
+      expect(shipmentOf(ids).status).toBe('DELIVERED')
+    })
+
+    it('submitting an order never takes a delivered load back to Open', async () => {
+      const ids = await onTheRoad('LOCAL')
+      await filePod(ids)
+      expect(shipmentOf(ids).status).toBe('DELIVERED')
+      // The 20010 case: the order was never submitted (still a draft) while the truck ran and delivered.
+      table(TABLES.shipment).set(ids.shipmentId, { ...shipmentOf(ids), status: 'DRAFT' })
+      await call('SUBMIT_ORDER', {
+        shipmentId: ids.shipmentId,
+        expectedUpdatedAt: shipmentOf(ids).updatedAt,
+        order: { equipmentType: "53' VAN" },
+        stops: JSON.parse(String(loadOf(ids).stops)),
+      })
+      expect(loadOf(ids).status).toBe('DELIVERED')
+      expect(shipmentOf(ids).status).toBe('DELIVERED')
+    })
+  })
+
   it('refuses a key that belongs to a different shipment', async () => {
     const ids = await delivered()
     const prepared = await prepare(ids.shipmentId)

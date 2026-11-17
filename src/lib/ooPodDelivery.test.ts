@@ -1,19 +1,31 @@
 import { describe, expect, it } from 'vitest'
-import { isOwnerOperatorLoad, ooPodStopOps } from './ooPodDelivery'
+import { isPodDeliveredLoad, podDeliveryGroup, ooPodStopOps } from './ooPodDelivery'
 import { loadStatusFromStopTimes, shipmentStatusFromLoads } from './shipmentStatus'
 
 const POD = '2026-11-12T16:30:00.000Z'
 
-describe('isOwnerOperatorLoad', () => {
-  it('reads the revenue subdivision or the driver fleet', () => {
-    expect(isOwnerOperatorLoad({ revSubdivision: 'OWNER_OPERATOR' })).toBe(true)
-    expect(isOwnerOperatorLoad({ driver: { fleetGroup: 'OWNER_OPERATOR' } })).toBe(true)
-    expect(isOwnerOperatorLoad({ driver: { fleetGroup: 'AMAZON' } })).toBe(true)
+describe('isPodDeliveredLoad', () => {
+  it('covers owner operators by subdivision or fleet', () => {
+    expect(isPodDeliveredLoad({ revSubdivision: 'OWNER_OPERATOR' })).toBe(true)
+    expect(isPodDeliveredLoad({ driver: { fleetGroup: 'OWNER_OPERATOR' } })).toBe(true)
+    expect(isPodDeliveredLoad({ driver: { fleetGroup: 'AMAZON' } })).toBe(true)
   })
-  it('leaves Ivan local and box truck loads alone', () => {
-    expect(isOwnerOperatorLoad({ revSubdivision: 'LOCAL', driver: { fleetGroup: 'LOCAL' } })).toBe(false)
-    expect(isOwnerOperatorLoad({ revSubdivision: 'BOX_TRUCK' })).toBe(false)
-    expect(isOwnerOperatorLoad({})).toBe(false)
+  it('covers Ivan local drivers and box trucks', () => {
+    expect(isPodDeliveredLoad({ revSubdivision: 'LOCAL', driver: { fleetGroup: 'LOCAL' } })).toBe(true)
+    expect(isPodDeliveredLoad({ driver: { fleetGroup: 'LOCAL', driverType: null } })).toBe(true)
+    expect(isPodDeliveredLoad({ revSubdivision: 'BOX_TRUCK' })).toBe(true)
+    expect(isPodDeliveredLoad({ driver: { fleetGroup: 'BOX_TRUCK', driverType: 'COMPANY' } })).toBe(true)
+    expect(isPodDeliveredLoad({ driver: { driverType: 'COMPANY' } })).toBe(true)
+  })
+  it('leaves outside-carrier and unknown loads alone', () => {
+    expect(isPodDeliveredLoad({})).toBe(false)
+    expect(isPodDeliveredLoad({ revSubdivision: 'BROKERAGE' })).toBe(false)
+    expect(isPodDeliveredLoad({ driver: {} })).toBe(false)
+  })
+  it('names the group for the audit note', () => {
+    expect(podDeliveryGroup({ driver: { fleetGroup: 'OWNER_OPERATOR' } })).toBe('owner operator')
+    expect(podDeliveryGroup({ driver: { fleetGroup: 'BOX_TRUCK' } })).toBe('box truck')
+    expect(podDeliveryGroup({ driver: { fleetGroup: 'LOCAL' } })).toBe('local driver')
   })
 })
 

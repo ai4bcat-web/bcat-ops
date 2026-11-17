@@ -407,6 +407,8 @@ async function notifyRecord(record: StreamRecord, deps: NotifierDeps): Promise<N
   const status = text(load.status)
   // Every other edit a load gets — stop times, money, notes — is not news.
   if (!status || status === text(prev.status)) return null
+  // A silent status (a POD that delivered an own-fleet load by itself, a backfill) is stamped BACKFILL: nobody is e-mailed for it.
+  if (text(load.statusSource) === 'BACKFILL') return null
   const milestone = MILESTONE_BY_LOAD_STATUS[status as LoadWorkflowStatus]
   if (!milestone) return null
 

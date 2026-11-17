@@ -79,6 +79,8 @@ export const ACTION_SENTENCE: Record<string, string> = {
   COMMIT_DOCUMENT: 'uploaded a document',
   INGEST_ATTACHMENT: 'filed an e-mail attachment',
   ATTACH_DRIVER_DOC: 'attached a driver document',
+  POD_AUTO_DELIVERED: 'delivered the load automatically: POD received',
+  SWEEP_POD_DELIVERIES: 'delivered loads that already had a POD',
   SAVE_GENERATED_DOCUMENT: 'generated a document',
   EMAIL_BOL: 'e-mailed the bill of lading',
   SEND_ADDRESS_DETAILS: 'sent the address details to the dispatcher',
