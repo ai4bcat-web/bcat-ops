@@ -290,6 +290,17 @@ describe('edit pipelines', () => {
       expect(deliveries.length).toBeGreaterThan(0)
       expect(api.setStopDrivers).toHaveBeenCalledExactlyOnceWith({ loadId: 'ld-1', assignments: deliveries.map((st) => ({ stopId: st.id, driverId: second.id })) })
       expect(api.assignAsset.mock.invocationCallOrder[0]).toBeLessThan(api.setStopDrivers.mock.invocationCallOrder[0])
+      // The form picked both drivers on purpose, so an existing relay is replaced without the server's relay confirmation.
+      expect(api.assignAsset.mock.calls[0][0]).toMatchObject({ flattenSplit: true })
+    })
+
+    it('with no separate delivery driver the assign leaves the relay guard on', async () => {
+      const was = filledValues(); was.carrier.isOwnFleet = true
+      const b = storedBundle(was)
+      const v = filledValues(); v.carrier.isOwnFleet = true; v.carrier.driver1.name = pickedDriver.name; v.carrier.deliveryDriverId = ''
+      api.assignAsset.mockResolvedValue(withStopDrivers(b, pickedDriver.id, pickedDriver.id))
+      await runEditSave(v, ctx2, b)
+      expect(api.assignAsset.mock.calls[0][0].flattenSplit).toBeUndefined()
     })
 
     it('a saved load with different pickup and delivery drivers opens with the delivery driver filled; the same driver on both leaves it empty', () => {
