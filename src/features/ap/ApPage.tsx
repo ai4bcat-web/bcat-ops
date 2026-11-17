@@ -45,7 +45,7 @@ import {
   AP_PAYMENT_KIND_LABEL, AP_PAYMENT_METHOD_LABEL, AP_PAYEE_KIND_LABEL, AP_TABS, BILL_STATUS_LABEL,
   EMPTY_TO_BE_PAID_FILTERS, applyToBePaidFilters, avgDaysToPayBills, awaitingInvoiceTotals, billCarrierOptions,
   billGates, type BillGates, billsAging, billsExpected, billsSelected, canSelectForPayment, invoiceAgeBuckets, isOwnFleet, paidBills,
-  payToLabel, paymentInfoFor, payeeLabel, quickPayLabel, remitEmailOf, selectionBalanceCents,
+  paymentInfoFor, payeeLabel, quickPayLabel, remitEmailOf, selectionBalanceCents,
   selectionCarrierId, sharedProLabel, sharedProIndex, type ApTabKey, type SharedProIndex, type ToBePaidFilters,
 } from './apViews'
 import { ApCreditDialog } from './components/ApCreditDialog'
@@ -63,6 +63,7 @@ import { ApReportDialog } from './components/ApReportDialogs'
 import { ApAgingReportTable } from './components/ApAgingReportTable'
 import { CashRequirementsTab } from './components/CashRequirementsTab'
 import { buildApAgingReport } from './apAgingReport'
+import { cashRequirements } from './cashFridays'
 import { proOf, termsLabel, type ApReportKind, type BillFactsIndex } from './apQueue'
 import { payablesSummary, useApSummaryModel } from './useApSummaryModel'
 import { tabFromUrl } from '@/features/finance/accountingLinks'
@@ -273,7 +274,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   // Aging by carrier: the same open bills `useOpenBills` ages, grouped by carrier with the bills under each.
   const agingReport = useMemo(() => buildApAgingReport(open.bills, new Date().toISOString(), {
     proOf: (bill) => proOf(bill, facts),
-    payToOf: payToLabel,
+    payToOf: payeeLabel,
   }), [open.bills, facts])
   const agingBills = useMemo(() => billsAging(queueBills), [queueBills])
   const selectedBills = useMemo(() => billsSelected(queueBills), [queueBills])
@@ -382,12 +383,18 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     saveBlob(new Blob([apAgingCsv(open.aging.byParty)], { type: 'text/csv' }), `ap-aging-${asOf}.csv`)
   }
 
+  // The Cash requirements tab counts the bills it schedules: past due and the next five Fridays.
+  const cashCount = useMemo(() => {
+    const cash = cashRequirements(open.bills, asOf)
+    return cash.pastDue.count + cash.weeks.reduce((n, w) => n + w.count, 0)
+  }, [open.bills, asOf])
+
   const counts: Record<ApTabKey, number> = {
     awaiting: awaiting.rows.length,
     expected: expectedBills.length,
     aging: agingBills.length,
     selected: selectedBills.length,
-    cash: 0,
+    cash: cashCount,
     paid: settled.length,
     payments: carrierAp.payments.length,
     report: open.aging.byParty.length,
@@ -892,9 +899,9 @@ const ACTIONS = { filter: false, sortable: false, fixed: true } as const
 function payeeColumns(infos: readonly CarrierPaymentInfo[], onInfo: (bill: CarrierBillRecord) => void): ApColumn<CarrierBillRecord>[] {
   return [
     facetCol<CarrierBillRecord>('remitEmail', 'REMIT E-MAIL', (bill) => remitEmailOf(bill, infos) || '—', undefined, { extraPx: 60 }),
-    facetCol<CarrierBillRecord>('payTo', 'PAY TO', payToLabel, (bill) => (
-      <TmsBadge tone={bill.payeeKind === 'FACTOR' ? 'blue' : 'gray'}>{payToLabel(bill)}</TmsBadge>
-    ), { extraPx: 30 }),
+    facetCol<CarrierBillRecord>('payTo', 'PAY TO', payeeLabel, (bill) => (
+      bill.payeeKind === 'FACTOR' ? <TmsBadge tone="blue">{payeeLabel(bill)}</TmsBadge> : payeeLabel(bill)
+    ), { extraPx: 60 }),
     {
       key: 'paymentInfo',
       header: 'PAYMENT INFO',
@@ -1093,9 +1100,9 @@ function reviewView({
       ),
     },
     facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
-    facetCol<CarrierBillRecord>('payTo', 'PAY TO', payToLabel, (bill) => (
-      <TmsBadge tone={bill.payeeKind === 'FACTOR' ? 'blue' : 'gray'}>{payToLabel(bill)}</TmsBadge>
-    ), { extraPx: 30 }),
+    facetCol<CarrierBillRecord>('payTo', 'PAY TO', payeeLabel, (bill) => (
+      bill.payeeKind === 'FACTOR' ? <TmsBadge tone="blue">{payeeLabel(bill)}</TmsBadge> : payeeLabel(bill)
+    ), { extraPx: 60 }),
     moneyCol<CarrierBillRecord>('amount', 'AMOUNT', (bill) => bill.grossCents, (bill) => (
       <span className={RIGHT}>
         {formatCents(bill.grossCents)}
@@ -1132,7 +1139,8 @@ function reviewView({
   ]
 
   return view<CarrierBillRecord>({
-    gridId: 'ap-review',
+    // v2: the columns changed (2026-11-16), so a saved column layout from the old grid must not hide the new ones.
+    gridId: 'ap-expected-v2',
     cardLayout: { title: 'pro', party: 'carrier', amount: 'amount', pills: ['status'] },
     banner,
     columns,
@@ -1343,9 +1351,9 @@ function payableView({
       ),
     },
     facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
-    facetCol<CarrierBillRecord>('payTo', 'PAY TO', payToLabel, (bill) => (
-      <TmsBadge tone={bill.payeeKind === 'FACTOR' ? 'blue' : 'gray'}>{payToLabel(bill)}</TmsBadge>
-    ), { extraPx: 30 }),
+    facetCol<CarrierBillRecord>('payTo', 'PAY TO', payeeLabel, (bill) => (
+      bill.payeeKind === 'FACTOR' ? <TmsBadge tone="blue">{payeeLabel(bill)}</TmsBadge> : payeeLabel(bill)
+    ), { extraPx: 60 }),
     dayCol<CarrierBillRecord>('billDate', 'INVOICE DATE', (bill) => bill.billDate),
     dayCol<CarrierBillRecord>('agingDate', 'AGING DATE', (bill) => bill.billDate),
     dayCol<CarrierBillRecord>('due', 'DUE DATE', (bill) => bill.dueAt),
@@ -1416,7 +1424,7 @@ function payableView({
   const tickedCents = selectionBalanceCents(bills, selected)
 
   return view<CarrierBillRecord>({
-    gridId: mode === 'aging' ? 'ap-aging' : 'ap-selected',
+    gridId: mode === 'aging' ? 'ap-aging-v2' : 'ap-selected',
     cardLayout: mode === 'aging' ? { title: 'pro', party: 'carrier', amount: 'amount' } : { title: 'bill', party: 'carrier', amount: 'balance', pills: ['status'] },
     onRowClick: onOpen,
     kpis,

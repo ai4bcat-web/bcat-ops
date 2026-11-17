@@ -14,7 +14,7 @@ import type { CarrierBillRecord } from '@/types/tms'
 import { cashRequirements, dayInZone, type CashLine } from '../cashFridays'
 import { BILL_STATUS_LABEL } from '../apViews'
 import { proOf, type BillFactsIndex } from '../apQueue'
-import { paymentInfoFor, payToLabel } from '../apViews'
+import { paymentInfoFor, payeeLabel } from '../apViews'
 import type { CarrierPaymentInfo } from '@/lib/apiClient'
 import '@/features/ar/components/agingReport.css'
 
@@ -45,11 +45,11 @@ export function CashRequirementsTab({ bills, facts, infos, asOf, busy, onMoveToS
 
   return (
     <div className="tms-aging" data-testid="cash-requirements">
-      <dl className="tms-aging-card-buckets" aria-label="Cash requirements summary" style={{ marginBottom: 12 }}>
-        <div><dt>Next 5 Fridays (with past due)</dt><dd><strong>{formatCents(cash.scheduledCents)}</strong></dd></div>
-        <div><dt>Largest week</dt><dd>{cash.largestWeek ? `${formatDay(cash.largestWeek.friday)} · ${formatCents(cash.largestWeek.totalCents)}` : '—'}</dd></div>
-        <div><dt>Past due</dt><dd>{formatCents(cash.pastDue.totalCents)}</dd></div>
-        <div><dt>Open AP in total</dt><dd>{formatCents(cash.openCents)}</dd></div>
+      <dl aria-label="Cash requirements summary" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 32px', margin: '0 0 12px' }}>
+        <div><dt className="tms-muted text-xs">Next 5 Fridays (with past due)</dt><dd className="text-lg"><strong>{formatCents(cash.scheduledCents)}</strong></dd></div>
+        <div><dt className="tms-muted text-xs">Largest week</dt><dd className="text-lg">{cash.largestWeek ? `${formatDay(cash.largestWeek.friday)} · ${formatCents(cash.largestWeek.totalCents)}` : '—'}</dd></div>
+        <div><dt className="tms-muted text-xs">Past due</dt><dd className="text-lg">{formatCents(cash.pastDue.totalCents)}</dd></div>
+        <div><dt className="tms-muted text-xs">Open AP in total</dt><dd className="text-lg">{formatCents(cash.openCents)}</dd></div>
       </dl>
 
       <ul aria-label="Due by Friday" style={{ listStyle: 'none', padding: 0, margin: '0 0 12px', display: 'grid', gap: 6 }}>
@@ -115,7 +115,7 @@ export function CashRequirementsTab({ bills, facts, infos, asOf, busy, onMoveToS
                               <tr key={b.id} data-testid="cash-bill-row">
                                 <td><Link className="tms-link" to={shipmentEditorPath(b.shipmentId)}>{proOf(b, facts)}</Link></td>
                                 <td>{b.carrierName ?? '—'}</td>
-                                <td>{payToLabel(b)}</td>
+                                <td>{payeeLabel(b)}</td>
                                 <td>{b.datesPending === true ? '—' : formatDay(b.dueAt)}</td>
                                 <td className="tms-dg-right"><strong>{formatCents(b.balanceCents)}</strong>{b.quickPay === true ? <> <TmsBadge tone="blue">Quick pay</TmsBadge></> : null}</td>
                                 <td>{BILL_STATUS_LABEL[b.status]}</td>
@@ -151,7 +151,7 @@ export function CashRequirementsTab({ bills, facts, infos, asOf, busy, onMoveToS
       </div>
       <p className="tms-muted text-xs" style={{ marginTop: 8 }}>
         How this is counted: a bill is paid on the Friday on or after its due date, and the next five Fridays start with today when today is a Friday
-        (Chicago time). A bill due before the first Friday is on the Past due line. A bill due after the fifth Friday is under Later. A bill with no
+        (Chicago time). A bill whose due date has already passed is on the Past due line and is paid on the first Friday. A bill due after the fifth Friday is under Later. A bill with no
         invoice date yet (Expected) has no due date and is under Not scheduled. Quick pay bills use their quick-pay due date and discounted amount, part-paid
         bills use what is left, and paid and void bills are left out. The lines add up to the open AP total.
       </p>
