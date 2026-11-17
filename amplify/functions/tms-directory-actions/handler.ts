@@ -89,6 +89,7 @@ import {
 import { validateWhiteLabel, type WhiteLabel } from '../../../src/lib/brokerage/whiteLabel'
 import { writeRawParameter, parameterNameFor } from '../_shared/integrationSecrets'
 import { normalizeAddress, normalizeName, type AddressShape } from '../_shared/directoryKeys'
+import { refreshQueueBrokerMc } from './queueBrokerMc'
 import { authorityDigits, duplicateCustomerMessage, findDuplicateCustomer, type CustomerDuplicate, type ExistingCustomerLike } from '../../../src/lib/customerCreateDuplicates'
 import type {
   CarrierAgreementTemplate,
@@ -131,6 +132,7 @@ const DIVISION_TABLE_NAME = tableOf('DIVISION_TABLE_NAME', 'Division', TABLE_NAM
 const SETTINGS_TABLE_NAME = tableOf('SETTINGS_TABLE_NAME', 'TmsSettings', TABLE_NAME)
 const MERGE_JOB_TABLE_NAME = tableOf('MERGE_JOB_TABLE_NAME', 'DirectoryMergeJob', TABLE_NAME)
 const LOAD_TABLE_NAME = tableOf('LOAD_TABLE_NAME', 'Load')
+const FACTORING_ITEM_TABLE_NAME = tableOf('FACTORING_ITEM_TABLE_NAME', 'FactoringItem')
 const USER_PROFILE_TABLE_NAME = tableOf('USER_PROFILE_TABLE_NAME', 'UserProfile')
 // Step R — the self-serve revenue taxonomy and the saved department views. This
 // Lambda is their only writer; the client reads the three tables directly.
@@ -1540,6 +1542,7 @@ async function upsertCustomer(
     await auditBillingChange(id, name, billing, caller)
     const saved = unmarshall(result.Attributes)
     await auditCustomer(existing, saved)
+    await refreshFactoringQueueMc(id, existing?.mcNumber, saved.mcNumber)
     return saved
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -1547,6 +1550,48 @@ async function upsertCustomer(
       throw conflictError('customer', err)
     }
     throw err
+  }
+}
+
+/**
+ * A changed customer MC reaches the unsubmitted factoring rows that copied the old one (Send to
+ * Factor prefills BrokerMC from the customer, and a prefilled value outranks the record). The
+ * customer save has already succeeded, so a failure here is logged and never fails the save.
+ */
+async function refreshFactoringQueueMc(customerId: string, oldMc: unknown, newMc: unknown): Promise<void> {
+  try {
+    const out = await refreshQueueBrokerMc(
+      {
+        scanQueue: () => scanTable(FACTORING_ITEM_TABLE_NAME),
+        now: nowIso,
+        setBrokerMc: async (rowId, storedMc, mc) => {
+          try {
+            await dynamo.send(
+              new UpdateItemCommand({
+                TableName: FACTORING_ITEM_TABLE_NAME,
+                Key: marshall({ id: rowId }),
+                UpdateExpression:
+                  'SET otrManualFields.#k = :mc, updatedAt = :u REMOVE brokerCheckResult, brokerMcChecked, brokerCheckedAt, otrError',
+                ConditionExpression:
+                  'attribute_type(otrManualFields, :m) AND otrManualFields.#k = :stored AND attribute_not_exists(otrInvoiceId) AND #st = :need',
+                ExpressionAttributeNames: { '#k': 'BrokerMC', '#st': 'status' },
+                ExpressionAttributeValues: marshall({ ':mc': mc, ':u': nowIso(), ':m': 'M', ':stored': storedMc, ':need': 'NEED_TO_FACTOR' }),
+              }),
+            )
+            return true
+          } catch (err) {
+            if ((err as { name?: string }).name === 'ConditionalCheckFailedException') return false
+            throw err
+          }
+        },
+      },
+      customerId,
+      oldMc,
+      newMc,
+    )
+    if (out.refreshed.length || out.skipped.length) console.log('[tms-directory-actions] factoring queue MC refreshed', { customerId, ...out })
+  } catch (err) {
+    console.warn('[tms-directory-actions] factoring queue MC refresh failed; the customer save stands', { customerId, err })
   }
 }
 
