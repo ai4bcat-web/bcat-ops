@@ -45,7 +45,7 @@ import {
   AP_PAYMENT_KIND_LABEL, AP_PAYMENT_METHOD_LABEL, AP_PAYEE_KIND_LABEL, AP_TABS, BILL_STATUS_LABEL,
   EMPTY_TO_BE_PAID_FILTERS, applyToBePaidFilters, avgDaysToPayBills, awaitingInvoiceTotals, billCarrierOptions,
   billGates, type BillGates, billsAging, billsExpected, billsSelected, canSelectForPayment, invoiceAgeBuckets, isOwnFleet, paidBills,
-  paymentInfoFor, payeeLabel, quickPayLabel, remitEmailOf, selectionBalanceCents,
+  paymentInfoFor, payeeLabel, quickPayLabel, remitEmailOf, remitEmailOfPayment, remittanceStatusOf, selectionBalanceCents,
   selectionCarrierId, sharedProLabel, sharedProIndex, type ApTabKey, type SharedProIndex, type ToBePaidFilters,
 } from './apViews'
 import { ApCreditDialog } from './components/ApCreditDialog'
@@ -53,6 +53,8 @@ import { VerifyPaymentBadge } from './components/VerifyPaymentBadge'
 import { isVerifyPaymentBill } from '@/lib/verifyPayment'
 import { ApproveBillDialog } from './components/ApproveBillDialog'
 import { PayCarrierDialog } from './components/PayCarrierDialog'
+import { RemitEmailDialog } from './components/RemitEmailDialog'
+import { RemitToCell } from './components/RemitToCell'
 import { PaymentInfoDialog } from './components/PaymentInfoDialog'
 import { RecordBillDialog, type RecordBillPrefill } from './components/RecordBillDialog'
 import { SendRemittanceDialog } from './components/SendRemittanceDialog'
@@ -73,6 +75,7 @@ import { ApSummaryStrip } from './components/ApSummaryStrip'
 import { apCompactItems } from './apCompactItems'
 import { AccountingReportsDialog } from '@/features/finance/AccountingReportsDialog'
 import { useApPaymentLines } from '@/features/finance/useApPaymentLines'
+import type { BillPaymentLine } from '@/features/finance/accountingStats'
 import type { AccountingReportKind } from '@/features/finance/accountingReports'
 import { ApAgingCard, ApExpectedCard, ApPaidCard, ProfitCheckCard } from '@/features/finance/AccountingCards'
 import { apAgingStats, apExpectedStats, apPaidStats } from '@/features/finance/accountingStats'
@@ -121,6 +124,8 @@ type ApDialog =
   | { kind: 'unapprove'; bill: CarrierBillRecord }
   | { kind: 'reverse'; payment: ApPaymentRecord }
   | { kind: 'payinfo'; bill: CarrierBillRecord }
+  /** The payee's remit e-mail; a bill names the exact payment method, a carrier takes the preferred one. */
+  | { kind: 'remit-email'; payee: string; billId?: string; carrierId?: string }
   | { kind: 'report'; report: ApReportKind }
 
 const RIGHT = 'block text-right tabular-nums'
@@ -154,7 +159,9 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     chip === 'NEEDS_REVIEW' ? undefined : historySince,
   )
   const [dialog, setDialog] = useState<ApDialog | null>(null)
-  const apPaymentLines = useApPaymentLines(tab === 'paid')
+  // Bumped after every dialog finishes, so a payment just posted shows how its remittance went.
+  const [payRefresh, setPayRefresh] = useState(0)
+  const apPaymentLines = useApPaymentLines(tab === 'paid', payRefresh)
   const [reportsOpen, setReportsOpen] = useState<AccountingReportKind | 'menu' | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -202,13 +209,14 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   }, [])
 
   // Masked on the way in (see `listCarrierPaymentInfo`); a failed read leaves the columns reading "Not on file".
+  const [infosKey, setInfosKey] = useState(0)
   useEffect(() => {
     let alive = true
     listCarrierPaymentInfo()
       .then((rows) => { if (alive) setPayInfos(rows) })
       .catch(() => {})
     return () => { alive = false }
-  }, [])
+  }, [infosKey])
 
   const carriersById = useMemo(() => {
     const map = new Map<string, CarrierRecord>()
@@ -275,7 +283,8 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const agingReport = useMemo(() => buildApAgingReport(open.bills, new Date().toISOString(), {
     proOf: (bill) => proOf(bill, facts),
     payToOf: payeeLabel,
-  }), [open.bills, facts])
+    remitEmailOf: (bill) => remitEmailOf(bill, payInfos),
+  }), [open.bills, facts, payInfos])
   const agingBills = useMemo(() => billsAging(queueBills), [queueBills])
   const selectedBills = useMemo(() => billsSelected(queueBills), [queueBills])
   // The drawer stays open under the dialogs it opens (dates, carrier pay, payment info).
@@ -302,6 +311,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
   const closeAndRefresh = () => {
     setDialog(null)
+    setPayRefresh((n) => n + 1)
     setSelected([])
     void refreshAll()
   }
@@ -473,6 +483,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     )
     : tab === 'paid' ? <ApPaidCard stats={apPaidStats(settled, facts, apPaymentLines)} monthLabel={monthLabel(month)} />
     : null
+  const addRemitFor = (bill: CarrierBillRecord) => setDialog({ kind: 'remit-email', payee: payeeLabel(bill), billId: bill.id })
   const openDrawer = (bill: CarrierBillRecord) => setDrawerId(bill.id)
   const chargesFor = (bill: CarrierBillRecord) => setDialog({ kind: 'charges', loadCarrierId: bill.loadCarrierId, shipmentId: bill.shipmentId, bill })
 
@@ -497,6 +508,8 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       shared,
       busy,
       onDates: (bill) => setDialog({ kind: 'dates', bill }),
+      infos: payInfos,
+      onAddRemit: addRemitFor,
     })
     : tab === 'aging' || tab === 'selected' ? payableView({
       mode: tab,
@@ -537,10 +550,14 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onMoveToSelected: (bill) => (bill.status === 'IN_REVIEW'
         ? setDialog({ kind: 'approve', bill, thenSelect: true })
         : runSelect([bill.id])),
+      onAddRemit: addRemitFor,
     })
     : tab === 'paid' ? paidView({
       banner: errorBanner,
       bills: settledShown,
+      infos: payInfos,
+      lines: apPaymentLines,
+      onAddRemit: addRemitFor,
       verifyOnly: verifyOnlyPaid,
       verifyCount: settled.filter(isVerifyPaymentBill).length,
       onVerifyOnly: setVerifyOnlyPaid,
@@ -563,6 +580,13 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onCredit: (carrierId) => setDialog({ kind: 'credit', carrierId }),
       onRemittance: (payment) => setDialog({ kind: 'remittance', payment }),
       onReverse: (payment) => setDialog({ kind: 'reverse', payment }),
+      infos: payInfos,
+      onAddRemit: (payment) => setDialog({
+        kind: 'remit-email',
+        payee: carrier?.name ?? 'this payee',
+        carrierId: payment.carrierId,
+        billId: payment.applications?.[0]?.billId,
+      }),
     })
     : tab === 'inbox' ? view<ApInboxItemRecord>(inboxView({
       banner: inboxBanner,
@@ -643,11 +667,12 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         {/* Keyed by grid so each view keeps its own saved columns, filters and sort. */}
         {tab === 'cash' ? (
           <CashRequirementsTab bills={open.bills} facts={facts} infos={payInfos} asOf={asOf} busy={busy}
-            onMoveToSelected={(bill) => (bill.status === 'IN_REVIEW' ? setDialog({ kind: 'approve', bill, thenSelect: true }) : runSelect([bill.id]))} />
+            onMoveToSelected={(bill) => (bill.status === 'IN_REVIEW' ? setDialog({ kind: 'approve', bill, thenSelect: true }) : runSelect([bill.id]))}
+            onAddRemit={addRemitFor} />
         ) : tab === 'report' ? (
           <>
             {current.banner}
-            <ApAgingReportTable report={agingReport} />
+            <ApAgingReportTable report={agingReport} onAddRemit={(c, b) => setDialog({ kind: 'remit-email', payee: b.payTo || c.carrierName, billId: b.id })} />
           </>
         ) : (
           <ApDenseList<never> key={current.gridId} config={current} email={user?.email} onRefresh={chrome.onRefresh}
@@ -773,6 +798,16 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           onConfirm={(reason) => runVoid(dialog.bill, reason)}
         />
       )}
+      {dialog?.kind === 'remit-email' && (
+        <RemitEmailDialog
+          open
+          payee={dialog.payee}
+          billId={dialog.billId}
+          carrierId={dialog.carrierId}
+          onOpenChange={(o) => { if (!o) setDialog(null) }}
+          onDone={() => { setDialog(null); setInfosKey((n) => n + 1); setPayRefresh((n) => n + 1) }}
+        />
+      )}
       {dialog?.kind === 'payinfo' && (
         <PaymentInfoDialog
           bill={dialog.bill}
@@ -891,14 +926,32 @@ const sumCents = <T,>(rows: T[], pick: (row: T) => number) => rows.reduce((sum, 
 
 const ACTIONS = { filter: false, sortable: false, fixed: true } as const
 
+/** Remit to: the e-mail the payee's remittance goes to, or an Add remit e-mail link when none is on file. */
+function remitToColumn(
+  infos: readonly CarrierPaymentInfo[],
+  onAddRemit: (bill: CarrierBillRecord) => void,
+): ApColumn<CarrierBillRecord> {
+  return facetCol<CarrierBillRecord>(
+    'remitEmail',
+    'REMIT TO',
+    (bill) => remitEmailOf(bill, infos) || 'No remit e-mail',
+    (bill) => <RemitToCell email={remitEmailOf(bill, infos)} label={payeeLabel(bill)} onAdd={() => onAddRemit(bill)} />,
+    { extraPx: 60 },
+  )
+}
+
 /**
- * The three columns every payable row carries after its dates: the remittance e-mail, who is paid
+ * The three columns every payable row carries after its dates: where the remittance goes, who is paid
  * (the carrier directly or its factor), and a link to the payee's payment info. Only masked details
  * are ever on a row; the dialog says where the full numbers live.
  */
-function payeeColumns(infos: readonly CarrierPaymentInfo[], onInfo: (bill: CarrierBillRecord) => void): ApColumn<CarrierBillRecord>[] {
+function payeeColumns(
+  infos: readonly CarrierPaymentInfo[],
+  onInfo: (bill: CarrierBillRecord) => void,
+  onAddRemit: (bill: CarrierBillRecord) => void,
+): ApColumn<CarrierBillRecord>[] {
   return [
-    facetCol<CarrierBillRecord>('remitEmail', 'REMIT E-MAIL', (bill) => remitEmailOf(bill, infos) || '—', undefined, { extraPx: 60 }),
+    remitToColumn(infos, onAddRemit),
     facetCol<CarrierBillRecord>('payTo', 'PAY TO', payeeLabel, (bill) => (
       bill.payeeKind === 'FACTOR' ? <TmsBadge tone="blue">{payeeLabel(bill)}</TmsBadge> : payeeLabel(bill)
     ), { extraPx: 60 }),
@@ -1066,7 +1119,7 @@ function awaitingView({ banner, rows, shared, busy, onRecord }: {
 /* ── In review ───────────────────────────────────────────────────────────── */
 
 function reviewView({
-  banner, bills, review, facts, onOpen, shared, busy, onDates,
+  banner, bills, review, facts, onOpen, shared, busy, onDates, infos, onAddRemit,
 }: {
   banner: ReactNode
   bills: CarrierBillRecord[]
@@ -1077,6 +1130,8 @@ function reviewView({
   shared: SharedProIndex
   busy: boolean
   onDates: (bill: CarrierBillRecord) => void
+  infos: readonly CarrierPaymentInfo[]
+  onAddRemit: (bill: CarrierBillRecord) => void
 }): ListView {
   const pendingDates = (bill: CarrierBillRecord) => bill.datesPending === true
   const flagOf = (bill: CarrierBillRecord) => review.get(bill.shipmentId)
@@ -1103,6 +1158,7 @@ function reviewView({
     facetCol<CarrierBillRecord>('payTo', 'PAY TO', payeeLabel, (bill) => (
       bill.payeeKind === 'FACTOR' ? <TmsBadge tone="blue">{payeeLabel(bill)}</TmsBadge> : payeeLabel(bill)
     ), { extraPx: 60 }),
+    remitToColumn(infos, onAddRemit),
     moneyCol<CarrierBillRecord>('amount', 'AMOUNT', (bill) => bill.grossCents, (bill) => (
       <span className={RIGHT}>
         {formatCents(bill.grossCents)}
@@ -1139,8 +1195,8 @@ function reviewView({
   ]
 
   return view<CarrierBillRecord>({
-    // v2: the columns changed (2026-11-16), so a saved column layout from the old grid must not hide the new ones.
-    gridId: 'ap-expected-v2',
+    // v3: the Remit to column was added (2026-11-17), so a saved column layout from the old grid must not hide it.
+    gridId: 'ap-expected-v3',
     cardLayout: { title: 'pro', party: 'carrier', amount: 'amount', pills: ['status'] },
     banner,
     columns,
@@ -1170,7 +1226,7 @@ function reviewView({
 function payableView({
   mode, errorBanner, facts, onOpen, bills, allBills, shared, infos, gatesOf, filters, showFilters, selected, asOf, busy,
   onToggleFilters, onFilters, onSelect, onInfo, onPay, onPaySelected, onApprove, onDates, onCharges, onVoid, onUnapprove,
-  onSelectForPayment, onUnselect, onReturnToExpected, onMoveToSelected,
+  onSelectForPayment, onUnselect, onReturnToExpected, onMoveToSelected, onAddRemit,
 }: {
   mode: 'aging' | 'selected'
   errorBanner: ReactNode
@@ -1201,6 +1257,7 @@ function payableView({
   onUnselect: (ids: string[]) => void
   onReturnToExpected: (bill: CarrierBillRecord) => void
   onMoveToSelected: (bill: CarrierBillRecord) => void
+  onAddRemit: (bill: CarrierBillRecord) => void
 }): ListView {
   // One payment is one carrier's: a selection spanning two of them cannot be posted as
   // one row, and the button says so instead of failing in the dialog.
@@ -1277,7 +1334,7 @@ function payableView({
     moneyCol<CarrierBillRecord>('balance', 'BALANCE', (bill) => bill.balanceCents, (bill) => (
       <span className={`${RIGHT} font-medium`}>{formatCents(bill.balanceCents)}</span>
     )),
-    ...payeeColumns(infos, onInfo),
+    ...payeeColumns(infos, onInfo, onAddRemit),
     {
       key: 'gates',
       header: 'STANDING IN THE WAY',
@@ -1424,7 +1481,7 @@ function payableView({
   const tickedCents = selectionBalanceCents(bills, selected)
 
   return view<CarrierBillRecord>({
-    gridId: mode === 'aging' ? 'ap-aging-v2' : 'ap-selected',
+    gridId: mode === 'aging' ? 'ap-aging-v3' : 'ap-selected-v2',
     cardLayout: mode === 'aging' ? { title: 'pro', party: 'carrier', amount: 'amount' } : { title: 'bill', party: 'carrier', amount: 'balance', pills: ['status'] },
     onRowClick: onOpen,
     kpis,
@@ -1553,7 +1610,7 @@ function payableView({
 
 /* ── Paid ────────────────────────────────────────────────────────────────── */
 
-function paidView({ banner, bills, shared, months, month, loading, onMonth, verifyOnly, verifyCount, onVerifyOnly }: {
+function paidView({ banner, bills, shared, months, month, loading, onMonth, verifyOnly, verifyCount, onVerifyOnly, infos, lines, onAddRemit }: {
   banner: ReactNode
   bills: CarrierBillRecord[]
   shared: SharedProIndex
@@ -1564,7 +1621,12 @@ function paidView({ banner, bills, shared, months, month, loading, onMonth, veri
   verifyOnly: boolean
   verifyCount: number
   onVerifyOnly: (on: boolean) => void
+  infos: readonly CarrierPaymentInfo[]
+  /** The payment behind each paid bill, with how its remittance went. */
+  lines: ReadonlyMap<string, BillPaymentLine>
+  onAddRemit: (bill: CarrierBillRecord) => void
 }): ListView {
+  const statusOf = (bill: CarrierBillRecord) => remittanceStatusOf(lines.get(bill.id), remitEmailOf(bill, infos))
   const columns: ApColumn<CarrierBillRecord>[] = [
     {
       key: 'bill',
@@ -1577,12 +1639,20 @@ function paidView({ banner, bills, shared, months, month, loading, onMonth, veri
     dayCol<CarrierBillRecord>('billDate', 'BILL DATE', (bill) => bill.billDate),
     dayCol<CarrierBillRecord>('paid', 'PAID', (bill) => bill.paidAt),
     facetCol('payee', 'PAYEE', payeeLabel),
+    remitToColumn(infos, onAddRemit),
+    facetCol<CarrierBillRecord>('remittance', 'REMITTANCE', (bill) => (lines.has(bill.id) ? statusOf(bill).label : '—'), (bill) => {
+      if (!lines.has(bill.id)) return <span className="tms-muted">—</span>
+      const status = statusOf(bill)
+      return status.needsEmail
+        ? <button type="button" className="tms-link whitespace-nowrap" onClick={() => onAddRemit(bill)}>No remit e-mail – add one</button>
+        : <TmsBadge tone={status.tone} title={status.title}>{status.label}</TmsBadge>
+    }, { extraPx: 40 }),
     moneyCol<CarrierBillRecord>('net', 'NET', (bill) => bill.netCents),
     moneyCol<CarrierBillRecord>('credits', 'CREDITS', (bill) => bill.creditedCents ?? 0, undefined, (bill) => !bill.creditedCents),
   ]
 
   return view<CarrierBillRecord>({
-    gridId: 'ap-paid',
+    gridId: 'ap-paid-v2',
     cardLayout: { title: 'bill', party: 'carrier', amount: 'net' },
     kpis: [
       { label: `Paid in ${monthLabel(month)}`, value: bills.length },
@@ -1617,7 +1687,7 @@ function paidView({ banner, bills, shared, months, month, loading, onMonth, veri
 
 function paymentsView({
   banner, carriers, carrier, payments, openCents, unappliedCents, busy,
-  onCarrier, onPay, onCredit, onRemittance, onReverse,
+  onCarrier, onPay, onCredit, onRemittance, onReverse, infos, onAddRemit,
 }: {
   banner: ReactNode
   carriers: CarrierRecord[]
@@ -1631,13 +1701,17 @@ function paymentsView({
   onCredit: (carrierId: string) => void
   onRemittance: (payment: ApPaymentRecord) => void
   onReverse: (payment: ApPaymentRecord) => void
+  infos: readonly CarrierPaymentInfo[]
+  onAddRemit: (payment: ApPaymentRecord) => void
 }): ListView {
   const remittanceText = (p: ApPaymentRecord) => (
     p.remittanceSentAt
       ? `Sent ${formatDay(p.remittanceSentAt)}`
       : p.markedSentAt
         ? `Marked sent ${formatDay(p.markedSentAt)}`
-        : 'Not sent'
+        : (p.remittanceAttempts ?? 0) > 0
+          ? 'Email failed'
+          : 'Not sent'
   )
   const columns: ApColumn<ApPaymentRecord>[] = [
     facetCol('kind', 'KIND', (p) => AP_PAYMENT_KIND_LABEL[p.kind]),
@@ -1647,8 +1721,17 @@ function paymentsView({
     moneyCol<ApPaymentRecord>('amount', 'AMOUNT', (p) => p.amountCents),
     moneyCol<ApPaymentRecord>('applied', 'APPLIED', (p) => p.appliedCents),
     moneyCol<ApPaymentRecord>('unapplied', 'UNAPPLIED', (p) => p.unappliedCents),
+    facetCol<ApPaymentRecord>('remitTo', 'REMIT TO', (p) => remitEmailOfPayment(p, infos) || 'No remit e-mail', (p) => (
+      p.kind === 'PAYMENT'
+        ? <RemitToCell email={remitEmailOfPayment(p, infos)} label={carrier?.name ?? 'this payee'} onAdd={() => onAddRemit(p)} />
+        : <span className="tms-muted">—</span>
+    ), { extraPx: 60 }),
     facetCol('remittance', 'REMITTANCE', remittanceText, (p) => (
-      p.remittanceSentAt || p.markedSentAt ? remittanceText(p) : <span className="tms-muted">Not sent</span>
+      p.remittanceSentAt || p.markedSentAt
+        ? remittanceText(p)
+        : (p.remittanceAttempts ?? 0) > 0
+          ? <TmsBadge tone="red" title="The e-mail was not delivered. Use Send remittance to try again.">Email failed</TmsBadge>
+          : <span className="tms-muted">Not sent</span>
     ), { filter: 'text' }),
     {
       key: 'actions',
@@ -1687,7 +1770,7 @@ function paymentsView({
   ]
 
   return view<ApPaymentRecord>({
-    gridId: 'ap-payments',
+    gridId: 'ap-payments-v2',
     cardLayout: { title: 'date', amount: 'amount', pills: ['kind'] },
     actions: (
       <>

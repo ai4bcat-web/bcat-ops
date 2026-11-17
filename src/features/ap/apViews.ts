@@ -39,11 +39,12 @@ export const AP_TABS: { key: ApTabKey; label: string }[] = [
   { key: 'expected', label: 'Expected' },
   { key: 'aging', label: 'Aging' },
   { key: 'selected', label: 'Selected' },
-  { key: 'cash', label: 'Cash requirements' },
   { key: 'paid', label: 'Paid' },
   { key: 'payments', label: 'Payments & credits' },
   { key: 'report', label: 'Aging by carrier' },
   { key: 'inbox', label: 'AP inbox' },
+  // Last, by Ryne's ask (2026-11-17): it is a forecast, read after the lists above.
+  { key: 'cash', label: 'Cash requirements' },
 ]
 
 export const BILL_STATUS_LABEL: Record<CarrierBillStatus, string> = {
@@ -196,6 +197,53 @@ export function remitEmailOf(
   infos: readonly CarrierPaymentInfo[],
 ): string {
   return bill.remitTo?.payeeEmail?.trim() || paymentInfoFor(bill, infos)?.payeeEmail?.trim() || ''
+}
+
+/** The remit address for a whole carrier (the Aging by carrier rows): their preferred active payment method's. */
+export function remitEmailOfCarrier(carrierId: string, infos: readonly CarrierPaymentInfo[]): string {
+  const mine = infos.filter((i) => i.carrierId === carrierId && i.status !== 'INACTIVE')
+  return (mine.find((i) => i.isPreferred) ?? mine[0])?.payeeEmail?.trim() || ''
+}
+
+/** The remit address on a payment row: the one snapshotted when it was paid, else the carrier's current one. */
+export function remitEmailOfPayment(
+  payment: { carrierId: string; remitTo?: { payeeEmail?: string | null } | null },
+  infos: readonly CarrierPaymentInfo[],
+): string {
+  return payment.remitTo?.payeeEmail?.trim() || remitEmailOfCarrier(payment.carrierId, infos)
+}
+
+export interface RemittanceStatus {
+  label: string
+  tone: 'green' | 'red' | 'orange' | 'gray'
+  /** True when nobody can be e-mailed yet, so the cell offers Add remit e-mail. */
+  needsEmail: boolean
+  title?: string
+}
+
+/**
+ * How a paid bill's remittance went: Emailed (with when and where), Marked sent by hand, Email failed
+ * (an attempt SES refused, the manual Send remittance on Payments & credits retries it), No remit e-mail
+ * (nobody on file to send to), or Not sent for payments from before the automatic send.
+ */
+export function remittanceStatusOf(
+  line: {
+    remittanceAttempts?: number
+    remittanceSentAt?: string | null
+    remittanceSentTo?: string | null
+    markedSentAt?: string | null
+  } | undefined,
+  remitEmail: string,
+): RemittanceStatus {
+  if (line?.remittanceSentAt) {
+    return { label: `Emailed ${line.remittanceSentAt.slice(0, 10)}`, tone: 'green', needsEmail: false, title: line.remittanceSentTo ? `Sent to ${line.remittanceSentTo}` : undefined }
+  }
+  if (line?.markedSentAt) return { label: `Marked sent ${line.markedSentAt.slice(0, 10)}`, tone: 'gray', needsEmail: false }
+  if ((line?.remittanceAttempts ?? 0) > 0) {
+    return { label: 'Email failed', tone: 'red', needsEmail: false, title: 'The e-mail was not delivered. Use Send remittance on Payments & credits to try again.' }
+  }
+  if (!remitEmail) return { label: 'No remit e-mail', tone: 'orange', needsEmail: true }
+  return { label: 'Not sent', tone: 'gray', needsEmail: false }
 }
 
 /** Approved bills waiting on cash — PARTIAL included — soonest due first. */

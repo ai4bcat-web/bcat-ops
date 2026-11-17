@@ -355,7 +355,16 @@ export function billingMismatches(input: {
 
 // ── AP payment method ───────────────────────────────────────────────────────
 
-export interface BillPaymentLine { method: ApPaymentMethod | null; reference: string | null; paidAt: string }
+export interface BillPaymentLine {
+  method: ApPaymentMethod | null
+  reference: string | null
+  paidAt: string
+  /** How the payee's remittance went: every attempt, when SES took it, where, and a hand-marked send. */
+  remittanceAttempts?: number
+  remittanceSentAt?: string | null
+  remittanceSentTo?: string | null
+  markedSentAt?: string | null
+}
 
 /** The latest live payment applied to each bill: its method and check/ref #. */
 export function billPaymentLines(payments: readonly ApPaymentRecord[]): Map<string, BillPaymentLine> {
@@ -365,7 +374,15 @@ export function billPaymentLines(payments: readonly ApPaymentRecord[]): Map<stri
     for (const a of p.applications ?? []) {
       if (!(a.amountCents > 0)) continue
       const cur = out.get(a.billId)
-      if (!cur || p.paidAt > cur.paidAt) out.set(a.billId, { method: p.method ?? null, reference: p.reference ?? null, paidAt: p.paidAt })
+      if (!cur || p.paidAt > cur.paidAt) out.set(a.billId, {
+        method: p.method ?? null,
+        reference: p.reference ?? null,
+        paidAt: p.paidAt,
+        remittanceAttempts: p.remittanceAttempts ?? 0,
+        remittanceSentAt: p.remittanceSentAt ?? null,
+        remittanceSentTo: p.remittanceSentTo ?? null,
+        markedSentAt: p.markedSentAt ?? null,
+      })
     }
   }
   return out

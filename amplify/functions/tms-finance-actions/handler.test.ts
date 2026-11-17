@@ -655,6 +655,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.unstubAllEnvs()
   errorSpy.mockRestore()
 })
 
@@ -2730,6 +2731,8 @@ describe('VOID_BILL', () => {
 
 describe('SEND_REMITTANCE', () => {
   it('records NOT_SENT with a download when SES refuses, and stamps nothing', async () => {
+    // The payment e-mails its own remittance now; this case is the manual send alone.
+    vi.stubEnv('AP_AUTO_REMITTANCE', 'off')
     seedAssignment()
     const bill = await recordBill({ approve: true })
     const paid = (await call('RECORD_AP_PAYMENT', {
@@ -2752,6 +2755,111 @@ describe('SEND_REMITTANCE', () => {
     expect(sent.body).toContain('ACH-88120')
     expect(sent.downloads.length).toBe(1)
     expect((table(TABLES.apPayment).get(String(paid.payment.id)) as Row).remittanceSentAt).toBeUndefined()
+  })
+})
+
+describe('automatic remittance on payment', () => {
+  const payBody = (over: Record<string, unknown> = {}) => ({
+    carrierId: CARRIER_ID,
+    paidAt: '2026-10-25',
+    method: 'ACH',
+    reference: 'ACH-88120',
+    ...over,
+  })
+  const rawOf = (callIndex = 0) => {
+    const input = sesSend.mock.calls[callIndex][0] as { input: { Content: { Raw: { Data: Uint8Array } }; Destination: { ToAddresses: string[] } } }
+    return { raw: new TextDecoder().decode(input.input.Content.Raw.Data), to: input.input.Destination.ToAddresses }
+  }
+
+  it('e-mails the payee once, with the table in the body and the advice attached, and stamps the payment', async () => {
+    seedAssignment()
+    const bill = await recordBill({ approve: true })
+    const paid = (await call('RECORD_AP_PAYMENT', payBody({
+      amountCents: 180_000,
+      applications: [{ billId: bill.id, amountCents: 180_000 }],
+    }))) as { payment: Row }
+
+    expect(sesSend).toHaveBeenCalledTimes(1)
+    const { raw, to } = rawOf()
+    expect(to).toEqual(['remit@wheeler.test'])
+    expect(raw).toContain('multipart/alternative')
+    expect(raw).toContain('application/pdf')
+    const row = table(TABLES.apPayment).get(String(paid.payment.id)) as Row
+    expect(row.remittanceSentAt).toBeTruthy()
+    expect(row.remittanceSentTo).toBe('remit@wheeler.test')
+    expect(row.remittanceCount).toBe(1)
+  })
+
+  it('does not send again when the same payment is posted twice', async () => {
+    seedAssignment()
+    const bill = await recordBill({ approve: true })
+    const body = payBody({ clientRequestId: 'req-1', amountCents: 180_000, applications: [{ billId: bill.id, amountCents: 180_000 }] })
+    await call('RECORD_AP_PAYMENT', body)
+    const again = (await call('RECORD_AP_PAYMENT', body)) as { duplicate: boolean }
+    expect(again.duplicate).toBe(true)
+    expect(sesSend).toHaveBeenCalledTimes(1)
+  })
+
+  it('still posts the payment when SES refuses, and leaves the attempt on the row', async () => {
+    seedAssignment()
+    const bill = await recordBill({ approve: true })
+    sesSend.mockRejectedValueOnce(new Error('Email address is not verified'))
+    const paid = (await call('RECORD_AP_PAYMENT', payBody({
+      amountCents: 180_000,
+      applications: [{ billId: bill.id, amountCents: 180_000 }],
+    }))) as { payment: Row }
+    expect((table(TABLES.carrierBill).get(String(bill.id)) as Row).status).toBe('PAID')
+    const row = table(TABLES.apPayment).get(String(paid.payment.id)) as Row
+    expect(row.remittanceSentAt).toBeUndefined()
+    expect(row.remittanceAttempts).toBe(1)
+  })
+
+  it('posts and sends nothing when the payee has no e-mail on file', async () => {
+    seedAssignment({ carrier: { email: null }, method: { payeeEmail: null } })
+    const bill = await recordBill({ approve: true })
+    const paid = (await call('RECORD_AP_PAYMENT', payBody({
+      amountCents: 180_000,
+      applications: [{ billId: bill.id, amountCents: 180_000 }],
+    }))) as { payment: Row }
+    expect(sesSend).not.toHaveBeenCalled()
+    expect((table(TABLES.carrierBill).get(String(bill.id)) as Row).status).toBe('PAID')
+    expect((table(TABLES.apPayment).get(String(paid.payment.id)) as Row).remittanceAttempts).toBeUndefined()
+  })
+
+  it('sends nothing for a credit memo', async () => {
+    seedAssignment()
+    await call('CREATE_AP_CREDIT', { carrierId: CARRIER_ID, memoDate: '2026-10-24', amountCents: 5_000, reason: 'TONU' })
+    expect(sesSend).not.toHaveBeenCalled()
+  })
+})
+
+describe('SET_REMIT_EMAIL', () => {
+  it('saves the address on the payment method the bill is paid under, audited', async () => {
+    seedAssignment({ method: { payeeEmail: null } })
+    const bill = await recordBill({ approve: true })
+    await call('SET_REMIT_EMAIL', { billId: bill.id, email: ' ap@wheeler.test ' })
+    expect((table(TABLES.carrierMethod).get('cpm-1') as Row).payeeEmail).toBe('ap@wheeler.test')
+    expect([...table(TABLES.audit).values()].some((row) => row.action === 'SET_REMIT_EMAIL')).toBe(true)
+  })
+
+  it('refuses something that is not one e-mail address', async () => {
+    seedAssignment()
+    const bill = await recordBill({ approve: true })
+    await expect(call('SET_REMIT_EMAIL', { billId: bill.id, email: 'not an email' })).rejects.toThrow(/valid e-mail/)
+    await expect(call('SET_REMIT_EMAIL', { billId: bill.id, email: 'a@b.com, c@d.com' })).rejects.toThrow(/valid e-mail/)
+  })
+
+  it('sends a carrier with no payment info to the profile rather than inventing a method', async () => {
+    seedAssignment()
+    const bill = await recordBill({ approve: true })
+    table(TABLES.carrierMethod).clear()
+    await expect(call('SET_REMIT_EMAIL', { billId: bill.id, email: 'ap@wheeler.test' })).rejects.toThrow(/no payment info/i)
+  })
+
+  it('is closed to a user who may only invoice', async () => {
+    seedAssignment()
+    const bill = await recordBill({ approve: true })
+    await expect(call('SET_REMIT_EMAIL', { billId: bill.id, email: 'ap@wheeler.test' }, BILLER)).rejects.toThrow(/Forbidden/)
   })
 })
 

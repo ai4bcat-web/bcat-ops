@@ -17,6 +17,8 @@ export interface ApAgingBill {
   shipmentId: string
   billNumber: string | null
   payTo: string
+  /** Where this payee's remittance is e-mailed; empty when none is on file. */
+  remitEmail: string
   dueAt: string
   /** Days past the due date; 0 when not yet due. */
   daysPastDue: number
@@ -52,7 +54,7 @@ const emptyBuckets = (): Record<AgingBucket, number> =>
 export function buildApAgingReport(
   bills: readonly CarrierBillRecord[],
   asOf: string,
-  lookups: { proOf: (bill: CarrierBillRecord) => string; payToOf: (bill: CarrierBillRecord) => string },
+  lookups: { proOf: (bill: CarrierBillRecord) => string; payToOf: (bill: CarrierBillRecord) => string; remitEmailOf?: (bill: CarrierBillRecord) => string },
 ): ApAgingReport {
   const byCarrier = new Map<string, ApAgingCarrier>()
   const report: ApAgingReport = { carriers: [], byBucket: emptyBuckets(), totalCents: 0, pastDueCents: 0, count: 0 }
@@ -80,6 +82,7 @@ export function buildApAgingReport(
       shipmentId: bill.shipmentId,
       billNumber: bill.billNumber ?? null,
       payTo: lookups.payToOf(bill),
+      remitEmail: lookups.remitEmailOf?.(bill) ?? '',
       dueAt: bill.dueAt,
       daysPastDue: late,
       balanceCents: bill.balanceCents,

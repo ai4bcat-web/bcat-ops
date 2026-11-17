@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  renderRemittanceTableEmail,
   INVOICE_EMAIL_BODY,
   milestoneRecipients,
   remittanceRecipients,
@@ -316,5 +317,45 @@ describe('remittanceRecipients', () => {
   it('writes to an address once even when two contacts share it', () => {
     const shared = [carrierContact('ann'), carrierContact('ann2', { email: 'ann@blueline.test' })]
     expect(remittanceRecipients(CARRIER, shared, null)).toEqual(['ann@blueline.test'])
+  })
+})
+
+describe('renderRemittanceTableEmail', () => {
+  const payment = {
+    id: 'app-1', reference: 'ACH-77', paidAt: '2026-11-17T12:00:00.000Z', amountCents: 150_000,
+    applications: [
+      { billId: 'b1', amountCents: 100_000 },
+      { billId: 'b2', amountCents: 50_000 },
+    ],
+  }
+  const bills = [
+    { id: 'b1', billNumber: 'INV-9', billDate: '2026-10-16', shipmentNumber: '14610', loadNumber: null, netCents: 100_000 },
+    { id: 'b2', billNumber: null, billDate: '2026-10-20', shipmentNumber: '14611', loadNumber: null, netCents: 50_000 },
+  ]
+
+  it('opens with the fixed line and tables PRO, invoice number, invoice date and what was paid, with a total', () => {
+    const mail = renderRemittanceTableEmail({ payment, bills, brokerName: 'BCAT Logistics' })
+    expect(mail.body.startsWith('Please find remittance for the below shipments attached:\n')).toBe(true)
+    expect(mail.body).toContain('14610')
+    expect(mail.body).toContain('INV-9')
+    expect(mail.body).toContain('2026-10-16')
+    expect(mail.body).toContain('$1000.00')
+    expect(mail.body).toMatch(/Total\s+\$1500\.00/)
+    expect(mail.subject).toBe('Remittance ACH-77 · BCAT Logistics')
+    expect(mail.html).toContain('<table')
+    expect(mail.html).toContain('Please find remittance for the below shipments attached:')
+  })
+
+  it('shows what was paid on the bill, not the bill net, and never anything of the customer or margin', () => {
+    const mail = renderRemittanceTableEmail({ payment: { ...payment, applications: [{ billId: 'b1', amountCents: 40_000 }] }, bills, brokerName: 'BCAT' })
+    expect(mail.body).toContain('$400.00')
+    expect(mail.body).not.toContain('14611')
+    expect(mail.body.toLowerCase()).not.toMatch(/margin|customer|rate/)
+  })
+
+  it('escapes what a carrier typed into an invoice number', () => {
+    const mail = renderRemittanceTableEmail({ payment, bills: [{ ...bills[0], billNumber: '<b>x</b>' }, bills[1]], brokerName: 'BCAT' })
+    expect(mail.html).not.toContain('<b>x</b>')
+    expect(mail.html).toContain('&lt;b&gt;')
   })
 })

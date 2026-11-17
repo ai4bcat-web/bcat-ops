@@ -34,4 +34,19 @@ describe('sendNoticeEmail', () => {
     expect(sent[0]).toMatchObject({ ConfigurationSetName: undefined, EmailTags: undefined })
     expect(new TextDecoder().decode((sent[0] as { Content: { Raw: { Data: Uint8Array } } }).Content.Raw.Data)).not.toContain('Reply-To')
   })
+
+  it('sends plain text plus an HTML twin as multipart/alternative, with or without an attachment', async () => {
+    const { ses, sent } = fakeSes()
+    const decode = (i: number) => new TextDecoder().decode((sent[i] as { Content: { Raw: { Data: Uint8Array } } }).Content.Raw.Data)
+    await sendNoticeEmail(ses, { from: 'a@b.com', to: ['c@d.com'], subject: 's', body: 'plain', htmlBody: '<table></table>' })
+    expect(decode(0)).toContain('Content-Type: multipart/alternative')
+    expect(decode(0)).toContain('Content-Type: text/html; charset=UTF-8')
+    await sendNoticeEmail(ses, {
+      from: 'a@b.com', to: ['c@d.com'], subject: 's', body: 'plain', htmlBody: '<table></table>',
+      attachments: [{ filename: 'r.pdf', contentType: 'application/pdf', bytes: new Uint8Array([1, 2, 3]) }],
+    })
+    expect(decode(1)).toContain('Content-Type: multipart/mixed')
+    expect(decode(1)).toContain('multipart/alternative')
+    expect(decode(1)).toContain('filename="r.pdf"')
+  })
 })
