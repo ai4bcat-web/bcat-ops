@@ -365,6 +365,8 @@ export const CAR_SHIPPING_KEPT_CODES: readonly string[] = [
   'PROFIT_MISSING',
   'CUSTOMER_BILLING_METHOD',
   'CUSTOMER_AP_EMAIL',
+  // A raised detention / TONU flag holds any load, car shipping included (the charge is not billed yet).
+  'ACCESSORIAL_FLAG_OPEN',
 ]
 
 /** What OTR needs, kept on a factored car-shipping load: the factoring gaps and the POD / rate confirmation. */

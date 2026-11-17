@@ -59,7 +59,6 @@ const TABLES = {
   division: 'Division-test',
   notice: 'ShipmentNotice-test',
   proClaim: 'ProClaim-test',
-  demo: 'DemoRecord-test',
   posting: 'ShipmentPosting-test',
   message: 'ShipmentMessage-test',
   intakeLoad: 'IntakeLoad-test',
@@ -93,7 +92,6 @@ const store = vi.hoisted(() => {
   process.env.SHIPMENT_NOTICE_TABLE_NAME = 'ShipmentNotice-test'
   process.env.PRO_CLAIM_TABLE_NAME = 'ProClaim-test'
   process.env.BUCKET_NAME = 'bcat-test-bucket'
-  process.env.DEMO_RECORD_TABLE_NAME = 'DemoRecord-test'
   process.env.SHIPMENT_MESSAGE_TABLE_NAME = 'ShipmentMessage-test'
   process.env.INTAKE_LOAD_TABLE_NAME = 'IntakeLoad-test'
   process.env.SHIPMENT_POSTING_TABLE_NAME = 'ShipmentPosting-test'
@@ -5935,6 +5933,19 @@ describe('READY_TO_INVOICE', () => {
       expect(table(TABLES.order).get(ids.orderId)!.arStatus).toBe('DOCS_NEEDED')
     })
 
+    it('holds a load with a raised detention or TONU flag, and releases it once the flag is cleared', async () => {
+      const ids = await reviewable()
+      const stamp = { flaggedAt: '2026-11-16T10:00:00.000Z', flaggedBy: 'dispatch@bcatcorp.com' }
+      table(TABLES.shipment).set(ids.shipmentId, { ...table(TABLES.shipment).get(ids.shipmentId)!, tonuFlag: stamp })
+      await expect(ready(ids.orderId, { review: REVIEW })).rejects.toThrow(
+        /^Not ready for accounting: Waiting for TONU: clear the flag or add the charge$/,
+      )
+      expect(table(TABLES.order).get(ids.orderId)!.arStatus).toBe('DOCS_NEEDED')
+      table(TABLES.shipment).set(ids.shipmentId, { ...table(TABLES.shipment).get(ids.shipmentId)!, tonuFlag: null })
+      const result = (await ready(ids.orderId, { review: REVIEW })) as { bundle: { orders: Row[] } }
+      expect(result.bundle.orders[0].arStatus).toBe('UNBILLED')
+    })
+
     it('still exempts imported Aljex history that never went through Load Review', async () => {
       const ids = await reviewable()
       table(TABLES.shipment).set(ids.shipmentId, { ...table(TABLES.shipment).get(ids.shipmentId)!, legacyImported: true })
@@ -8257,40 +8268,6 @@ describe('Numeric PRO scheme (Aljex-exit DECIDED-1)', () => {
     const load = [...table(TABLES.load).values()].find((row) => row.shipmentId === copy.id)!
     expect(load).toMatchObject({ aljexId: '14914', loadNumber: '14914' })
     expect(load.legacyImported).toBeFalsy()
-  })
-})
-
-describe('Step P demo actions', () => {
-  it('GET_DEMO_STATE reports the dev stack and current seed state', async () => {
-    const state = await call('GET_DEMO_STATE', {}, OWNER)
-    expect(state.devStack).toBe(true)
-    expect(state.seedVersion).toBeNull()
-  })
-
-  it('SEED_DEMO_DATA wires through the handler as an admin-only action', async () => {
-    seedCustomer()
-    seedSettings()
-    table('UserProfile-test').set('sub-owner', { id: 'sub-owner', role: 'CARRIER_REP' })
-    const result = await call('SEED_DEMO_DATA', {}, OWNER)
-
-    expect(result.seedVersion).toBe('p8.3')
-    expect(result.created).toBeGreaterThan(0)
-    expect(table(TABLES.demo).size).toBeGreaterThan(0)
-    expect(table(TABLES.customer).size).toBeGreaterThan(0)
-  })
-
-  it('RESET_DEMO_DATA wires through the handler and re-seeds from a blank index', async () => {
-    seedCustomer()
-    seedSettings()
-    table('UserProfile-test').set('sub-owner', { id: 'sub-owner', role: 'CARRIER_REP' })
-    await call('SEED_DEMO_DATA', {}, OWNER)
-    const shipmentCount = table(TABLES.shipment).size
-
-    const result = await call('RESET_DEMO_DATA', {}, OWNER)
-
-    expect(result.seedVersion).toBe('p8.3')
-    expect(table(TABLES.shipment).size).toBeGreaterThanOrEqual(shipmentCount)
-    expect(table(TABLES.shipment).size).toBeGreaterThan(0)
   })
 })
 

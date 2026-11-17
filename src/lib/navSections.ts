@@ -169,7 +169,6 @@ const SETTINGS_CHILDREN: NavChildDef[] = [
   { to: '/tms/brokerage/audit', label: 'Audit log', pageKey: 'audit', tms: true },
   { to: '/compliance', label: 'Compliance', pageKey: 'compliance', badgeKey: 'review' },
   { to: '/platform-health', label: 'Platform health', pageKey: 'platformHealth', adminOnly: true },
-  { to: '/tms/brokerage/demo', label: 'Demo', pageKey: 'tms', tms: true },
 ]
 
 /**

@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { needsLine } from './flowDefaults'
-import { isDemoText } from './demoFlow'
 import {
   buildIntakeDraft, mergeIntakeFields, canMarkReviewed, canMoveToActive, correctedKeys, customerDefaultsOf, emptyIntakeFields, fieldStatusOf, intakeCounts,
-  ensureRequiredStops, INTAKE_ALWAYS_REQUIRED, intakeMissing, intakeRequired, isDemoIntake, patchIntakeFields, toCreateShipmentInput, withCustomerDefaults,
+  ensureRequiredStops, INTAKE_ALWAYS_REQUIRED, intakeMissing, intakeRequired, patchIntakeFields, toCreateShipmentInput, withCustomerDefaults,
 } from './intakeLoad'
 import type { TenderPrefill } from './intakeTender'
 import type { IntakeFields, IntakeLoadRecord, IntakeMeta } from '../types/intake'
@@ -284,21 +283,6 @@ describe('customer defaults for a new load', () => {
     const blankRep = withCustomerDefaults({ ...d, confirmed: [], fields: { ...d.fields, salesRepId: null } }, { defaultSalesRepId: 'other' })
     expect(blankRep.fields.salesRepId).toBe('other')
     expect(blankRep.meta.salesRepId.source).toBe('DEFAULT')
-  })
-})
-
-describe('Demo chip matching', () => {
-  const row = (over: Partial<Parameters<typeof isDemoIntake>[0]> = {}) => ({ fields: { ...emptyIntakeFields(), ...over.fields }, fromName: null, subject: null, divisionCode: null, ...over }) as Parameters<typeof isDemoIntake>[0]
-
-  it('matches the ZZ DEMO naming wherever the demo script puts it, and nothing else', () => {
-    expect(isDemoText('ZZ DEMO Customer 695311')).toBe(true)
-    expect(isDemoText(null, 'ZZ_DEMO_1793791695311')).toBe(true)
-    expect(isDemoText('ZZDEMO-695311')).toBe(true)
-    expect(isDemoText('zz demo shipper')).toBe(true)
-    expect(isDemoText('Acme Foods', 'Demo Dispatcher', 'ZZ Carrier', null, undefined)).toBe(false)
-    expect(isDemoIntake(row({ fields: { ...emptyIntakeFields(), customerName: 'ZZ DEMO Customer 1' } }))).toBe(true)
-    expect(isDemoIntake(row({ divisionCode: 'ZZ_DEMO_17' }))).toBe(true)
-    expect(isDemoIntake(row({ subject: 'Tender 123', fromName: 'Real Shipper' }))).toBe(false)
   })
 })
 

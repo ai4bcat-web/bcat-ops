@@ -27,6 +27,8 @@ import {
 import { gateLoadIds, isOutsideRateConKey, isOwnFleetLoad, requiredDocTypesFor } from '../../../src/lib/shipmentDocuments'
 import { customerDocsNotRequired, customerFactorsForOtr, rateConRequired } from '../../../src/lib/reviewRequirements'
 import { isCarShipperLoad } from '../../../src/lib/carShipper'
+import { parseDetentionFlag } from '../../../src/lib/detentionFlag'
+import { parseTonuFlag } from '../../../src/lib/tonuFlag'
 import { loadExtraDocTypes } from '../../../src/lib/loadRequiredDocs'
 import type {
   ReleaseGateDocument,
@@ -238,9 +240,15 @@ export async function loadReleaseGateInput(
     loadRevDivision,
   )
 
+  // A raised "waiting for detention" / "waiting for TONU" flag holds the load out of billing until it is cleared.
+  const accessorialFlags: ('detention' | 'tonu')[] = []
+  if (parseDetentionFlag(shipment.detentionFlag) != null) accessorialFlags.push('detention')
+  if (parseTonuFlag(shipment.tonuFlag) != null) accessorialFlags.push('tonu')
+
   return {
     ownFleet,
     ownFleetTenderOnLoad,
+    accessorialFlags,
     // One rule for every load: car shipping needs none unless the customer factors (OTR), see rateConRequired.
     customerFactors: loadFactors,
     rateConRequired: rateConRequired({

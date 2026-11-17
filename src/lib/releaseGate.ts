@@ -31,6 +31,7 @@ export type ReleaseGateReasonCode =
   | 'DRIVER_MISSING'
   | 'CARRIER_RATE_MISSING'
   | 'OPEN_EXCEPTIONS'
+  | 'ACCESSORIAL_FLAG_OPEN'
 
 export interface ReleaseGateReason {
   code: ReleaseGateReasonCode
@@ -134,6 +135,12 @@ export interface ReleaseGateInput {
    * still asks for (Ryne 2026-11-16: only delivered there, plus OTR's POD and rate confirmation when factored).
    */
   customerFactors?: boolean
+  /**
+   * Billing flags still raised on the shipment (Ryne 2026-11-16): `detention` / `tonu` while a "Waiting for detention" or
+   * "Waiting for TONU" flag is open. The load is held out of billing until someone clears the flag or adds the charge.
+   * Absent or empty = nothing raised. Applies to every load, imported history and car shipping included.
+   */
+  accessorialFlags?: readonly ('detention' | 'tonu')[]
 }
 
 export interface ReleaseGateResult {
@@ -156,6 +163,12 @@ const ALWAYS_REQUIRED_DOC_TYPES = ['POD']
  * a customer's list or the org default names it. It still attaches to invoices when filed.
  */
 export const NEVER_BLOCKING_DOC_TYPES: readonly string[] = ['BOL']
+
+/** The sentence for a held load: which flag, and the two ways out. Shared with Load Review's row-derived reasons. */
+export function accessorialFlagMessage(flags: readonly ('detention' | 'tonu')[]): string {
+  const names = flags.map((f) => (f === 'tonu' ? 'TONU' : 'detention'))
+  return `Waiting for ${names.join(' and ')}: clear the flag or add the charge`
+}
 
 /** Eight call sites build this shape; they stay in lockstep through here. */
 function reason(code: ReleaseGateReasonCode, detail: string | null, message: string): ReleaseGateReason {
@@ -307,6 +320,12 @@ export function evaluateReleaseGate(input: ReleaseGateInput): ReleaseGateResult 
   const open = Number.isFinite(input.openIncidentCount) ? Math.max(0, Math.trunc(input.openIncidentCount)) : 0
   if (open > 0) {
     missing.push(reason('OPEN_EXCEPTIONS', String(open), `${open} open exception${open === 1 ? '' : 's'}`))
+  }
+
+  // A raised detention / TONU flag holds the load: the charge is not on the invoice yet (Ryne 2026-11-16).
+  const flags = input.accessorialFlags ?? []
+  if (flags.length > 0) {
+    missing.push(reason('ACCESSORIAL_FLAG_OPEN', flags.join(','), accessorialFlagMessage(flags)))
   }
 
   // Car shipping (reviewRequirements.ts): the gate asks only that it delivered, plus OTR's documents when factored.

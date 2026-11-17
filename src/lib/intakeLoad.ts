@@ -18,7 +18,6 @@ import type {
   IntakeSource,
   IntakeStop,
 } from '../types/intake'
-import { isDemoText } from './demoFlow'
 import type { TenderPrefill, TenderStopPrefill } from './intakeTender'
 import {
   REQUIRED_FIELD_CATALOG,
@@ -174,11 +173,6 @@ export function customerDefaultsOf(customer: {
     salesRepId: defaultSalesRepIdOf(customer),
     billToId: clean(customer?.defaultBillToId) ?? defaultBillToIdOf(customer),
   }
-}
-
-/** The "Demo" chip: an intake load carrying the ZZ DEMO marker in its customer, sender, subject or division. */
-export function isDemoIntake(row: Pick<IntakeLoadRecord, 'fields' | 'fromName' | 'subject' | 'divisionCode'>): boolean {
-  return isDemoText(row.fields.customerName, row.fields.reference, row.fromName, row.subject, row.divisionCode)
 }
 
 const MERGE_SCALARS = ['customerName', 'reference', 'pickupNumber', 'deliveryNumber', 'shipmentType', 'equipmentType', 'commodity', 'weightLb', 'customerRateCents'] as const

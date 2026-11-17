@@ -218,6 +218,21 @@ describe('evaluateReleaseGate', () => {
     expect(gate.missing).toEqual([{ code: 'OPEN_EXCEPTIONS', detail: '2', message: '2 open exceptions' }])
   })
 
+  it('holds a load with a raised detention or TONU flag until it is cleared (Ryne 2026-11-16)', () => {
+    expect(evaluateReleaseGate(input({ accessorialFlags: [] }))).toEqual({ ok: true, missing: [] })
+    expect(evaluateReleaseGate(input({ accessorialFlags: ['detention'] })).missing).toEqual([
+      { code: 'ACCESSORIAL_FLAG_OPEN', detail: 'detention', message: 'Waiting for detention: clear the flag or add the charge' },
+    ])
+    expect(messages(input({ accessorialFlags: ['tonu'] }))).toEqual(['Waiting for TONU: clear the flag or add the charge'])
+    expect(messages(input({ accessorialFlags: ['detention', 'tonu'] }))).toEqual(['Waiting for detention and TONU: clear the flag or add the charge'])
+  })
+
+  it('holds imported history and car shipping on a raised flag too', () => {
+    expect(evaluateReleaseGate(input({ shipment: { status: 'DELIVERED', legacyImported: true }, accessorialFlags: ['tonu'] })).ok).toBe(false)
+    const car = evaluateReleaseGate(input({ shipment: { status: 'DELIVERED', revDivision: 'CAR_SHIPPING' }, accessorialFlags: ['detention'] }))
+    expect(car.missing.map((m) => m.code)).toEqual(['ACCESSORIAL_FLAG_OPEN'])
+  })
+
   it('never lets an invoice-early order out before the truck has delivered', () => {
     // `invoiceEarly` is not an input here, and that is the point: step R removed
     // every flag that admitted an undelivered order.

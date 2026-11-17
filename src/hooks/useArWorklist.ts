@@ -22,6 +22,8 @@ import { customerDisplayName, isCustomerUnresolved } from '@/lib/customerResolut
 import { isShipmentVoided } from '@/lib/shipmentVoid'
 import type { OrderRecord, ShipmentRecord } from '@/types/tms'
 import { deliveredTimeOf } from '@/lib/deliveredAt'
+import { openAccessorialFlags } from '@/lib/loadReview'
+import { accessorialFlagMessage } from '@/lib/releaseGate'
 
 const POLL_MS = 60_000
 
@@ -119,6 +121,9 @@ export function useArWorklist(tab: ArWorklistTab): ArWorklist {
         // record, before the release gate ever runs, so the row says so rather than
         // leaving the biller to discover it at the refusal.
         if (isCustomerUnresolved(order)) reasons.push('No customer linked')
+        // A raised detention / TONU flag holds the load until it is cleared or the charge is added (the release gate says the same).
+        const heldFlags = shipment ? openAccessorialFlags(shipment) : []
+        if (heldFlags.length > 0) reasons.push(accessorialFlagMessage(heldFlags))
 
         return {
           order,

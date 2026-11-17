@@ -115,7 +115,7 @@ describe('buildNavSections', () => {
     expect(kids('Accounting')).toEqual(['Accounts Receivable', 'Accounts Payable', 'Payments Received', 'Vendors'])
     expect(kids('Settings')).toEqual([
       'General & automation', 'Company', 'Divisions & ownership', 'Users & roles', 'Integrations', 'AI agents',
-      'Spot quoter & e-mail', 'Carrier Sales', 'Commissions', 'Reports', 'Audit log', 'Compliance', 'Platform health', 'Demo',
+      'Spot quoter & e-mail', 'Carrier Sales', 'Commissions', 'Reports', 'Audit log', 'Compliance', 'Platform health',
     ])
     // Every child lands somewhere different.
     const childTargets = pinned.flatMap((i) => [...(i.children ?? []), ...(i.childGroups ?? []).flatMap((g) => g.children)].map((c) => c.to))
@@ -139,7 +139,7 @@ describe('buildNavSections', () => {
     // and the accounting pages are granted one by one (Ryne 2026-11-12).
     expect(labels(pinned)).toEqual(['Active shipments', 'Profiles', 'Settings'])
     const settings = pinned.find((i) => i.label === 'Settings')
-    expect(labels(settings?.children)).toEqual(['General & automation', 'Commissions', 'Reports', 'Audit log', 'Demo'])
+    expect(labels(settings?.children)).toEqual(['General & automation', 'Commissions', 'Reports', 'Audit log'])
     expect(sections).toEqual([])
     expect(businesses).toEqual([{ key: 'BROKERAGE' }])
   })

@@ -31,7 +31,6 @@ vi.mock('@/features/audit/AuditPage', () => ({ AuditPage: () => <p>audit body</p
 vi.mock('@/features/tms/settings/DivisionsPage', () => ({ default: () => <p>divisions body</p> }))
 vi.mock('@/features/tms/integrations/IntegrationsTab', () => ({ IntegrationsTab: () => <p>integrations body</p> }))
 vi.mock('@/features/tms/settings/AiAgentsPage', () => ({ default: () => <p>ai agents body</p> }))
-vi.mock('./DemoPage', () => ({ DemoPage: () => <p>demo body</p> }))
 vi.mock('@/features/tms/settings/SpotQuoterSettingsPage', () => ({ SpotQuoterSettingsPage: () => <p>spot quoter body</p> }))
 vi.mock('@/features/tms/settings/CarrierSalesSettingsPage', () => ({ CarrierSalesSettingsPage: () => <p>carrier sales body</p> }))
 vi.mock('./company/CompanyTab', () => ({ default: () => <p>company body</p>, CompanyTab: () => <p>company body</p> }))
@@ -67,7 +66,7 @@ describe('BrokeragePage', () => {
     expect(screen.getByRole('heading', { name: 'Settings', level: 1 })).toBeInTheDocument()
     expect(tabNames()).toEqual([
       'Settings', 'Users', 'Commissions', 'Reports', 'Audit', 'Divisions & ownership',
-      'Integrations', 'AI Agents', 'Spot quoter & e-mail', 'Carrier Sales', 'Company', 'Demo',
+      'Integrations', 'AI Agents', 'Spot quoter & e-mail', 'Carrier Sales', 'Company',
     ])
     expect(screen.getByText('settings body')).toBeInTheDocument()
   })
@@ -76,7 +75,7 @@ describe('BrokeragePage', () => {
     auth.grants = ['tms']
     draw()
 
-    expect(tabNames()).toEqual(['Settings', 'Commissions', 'Reports', 'Audit', 'Demo'])
+    expect(tabNames()).toEqual(['Settings', 'Commissions', 'Reports', 'Audit'])
   })
 
   it('never draws Integrations for a broker holding only the tms grant', () => {
@@ -119,6 +118,14 @@ describe('BrokeragePage', () => {
     await waitFor(() => expect(screen.getByText('audit body')).toBeInTheDocument())
     expect(screen.getByRole('tab', { name: 'Audit' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'false')
+  })
+
+  it('sends an old /demo bookmark to Settings, the page home', () => {
+    auth.isAdmin = true
+    draw('/tms/brokerage/demo')
+
+    expect(screen.getByText('settings body')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('refuses a desk a grant does not open even when the URL is typed', () => {

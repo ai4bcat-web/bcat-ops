@@ -8910,25 +8910,23 @@ export async function saveQuoteSettings(input: Partial<QuoteSettings> & { expect
   return shipmentAction<{ settings: TmsSettings }>('SAVE_QUOTE_SETTINGS', input)
 }
 
-// ── Step P — the end-to-end demo flow ────────────────────────────────────────
+// ── Step P — postings, build gate, carrier offers ────────────────────────────────────────
 //
 // Every write below is an action on a Lambda that already owns the records it
-// touches: postings, the build gate, carrier offers, the demo seed and the market
+// touches: postings, the build gate, carrier offers and the market
 // rate go to `tmsShipmentActions`, which owns Shipment/Order/Load/Quote; the
 // shipment thread, the check-call agent and the POD review go to
 // `tmsTrackingActions`, which is the only Lambda wired to Twilio and SES for a
 // shipment. Nothing here writes a record from the browser.
 
 export type {
-  ShipmentPostingRecord, ShipmentMessageRecord, DemoRecordRow, ShipmentBuildState,
+  ShipmentPostingRecord, ShipmentMessageRecord, ShipmentBuildState,
   PostingStatus, ShipmentMessageChannel, ShipmentMessageKind, ShipmentMessageParty,
   ShipmentMessageStatus, CheckCallPlan, CheckCallChannel, CheckCallMilestone, RateViewAnswer,
 } from '@/types/tms'
 import type {
-  ShipmentPostingRecord, ShipmentMessageRecord, DemoRecordRow, CheckCallPlan, RateViewAnswer, TrackingAutomationSettings,
+  ShipmentPostingRecord, ShipmentMessageRecord, CheckCallPlan, RateViewAnswer, TrackingAutomationSettings,
 } from '@/types/tms'
-import type { DemoChecklistFacts } from '@/lib/demoFlow'
-export type { DemoChecklistFacts, DemoStepDef, DemoStepKey, DemoChecklistRow } from '@/lib/demoFlow'
 
 const POSTING_FIELDS = `
   id shipmentId loadId provider status mode boardPostingId message
@@ -9236,30 +9234,6 @@ export async function reviewShipmentPod(input: {
   documentId: string
 }): Promise<PodReviewOutcome> {
   return trackingAction<PodReviewOutcome>('REVIEW_SHIPMENT_POD', input)
-}
-
-// ── The demo seed and the Demo page (tmsShipmentActions) ─────────────────────
-
-export interface DemoState {
-  seedVersion: string | null
-  seededAt: string | null
-  devStack: boolean
-  records: DemoRecordRow[]
-  facts: DemoChecklistFacts
-}
-
-export async function getDemoState(): Promise<DemoState> {
-  return shipmentAction<DemoState>('GET_DEMO_STATE', {})
-}
-
-/** owner/ADMIN, dev stack only. Puts every seeded record back the way it started. */
-export async function resetDemoData(): Promise<{ counts: Record<string, number>; seedVersion: string }> {
-  return shipmentAction<{ counts: Record<string, number>; seedVersion: string }>('RESET_DEMO_DATA', {})
-}
-
-/** owner/ADMIN, dev stack only. Mints the P1 seed through the normal actions. */
-export async function seedDemoData(input: { reset?: boolean } = {}): Promise<{ counts: Record<string, number>; seedVersion: string }> {
-  return shipmentAction<{ counts: Record<string, number>; seedVersion: string }>('SEED_DEMO_DATA', input)
 }
 
 // ── Commissions (tmsFinanceActions, Step I) ──────────────────────────────────
