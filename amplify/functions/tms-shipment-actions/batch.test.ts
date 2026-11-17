@@ -15,6 +15,7 @@ function dependencies(): BatchShipmentDeps {
     },
     setSalesRep: vi.fn(), setRevTag: vi.fn(), assignCarrierRep: vi.fn(), setStatus: vi.fn(), writeAudit: vi.fn(),
     pushToReview: vi.fn(async () => ({ reasons: [], already: false })),
+    returnToActive: vi.fn(async () => ({ already: false })),
     getLoadsOf: vi.fn(async () => []),
     assignAsset: vi.fn(),
   }
@@ -107,6 +108,21 @@ describe('batchShipmentTask', () => {
       expect(deps.writeAudit).toHaveBeenCalledWith('SHIPMENT', 'BATCH', 'BATCH_SHIPMENT_TASK', caller, {
         task: 'PUSH_TO_LOAD_REVIEW', count: 3, okCount: 2, failCount: 1,
       })
+    })
+
+    it('moves rows back to Active with the note, reports a refused (invoiced) row, and keeps going', async () => {
+      const deps = dependencies()
+      deps.returnToActive = vi.fn(async (id) => {
+        if (id === 'b') throw new Error('This load is already invoiced. Revise or void the invoice from Accounts Receivable instead; it cannot go back to Active.')
+        return { already: id === 'c' }
+      })
+      const { results } = await batchShipmentTask(deps, { task: 'RETURN_TO_ACTIVE', shipmentIds: ['a', 'b', 'c'], params: { note: ' wrong time ' } }, caller)
+      expect(deps.returnToActive).toHaveBeenCalledWith('a', 'wrong time', caller)
+      expect(results.map((r) => [r.shipmentId, r.ok, r.message])).toEqual([
+        ['a', true, null],
+        ['b', false, 'This load is already invoiced. Revise or void the invoice from Accounts Receivable instead; it cannot go back to Active.'],
+        ['c', true, 'Was not in Load Review'],
+      ])
     })
 
     it('carries a release refusal as a per-row reason list', async () => {

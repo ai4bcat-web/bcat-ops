@@ -3416,13 +3416,48 @@ async function pushToReview(shipmentId: string, caller: Caller): Promise<{ reaso
       updatedBy: caller.email,
       updatedAt: now,
       version: (numberOrNull(shipment.version) ?? 1) + 1,
-    }, null)],
+      // A person pushing it again lifts the hold a "Move back to Active" left, so the auto-push may run again later.
+    }, null, caller.email === SYSTEM_CALLER_EMAIL ? {} : { remove: ['loadReviewHeldAt', 'loadReviewHeldBy', 'loadReviewHeldNote'] })],
     'load review push',
   )
   await writeAudit('SHIPMENT', shipmentId, 'PUSH_TO_LOAD_REVIEW', caller, { pushedAt: now })
   // Imported history is checked like any other load once it is in review: work its cached document gate out again.
   await recacheAfterReviewPush(documentDeps, shipmentId, now).catch((err) => console.error('[push-to-review] doc gate recache failed', shipmentId, String(err)))
   return { reasons: [], already: false }
+}
+
+/**
+ * Move a shipment back out of Load Review to the Active board (Ryne 2026-11-16). Reverses the push stamp so the load can be fixed and
+ * pushed again, and leaves a hold so the automatic push does not bounce it straight back. Only a load still waiting in review is
+ * returned: once it is released to billing or invoiced, the invoice is the thing to revise or void.
+ */
+async function returnToActive(shipmentId: string, note: string | null, caller: Caller): Promise<{ already: boolean }> {
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  assertNotVoided(shipment)
+  const orders = await queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  const invoiced = orders.some((o) => o.invoiceId || o.arStatus === 'UNPAID' || o.arStatus === 'PAID')
+  if (invoiced) {
+    throw new Error('This load is already invoiced. Revise or void the invoice from Accounts Receivable instead; it cannot go back to Active.')
+  }
+  if (orders.some((o) => o.arStatus && o.arStatus !== 'DOCS_NEEDED')) {
+    throw new Error('This load was already moved to billing (Ready to Invoice). It is no longer in Load Review.')
+  }
+  if (!shipment.loadReviewPushedAt) return { already: true }
+  const now = nowIso()
+  await transact(
+    [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+      loadReviewHeldAt: now,
+      loadReviewHeldBy: caller.email,
+      loadReviewHeldNote: note,
+      updatedBy: caller.email,
+      updatedAt: now,
+      version: (numberOrNull(shipment.version) ?? 1) + 1,
+    }, typeof shipment.updatedAt === 'string' ? shipment.updatedAt : null, { remove: ['loadReviewPushedAt', 'loadReviewPushedBy'] })],
+    'load review return',
+  )
+  await writeAudit('SHIPMENT', shipmentId, 'RETURN_TO_ACTIVE', caller, { returnedAt: now, note, previousPushedAt: shipment.loadReviewPushedAt })
+  return { already: false }
 }
 
 /**
@@ -3434,6 +3469,8 @@ async function autoPushToReview(shipmentId: string, caller: Caller): Promise<boo
   try {
     const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
     if (!shipment || shipment.status !== 'DELIVERED' || shipment.loadReviewPushedAt) return false
+    // Moved back to Active by a person: it stays there until somebody pushes it again.
+    if (typeof shipment.loadReviewHeldAt === 'string' && shipment.loadReviewHeldAt) return false
     const done = await pushToReview(shipmentId, { ...caller, email: SYSTEM_CALLER_EMAIL })
     return done.reasons.length === 0 && !done.already
   } catch (err) {
@@ -9691,6 +9728,7 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
         setStatus: setShipmentStatus,
         writeAudit,
         pushToReview,
+        returnToActive,
       }, input, caller)) }
     case 'TEST_OWNERSHIP_RULES':
       return testOwnershipRules(input)

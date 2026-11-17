@@ -2074,6 +2074,10 @@ const schema = a.schema(stageTypes({
       // Step AP: Load Review push. Written by tms-shipment-actions PUSH_TO_LOAD_REVIEW only.
       loadReviewPushedAt: a.datetime(),
       loadReviewPushedBy: a.string(),
+      // Ryne 2026-11-16: a person moved the load back to Active; the auto-push to Load Review waits for a manual push.
+      loadReviewHeldAt: a.datetime(),
+      loadReviewHeldBy: a.string(),
+      loadReviewHeldNote: a.string(),
       // Aljex codes kept verbatim so Settings > Users (AljexCodeMap) can map them to people
       // later without a re-import. `salesRepId` stays null until a mapping is applied.
       salesRepCode:    a.string(),

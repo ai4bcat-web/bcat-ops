@@ -19,6 +19,7 @@ import { StatusPill } from '@/features/shipments/StatusPill'
 import { LoadReviewDocuments } from './LoadReviewDocuments'
 import { LoadReviewCharges } from './LoadReviewCharges'
 import { ReviewFixPanel } from './ReviewFixPanel'
+import { ReturnToActiveDialog } from './ReturnToActiveDialog'
 import { FIELD_ANCHOR, anchorForReason, scrollToFix } from './reviewFix'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
@@ -78,6 +79,7 @@ export function LoadReviewDrawer({ row, focus, onClose, onRefresh, onMoved, onFa
   const [saveErrors, setSaveErrors] = useState<ReadonlyMap<string, string>>(new Map())
   const [reloadSignal, setReloadSignal] = useState(0)
   const [confirmClose, setConfirmClose] = useState(false)
+  const [returnOpen, setReturnOpen] = useState(false)
   const registerPending = useCallback((key: string, save: PendingSave | null) => {
     if (save) pending.current.set(key, save)
     else pending.current.delete(key)
@@ -202,10 +204,12 @@ export function LoadReviewDrawer({ row, focus, onClose, onRefresh, onMoved, onFa
         <TmsButton variant={unsaved ? 'secondary' : 'primary'} disabled={busy || !result || !verdict.ok || released || !!error || !canRelease || unsaved > 0} title={unsaved ? 'Save your changes first' : canRelease ? undefined : LOAD_REVIEW_GRANT_MESSAGE} onClick={() => void move()}>Move to billing</TmsButton>
         <span className="lr-footer-spacer" />
         {shipmentLink('overview', 'Open shipment')}
+        <TmsButton variant="ghost" disabled={busy || released} data-testid="lr-return-active" title="Send this load back to the Active shipments board" onClick={() => setReturnOpen(true)}>Move back to Active</TmsButton>
         <TmsButton variant="ghost" disabled={busy || !result} onClick={() => void rereview()}>Re-check</TmsButton>
         <TmsButton variant="ghost" onClick={requestClose}>Close</TmsButton>
       </div>
     </div>}>
+    <ReturnToActiveDialog open={returnOpen} onOpenChange={setReturnOpen} ids={[row.id]} label={row.number} onDone={() => { void onRefresh(); onClose() }} />
     <DetentionSection shipment={row} onChanged={() => { void onRefresh() }} />
     {!result && !error && <p role="status">Checking release requirements…</p>}
     {error && <ReleaseGateList messages={releaseGateMessages(error) ?? [error]} />}
