@@ -477,38 +477,6 @@ function drawDetails(ctx: Ctx): void {
   }
 }
 
-/** Revisions only: when this version was issued and what changed since the one before it. */
-function drawRevision(ctx: Ctx): void {
-  const revision = ctx.input.revision
-  if (!revision) return
-  const { fonts } = ctx
-  const size = 8.5
-  const issued = `Revision ${revision.number} issued ${stampOf(revision.at)} (EST). This replaces revision ${revision.number - 1}; only this version can be signed.`
-  const lines = [
-    ...wrapMono(issued, 100),
-    ...(revision.changes.length
-      ? revision.changes.flatMap((c) => wrapMono(`- ${c}`, 100))
-      : ['- Changes from the previous revision were not recorded.']),
-  ]
-  let rest = lines
-  let first = true
-  while (rest.length) {
-    const needed = 8.8 + 2 * MONO_ROW + 10.7
-    if (ctx.y + needed > CONTENT_BOTTOM) newPage(ctx)
-    const top = ctx.y
-    box(ctx.page, 20.4, top, 595.3, top + 8.8, hatch)
-    put(ctx.page, first ? `CHANGES SINCE REV ${revision.number - 1}` : `CHANGES SINCE REV ${revision.number - 1} (CONT.)`, 306, top + 0.5, fonts.helvBold, 8, { align: 'center', color: revised })
-    const room = Math.max(1, Math.floor((CONTENT_BOTTOM - top - 8.8 - 10.7) / MONO_ROW))
-    const chunk = rest.slice(0, room)
-    rest = rest.slice(room)
-    const bottom = top + 8.8 + chunk.length * MONO_ROW + 10.7
-    box(ctx.page, 20.4, top + 8.8, 595.3, bottom)
-    chunk.forEach((l, i) => put(ctx.page, l, 28, top + 8.8 + 8.7 + i * MONO_ROW, fonts.mono, size))
-    ctx.y = bottom + SECTION_GAP
-    first = false
-  }
-}
-
 /** `STOP_REF` (a stored reference code) prints as the reference's own "Ref #"; other codes lose their underscores. */
 function refLabelOf(label: string): string {
   const text = foldAscii(label).replace(/_/g, ' ').trim()
@@ -610,7 +578,8 @@ export async function buildRateConPdf(input: RateConInput): Promise<Uint8Array> 
   drawHeader(ctx)
   drawFooter(ctx)
   drawDetails(ctx)
-  drawRevision(ctx)
+  // A revision prints only its "REVISED - REV n" header. What changed since the last version is kept on the
+  // assignment (rateConSnapshot.history) for staff, never printed on the carrier's copy (Ryne 2026-11-17).
 
   let picks = 0
   let drops = 0

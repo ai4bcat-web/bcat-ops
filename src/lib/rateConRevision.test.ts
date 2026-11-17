@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  parseRateConSnapshot, rateConChanges, rateConRevisionFor, rateConSnapshotOf, rateConThreadHeaders, revisedRateConSubject,
+  parseRateConSnapshot, rateConChanges, rateConRevisionFor, rateConSnapshotOf, rateConThreadHeaders, revisedRateConSubject, withRateConHistory,
   type RateConSnapshot,
 } from './rateConRevision'
 import type { RateConInput } from './carrierRateCon'
@@ -64,6 +64,24 @@ describe('rateConRevisionFor', () => {
     expect(rateConRevisionFor(1, null, snap)).toBeNull()
     expect(rateConRevisionFor(2, snap, snap)).toMatchObject({ number: 2, changes: [] })
     expect(rateConRevisionFor(3, null, snap)).toMatchObject({ number: 3, changes: [] })
+  })
+})
+
+describe('withRateConHistory', () => {
+  const snap = (changes: string[]) => ({ charges: [], totalCents: 0, stops: [], equipmentType: null, commodity: null, weightLbs: null, pieces: null, miles: null, notes: '', truckNumber: null, trailerNumber: null, driverName: null, changes })
+
+  it('appends this version to the stored log and ignores any history the browser sent', () => {
+    const stored = { ...snap(['x']), history: [{ version: 2, at: '2026-11-13T21:00:00Z', by: 'a@b.com', changes: ['Driver none -> Pat'] }] }
+    const browser = { ...snap(['Truck # 01 -> 02']), history: [{ version: 9, at: 'forged', by: null, changes: ['forged'] }] }
+    const out = withRateConHistory(browser, stored, 3, '2026-11-17T18:30:00Z', 'ryne@bcatcorp.com')
+    expect(out.history?.map((h) => h.version)).toEqual([2, 3])
+    expect(out.history?.[1]).toEqual({ version: 3, at: '2026-11-17T18:30:00Z', by: 'ryne@bcatcorp.com', changes: ['Truck # 01 -> 02'] })
+  })
+
+  it('a first send logs nothing and a re-stored version replaces its own entry', () => {
+    expect(withRateConHistory(snap([]), null, 1, 't', null).history).toEqual([])
+    const stored = { ...snap([]), history: [{ version: 2, at: 'old', by: null, changes: ['old'] }] }
+    expect(withRateConHistory(snap(['new']), stored, 2, 'now', null).history).toEqual([{ version: 2, at: 'now', by: null, changes: ['new'] }])
   })
 })
 
