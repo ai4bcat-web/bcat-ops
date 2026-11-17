@@ -12,7 +12,7 @@
  * is one that has not been submitted (no `otrInvoiceId`). A submitted PRO is refused.
  */
 import { assertString, optionalString, type Caller } from '../_shared/actionInputs'
-import { factoringRowFor, whyNotFactorable } from '../../../src/lib/factorHandoff'
+import { factoringRowFor, needsFactorReaddress, whyNotFactorable } from '../../../src/lib/factorHandoff'
 import {
   RELEASE_GATE_ERROR_PREFIX,
   evaluateReleaseGate,
@@ -29,6 +29,7 @@ import type {
   CustomerRecord,
   InvoiceRecord,
   OrderRecord,
+  RemitTo,
   ShipmentLoad,
   ShipmentRecord,
 } from '../../../src/types/tms'
@@ -57,6 +58,7 @@ import {
   type Row,
 } from './store'
 import { stopsList } from '../../../src/lib/stopPlace'
+import { rerenderInvoicePdf } from './invoices'
 
 /**
  * The factor's remit-to name from org settings, when one is configured.
@@ -64,12 +66,23 @@ import { stopsList } from '../../../src/lib/stopPlace'
  * Narrowed rather than cast: `factorRemitTo` is a free-form JSON column, and a blob
  * without a name is exactly the case that must read as "no factor configured".
  */
-async function configuredFactorRemitToName(): Promise<string | null> {
+async function configuredFactorRemitTo(): Promise<RemitTo | null> {
   const settings = await getSettings()
   const remitTo = settings.factorRemitTo
   if (!remitTo || typeof remitTo !== 'object' || !('name' in remitTo)) return null
   const name = remitTo.name
-  return typeof name === 'string' && name.trim() ? name.trim() : null
+  if (typeof name !== 'string' || !name.trim()) return null
+  const blob = remitTo as Record<string, unknown>
+  return {
+    name: name.trim(),
+    address: (blob.address as RemitTo['address']) ?? null,
+    email: typeof blob.email === 'string' ? blob.email : null,
+    noticeText: typeof blob.noticeText === 'string' ? blob.noticeText : null,
+  }
+}
+
+async function configuredFactorRemitToName(): Promise<string | null> {
+  return (await configuredFactorRemitTo())?.name ?? null
 }
 
 /**
@@ -142,6 +155,10 @@ export async function sendToFactor(input: Row, caller: Caller): Promise<Row> {
   const factorRemitToName = await configuredFactorRemitToName()
   const refusal = whyNotFactorable({ invoice, order, shipment, customer, load, existingRow, factorRemitToName })
   if (refusal) throw new Error(refusal)
+  // A draft issued while the customer was billed manually prints our own (or a blank) remit-to. It never
+  // went out, so it is re-addressed to the factor here, in the same write that links it to the queue.
+  const readdress = needsFactorReaddress(invoice, factorRemitToName)
+  const factorRemitTo = readdress ? await configuredFactorRemitTo() : null
   const release = await factorReleaseGate(invoice, {
     shipment: shipmentRow,
     order: orderRow,
@@ -194,6 +211,16 @@ export async function sendToFactor(input: Row, caller: Caller): Promise<Row> {
       {
         factored: true,
         factoringItemId: queueRow.id,
+        ...(factorRemitTo
+          ? {
+              remitTo: {
+                name: factorRemitTo.name.trim(),
+                address: factorRemitTo.address ?? null,
+                email: factorRemitTo.email ?? null,
+                noticeText: factorRemitTo.noticeText ?? null,
+              },
+            }
+          : {}),
         updatedAt: now,
         updatedBy: caller.email,
         version: (invoice.version ?? 1) + 1,
@@ -215,7 +242,13 @@ export async function sendToFactor(input: Row, caller: Caller): Promise<Row> {
     factoringItemId: queueRow.id,
     proNumber: queueRow.proNumber,
     reused: Boolean(existingRow),
+    ...(factorRemitTo ? { readdressedTo: factorRemitTo.name, was: invoice.remitTo?.name ?? null } : {}),
   })
+  if (factorRemitTo) {
+    // The PDF prints the remit-to, so it is redrawn. Best effort like every render: a failure leaves the
+    // invoice as written, and Regenerate PDF repairs it.
+    await rerenderInvoicePdf(invoiceId, caller).catch(() => undefined)
+  }
 
   return {
     factoringItem: (await getById(FACTORING_ITEM_TABLE_NAME, queueRow.id)) ?? {},

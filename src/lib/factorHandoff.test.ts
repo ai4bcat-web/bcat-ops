@@ -8,7 +8,7 @@
  * the PO the broker will look for — plus every reason the office is told no.
  */
 import { describe, it, expect } from 'vitest'
-import { factoringRowFor, invoicePoNumber, otrFieldsFor, whyNotFactorable } from './factorHandoff'
+import { factoringRowFor, invoicePoNumber, isUnsentDraft, needsFactorReaddress, otrFieldsFor, whyNotFactorable } from './factorHandoff'
 import type { FactorLoadSlice } from './factorHandoff'
 import type { FactoringItem, Stop } from '../types'
 import type {
@@ -329,5 +329,42 @@ describe('brokered loads are never factored (Ryne 2026-11-16)', () => {
       load: LOAD,
     })
     expect(refusal).toMatch(/brokered load/)
+  })
+})
+
+describe('an invoice addressed to us instead of the factor', () => {
+  const clean = {
+    order: order(),
+    shipment: shipment(),
+    customer: customer(),
+    load: LOAD,
+    factorRemitToName: 'OTR Solutions',
+  }
+
+  it('is not refused while it is an unsent draft, because Send to Factor re-addresses it', () => {
+    const draft = invoice({ remitTo: { name: '', address: null, email: null, noticeText: null } })
+    expect(whyNotFactorable({ ...clean, invoice: draft })).toBeNull()
+    expect(needsFactorReaddress(draft, 'OTR Solutions')).toBe(true)
+  })
+
+  it('is refused once it has been sent, marked sent, paid or queued', () => {
+    const own = { name: 'BCAT Logistics LLC', address: null, email: null, noticeText: null }
+    for (const over of [
+      { sentAt: '2026-11-16T12:00:00.000Z', sentCount: 1 },
+      { markedSentAt: '2026-11-16T12:00:00.000Z' },
+      { paidCents: 5_000 },
+      { factoringItemId: 'S000001-1' },
+    ]) {
+      const sent = invoice({ remitTo: own, ...over })
+      expect(isUnsentDraft(sent)).toBe(false)
+      expect(whyNotFactorable({ ...clean, invoice: sent })).toMatch(/addressed to pay BCAT Logistics LLC, not the factor/)
+      expect(needsFactorReaddress(sent, 'OTR Solutions')).toBe(false)
+    }
+  })
+
+  it('needs nothing when it already names the factor, or when no factor is configured', () => {
+    const named = invoice({ remitTo: { name: 'OTR Solutions', address: null, email: null, noticeText: null } })
+    expect(needsFactorReaddress(named, 'OTR Solutions')).toBe(false)
+    expect(needsFactorReaddress(invoice({ remitTo: null }), null)).toBe(false)
   })
 })

@@ -191,6 +191,34 @@ export function factoringRowFor(input: FactoringRowInput): FactoringItem {
 }
 
 /**
+ * An invoice that has not left the building: issued, never e-mailed or marked sent, nothing paid, nothing
+ * written off, not yet on the factoring queue. Its printed remit-to can still be corrected in place.
+ */
+export function isUnsentDraft(invoice: Pick<InvoiceRecord, 'status' | 'sentAt' | 'markedSentAt' | 'sentCount' | 'paidCents' | 'writtenOffCents' | 'factoringItemId'>): boolean {
+  return (
+    invoice.status === 'ISSUED' &&
+    !text(invoice.sentAt) &&
+    !text(invoice.markedSentAt) &&
+    (invoice.sentCount ?? 0) === 0 &&
+    (invoice.paidCents ?? 0) === 0 &&
+    (invoice.writtenOffCents ?? 0) === 0 &&
+    !text(invoice.factoringItemId)
+  )
+}
+
+/**
+ * True when Send to Factor must re-address this draft to the factor: a factor remit-to is configured, the
+ * draft still prints something else (typically our own, or blank when it was issued while the customer was
+ * still billed manually), and it is still a draft.
+ */
+export function needsFactorReaddress(
+  invoice: Parameters<typeof isUnsentDraft>[0] & { remitTo?: { name?: string | null } | null },
+  factorRemitToName: string | null | undefined,
+): boolean {
+  return Boolean(factorRemitToName) && text(invoice.remitTo?.name) !== factorRemitToName && isUnsentDraft(invoice)
+}
+
+/**
  * Why this invoice cannot be sent to the factor, in one sentence, or null if it can.
  *
  * Each refusal names something a person can fix. They are checked in the order a person
@@ -241,7 +269,9 @@ export function whyNotFactorable(input: FactorRefusalInput): string | null {
   }
   // A factor buys a bill that tells the customer to pay the factor. If this one prints
   // our own remit-to, selling it sends the cash to the wrong account.
-  if (input.factorRemitToName && text(invoice.remitTo?.name) !== input.factorRemitToName) {
+  // An unsent, unpaid draft is not refused for it: Send to Factor re-addresses it to the factor
+  // itself (needsFactorReaddress), so nobody has to void and re-issue a bill that never went out.
+  if (input.factorRemitToName && text(invoice.remitTo?.name) !== input.factorRemitToName && !isUnsentDraft(invoice)) {
     return `Invoice ${invoice.number} is addressed to pay ${invoice.remitTo?.name ?? 'us'}, not the factor; void and re-issue it with the factor's remit-to.`
   }
   return null
