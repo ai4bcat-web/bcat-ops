@@ -1775,6 +1775,30 @@ describe('review regressions', () => {
     expect(table(TABLES.invoice).get(invoiceId)!.remitTo).toMatchObject({ name: 'OTR Solutions' })
   })
 
+  it('re-addresses an unsent draft to the factor when the customer was switched to FACTOR after it was issued', async () => {
+    // Issued while the customer was billed manually: it prints our own (or no) remit-to.
+    const { invoiceId } = await generate()
+    expect((table(TABLES.invoice).get(invoiceId)!.remitTo as Row).name).not.toBe('OTR Solutions')
+    table(TABLES.customer).set(CUSTOMER_ID, { ...table(TABLES.customer).get(CUSTOMER_ID)!, factored: true })
+    await call('SAVE_AR_SETTINGS', { factorRemitTo: { name: 'OTR Solutions', noticeText: 'Assigned to OTR Solutions.' } })
+
+    await call('SEND_TO_FACTOR', { invoiceId })
+    const invoice = table(TABLES.invoice).get(invoiceId)!
+    expect(invoice.remitTo).toMatchObject({ name: 'OTR Solutions', noticeText: 'Assigned to OTR Solutions.' })
+    expect(invoice).toMatchObject({ factored: true, status: 'ISSUED', sentCount: 0 })
+    expect(auditRows('SEND_TO_FACTOR', 'Invoice')[0].changes).toContain('readdressedTo')
+    expect(sesSend).not.toHaveBeenCalled()
+  })
+
+  it('still refuses to re-address an invoice that was already sent', async () => {
+    const { invoiceId } = await generate()
+    await call('MARK_SENT', { invoiceId, note: 'faxed to their AP desk' })
+    table(TABLES.customer).set(CUSTOMER_ID, { ...table(TABLES.customer).get(CUSTOMER_ID)!, factored: true })
+    await call('SAVE_AR_SETTINGS', { factorRemitTo: { name: 'OTR Solutions' } })
+    await expect(call('SEND_TO_FACTOR', { invoiceId })).rejects.toThrow(/not the factor; void and re-issue/)
+    expect((table(TABLES.invoice).get(invoiceId)!.remitTo as Row).name).not.toBe('OTR Solutions')
+  })
+
   it('refuses a factor remit-to with no name', async () => {
     await expect(call('SAVE_AR_SETTINGS', { factorRemitTo: { email: 'ap@otr.test' } })).rejects.toThrow(/factorRemitTo\.name/)
   })
