@@ -15,12 +15,8 @@ import {
 } from '../_shared/twilio'
 import { slackClient } from '../_shared/slackApi'
 import { mirrorInbound, mirrorDeliveryFailure, mirrorTranscript, slackMirrorEnabled, type SlackBridgeDeps, type MediaFetcher } from '../_shared/slackDispatch'
-import { autoFilePod, type AutoPodStore } from '../_shared/dispatchAutoPod'
-import { DynamoDBDocumentClient, ScanCommand as DocScanCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
-import { randomUUID } from 'node:crypto'
-import { getStops } from '../../../src/lib/stops'
-import { normalizePro } from '../../../src/lib/proNumber'
-import type { Load, Stop } from '../../../src/types'
+import { DynamoDBDocumentClient, ScanCommand as DocScanCommand } from '@aws-sdk/lib-dynamodb'
+import type { Load } from '../../../src/types'
 import { matchDriverByPhone, conversationTitle, callPlan, type DispatchMedia, type DispatchDriver, type DispatchConversation, type DispatchMessage } from '../../../src/lib/dispatch'
 import { bridgeToShipment, type ShipmentBridgeDeps } from './shipmentBridge'
 import { textOfVcard } from '../../../src/lib/locationShare'
@@ -46,8 +42,6 @@ interface Deps {
   readMedia?: MediaFetcher
   sendSms: (to: string, body: string) => Promise<void>
   now: () => Date
-  /** Files a texted picture as the POD on the driver's open load; absent in a stack without the load tables. */
-  autoPod?: AutoPodStore
   /** truckId → TruckConfig.phone; absent in a stack without the table. */
   truckPhones?: () => Promise<Record<string, string>>
   /** Carries a driver's text into their shipment thread; absent without the tracking function or load tables. */
@@ -185,30 +179,7 @@ async function inboundSms(p: Record<string, string>, deps: Deps): Promise<Reply>
   const updated = await store.touchConversation(conversation.id, message, { unread: 'increment' })
   await toSlack(deps, updated, (b) => mirrorInbound(b, updated, message, deps.readMedia ?? (() => Promise.reject(new Error('no media reader')))))
 
-  // A picture from a driver is a POD until proven otherwise: file it on their open load.
-  if (deps.autoPod && media.length) {
-    const driver = updated.driverId ? roster.find((d) => d.id === updated.driverId) ?? null : null
-    try {
-      const r = await autoFilePod(deps.autoPod, driver ? { id: driver.id, name: driver.name } : null, { body, media, at: message.at })
-      if (r.filed) {
-        const place = [...getStops(r.load)].reverse().find((s) => s.type === 'delivery')
-        const where = [place?.name?.trim(), place?.city?.trim()].filter(Boolean).join(', ')
-        const text = `${r.delivered ? 'Delivered' : 'POD received'}${where ? ` · ${where}` : ''} · PRO ${r.pro} · POD filed from your text${r.how === 'pro' ? '' : ''}`
-        const status = await store.putMessage(messageRow({ conversationId: updated.id, phone: from, direction: 'IN', kind: 'STATUS', at: deps.now().toISOString(), body: text, status: 'received' }))
-        const touched = await store.touchConversation(updated.id, status, { unread: 'keep' })
-        await toSlack(deps, touched, (b) => mirrorInbound(b, touched, status, deps.readMedia ?? (() => Promise.reject(new Error('no media reader')))))
-        console.log('[dispatch-webhook] POD auto-filed', { driverId: driver?.id, loadId: r.load.id, pro: r.pro, how: r.how, pages: media.length })
-      } else if (r.reason === 'many') {
-        const pros = (r.loads ?? []).map((l) => (l.aljexId ?? '').trim() || '—').join(', ')
-        const note = await store.putMessage(messageRow({ conversationId: updated.id, phone: from, direction: 'OUT', kind: 'NOTE', at: deps.now().toISOString(), body: `📎 Picture not filed as a POD — ${driver?.name ?? 'the driver'} has ${r.loads?.length ?? 0} loads open (PRO ${pros}). Tap File as POD under the picture to pick the load, or ask them for the PRO.`, status: 'saved', sentBy: 'dispatch' }))
-        await store.touchConversation(updated.id, note, { unread: 'keep' })
-      } else {
-        console.log('[dispatch-webhook] picture not filed as POD', { driverId: driver?.id, reason: r.reason })
-      }
-    } catch (err) {
-      console.error('[dispatch-webhook] POD auto-file failed', { sid, err: String(err) })
-    }
-  }
+  // A picture texted to dispatch stays in the thread. It becomes a POD only when staff tap File as POD and pick the load.
 
   // A text from a driver also lands in their shipment's thread when exactly one shipment is theirs to answer.
   const bridgeBody = body || vcardText || ''
@@ -415,8 +386,6 @@ async function transcriptionReady(p: Record<string, string>, deps: Deps): Promis
 // ── POD auto-file plumbing ──────────────────────────────────────────────────
 
 const LOAD_TABLE = process.env.LOAD_TABLE_NAME ?? ''
-const SUBMISSION_TABLE = process.env.DRIVER_SUBMISSION_TABLE_NAME ?? ''
-const SUBMISSION_DOC_TABLE = process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME ?? ''
 
 async function scanAll<T>(doc: DynamoDBDocumentClient, TableName: string, extra: { FilterExpression?: string; ExpressionAttributeValues?: Record<string, unknown> } = {}): Promise<T[]> {
   const out: T[] = []
@@ -429,49 +398,17 @@ async function scanAll<T>(doc: DynamoDBDocumentClient, TableName: string, extra:
   return out
 }
 
-/** The load, submission and document tables, as the auto-file needs them. Undefined when the stack lacks them. */
-function autoPodStore(): AutoPodStore | undefined {
-  if (!LOAD_TABLE || !SUBMISSION_TABLE || !SUBMISSION_DOC_TABLE) return undefined
+/** A driver's loads, read-only, for the shipment bridge. Undefined when the stack lacks the load table. */
+function loadsForDriverReader(): ShipmentBridgeDeps['loadsForDriver'] | undefined {
+  if (!LOAD_TABLE) return undefined
   const doc = DynamoDBDocumentClient.from(dynamo, { marshallOptions: { removeUndefinedValues: true } })
-  return {
-    loadsForDriver: async (driverId) => {
-      // The stops JSON names the driver; the legacy fields do too. One scan, filtered here.
-      const rows = await scanAll<Load & { stops?: unknown }>(doc, LOAD_TABLE, {
-        FilterExpression: 'contains(stops, :d) OR pickupDriverId = :d OR deliveryDriverId = :d',
-        ExpressionAttributeValues: { ':d': driverId },
-      })
-      return rows.map((l) => ({ ...l, stops: typeof l.stops === 'string' ? JSON.parse(l.stops) : l.stops } as Load))
-    },
-    hasPod: async (load, driverId) => {
-      const pro = normalizePro(load.aljexId ?? null)
-      const subs = await scanAll<{ id: string; loadId?: string | null; referenceNumber?: string | null }>(doc, SUBMISSION_TABLE, { FilterExpression: 'driverId = :d', ExpressionAttributeValues: { ':d': driverId } })
-      const mine = new Set(subs.filter((s) => (s.loadId && s.loadId === load.id) || (!!pro && normalizePro(s.referenceNumber ?? null) === pro)).map((s) => s.id))
-      if (!mine.size) return false
-      const docs = await scanAll<{ submissionId: string; kind?: string }>(doc, SUBMISSION_DOC_TABLE, { FilterExpression: 'driverId = :d AND kind = :k', ExpressionAttributeValues: { ':d': driverId, ':k': 'POD' } })
-      return docs.some((d) => mine.has(d.submissionId))
-    },
-    fileSubmission: async ({ driverId, driverName, load, pro, pages, at }) => {
-      const submissionId = randomUUID()
-      await doc.send(new PutCommand({ TableName: SUBMISSION_TABLE, Item: {
-        id: submissionId, __typename: 'DriverSubmission', driverId, driverName, status: 'LINKED', source: 'STAFF',
-        submittedByEmail: 'dispatch', loadId: load.id, referenceNumber: pro, note: 'Texted to dispatch', createdAt: at, updatedAt: at,
-      }, ConditionExpression: 'attribute_not_exists(id)' }))
-      // The picture already sits in the bucket under dispatch-media/, readable to staff; the row points at it.
-      await Promise.all(pages.map((m, i) => doc.send(new PutCommand({ TableName: SUBMISSION_DOC_TABLE, Item: {
-        id: randomUUID(), submissionId, driverId, kind: 'POD', s3Key: m.key, fileName: `POD-${pro}-${i + 1}.${m.key.split('.').pop() ?? 'jpg'}`,
-        contentType: m.contentType, pageNumber: i + 1, uploadedAt: at, scanStatus: 'ORIGINAL_ONLY', createdAt: at, updatedAt: at,
-      } }))))
-      return { submissionId }
-    },
-    markDelivered: async (load, stops: Stop[], at) => {
-      const prev = (load as Load & { updatedAt?: string }).updatedAt
-      await doc.send(new UpdateCommand({
-        TableName: LOAD_TABLE, Key: { id: load.id },
-        UpdateExpression: 'SET stops = :stops, updatedAt = :now, updatedBy = :by',
-        ConditionExpression: prev ? 'updatedAt = :prev' : 'attribute_not_exists(updatedAt)',
-        ExpressionAttributeValues: { ':stops': stops, ':now': at, ':by': 'dispatch', ...(prev ? { ':prev': prev } : {}) },
-      }))
-    },
+  return async (driverId) => {
+    // The stops JSON names the driver; the legacy fields do too. One scan, filtered here.
+    const rows = await scanAll<Load & { stops?: unknown }>(doc, LOAD_TABLE, {
+      FilterExpression: 'contains(stops, :d) OR pickupDriverId = :d OR deliveryDriverId = :d',
+      ExpressionAttributeValues: { ':d': driverId },
+    })
+    return rows.map((l) => ({ ...l, stops: typeof l.stops === 'string' ? JSON.parse(l.stops) : l.stops } as Load))
   }
 }
 
@@ -498,13 +435,13 @@ function truckPhonesLoader(): (() => Promise<Record<string, string>>) | undefine
  * status-callback URL), so a name reference the other way would be a CloudFormation cycle.
  * Undefined (the bridge off) without the parameter name or the load tables.
  */
-function shipmentBridgeDeps(config: DispatchConfig, autoPod: AutoPodStore | undefined): ShipmentBridgeDeps | undefined {
-  if (!TRACKING_ACTIONS_PARAM || !autoPod) return undefined
+function shipmentBridgeDeps(config: DispatchConfig, loadsForDriver: ShipmentBridgeDeps['loadsForDriver'] | undefined): ShipmentBridgeDeps | undefined {
+  if (!TRACKING_ACTIONS_PARAM || !loadsForDriver) return undefined
   const lambda = new LambdaClient({})
   const ssm = new SSMClient({})
   let functionName: string | null = null
   return {
-    loadsForDriver: autoPod.loadsForDriver,
+    loadsForDriver,
     dispatchNumber: config.dispatchNumber,
     invokeTracking: async (args) => {
       functionName ??= (await ssm.send(new GetParameterCommand({ Name: TRACKING_ACTIONS_PARAM }))).Parameter?.Value ?? null
@@ -528,7 +465,7 @@ export const handler = async (event: FnUrlEvent) => {
     return text('dispatch not configured', 503)
   }
   const store = new DispatchStore(dynamo, tablesFromEnv())
-  const autoPod = autoPodStore()
+  const loadsForDriver = loadsForDriverReader()
   const deps: Deps = {
     store,
     config,
@@ -555,9 +492,8 @@ export const handler = async (event: FnUrlEvent) => {
       await sendMessage(config, { to, from: config.dispatchNumber, body })
     },
     now: () => new Date(),
-    autoPod,
     truckPhones: truckPhonesLoader(),
-    shipmentBridge: shipmentBridgeDeps(config, autoPod),
+    shipmentBridge: shipmentBridgeDeps(config, loadsForDriver),
   }
   try {
     return await handleEvent(event, deps)

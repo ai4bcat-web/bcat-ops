@@ -1036,21 +1036,14 @@ for (const fn of [dispatchWebhookFn, dispatchActionsFn, dispatchSlackBridgeFn, d
   }))
   backend.storage.resources.bucket.grantReadWrite(fn, 'dispatch-media/*')
 }
-// A picture texted to dispatch is filed as the POD on the driver's open load
-// (amplify/functions/_shared/dispatchAutoPod.ts): the webhook reads loads and writes
-// a driver submission, and stamps the delivery.
+// The webhook reads the driver's loads (shipment bridge). A texted picture is never filed as a POD
+// by the webhook; staff file it from the dispatch thread.
 {
   const dispatchLoadTable = stageTables['Load']
   dispatchWebhookFn.addEnvironment('LOAD_TABLE_NAME', dispatchLoadTable.tableName)
-  dispatchWebhookFn.addEnvironment('DRIVER_SUBMISSION_TABLE_NAME', driverSubmissionTable.tableName)
-  dispatchWebhookFn.addEnvironment('DRIVER_SUBMISSION_DOC_TABLE_NAME', driverSubmissionDocTable.tableName)
   dispatchWebhookFn.addToRolePolicy(new PolicyStatement({
-    actions: ['dynamodb:Scan', 'dynamodb:GetItem', 'dynamodb:UpdateItem'],
+    actions: ['dynamodb:Scan', 'dynamodb:GetItem'],
     resources: [dispatchLoadTable.tableArn],
-  }))
-  dispatchWebhookFn.addToRolePolicy(new PolicyStatement({
-    actions: ['dynamodb:Scan', 'dynamodb:PutItem'],
-    resources: [driverSubmissionTable.tableArn, driverSubmissionDocTable.tableArn],
   }))
 }
 
@@ -3901,8 +3894,8 @@ backend.storage.resources.bucket.grantRead(podActionsFn, 'pods/*')
 // beside the original there, never over it.
 backend.storage.resources.bucket.grantRead(podActionsFn, 'driver-docs/*')
 backend.storage.resources.bucket.grantPut(podActionsFn, 'driver-docs/*')
-// Pictures texted to dispatch are filed as PODs straight from the dispatch media folder
-// (dispatchAutoPod); the cleanup reads the original there and writes the cleaned page
+// Pictures texted to dispatch are filed as PODs by staff straight from the dispatch media folder;
+// the cleanup reads the original there and writes the cleaned page
 // beside it, so it needs both directions on that prefix.
 backend.storage.resources.bucket.grantReadWrite(podActionsFn, 'dispatch-media/*')
 // The POD review check reads the load's rate confirmation to compare addresses with.
