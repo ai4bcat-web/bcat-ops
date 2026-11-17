@@ -31,8 +31,7 @@ import { CarrierLookup } from './CarrierLookup'
 import { OffersHub } from './OffersHub'
 import { UnmatchedOffers } from './UnmatchedOffers'
 import { CarrierOffersPanel } from './CarrierOffersPanel'
-import { DemoLoads } from './DemoLoads'
-import { targetFromDemo, targetFromRow, type OffersTarget } from './offersTarget'
+import { targetFromRow, type OffersTarget } from './offersTarget'
 import { useUnmatchedOffers } from './useUnmatchedOffers'
 
 type TabKey = 'needs-cover' | 'offers' | 'unmatched' | 'covered'
@@ -111,7 +110,7 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
   const [search, setSearch] = useState('')
   // Step AM: Cover opens a dialog right here instead of hopping to the shipment, and the Covered tab filters by ladder rung.
   const [coverRow, setCoverRow] = useState<ShipmentListRow | null>(null)
-  // Click any load to see its offers by channel (voice + email). Only the labelled demo loads carry (fake) offers.
+  // Click any load to see its offers by channel (voice + email).
   const [offersTarget, setOffersTarget] = useState<OffersTarget | null>(null)
   const [ladderFilter, setLadderFilter] = useState<CarrierAssignmentStatus | 'ALL'>('ALL')
   const [pageSize, setPageSize] = useState(PAGE_STEP)
@@ -268,7 +267,6 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
         {gridTab ? (
           <>
             <DenseKpiStrip open items={kpis} />
-            {!isCovered && <DemoLoads onOpen={(d) => setOffersTarget(targetFromDemo(d))} />}
             <div className="tms-dense-body">
               <DenseGrid<ShipmentListRow>
                 aria-label={isCovered ? 'Covered loads' : 'Loads needing cover'}
