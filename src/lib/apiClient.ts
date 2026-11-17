@@ -7930,6 +7930,27 @@ export async function agingStatement(input: { customerId: string; send?: boolean
   return financeAction<AgingStatementResult>('AGING_STATEMENT', input)
 }
 
+export interface PastDueReminderResult {
+  preview: boolean
+  to: string[]
+  cc: string[]
+  defaultTo?: string[]
+  subject: string
+  body: string
+  rows?: { invoiceId: string; invoiceNumber: string; pro: string; po: string | null; invoiceDate: string; dueAt: string; totalCents: number; balanceCents: number; daysPastDue: number }[]
+  recent?: { invoiceNumber: string; sentAt: string }[]
+  cooldownDays?: number
+  emailStatus?: string
+  emailError?: string | null
+  sentAt?: string | null
+  summary: { customerId: string; customerName: string; count: number; totalCents: number; companyName: string }
+}
+
+/** A past-due reminder to one customer about some of its invoices: preview it (send false) or e-mail it (send true). */
+export async function pastDueReminder(input: { invoiceIds: string[]; send?: boolean; to?: string[]; cc?: string[]; confirmRecent?: boolean }): Promise<PastDueReminderResult> {
+  return financeAction<PastDueReminderResult>('PAST_DUE_REMINDER', input)
+}
+
 /** Nothing deletes a posted row; a mistake gets a REVERSAL that restores the balances. */
 export async function reversePayment(input: { paymentId: string; reason: string }): Promise<PostedRow> {
   return financeAction<PostedRow>('REVERSE_PAYMENT', input)

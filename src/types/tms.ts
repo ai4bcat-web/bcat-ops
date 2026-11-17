@@ -3217,6 +3217,9 @@ export interface InvoiceRecord {
   /** Comma-joined, like `ShipmentNotice.to`. */
   sentTo?: string | null
   sentCount?: number | null
+  /** Last past-due reminder e-mailed to the customer, and to whom (PAST_DUE_REMINDER). */
+  pastDueReminderSentAt?: string | null
+  pastDueReminderSentTo?: string | null
   /** Step AW: the Aljex due date / customer terms kept as a reference when a carried-over invoice is redated (Danisco 120 days). */
   aljexDueDate?: string | null
   aljexTerms?: number | null

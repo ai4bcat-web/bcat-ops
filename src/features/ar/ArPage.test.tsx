@@ -445,7 +445,8 @@ describe('the AR dense grid', () => {
     expect(within(grid).getByText('$2,500.00', { selector: 'span' })).toBeTruthy()
     // No payment entry on the AR tabs (Ryne 2026-11-16): no links on a row, no tick boxes, no Record payment.
     expect(within(grid).queryAllByRole('link')).toHaveLength(0)
-    expect(within(grid).queryAllByRole('checkbox')).toHaveLength(0)
+    // The only tick boxes are the past-due reminder ones (Ryne 2026-11-17); nothing selects an invoice for payment.
+    expect(within(grid).queryAllByRole('checkbox').filter((box) => !/past due reminder/.test(box.getAttribute('aria-label') ?? ''))).toHaveLength(0)
     expect(screen.queryByText(/Record payment/)).toBeNull()
     expect(screen.queryByTestId('ar-record-payment-batch')).toBeNull()
     expect(screen.getByTestId('payments-recorded-note').textContent).toBe('Payments are recorded in Payments Received.')

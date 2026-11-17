@@ -30,6 +30,8 @@ import {
 import { SendReviewCarousel } from './components/SendReviewCarousel'
 import { AgingStatementDialog } from './components/AgingStatementDialog'
 import { BulkAgingStatementDialog, type BulkStatementCustomer } from './components/BulkAgingStatementDialog'
+import { PastDueReminderDialog, type PastDueGroup } from './components/PastDueReminderDialog'
+import { isPastDueReminderEligible } from '@/lib/pastDueReminder'
 import { allApEmails } from '@/lib/billingMethod'
 import { useAuthUser } from '@/hooks/useAuth'
 import { isOwnerOrAdmin } from '@/lib/accountingAccess'
@@ -105,6 +107,7 @@ type ArDialog =
   | { kind: 'statement'; customerId: string; customerName: string }
   | { kind: 'statementPreview'; customerId: string; customerName: string }
   | { kind: 'bulkStatement'; customers: BulkStatementCustomer[] }
+  | { kind: 'pastDue'; groups: PastDueGroup[] }
   | { kind: 'credit'; customerId: string; customerName: string }
   | { kind: 'factor'; invoiceId: string }
   | { kind: 'batchFactor'; rows: ArQueueRow[] }
@@ -563,6 +566,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onReview: (invs) => setDialog({ kind: 'review', invoices: invs }),
       onEdit: (inv) => setDialog({ kind: 'edit', invoice: inv }),
       onStatement: (customerId, customerName) => setDialog({ kind: 'statement', customerId, customerName }),
+      onPastDue: (groups) => { if (groups.length > 0) setDialog({ kind: 'pastDue', groups }) },
       paymentFacts,
     })
     : agingView({
@@ -771,6 +775,13 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           onDone={() => { setDialog(null); setStatementSelected([]); void refreshAll() }}
         />
       )}
+      {dialog?.kind === 'pastDue' && (
+        <PastDueReminderDialog
+          groups={dialog.groups}
+          onClose={() => setDialog(null)}
+          onSent={() => { setDialog(null); setSelected([]); void refreshAll() }}
+        />
+      )}
       {dialog?.kind === 'credit' && (
         <CreditMemoDialog
           customerId={dialog.customerId}
@@ -904,7 +915,7 @@ function dateCol<T>(key: string, header: string, of: (row: T) => string | null, 
 function queueView({
   status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, factorByItemId, customerById,
   attachmentPlans, boardById, shipmentsById, months, month, paidLoading, onMonth, onSelect, invoiceErrors, invoicesRunning, onRetryInvoice, onBatchGenerate, onReview, onEdit,
-  onStatement, paymentFacts,
+  onStatement, onPastDue, paymentFacts,
   factorReadiness, onBatchFactor, onWhy, onDocs, onEditCustomer, onChangeMethod,
 }: {
   status: ArQueueStatus
@@ -947,6 +958,8 @@ function queueView({
   onEdit: (invoice: InvoiceRecord) => void
   /** Invoiced, grouped by customer: e-mail that customer's aging report from the group header. */
   onStatement?: (customerId: string, customerName: string) => void
+  /** Invoiced: e-mail a customer a past-due reminder for these invoices (previewed first). */
+  onPastDue?: (groups: PastDueGroup[]) => void
   paymentFacts: CustomerPaymentFacts
 }): ListView {
   const ready = status === 'READY'
@@ -1032,6 +1045,7 @@ function queueView({
 
   const columns: Array<Col<ArQueueRow>> = [
     ...(ready ? [{ key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 76 } as Col<ArQueueRow>] : []),
+    ...(invoiced && onPastDue ? [{ key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 32 } as Col<ArQueueRow>] : []),
     { key: 'shipment', header: 'PRO', group: 'Shipment', text: (row) => row.shipmentNumber ?? row.shipmentId, extraPx: 16 },
     { key: 'invoice', header: 'Invoice #', group: 'Invoice', text: (row) => row.invoiceNumber ?? '—' },
     {
@@ -1086,13 +1100,33 @@ function queueView({
         sortValue: (row) => settlement(row)?.daysToPay ?? -1, filter: 'number', numberOf: (row) => settlement(row)?.daysToPay ?? 0, numberUnit: 'days',
       } as Col<ArQueueRow>,
     ] : []),
+    ...(invoiced ? [{ key: 'reminder', header: 'Last reminder', group: 'Invoice', text: (row: ArQueueRow) => formatDay(row.invoice?.pastDueReminderSentAt ?? null) || '—', sortValue: (row: ArQueueRow) => row.invoice?.pastDueReminderSentAt ?? '' } as Col<ArQueueRow>] : []),
     ...(invoiced ? [{ key: 'factor', header: 'Factor', group: 'Invoice', text: factorText, filter: 'multi', optionsOf: (row: ArQueueRow) => opt(factorText(row)) } as Col<ArQueueRow>] : []),
-    { key: 'actions', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: ready ? 96 : 48 } as Col<ArQueueRow>,
+    { key: 'actions', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: ready ? 96 : invoiced && onPastDue ? 76 : 48 } as Col<ArQueueRow>,
   ]
+
+  // Past-due reminder: only open, past-due invoices billed to the customer by hand (never a factored one).
+  const canRemind = (row: ArQueueRow) => invoiced && row.invoice != null && isPastDueReminderEligible(row.invoice, asOf)
+  const remindGroups = (list: ArQueueRow[]): PastDueGroup[] => {
+    const byCustomer = new Map<string, PastDueGroup>()
+    for (const row of list) {
+      if (!canRemind(row) || !row.invoice) continue
+      const g = byCustomer.get(row.customerId ?? '') ?? { customerId: row.customerId ?? '', customerName: row.customerName || row.customerId || '', invoiceIds: [] }
+      g.invoiceIds.push(row.invoice.id)
+      byCustomer.set(row.customerId ?? '', g)
+    }
+    return [...byCustomer.values()].filter((g) => g.customerId)
+  }
+  const remindSelected = invoiced ? rows.filter((row) => selected.includes(row.orderId) && canRemind(row)) : []
 
   const renderCell = (row: ArQueueRow, key: string): ReactNode => {
     switch (key) {
       case 'select':
+        if (invoiced) {
+          return canRemind(row) ? (
+            <input type="checkbox" aria-label={`Select invoice ${row.invoiceNumber ?? row.orderId} for a past due reminder`} checked={selected.includes(row.orderId)} onChange={() => toggle(row.orderId)} />
+          ) : null
+        }
         return (
           <span className="flex items-center gap-1">
             <input
@@ -1280,6 +1314,10 @@ function queueView({
         if (!inv) return null
         return (
           <span className="flex items-center justify-end gap-1">
+            {canRemind(row) && onPastDue && (
+              <button type="button" className="tms-icon-btn tms-icon-btn-plain" aria-label={`Send a past due reminder for invoice ${inv.number}`} title="Send past due reminder" data-testid="ar-row-reminder"
+                onClick={() => onPastDue(remindGroups([row]))}><Mail size={15} /></button>
+            )}
             <button type="button" className="tms-icon-btn tms-icon-btn-plain" aria-label={`Documents for PRO ${row.shipmentNumber ?? row.shipmentId}`} title="POD and rate confirmation: replace or delete" data-testid="ar-docs-open" onClick={() => onDocs(row)}><FileText size={15} /></button>
             <button type="button" className="tms-icon-btn tms-icon-btn-plain" aria-label={`View or edit invoice ${inv.number}`} title="Open invoice" onClick={() => onEdit(inv)}><Eye size={15} /></button>
           </span>
@@ -1330,6 +1368,19 @@ function queueView({
             onClick={() => onReview(selectedDrafts)}
           >
             <Mail size={14} /> Send {selectedDrafts.length || ''} invoice{selectedDrafts.length === 1 ? '' : 's'}
+          </TmsButton>
+        </div>
+      )}
+      {invoiced && onPastDue && (
+        <div className="tms-batch-actions" data-active={remindSelected.length > 0 ? 'true' : undefined}>
+          <TmsButton
+            aria-label="Send past due reminders for selected invoices"
+            data-testid="batch-reminder"
+            disabled={busy || remindSelected.length === 0}
+            title={remindSelected.length === 0 ? 'Tick past-due invoices; you preview each customer\'s e-mail before anything goes out' : undefined}
+            onClick={() => onPastDue(remindGroups(remindSelected))}
+          >
+            <Mail size={14} /> Past due reminder{remindSelected.length ? ` (${remindSelected.length})` : ''}
           </TmsButton>
         </div>
       )}
@@ -1402,6 +1453,15 @@ function queueView({
                   Email aging report
                 </button>
               )}
+              {invoiced && customerId && onPastDue && (() => {
+                const groups = remindGroups(shown)
+                return groups.length > 0 ? (
+                  <button type="button" className="tms-link text-sm" data-testid="ar-group-reminder"
+                    onClick={(e) => { e.stopPropagation(); onPastDue(groups) }}>
+                    Past due reminder
+                  </button>
+                ) : null
+              })()}
             </span>
           )
         },
