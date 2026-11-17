@@ -2483,6 +2483,8 @@ const schema = a.schema(stageTypes({
       sentAt:          a.datetime(),
       sentTo:          a.string(),              // comma-joined, like ShipmentNotice.to
       sentCount:       a.integer(),
+      pastDueReminderSentAt: a.datetime(),   // last past-due reminder e-mailed (PAST_DUE_REMINDER)
+      pastDueReminderSentTo: a.string(),
       markedSentAt:    a.datetime(),
       markedSentBy:    a.string(),
       markedSentNote:  a.string(),
