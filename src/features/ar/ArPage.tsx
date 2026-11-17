@@ -244,16 +244,19 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const paidInMonth = useMemo(() => paidInMonthOf(recentPaid, month), [recentPaid, month])
 
   const queue: Record<ArQueueStatus, ArQueueRow[]> = useMemo(() => {
-    const keepAll = (rows: ArQueueRow[], due: boolean) => rows.filter((row) => billedByMatches(row, billedBy)
+    // `byBilled` is false for Ready to invoice: a factored draft is waiting on its Factor click whichever way the
+    // Billed view is set, so the Billed filter must not hide it (Ryne 2026-11-17, 14902 / 14868 / 14916).
+    const keepAll = (rows: ArQueueRow[], due: boolean, byBilled = true) => rows.filter((row) => (!byBilled || billedByMatches(row, billedBy))
       && (owed.parties.length === 0 || owed.parties.includes(row.customerId ?? ''))
       && divisionMatches(divisionKeyOf(lookups.shipmentsById.get(row.shipmentId) ?? { revDivision: row.revDivision }), owed.divisions)
       && (!due || inDueBucket(row.dueAt, asOf, owed.due)))
     const keep = (rows: ArQueueRow[]) => keepAll(rows, true)
+    const keepReady = (rows: ArQueueRow[]) => keepAll(rows, true, false)
     return {
       // The loads the To factor tab held: queue rows not yet at OTR. Always listed, whatever the billed-by view.
       READY: readyQueueRows({
         unbilledRows: unbilled.rows, drafts: split.drafts, monthInvoices: paidInvoices, openInvoices: open.invoices, factoringItems, lookups,
-      }, keep),
+      }, keepReady),
       INVOICED: keep(split.invoiced),
       // Paid rows owe nothing, so the due bucket does not narrow them.
       PAID: keepAll(buildPaidRows(paidInMonth, lookups), false),
