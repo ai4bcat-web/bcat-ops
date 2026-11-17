@@ -35,6 +35,7 @@ import { FactoringDocCell } from './FactoringDocCell'
 import { useResolveLoads } from '@/hooks/useResolveLoads'
 import type { OtrReadiness } from '@/lib/otrInvoice'
 import type { FactoringItem, FactoringItemStatus } from '@/types'
+import type { InvoiceRecord } from '@/types/tms'
 import { otrStatusMeta } from '@/lib/otrInvoiceStatus'
 import { otrDocsIncomplete, otrDocsErrorMessage } from '@/lib/otrSubmitOutcome'
 import { uploadOtrDocs, resolveLoad, assembleInvoice } from '@/lib/otrClient'
@@ -47,6 +48,8 @@ import { FACTORING_REASON_LABEL, factoringReasonOf, type FactoringReasonInvoice 
 import { FactoringWhy } from './FactoringWhy'
 import { TABLET_MAX_WIDTH } from '@/features/tms/grid/denseCardLayout'
 import { FixAndInvoiceDialog } from './FixAndInvoiceDialog'
+import { ChangeInvoiceMethodDialog } from '@/features/ar/components/ChangeInvoiceMethodDialog'
+import { canChangeMethod } from '@/lib/invoiceMethod'
 import { InvoiceManuallyDialog } from './InvoiceManuallyDialog'
 import { CustomerPaidCell, CustomerPaidDialog } from './CustomerPaidCell'
 import { formatPaidOn } from './formatPaidOn'
@@ -478,6 +481,8 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const [resendId, setResendId] = useState<string | null>(null)
   /** The OTR-rejected row whose Move to manual invoice confirmation is open. */
   const [moveManualId, setMoveManualId] = useState<string | null>(null)
+  /** The queue row whose "Change method" dialog is open (an unsent draft can go by hand instead). */
+  const [changeMethodId, setChangeMethodId] = useState<string | null>(null)
   const canEditPaid = hasAccountingPage(user?.groups, user?.email, 'factoring')
 
   // Deleting a row drops the record that a PRO was ever sent for factoring, so it is
@@ -499,6 +504,11 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         map.set(inv.factoringItemId, { id: inv.id, number: inv.number, customerName: inv.customerName, totalCents: inv.totalCents, factored: inv.factored })
       }
     }
+    return map
+  }, [openInvoices.invoices])
+  const fullInvoiceByItemId = useMemo(() => {
+    const map = new Map<string, InvoiceRecord>()
+    for (const inv of openInvoices.invoices) if (inv.factoringItemId && !map.has(inv.factoringItemId)) map.set(inv.factoringItemId, inv)
     return map
   }, [openInvoices.invoices])
   const reasonOf = useCallback((item: FactoringItem) => factoringReasonOf(item, {
@@ -785,6 +795,22 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
               Invoice manually
             </TmsButton>
           )}
+          {item.status === 'NEED_TO_FACTOR' && !isOtrRejected(item) && (() => {
+            const inv = fullInvoiceByItemId.get(item.id)
+            return inv && canChangeMethod(inv, item) ? (
+              <TmsButton
+                size="sm"
+                variant="ghost"
+                aria-label={`Change method for PRO ${item.proNumber}`}
+                data-testid={`change-method-${item.id}`}
+                disabled={pendingIds.has(item.id)}
+                title="Bill this invoice by hand instead of through OTR"
+                onClick={() => setChangeMethodId(item.id)}
+              >
+                Change method
+              </TmsButton>
+            ) : null
+          })()}
           {isOtrRejected(item) && (
             <TmsButton
               size="sm"
@@ -1028,6 +1054,15 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
       {paidEditItem && <CustomerPaidDialog item={paidEditItem} onClose={() => setPaidEditId(null)} onDone={refresh} />}
       {resendItem && <ResendToOtrDialog item={resendItem} onClose={() => setResendId(null)} onDone={refresh} />}
+      {changeMethodId && fullInvoiceByItemId.get(changeMethodId) && (
+        <ChangeInvoiceMethodDialog
+          invoice={fullInvoiceByItemId.get(changeMethodId)!}
+          customer={customers.find((c) => c.id === fullInvoiceByItemId.get(changeMethodId)!.customerId)}
+          factoringRow={items.find((i) => i.id === changeMethodId) ?? null}
+          onClose={() => setChangeMethodId(null)}
+          onChanged={() => { void refresh() }}
+        />
+      )}
       {moveManualItem && (
         <FixAndInvoiceDialog
           item={moveManualItem}

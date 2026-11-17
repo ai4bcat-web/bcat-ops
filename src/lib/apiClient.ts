@@ -1,3 +1,4 @@
+import { INVOICE_METHOD_SYNCED_EVENT } from './invoiceMethod'
 import { generateClient } from 'aws-amplify/data'
 import { messageAttachments } from '@/lib/shipmentThread'
 import { uploadData, getUrl, remove } from 'aws-amplify/storage'
@@ -1670,12 +1671,29 @@ export async function createCustomer(input: Omit<CustomerRecord, 'id' | 'created
  * `changeSource` names where the edit was made (defaults to "Customer profile").
  */
 export type CustomerPatch = Partial<Omit<CustomerRecord, 'id' | 'createdAt' | 'updatedAt'>> & { changeReason?: string; changeSource?: string }
+/**
+ * A customer's billing method decides how its unsent invoices go out, but each draft copied it when it was made. After a
+ * save that names the method, the drafts follow (best effort, in the background: a person without Invoicing access, or a
+ * draft the factor's gate refuses, simply leaves it as it was; the customer save has already succeeded).
+ */
+function followBillingMethod(saved: CustomerRecord, patch: CustomerPatch): void {
+  if (!('billingMethod' in patch) && !('factored' in patch)) return
+  void syncCustomerMethod(saved.id)
+    .then((result) => {
+      if (result.changed.length > 0 && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(INVOICE_METHOD_SYNCED_EVENT, { detail: { customerName: saved.name, ...result } }))
+    })
+    .catch((err) => console.warn('[customer] drafts did not follow the new billing method', err))
+}
 export async function updateCustomer(id: string, patch: CustomerPatch, expectedUpdatedAt: string): Promise<CustomerRecord> {
-  return rememberCustomerPolicy(await directoryAction<CustomerRecord>('UPSERT_CUSTOMER', { id, expectedUpdatedAt, ...patch }))
+  const saved = rememberCustomerPolicy(await directoryAction<CustomerRecord>('UPSERT_CUSTOMER', { id, expectedUpdatedAt, ...patch }))
+  followBillingMethod(saved, patch)
+  return saved
 }
 /** Changes only the fields given; everything else on the customer keeps what is stored (Load Review's rail). */
 export async function patchCustomer(id: string, patch: CustomerPatch, expectedUpdatedAt: string): Promise<CustomerRecord> {
-  return rememberCustomerPolicy(await directoryAction<CustomerRecord>('UPSERT_CUSTOMER', { ...patch, id, expectedUpdatedAt, patch: true }))
+  const saved = rememberCustomerPolicy(await directoryAction<CustomerRecord>('UPSERT_CUSTOMER', { ...patch, id, expectedUpdatedAt, patch: true }))
+  followBillingMethod(saved, patch)
+  return saved
 }
 export async function archiveCustomer(id: string, expectedUpdatedAt: string, changeReason?: string): Promise<CustomerRecord> {
   return rememberCustomerPolicy(await directoryAction<CustomerRecord>('ARCHIVE_CUSTOMER', { id, expectedUpdatedAt, ...(changeReason ? { changeReason } : {}) }))
@@ -7957,6 +7975,33 @@ export async function sendToFactor(input: { invoiceId: string }): Promise<{
 }> {
   const result = await financeAction<{ factoringItem: FactoringItem; invoice: InvoiceRecord; reused: boolean }>('SEND_TO_FACTOR', input)
   return { ...result, factoringItem: parseFactoringJson(result.factoringItem) }
+}
+
+/**
+ * SET_INVOICE_METHOD: one unsent invoice, factored or by hand (the "Change method" link). `scope: 'invoice'` pins the
+ * choice to this invoice; `'customer'` (the default) also moves the customer's profile to match. Nothing is e-mailed
+ * and nothing goes to OTR; Send to Factor and the e-mail step stay the separate presses.
+ */
+export interface InvoiceMethodResult {
+  invoice: InvoiceRecord
+  changed: boolean
+  customerChanged: boolean
+  from: 'FACTOR' | 'MANUAL'
+  to: 'FACTOR' | 'MANUAL'
+  warnings: string[]
+}
+export async function setInvoiceMethod(input: { invoiceId: string; method: 'FACTOR' | 'MANUAL'; scope?: 'invoice' | 'customer' }): Promise<InvoiceMethodResult> {
+  return financeAction<InvoiceMethodResult>('SET_INVOICE_METHOD', input)
+}
+
+/** SYNC_CUSTOMER_METHOD: every unsent draft of the customer follows the customer's current billing method. */
+export interface CustomerMethodSyncResult {
+  customerId: string
+  changed: { invoiceId: string; number: string; from: 'FACTOR' | 'MANUAL'; to: 'FACTOR' | 'MANUAL'; warnings: string[] }[]
+  skipped: { invoiceId: string; why: string }[]
+}
+export async function syncCustomerMethod(customerId: string): Promise<CustomerMethodSyncResult> {
+  return financeAction<CustomerMethodSyncResult>('SYNC_CUSTOMER_METHOD', { customerId })
 }
 
 export async function saveArSettings(input: Partial<ArSettings>): Promise<{ settings: TmsSettings }> {

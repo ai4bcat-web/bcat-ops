@@ -50,6 +50,8 @@ import { readyFactsOf } from './readyFacts'
 import { exportOutstandingReceivables } from '@/lib/opsExports'
 import { useDirectory } from '@/hooks/useDirectory'
 import { EditCustomerBillingDialog } from '@/features/shipments/form/EditCustomerBillingDialog'
+import { ChangeInvoiceMethodDialog } from './components/ChangeInvoiceMethodDialog'
+import { canChangeMethod, INVOICE_METHOD_SYNCED_EVENT, isMethodPinned, methodForLoad } from '@/lib/invoiceMethod'
 import {
   batchGenerateInvoices, getTmsSettings, graphqlErrorText, voidInvoice,
 } from '@/lib/apiClient'
@@ -108,6 +110,7 @@ type ArDialog =
   | { kind: 'batchFactor'; rows: ArQueueRow[] }
   | { kind: 'void'; invoice: InvoiceRecord }
   | { kind: 'changeCustomer'; invoice: InvoiceRecord }
+  | { kind: 'changeMethod'; invoice: InvoiceRecord }
   | { kind: 'why'; pro: string; reason: string; customerId?: string | null; shipmentId?: string | null; row?: ArQueueRow }
   | { kind: 'docs'; row: ArQueueRow }
   | { kind: 'editCustomer'; customerId: string }
@@ -354,6 +357,21 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     await refreshAll()
   }
 
+  // A customer's billing method changed elsewhere (profile, rail, quick edit) and its unsent drafts followed: re-read.
+  const refreshAllRef = useRef(refreshAll)
+  useEffect(() => { refreshAllRef.current = refreshAll })
+  useEffect(() => {
+    const onSynced = (event: Event) => {
+      const detail = (event as CustomEvent<{ customerName?: string; changed?: unknown[] }>).detail
+      const n = detail?.changed?.length ?? 0
+      if (n > 0) toast.success(`${n} unsent invoice${n === 1 ? '' : 's'} for ${detail?.customerName ?? 'the customer'} now follow its new billing method`)
+      setFactorVersion((v) => v + 1)
+      void refreshAllRef.current()
+    }
+    window.addEventListener(INVOICE_METHOD_SYNCED_EVENT, onSynced)
+    return () => window.removeEventListener(INVOICE_METHOD_SYNCED_EVENT, onSynced)
+  }, [])
+
   const factorReadiness = useFactorReadiness(queue.READY, tab === 'ready', factorVersion)
   const deliveredNotReady = useDeliveredNotReady(tab === 'ready')
   const navigate = useNavigate()
@@ -541,6 +559,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onWhy: (row: ArQueueRow, reason: string) => setDialog({ kind: 'why', pro: String(row.shipmentNumber ?? row.orderId), reason, customerId: row.customerId, shipmentId: row.shipmentId, row }),
       onDocs: (row: ArQueueRow) => setDialog({ kind: 'docs', row }),
       onEditCustomer: (customerId: string) => setDialog({ kind: 'editCustomer', customerId }),
+      onChangeMethod: (inv) => setDialog({ kind: 'changeMethod', invoice: inv }),
       onReview: (invs) => setDialog({ kind: 'review', invoices: invs }),
       onEdit: (inv) => setDialog({ kind: 'edit', invoice: inv }),
       onStatement: (customerId, customerName) => setDialog({ kind: 'statement', customerId, customerName }),
@@ -697,6 +716,15 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           context={`This changes ${customerById.get(dialog.customerId)!.name} for all of its loads. ${readyLoadsText(queue.READY, dialog.customerId)} Setting Factor does not send anything to OTR; it only decides how this customer's invoices go out.`}
           onClose={() => setDialog(null)}
           onSaved={() => { void refreshDirectory(); setFactorVersion((v) => v + 1); void refreshAll() }}
+        />
+      )}
+      {dialog?.kind === 'changeMethod' && (
+        <ChangeInvoiceMethodDialog
+          invoice={dialog.invoice}
+          customer={customerById.get(dialog.invoice.customerId)}
+          factoringRow={dialog.invoice.factoringItemId ? (factorByItemId.get(dialog.invoice.factoringItemId) ?? null) : null}
+          onClose={() => setDialog(null)}
+          onChanged={() => { void refreshDirectory(); setFactorVersion((v) => v + 1); void refreshAll() }}
         />
       )}
       {dialog?.kind === 'changeCustomer' && (
@@ -877,7 +905,7 @@ function queueView({
   status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, factorByItemId, customerById,
   attachmentPlans, boardById, shipmentsById, months, month, paidLoading, onMonth, onSelect, invoiceErrors, invoicesRunning, onRetryInvoice, onBatchGenerate, onReview, onEdit,
   onStatement, paymentFacts,
-  factorReadiness, onBatchFactor, onWhy, onDocs, onEditCustomer,
+  factorReadiness, onBatchFactor, onWhy, onDocs, onEditCustomer, onChangeMethod,
 }: {
   status: ArQueueStatus
   rows: ArQueueRow[]
@@ -913,6 +941,8 @@ function queueView({
   onDocs: (row: ArQueueRow) => void
   /** Ready to invoice: open the customer's billing method / MC editor (Ryne 2026-11-16). */
   onEditCustomer: (customerId: string) => void
+  /** Ready to invoice: bill an unsent draft through the factor or by hand ("Change method"). */
+  onChangeMethod: (invoice: InvoiceRecord) => void
   onReview: (invoices: InvoiceRecord[]) => void
   onEdit: (invoice: InvoiceRecord) => void
   /** Invoiced, grouped by customer: e-mail that customer's aging report from the group header. */
@@ -1150,9 +1180,31 @@ function queueView({
           return <span className="flex items-center gap-1"><TmsBadge tone="red">Blocked</TmsBadge><span style={{ color: 'var(--tms-badge-red)' }}>{row.reasons.join('; ')}</span></span>
         }
         if (row.status === 'READY' && row.invoiceId) {
-          return throughOtr(row)
-            ? <TmsBadge tone="blue" title="Factored: batch Factor sends it to OTR; no e-mail">Factor next</TmsBadge>
-            : <TmsBadge tone="orange">Draft — not sent</TmsBadge>
+          const inv = row.invoice
+          const item = row.factorItem ?? (inv?.factoringItemId ? factorByItemId.get(inv.factoringItemId) : undefined)
+          const customer = row.customerId ? customerById.get(row.customerId) : undefined
+          // The profile moved after this draft was made: say so, the link below puts the draft in step.
+          const profileWants = customer ? methodForLoad(customer, row.revDivision) : null
+          const behind = inv && profileWants && !isMethodPinned(item ?? null) && (profileWants === 'FACTOR') !== throughOtr(row)
+          return (
+            <span className="flex items-center gap-1">
+              {throughOtr(row)
+                ? <TmsBadge tone="blue" title="Factored: batch Factor sends it to OTR; no e-mail">Factor next</TmsBadge>
+                : <TmsBadge tone="orange">Draft — not sent</TmsBadge>}
+              {behind && <TmsBadge tone="orange" title="The customer's profile now bills this customer differently than this draft was made">Profile: {profileWants === 'FACTOR' ? 'Factor' : 'Manual'}</TmsBadge>}
+              {inv && canChangeMethod(inv, item ?? null) && (
+                <button
+                  type="button"
+                  className="tms-link"
+                  data-testid="ar-change-method"
+                  title="Bill this invoice through the factor or by hand"
+                  onClick={(e) => { e.stopPropagation(); onChangeMethod(inv) }}
+                >
+                  Change method
+                </button>
+              )}
+            </span>
+          )
         }
         return <TmsBadge tone={row.status === 'PAID' ? 'green' : row.status === 'INVOICED' ? 'blue' : 'gray'}>{AR_QUEUE_STATUS_LABEL[row.status]}</TmsBadge>
       case 'sent':
