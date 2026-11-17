@@ -45,6 +45,7 @@ import {
   DEFAULT_REMITTANCE_EMAIL_TEMPLATE,
   remittanceRecipients,
   renderRemittanceEmail,
+  renderRemittanceTableEmail,
 } from '../../../src/lib/shipmentNotices'
 import { buildRemittancePdf, remittanceData, remittanceFilename } from '../../../src/lib/remittancePdf'
 import type {
@@ -439,6 +440,8 @@ export async function recordApPayment(input: Row, caller: Caller): Promise<Poste
     // The advice is rendered after the money is recorded, never before: a renderer
     // that throws must not stop a payment that has already gone out of the bank.
     await storeRemittance(id, caller)
+    // Then the carrier is told, once. A failure here never touches the payment (see autoSendRemittance).
+    await autoSendRemittance(id, caller)
   }
   return readBack(id, billIds, duplicate)
 }
@@ -664,6 +667,121 @@ function emailList(value: unknown, label: string): string[] {
   return assertArrayOf<string>(value, label, (item, index) => assertString(item, `${label}[${index}]`), 20)
 }
 
+/**
+ * The payee's remit address, the way the Remit to column reads it: the address snapshotted on the bill,
+ * else the payment method the bill names, else the carrier's preferred (or any) active method, and only
+ * then the carrier's accounting contacts and own address.
+ */
+export function remitRecipientsFor(context: {
+  payment: Row
+  bills: CarrierBillRecord[]
+  carrier: CarrierRecord | null
+  contacts: CarrierContactRecord[]
+  methods: CarrierPaymentMethodRecord[]
+}): string[] {
+  const snapshot = [
+    (context.payment.remitTo as { payeeEmail?: string | null } | null | undefined)?.payeeEmail,
+    ...context.bills.map((bill) => bill.remitTo?.payeeEmail),
+  ].map((email) => (email ?? '').trim()).find((email) => email.includes('@'))
+  if (snapshot) return [snapshot]
+  const named = context.methods.find((row) => row.id === context.bills[0]?.paymentMethodId)
+  const active = context.methods.filter((row) => row.status !== 'INACTIVE')
+  const method = named ?? active.find((row) => row.isPreferred) ?? active[0] ?? null
+  return remittanceRecipients(context.carrier, context.contacts, method)
+}
+
+export type AutoRemittanceDecision =
+  | { action: 'SEND'; to: string[] }
+  | { action: 'SKIP'; reason: 'NOT_A_PAYMENT' | 'REVERSED' | 'NO_BILLS' | 'ALREADY_HANDLED' | 'NO_REMIT_EMAIL' | 'TURNED_OFF' }
+
+/**
+ * Whether a payment that was just recorded sends its own remittance. Only a fresh PAYMENT does, once: any
+ * earlier attempt, hand-marked send or sent stamp means a person or an earlier run already dealt with it.
+ */
+export function autoRemittanceDecision(
+  context: Parameters<typeof remitRecipientsFor>[0],
+  env: string | undefined = process.env.AP_AUTO_REMITTANCE,
+): AutoRemittanceDecision {
+  const payment = context.payment
+  if (String(env ?? '').toLowerCase() === 'off') return { action: 'SKIP', reason: 'TURNED_OFF' }
+  if (payment.kind !== 'PAYMENT') return { action: 'SKIP', reason: 'NOT_A_PAYMENT' }
+  if (typeof payment.reversedByPaymentId === 'string' && payment.reversedByPaymentId) return { action: 'SKIP', reason: 'REVERSED' }
+  if (context.bills.length === 0) return { action: 'SKIP', reason: 'NO_BILLS' }
+  if ((numberOrNull(payment.remittanceAttempts) ?? 0) > 0 || payment.remittanceSentAt || payment.markedSentAt) {
+    return { action: 'SKIP', reason: 'ALREADY_HANDLED' }
+  }
+  const to = remitRecipientsFor(context)
+  return to.length === 0 ? { action: 'SKIP', reason: 'NO_REMIT_EMAIL' } : { action: 'SEND', to }
+}
+
+/**
+ * Runs right after a payment posts. It never throws: the money is already out, so a payee with no address,
+ * a refused send or a bug here is logged and left for the Paid view to show, and the manual Send remittance
+ * button still works.
+ */
+async function autoSendRemittance(paymentRowId: string, caller: Caller): Promise<void> {
+  try {
+    const context = await readRemittanceContext(paymentRowId)
+    const decision = autoRemittanceDecision(context)
+    if (decision.action === 'SKIP') {
+      if (decision.reason === 'NO_REMIT_EMAIL') {
+        await writeAudit('ApPayment', paymentRowId, 'AUTO_REMITTANCE_SKIPPED', caller, { reason: decision.reason })
+      }
+      return
+    }
+    await sendRemittance({ paymentId: paymentRowId, layout: 'TABLE', to: decision.to }, caller)
+  } catch (err) {
+    console.error('[tms-finance-actions] automatic remittance failed', paymentRowId, String(err))
+  }
+}
+
+const EMAIL_SHAPE = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/
+
+/**
+ * Save the address a payee's remittance goes to, from the Remit to column. It is written onto the payment
+ * method the bill is paid under (the one the column reads), so the carrier profile shows the same address.
+ * A carrier with no payment info at all is sent to the profile instead: inventing a method here would
+ * invent a way to pay them.
+ */
+export async function setPayeeRemitEmail(input: Row, caller: Caller): Promise<Row> {
+  const email = assertString(input.email, 'email').trim()
+  if (email.length > 254 || !EMAIL_SHAPE.test(email)) throw new Error('Enter one valid e-mail address')
+
+  // A bill names the exact method it is paid under; a carrier row (Aging by carrier) takes the preferred one.
+  const billId = optionalString(input.billId, 128)
+  const bill = billId ? await getById(CARRIER_BILL_TABLE_NAME, billId) : null
+  if (billId && !bill) throw new Error(`Bill not found: ${billId}`)
+  const carrierId = bill ? String(bill.carrierId ?? '') : assertString(input.carrierId, 'carrierId')
+  const methods = (await queryIndex(
+    CARRIER_PAYMENT_METHOD_TABLE_NAME,
+    IDX_PAYMENT_METHODS_BY_CARRIER,
+    'carrierId',
+    carrierId,
+  )) as unknown as CarrierPaymentMethodRecord[]
+  const active = methods.filter((row) => row.status !== 'INACTIVE')
+  const method =
+    methods.find((row) => row.id === bill?.paymentMethodId) ??
+    active.find((row) => row.isPreferred) ??
+    active[0] ??
+    null
+  if (!method) {
+    throw new Error('This carrier has no payment info on file. Add it on the carrier profile, then the remit e-mail can be saved there.')
+  }
+
+  const now = nowIso()
+  await transact(
+    [updateTx(CARRIER_PAYMENT_METHOD_TABLE_NAME, method.id, { payeeEmail: email, updatedAt: now, updatedBy: caller.email })],
+    'remit e-mail',
+  )
+  await writeAudit('CARRIER_PAYMENT_METHOD', method.id, 'SET_REMIT_EMAIL', caller, {
+    carrierId,
+    billId,
+    previous: method.payeeEmail ?? null,
+    email,
+  })
+  return { paymentMethodId: method.id, carrierId, email }
+}
+
 export async function sendRemittance(input: Row, caller: Caller): Promise<Row> {
   const paymentRowId = assertString(input.paymentId, 'paymentId')
   const copyOnly = optionalString(input.via, 16) === 'COPY'
@@ -676,20 +794,28 @@ export async function sendRemittance(input: Row, caller: Caller): Promise<Row> {
   if (context.bills.length === 0) throw new Error('That payment has no bills to advise on')
 
   const settings = await getSettings()
-  const method = context.methods.find((row) => row.id === context.bills[0]?.paymentMethodId) ?? null
   const to = emailList(input.to, 'to').length > 0
     ? emailList(input.to, 'to')
-    : remittanceRecipients(context.carrier, context.contacts, method)
+    : remitRecipientsFor(context)
   const cc = emailList(input.cc, 'cc')
+  const tableLayout = optionalString(input.layout, 16) === 'TABLE'
   if (to.length === 0 && !copyOnly) {
     throw new Error('Nobody is listed to receive this remittance; add an accounting contact or type an address')
   }
 
-  const rendered = renderRemittanceEmail({
+  const brokerName = context.division?.name ?? 'BCAT'
+  const table = tableLayout
+    ? renderRemittanceTableEmail({
+        payment: context.payment as unknown as Parameters<typeof renderRemittanceTableEmail>[0]['payment'],
+        bills: context.bills,
+        brokerName,
+      })
+    : null
+  const rendered = table ?? renderRemittanceEmail({
     payment: context.payment as unknown as Parameters<typeof renderRemittanceEmail>[0]['payment'],
     bills: context.bills,
     carrierName: context.carrier?.name ?? String(context.payment.carrierId ?? ''),
-    brokerName: context.division?.name ?? 'BCAT',
+    brokerName,
     template: (settings.remittanceEmailTemplate as string | undefined) ?? DEFAULT_REMITTANCE_EMAIL_TEMPLATE,
   })
   const body = message ? `${message}\n\n${rendered.body}` : rendered.body
@@ -713,6 +839,7 @@ export async function sendRemittance(input: Row, caller: Caller): Promise<Row> {
     tableName: SHIPMENT_NOTICE_TABLE_NAME,
     from: FROM_ADDRESS,
     attachments,
+    htmlBody: table && !message ? table.html : null,
     draft: {
       id: noticeId,
       // A carrier's e-mail history lives on the payment; the notice log is keyed by

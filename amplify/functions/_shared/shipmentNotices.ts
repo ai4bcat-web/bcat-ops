@@ -52,6 +52,8 @@ export interface SendEmailArgs {
   noticeId?: string | null
   subject: string
   body: string
+  /** An HTML twin of `body` (a table, say). Sent as multipart/alternative; the plain text stays the fallback. */
+  htmlBody?: string | null
   attachments?: EmailAttachment[]
 }
 
@@ -74,6 +76,27 @@ export async function sendNoticeEmail(ses: SESv2Client, args: SendEmailArgs): Pr
   const attachments = args.attachments ?? []
   const subject = args.subject.replace(/[\r\n]+/g, ' ').trim()
   const bodyB64 = wrap76(Buffer.from(args.body, 'utf8').toString('base64'))
+  const htmlB64 = args.htmlBody ? wrap76(Buffer.from(args.htmlBody, 'utf8').toString('base64')) : null
+  // With an HTML twin the message body is itself a multipart/alternative: plain text first, HTML last.
+  const altBoundary = `alt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  const bodyPart = htmlB64
+    ? `Content-Type: multipart/alternative; boundary="${altBoundary}"\r\n` +
+      `\r\n` +
+      `--${altBoundary}\r\n` +
+      `Content-Type: text/plain; charset=UTF-8\r\n` +
+      `Content-Transfer-Encoding: base64\r\n` +
+      `\r\n` +
+      `${bodyB64}\r\n` +
+      `--${altBoundary}\r\n` +
+      `Content-Type: text/html; charset=UTF-8\r\n` +
+      `Content-Transfer-Encoding: base64\r\n` +
+      `\r\n` +
+      `${htmlB64}\r\n` +
+      `--${altBoundary}--\r\n`
+    : `Content-Type: text/plain; charset=UTF-8\r\n` +
+      `Content-Transfer-Encoding: base64\r\n` +
+      `\r\n` +
+      `${bodyB64}\r\n`
 
   let raw =
     `From: ${args.from}\r\n` +
@@ -84,21 +107,14 @@ export async function sendNoticeEmail(ses: SESv2Client, args: SendEmailArgs): Pr
     `MIME-Version: 1.0\r\n`
 
   if (attachments.length === 0) {
-    raw +=
-      `Content-Type: text/plain; charset=UTF-8\r\n` +
-      `Content-Transfer-Encoding: base64\r\n` +
-      `\r\n` +
-      `${bodyB64}\r\n`
+    raw += bodyPart
   } else {
     const boundary = `bcat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
     raw +=
       `Content-Type: multipart/mixed; boundary="${boundary}"\r\n` +
       `\r\n` +
       `--${boundary}\r\n` +
-      `Content-Type: text/plain; charset=UTF-8\r\n` +
-      `Content-Transfer-Encoding: base64\r\n` +
-      `\r\n` +
-      `${bodyB64}\r\n`
+      bodyPart
     for (const file of attachments) {
       const safe = file.filename.replace(/["\\\r\n]/g, '_')
       raw +=
@@ -239,6 +255,8 @@ export interface DeliverNoticeArgs {
   /** Reply-To header; leave unset when replies should go to `from`. */
   replyTo?: string | null
   attachments?: EmailAttachment[]
+  /** HTML twin of the draft's body, sent but not stored on the notice row. */
+  htmlBody?: string | null
 }
 
 export interface DeliveredNotice {
@@ -279,6 +297,7 @@ export async function deliverNotice(args: DeliverNoticeArgs): Promise<DeliveredN
       noticeId: args.draft.id,
       subject: args.draft.subject,
       body: args.draft.body,
+      htmlBody: args.htmlBody,
       attachments: args.attachments,
     })
     await recordNoticeOutcome(args.db, args.tableName, args.draft.id, { status: 'SENT', messageId })

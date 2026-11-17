@@ -3,7 +3,7 @@ import { ageOpenItems } from '@/lib/arAging'
 import type { CarrierBillRecord } from '@/types/tms'
 import {
   billsInReview, sharedProIndex, sharedProLabel, siblingCarriers, awaitingInvoiceTotals,
-  billsExpected, billsAging, billsSelected, canSelectForPayment, invoiceAgeBuckets, payToLabel, paymentInfoFor, remitEmailOf,
+  billsExpected, billsAging, billsSelected, canSelectForPayment, invoiceAgeBuckets, payToLabel, paymentInfoFor, remitEmailOf, remittanceStatusOf, AP_TABS,
 } from './apViews'
 
 const lc = (id: string, over: Record<string, unknown> = {}) => ({
@@ -131,5 +131,20 @@ describe('who is paid and where', () => {
     expect(remitEmailOf(bill({ remitTo: { name: 'x', payeeEmail: 'snap@carrier.test' } }), info)).toBe('snap@carrier.test')
     expect(remitEmailOf(bill({}), info)).toBe('ap@carrier.test')
     expect(remitEmailOf(bill({ carrierId: 'other' }), info)).toBe('')
+  })
+})
+
+describe('Payable tab order and remittance status', () => {
+  it('ends with Cash requirements', () => {
+    expect(AP_TABS[AP_TABS.length - 1].key).toBe('cash')
+    expect(AP_TABS.map((t) => t.key).slice(0, 3)).toEqual(['expected', 'aging', 'selected'])
+  })
+
+  it('says how a paid bill remittance went', () => {
+    expect(remittanceStatusOf({ remittanceSentAt: '2026-11-17T10:00:00Z', remittanceSentTo: 'ap@x.com' }, 'ap@x.com')).toMatchObject({ label: 'Emailed 2026-11-17', tone: 'green' })
+    expect(remittanceStatusOf({ markedSentAt: '2026-11-17T10:00:00Z' }, '')).toMatchObject({ tone: 'gray', needsEmail: false })
+    expect(remittanceStatusOf({ remittanceAttempts: 1 }, 'ap@x.com')).toMatchObject({ label: 'Email failed', tone: 'red' })
+    expect(remittanceStatusOf({ remittanceAttempts: 0 }, '')).toMatchObject({ label: 'No remit e-mail', needsEmail: true })
+    expect(remittanceStatusOf(undefined, 'ap@x.com')).toMatchObject({ label: 'Not sent', needsEmail: false })
   })
 })

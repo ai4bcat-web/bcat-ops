@@ -451,6 +451,89 @@ export function renderRemittanceEmail(input: RemittanceEmailInput): { subject: s
   return { subject, body: lines.join('\n').slice(0, MAX_NOTICE_BODY_CHARS) }
 }
 
+/** Ryne's fixed opening line for the remittance that goes out when payments are marked paid. */
+export const AUTO_REMITTANCE_INTRO = 'Please find remittance for the below shipments attached:'
+
+export interface RemittanceTableInput {
+  payment: Pick<ApPaymentRecord, 'id' | 'reference' | 'paidAt' | 'amountCents' | 'applications'>
+  bills: Pick<CarrierBillRecord, 'id' | 'billNumber' | 'billDate' | 'shipmentNumber' | 'loadNumber' | 'netCents'>[]
+  brokerName: string
+}
+
+export interface RemittanceTableRow {
+  pro: string
+  invoiceNumber: string
+  invoiceDate: string
+  amountCents: number
+}
+
+/** One line per bill the payment settled: PRO, the carrier's invoice number and date, and what was paid on it. */
+export function remittanceTableRows(input: RemittanceTableInput): { rows: RemittanceTableRow[]; totalCents: number } {
+  const byId = new Map(input.bills.map((bill) => [bill.id, bill]))
+  const paid: Record<string, number> = {}
+  for (const application of input.payment.applications ?? []) {
+    paid[application.billId] = (paid[application.billId] ?? 0) + application.amountCents
+  }
+  const rows: RemittanceTableRow[] = []
+  let totalCents = 0
+  for (const [billId, amountCents] of Object.entries(paid)) {
+    const bill = byId.get(billId)
+    rows.push({
+      pro: bill?.shipmentNumber || bill?.loadNumber || '',
+      invoiceNumber: bill?.billNumber ?? '',
+      invoiceDate: bill?.billDate ?? '',
+      amountCents,
+    })
+    totalCents += amountCents
+  }
+  return { rows, totalCents }
+}
+
+function htmlEscape(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+/**
+ * The remittance e-mail sent when a payment is marked paid: the fixed opening line, then a table of what
+ * was paid. The PDF advice rides along as the attachment. Carrier-facing, so only what was paid to them:
+ * no customer rate, no margin.
+ */
+export function renderRemittanceTableEmail(input: RemittanceTableInput): { subject: string; body: string; html: string } {
+  const { rows, totalCents } = remittanceTableRows(input)
+  const reference = input.payment.reference?.trim() || input.payment.id
+  const subject = `Remittance ${reference} · ${input.brokerName}`
+  const money = (cents: number) => `$${formatCents(cents)}`
+  const headers = ['PRO #', 'Carrier invoice #', 'Invoice date', 'Amount paid']
+  const cells = rows.map((r) => [r.pro || '—', r.invoiceNumber || '—', r.invoiceDate || '—', money(r.amountCents)])
+  const totalRow = ['Total', '', '', money(totalCents)]
+  const widths = headers.map((h, i) => Math.max(h.length, ...[...cells, totalRow].map((row) => row[i].length)))
+  const pad = (row: string[]) => row.map((cell, i) => (i === 3 ? cell.padStart(widths[i]) : cell.padEnd(widths[i]))).join('  ')
+  const body = [
+    AUTO_REMITTANCE_INTRO,
+    '',
+    pad(headers),
+    widths.map((w) => '-'.repeat(w)).join('  '),
+    ...cells.map(pad),
+    widths.map((w) => '-'.repeat(w)).join('  '),
+    pad(totalRow),
+    '',
+    input.brokerName,
+  ].join('\n').slice(0, MAX_NOTICE_BODY_CHARS)
+
+  const td = (text: string, right = false, bold = false) =>
+    `<td style="padding:6px 12px;border-bottom:1px solid #ddd;${right ? 'text-align:right;' : ''}${bold ? 'font-weight:bold;' : ''}">${htmlEscape(text)}</td>`
+  const th = (text: string, right = false) =>
+    `<th style="padding:6px 12px;border-bottom:2px solid #333;text-align:${right ? 'right' : 'left'};">${htmlEscape(text)}</th>`
+  const html =
+    `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222;">` +
+    `<p>${htmlEscape(AUTO_REMITTANCE_INTRO)}</p>` +
+    `<table style="border-collapse:collapse;"><thead><tr>${headers.map((h, i) => th(h, i === 3)).join('')}</tr></thead><tbody>` +
+    cells.map((row) => `<tr>${row.map((c, i) => td(c, i === 3)).join('')}</tr>`).join('') +
+    `<tr>${totalRow.map((c, i) => td(c, i === 3, true)).join('')}</tr></tbody></table>` +
+    `<p>${htmlEscape(input.brokerName)}</p></div>`
+  return { subject, body, html }
+}
+
 /**
  * Where a remittance is sent, in the order a cheque would follow the money: the payee
  * address on the payment method the bill was paid under, then the carrier's accounting

@@ -8103,7 +8103,7 @@ const AP_PAYMENT_FIELDS = `
   id carrierId payeeKind kind paidAt method reference
   amountCents appliedCents unappliedCents applications creditApplications remitTo
   loadCarrierId reversesPaymentId reversedByPaymentId
-  pdfKey pdfVersion remittanceSentAt remittanceSentTo remittanceCount
+  pdfKey pdfVersion remittanceSentAt remittanceSentTo remittanceCount remittanceAttempts
   markedSentAt markedSentBy markedSentNote lastNoticeId note
   createdBy createdAt updatedAt
 `
@@ -8441,6 +8441,11 @@ export async function sendRemittance(input: {
   via?: 'EMAIL' | 'COPY'
 }): Promise<RemittanceEmailResult> {
   return financeAction<RemittanceEmailResult>('SEND_REMITTANCE', input)
+}
+
+/** Save the e-mail a payee's remittance goes to, on the payment method the bill is paid under. */
+export async function setPayeeRemitEmail(input: { billId?: string; carrierId?: string; email: string }): Promise<{ paymentMethodId: string; carrierId: string; email: string }> {
+  return financeAction<{ paymentMethodId: string; carrierId: string; email: string }>('SET_REMIT_EMAIL', input)
 }
 
 export async function renderRemittancePdf(input: { paymentId: string }): Promise<{ payment: ApPaymentRecord }> {

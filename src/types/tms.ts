@@ -3472,6 +3472,8 @@ export interface ApPaymentRecord {
   remittanceSentAt?: string | null
   remittanceSentTo?: string | null
   remittanceCount?: number | null
+  /** Every send attempt, delivered or not. */
+  remittanceAttempts?: number | null
   markedSentAt?: string | null
   markedSentBy?: string | null
   markedSentNote?: string | null

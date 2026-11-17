@@ -14,7 +14,8 @@ import type { CarrierBillRecord } from '@/types/tms'
 import { cashRequirements, dayInZone, type CashLine } from '../cashFridays'
 import { BILL_STATUS_LABEL } from '../apViews'
 import { proOf, type BillFactsIndex } from '../apQueue'
-import { paymentInfoFor, payeeLabel } from '../apViews'
+import { paymentInfoFor, payeeLabel, remitEmailOf } from '../apViews'
+import { RemitToCell } from './RemitToCell'
 import type { CarrierPaymentInfo } from '@/lib/apiClient'
 import '@/features/ar/components/agingReport.css'
 
@@ -27,7 +28,7 @@ function payMethod(bill: CarrierBillRecord, infos: readonly CarrierPaymentInfo[]
   return method ? String(method) : '—'
 }
 
-export function CashRequirementsTab({ bills, facts, infos, asOf, busy, onMoveToSelected }: {
+export function CashRequirementsTab({ bills, facts, infos, asOf, busy, onMoveToSelected, onAddRemit }: {
   bills: readonly CarrierBillRecord[]
   facts: BillFactsIndex
   infos: readonly CarrierPaymentInfo[]
@@ -35,6 +36,7 @@ export function CashRequirementsTab({ bills, facts, infos, asOf, busy, onMoveToS
   asOf: string
   busy: boolean
   onMoveToSelected: (bill: CarrierBillRecord) => void
+  onAddRemit: (bill: CarrierBillRecord) => void
 }) {
   const today = /^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf : dayInZone(asOf)
   const cash = useMemo(() => cashRequirements(bills, today), [bills, today])
@@ -106,7 +108,7 @@ export function CashRequirementsTab({ bills, facts, infos, asOf, busy, onMoveToS
                         <table className="tms-aging-inv" aria-label={`Bills for ${l.label}`}>
                           <thead>
                             <tr>
-                              <th scope="col">PRO</th><th scope="col">Carrier</th><th scope="col">Pay to</th><th scope="col">Due</th>
+                              <th scope="col">PRO</th><th scope="col">Carrier</th><th scope="col">Pay to</th><th scope="col">Remit to</th><th scope="col">Due</th>
                               <th scope="col" className="tms-dg-right">Amount to pay</th><th scope="col">Status</th><th scope="col">Method</th><th scope="col"><span className="sr-only">Action</span></th>
                             </tr>
                           </thead>
@@ -116,6 +118,7 @@ export function CashRequirementsTab({ bills, facts, infos, asOf, busy, onMoveToS
                                 <td><Link className="tms-link" to={shipmentEditorPath(b.shipmentId)}>{proOf(b, facts)}</Link></td>
                                 <td>{b.carrierName ?? '—'}</td>
                                 <td>{payeeLabel(b)}</td>
+                                <td><RemitToCell email={remitEmailOf(b, infos)} label={payeeLabel(b)} onAdd={() => onAddRemit(b)} /></td>
                                 <td>{b.datesPending === true ? '—' : formatDay(b.dueAt)}</td>
                                 <td className="tms-dg-right"><strong>{formatCents(b.balanceCents)}</strong>{b.quickPay === true ? <> <TmsBadge tone="blue">Quick pay</TmsBadge></> : null}</td>
                                 <td>{BILL_STATUS_LABEL[b.status]}</td>

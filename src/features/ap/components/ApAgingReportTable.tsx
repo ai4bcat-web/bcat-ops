@@ -11,13 +11,18 @@ import { AGING_BUCKETS, AGING_BUCKET_LABEL } from '@/lib/arAging'
 import { formatCents } from '@/lib/invoiceBuild'
 import { shipmentEditorPath } from '@/lib/shipmentLinks'
 import { formatDay } from '@/features/ar/arViews'
-import type { ApAgingCarrier, ApAgingReport } from '../apAgingReport'
+import type { ApAgingBill, ApAgingCarrier, ApAgingReport } from '../apAgingReport'
 import { BILL_STATUS_LABEL } from '../apViews'
+import { RemitToCell } from './RemitToCell'
 import '@/features/ar/components/agingReport.css'
 
 const money = (cents: number) => (cents ? formatCents(cents) : '—')
 
-export function ApAgingReportTable({ report }: { report: ApAgingReport }) {
+export function ApAgingReportTable({ report, onAddRemit }: {
+  report: ApAgingReport
+  /** Opens the Add remit e-mail dialog for one bill's payee. */
+  onAddRemit?: (carrier: ApAgingCarrier, bill: ApAgingBill) => void
+}) {
   const [search, setSearch] = useState('')
   const [pastDueOnly, setPastDueOnly] = useState(false)
   const [open, setOpen] = useState<Set<string>>(new Set())
@@ -107,7 +112,7 @@ export function ApAgingReportTable({ report }: { report: ApAgingReport }) {
                   </tr>
                   {isOpen && (
                     <tr className="tms-aging-detail-row">
-                      <td colSpan={11}><BillTable carrier={c} /></td>
+                      <td colSpan={11}><BillTable carrier={c} onAddRemit={onAddRemit} /></td>
                     </tr>
                   )}
                 </Fragment>
@@ -152,7 +157,7 @@ export function ApAgingReportTable({ report }: { report: ApAgingReport }) {
                         <span className="tms-aging-card-amt">{formatCents(b.balanceCents)}</span>
                       </div>
                       <div className="tms-muted text-xs">
-                        Pay to {b.payTo} · Due {formatDay(b.dueAt)}{b.daysPastDue > 0 ? ` · ${b.daysPastDue}d past due` : ''} · {AGING_BUCKET_LABEL[b.bucket]}
+                        Pay to {b.payTo}{b.remitEmail ? ` · ${b.remitEmail}` : ''} · Due {formatDay(b.dueAt)}{b.daysPastDue > 0 ? ` · ${b.daysPastDue}d past due` : ''} · {AGING_BUCKET_LABEL[b.bucket]}
                       </div>
                     </li>
                   ))}
@@ -169,7 +174,7 @@ export function ApAgingReportTable({ report }: { report: ApAgingReport }) {
   )
 }
 
-function BillTable({ carrier }: { carrier: ApAgingCarrier }) {
+function BillTable({ carrier, onAddRemit }: { carrier: ApAgingCarrier; onAddRemit?: (carrier: ApAgingCarrier, bill: ApAgingBill) => void }) {
   return (
     <table className="tms-aging-inv" aria-label="Open bills">
       <thead>
@@ -177,6 +182,7 @@ function BillTable({ carrier }: { carrier: ApAgingCarrier }) {
           <th scope="col">PRO</th>
           <th scope="col">Bill #</th>
           <th scope="col">Pay to</th>
+          <th scope="col">Remit to</th>
           <th scope="col">Due</th>
           <th scope="col" className="tms-dg-right">Past due</th>
           <th scope="col" className="tms-dg-right">Amount</th>
@@ -190,6 +196,7 @@ function BillTable({ carrier }: { carrier: ApAgingCarrier }) {
             <td><Link className="tms-link" to={shipmentEditorPath(b.shipmentId)} aria-label={`Open PRO ${b.pro}`}>{b.pro}</Link></td>
             <td>{b.billNumber ?? '—'}</td>
             <td>{b.payTo}</td>
+            <td><RemitToCell email={b.remitEmail} label={b.payTo || carrier.carrierName} onAdd={() => onAddRemit?.(carrier, b)} /></td>
             <td>{formatDay(b.dueAt)}</td>
             <td className="tms-dg-right">{b.daysPastDue > 0 ? <span className="tms-aging-late">{b.daysPastDue}d</span> : '—'}</td>
             <td className="tms-dg-right"><strong>{formatCents(b.balanceCents)}</strong>{b.quickPay ? ' · quick pay' : ''}</td>

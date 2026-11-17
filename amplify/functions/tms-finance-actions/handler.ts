@@ -53,6 +53,7 @@ import {
   renderRemittancePdf,
   reverseApPayment,
   sendRemittance,
+  setPayeeRemitEmail,
 } from './apPayments'
 import { repointInvoicedCustomer } from './repoint'
 import { changeInvoiceCustomer } from './changeCustomer'
@@ -126,6 +127,7 @@ type Action =
   | 'CREATE_AP_CREDIT'
   | 'REVERSE_AP_PAYMENT'
   | 'SEND_REMITTANCE'
+  | 'SET_REMIT_EMAIL'
   | 'RENDER_REMITTANCE_PDF'
   | 'MARK_REMITTANCE_SENT'
   | 'SAVE_AP_SETTINGS'
@@ -175,6 +177,7 @@ const AP_ACTIONS: Record<string, true> = {
   CREATE_AP_CREDIT: true,
   REVERSE_AP_PAYMENT: true,
   SEND_REMITTANCE: true,
+  SET_REMIT_EMAIL: true,
   RENDER_REMITTANCE_PDF: true,
   MARK_REMITTANCE_SENT: true,
   SAVE_AP_SETTINGS: true,
@@ -362,6 +365,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return reverseApPayment(input, caller) as unknown as Promise<Row>
     case 'SEND_REMITTANCE':
       return sendRemittance(input, caller)
+    case 'SET_REMIT_EMAIL':
+      return setPayeeRemitEmail(input, caller)
     case 'RENDER_REMITTANCE_PDF':
       return renderRemittancePdf(input, caller)
     case 'MARK_REMITTANCE_SENT':
