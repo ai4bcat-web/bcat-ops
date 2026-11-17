@@ -3,7 +3,7 @@ import { Receipt } from 'lucide-react'
 import { useVendorPayables } from '@/hooks/useVendorPayables'
 import { vendorApTotals } from '@/lib/vendorApTotals'
 import { toLocalDateString } from '@/lib/payPeriod'
-import { DashCard, DashRow, DashRows, Headline } from './DashCard'
+import { DashCard, DashRow, Headline } from './DashCard'
 
 function cents(n: number): string {
   return `$${(n / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -28,9 +28,10 @@ export function VendorApCard({ onOpen }: { onOpen: () => void }) {
         value={loading && items.length === 0 ? '—' : cents(totals.outstandingAmount)}
         caption={`to pay · ${totals.outstandingCount} invoice${totals.outstandingCount === 1 ? '' : 's'}${totals.unvalued ? ` · ${totals.unvalued} without an amount` : ''}${totals.nextDue ? ` · next due ${totals.nextDue}` : ''}`}
       />
-      <DashRows>
+      {/* Rows sit right under the headline, like the other panels (the tiles pin theirs to the bottom). */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
         {rows.map((r) => <DashRow key={r.label} color={r.color} label={r.label} count={r.count} value={cents(r.amount)} />)}
-      </DashRows>
+      </div>
     </DashCard>
   )
 }

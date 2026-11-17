@@ -51,24 +51,35 @@ export function DeliveryToReviewCard() {
   const bars = shown.length < 2 ? null : (
     <div data-testid="review-lag-weeks" style={{ marginTop: 'auto' }}>
       <div style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)', marginBottom: 6 }}>
-        Weekly average
+        Weekly average · days
       </div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 36 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 76 }}>
         {shown.map((w, i) => {
           const last = i === shown.length - 1
           return (
             <div
               key={w.week}
               title={`${weekLabel(w.week)} · ${days(w.avgDays)} · ${w.count} pushed`}
-              style={{
-                flex: 1, minWidth: 6, borderRadius: 3,
-                height: `${Math.max(8, Math.round(((w.avgDays ?? 0) / maxDays) * 100))}%`,
-                background: last ? 'var(--tms-primary)' : 'var(--tms-muted)',
-                opacity: last ? 1 : 0.55,
-              }}
-            />
+              style={{ flex: 1, minWidth: 6, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'stretch', gap: 3 }}
+            >
+              <span style={{ fontSize: 10.5, textAlign: 'center', fontVariantNumeric: 'tabular-nums', color: last ? 'var(--tms-text)' : 'var(--tms-muted)', fontWeight: last ? 700 : 500 }}>
+                {(w.avgDays ?? 0).toFixed(1)}
+              </span>
+              <div
+                style={{
+                  borderRadius: 3,
+                  height: `${Math.max(6, Math.round(((w.avgDays ?? 0) / maxDays) * 48))}px`,
+                  background: last ? 'var(--tms-primary)' : 'var(--tms-muted)',
+                  opacity: last ? 1 : 0.55,
+                }}
+              />
+            </div>
           )
         })}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 10.5, color: 'var(--tms-muted)' }}>
+        <span>{weekLabel(shown[0].week).replace('Week of ', '')}</span>
+        <span>This week</span>
       </div>
     </div>
   )

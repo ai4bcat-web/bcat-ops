@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
-import { monthRows, monthRowsFromRep, monthsBetween, repRows, trailingMonths } from '@/lib/brokerageRevenue'
+import { monthRows, monthRowsFromRep, monthsBetween, trailingMonths } from '@/lib/brokerageRevenue'
 import { TZ } from '@/lib/date'
 import { BrokerageMonthWidget } from './BrokerageMonthWidget'
 import { BrokerageRepWidget } from './BrokerageRepWidget'
 import { RangePicker, type Preset } from './BrokerageRangePicker'
-import { FIRST_MONTH, clampRange, previousMonth, type MonthRange } from './brokerageFormat'
+import { FIRST_MONTH, clampRange, type MonthRange } from './brokerageFormat'
 import { useBrokerageDashboard } from './useBrokerageDashboard'
 
 const MONTH_PRESETS: Preset[] = [
@@ -13,9 +13,9 @@ const MONTH_PRESETS: Preset[] = [
   { key: 'ytd', label: 'Year to date', range: (c) => ({ from: `${c.slice(0, 4)}-01`, to: c }) },
 ]
 const REP_PRESETS: Preset[] = [
-  { key: 'this', label: 'This month', range: (c) => ({ from: c, to: c }) },
-  { key: 'last', label: 'Last month', range: (c) => ({ from: previousMonth(c), to: previousMonth(c) }) },
-  { key: 'q', label: 'Last 3 months', range: (c) => ({ from: trailingMonths(c, 3)[0], to: c }) },
+  { key: '3', label: '3 months', range: (c) => ({ from: trailingMonths(c, 3)[0], to: c }) },
+  { key: '6', label: '6 months', range: (c) => ({ from: trailingMonths(c, 6)[0], to: c }) },
+  { key: '13', label: '12 months + this', range: (c) => ({ from: trailingMonths(c, 13)[0], to: c }) },
   { key: 'ytd', label: 'Year to date', range: (c) => ({ from: `${c.slice(0, 4)}-01`, to: c }) },
 ]
 
@@ -48,7 +48,6 @@ export function BrokerageSection() {
     () => (own ? monthRowsFromRep(data.repMonths, repMonths, data.divisions) : monthRows(data.rows, repMonths, data.divisions)),
     [own, data.rows, data.repMonths, data.divisions, repMonths],
   )
-  const byRep = useMemo(() => repRows(data.repMonths, repMonths, data.divisions, data.names), [data.repMonths, data.divisions, data.names, repMonths])
   // A month the rollup holds but whose per-rep object is not written yet (before the first recompute after deploy).
   const repReady = own || repMonths.every((m) => !data.rows.some((r) => r.payload.month === m) || data.repMonths.some((r) => r.month === m))
 
@@ -72,6 +71,7 @@ export function BrokerageSection() {
             <li><b>Revenue:</b> what the customer is charged for the load (the sum of its customer charge lines: line haul, fuel and accessorials), the same figure the TMS revenue and margin cards use.</li>
             <li><b>Expense:</b> what the carrier charges us for the load (the sum of its carrier charge lines: carrier rate and carrier accessorials), the same cost those margin cards use.</li>
             <li><b>Profit</b> = revenue − expense. <b>Profit %</b> = profit ÷ revenue; a month or rep with no revenue shows a dash.</li>
+            <li><b>By sales rep, month over month:</b> loads = delivered, priced loads; gross revenue = the customer charge lines; expenses = the carrier charge lines; profit = revenue − expenses. Each cell's small figure is the change from the month before (a percent, or a load count); the month in progress is shown to date with no change. Expenses are never colored as good or bad. The Division switch re-cuts the same loads by revenue division (Brokerage includes anything under it).</li>
             <li><b>Sales rep:</b> the rep on the load or shipment (profile name, group reps such as Ivan Cartage, BCAT and Owner Operators as their own rows, or the typed rep name when there is no login). Loads with no rep are the &quot;No sales rep&quot; row, so the rep total equals the month total.</li>
             <li>Figures come from the dashboard rollup and are recomputed within minutes of a change; they are not a general-ledger close (an uninvoiced load counts at its customer rate, and a later invoice adjustment moves it).</li>
           </ul>
@@ -106,12 +106,21 @@ export function BrokerageSection() {
 
             <section aria-label="By sales rep" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>By sales rep</h2>
+                <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>By sales rep, month over month</h2>
                 <RangePicker label="Rep view" range={repRange} current={current} presets={REP_PRESETS} onChange={setRepRange} />
               </div>
               {data.state === 'loading'
                 ? <div className="tms-card" aria-busy="true" style={{ minHeight: 160 }} />
-                : <BrokerageRepWidget rows={byRep} monthRows={repMonthRows} ready={repReady} />}
+                : <BrokerageRepWidget
+                    repMonths={data.repMonths}
+                    divisions={data.divisions}
+                    names={data.names}
+                    months={repMonths}
+                    monthRows={repMonthRows}
+                    current={current}
+                    ready={repReady}
+                    own={own}
+                  />}
             </section>
           </>
         )}

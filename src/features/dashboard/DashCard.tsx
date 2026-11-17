@@ -32,7 +32,7 @@ export function DashCard({ label, icon, hint, onOpen, testId, ariaBusy, children
     >
       <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10, height: '100%', boxSizing: 'border-box' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-          <div title={hint} style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div title={hint} style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)', lineHeight: 1.25 }}>
             {label}
           </div>
           <div style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tms-text-2)' }}>
@@ -72,16 +72,16 @@ export function DeltaChip({ delta, dir }: { delta: string; dir: 'up' | 'down' | 
   )
 }
 
-/** One breakdown row: coloured dot, truncating label, optional count, right-aligned value that never clips. */
+/** One breakdown row: coloured dot, label (wraps rather than clips), optional count, right-aligned value that never clips. */
 export function DashRow({ color, label, count, value }: { color: string; label: string; count?: number | null; value: ReactNode }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, minWidth: 0 }}>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: 'var(--tms-text-2)', minWidth: 0 }}>
-        <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, minWidth: 0 }}>
+      <span style={{ display: 'inline-flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, lineHeight: 1.35, color: 'var(--tms-text-2)', minWidth: 0 }}>
+        <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0, marginTop: 6 }} />
+        <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{label}</span>
         {count != null && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--tms-muted)', flexShrink: 0 }}>{count}</span>}
       </span>
-      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--tms-text)', flexShrink: 0, textAlign: 'right', whiteSpace: 'nowrap', ...NUM }}>{value}</span>
+      <span style={{ fontSize: 13, lineHeight: 1.3, fontWeight: 600, color: 'var(--tms-text)', flexShrink: 0, textAlign: 'right', whiteSpace: 'nowrap', ...NUM }}>{value}</span>
     </div>
   )
 }

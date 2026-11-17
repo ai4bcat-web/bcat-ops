@@ -54,6 +54,16 @@ export function isBrokerageScope(scope: ScopeKey, divisions: readonly DivisionSh
   return topLevelOf(divisions.map((d) => ({ id: d.code, code: d.code, parentId: d.parentId ?? null })), code) === BROKERAGE_DIVISION
 }
 
+/** The division filter on the rep-by-month grid: one revenue division by its code, or every division. */
+export type DivisionFilter = 'ALL' | 'BROKERAGE' | 'ASSETS' | 'CAR_SHIPPING'
+
+/** Whether a rollup scope belongs to the chosen division (Brokerage includes everything under it, see `isBrokerageScope`). */
+export function inDivision(scope: ScopeKey, divisions: readonly DivisionShape[], filter: DivisionFilter): boolean {
+  if (filter === 'ALL') return true
+  if (filter === BROKERAGE_DIVISION) return isBrokerageScope(scope, divisions)
+  return split(scope).division === filter
+}
+
 export function marginBpsOf(revenueCents: number, profitCents: number): number | null {
   return revenueCents > 0 ? Math.round((profitCents / revenueCents) * 10000) : null
 }
@@ -203,4 +213,75 @@ export function tieOut(byMonth: readonly Measures[], byRep: readonly Measures[])
   const expenseDiffCents = r.expenseCents - m.expenseCents
   const loadsDiff = r.loads - m.loads
   return { ok: revenueDiffCents === 0 && expenseDiffCents === 0 && loadsDiff === 0, revenueDiffCents, expenseDiffCents, loadsDiff }
+}
+
+export interface RepMonthRow {
+  repKey: RepKey
+  label: string
+  /** One entry per month of the matrix, in its order. */
+  byMonth: Measures[]
+  total: Measures
+}
+
+export interface RepMonthMatrix {
+  months: string[]
+  /** Reps with at least one load in the range, biggest total profit first; "No sales rep" last when it has loads. */
+  reps: RepMonthRow[]
+  totalsByMonth: Measures[]
+  grand: Measures
+}
+
+/**
+ * Month-over-month by sales rep: one row per rep, one measure set per month, from the same per-rep month objects the
+ * rep table reads, so every column adds up to that month's row in the month view. A rep known by profile id and by a
+ * typed name collapses into one row (same rule as `repRows`).
+ */
+export function repMonthMatrix(
+  rows: readonly RepMonth[],
+  months: readonly string[],
+  divisions: readonly DivisionShape[],
+  names: RepNames,
+  filter: DivisionFilter,
+): RepMonthMatrix {
+  const byMonthIndex = new Map(months.map((m, i) => [m, i]))
+  const reps = new Map<string, { key: RepKey; label: string; sums: Sum[] }>()
+  const touch = (key: RepKey) => {
+    const label = repLabelOf(key, names)
+    const merge = key === NO_REP_KEY ? '' : `n:${label.trim().toLowerCase()}`
+    let entry = reps.get(merge)
+    if (!entry) { entry = { key, label, sums: months.map(zero) }; reps.set(merge, entry) }
+    return entry
+  }
+  for (const row of rows) {
+    const at = byMonthIndex.get(row.month)
+    if (at === undefined) continue
+    for (const [scope, perRep] of Object.entries(row.rep)) {
+      if (!inDivision(scope, divisions, filter)) continue
+      for (const [key, f] of Object.entries(perRep)) add(touch(key).sums[at], f)
+    }
+  }
+  const built: RepMonthRow[] = [...reps.values()].map(({ key, label, sums }) => {
+    const total = zero()
+    for (const s of sums) { total.loads += s.loads; total.revenue += s.revenue; total.expense += s.expense }
+    return { repKey: key, label, byMonth: sums.map(measures), total: measures(total) }
+  }).filter((r) => r.total.loads > 0)
+  const none = built.filter((r) => r.repKey === NO_REP_KEY)
+  const named = built
+    .filter((r) => r.repKey !== NO_REP_KEY)
+    .sort((a, b) => b.total.profitCents - a.total.profitCents || b.total.revenueCents - a.total.revenueCents || a.label.localeCompare(b.label))
+  const ordered = [...named, ...none]
+  const totalsByMonth = months.map((_, i) => totalsOf(ordered.map((r) => r.byMonth[i])))
+  return { months: [...months], reps: ordered, totalsByMonth, grand: totalsOf(ordered.map((r) => r.total)) }
+}
+
+/** Month-over-month change of one figure: a percent of the earlier month, or a plain count for loads; null with nothing to compare. */
+export function monthChange(cur: number, prev: number, kind: 'money' | 'loads'): { text: string; dir: 'up' | 'down' | 'flat' } | null {
+  if (kind === 'loads') {
+    const d = cur - prev
+    return { text: d === 0 ? '0' : `${d > 0 ? '+' : '−'}${Math.abs(d)}`, dir: d > 0 ? 'up' : d < 0 ? 'down' : 'flat' }
+  }
+  if (prev <= 0) return null
+  const pct = ((cur - prev) / prev) * 100
+  const rounded = Math.round(pct)
+  return { text: `${rounded > 0 ? '+' : rounded < 0 ? '−' : ''}${Math.abs(rounded)}%`, dir: rounded > 0 ? 'up' : rounded < 0 ? 'down' : 'flat' }
 }
