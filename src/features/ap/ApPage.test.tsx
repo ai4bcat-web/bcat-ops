@@ -373,13 +373,13 @@ describe('the AP board', () => {
       })
       return [a, b]
     }
-    const order = () => within(screen.getByRole('table', { name: 'AP aging' })).getAllByRole('row')
-      .map((r) => r.textContent ?? '').filter((t) => /Blue Line|Red Line/.test(t)).map((t) => (t.includes('Blue Line') ? 'BL-1' : 'RL-1'))
+    const order = () => within(screen.getByRole('table', { name: /^AP aging/ })).getAllByRole('row')
+      .map((r) => r.textContent ?? '').filter((t) => /Blue Line|Red Line/.test(t)).map((t) => (t.includes('Red Line') ? 'RL-1' : 'BL-1'))
 
     it('draws every view as the shared dense table with the Columns, density and summary controls', async () => {
       await setup({ bills: two() })
       fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
-      expect(screen.getByRole('table', { name: 'AP aging' })).toBeTruthy()
+      expect(screen.getByRole('table', { name: /^AP aging/ })).toBeTruthy()
       expect(screen.getByRole('button', { name: /Columns/ })).toBeTruthy()
       expect(screen.getByRole('button', { name: /Summary/ })).toBeTruthy()
       expect(screen.getByRole('button', { name: 'Filter CARRIER' })).toBeTruthy()
@@ -390,7 +390,7 @@ describe('the AP board', () => {
     it('sorts a money column by its cents when the header is clicked', async () => {
       await setup({ bills: two() })
       fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
-      const header = within(screen.getByRole('table', { name: 'AP aging' })).getByRole('columnheader', { name: /AMOUNT/ })
+      const header = within(screen.getByRole('table', { name: /^AP aging/ })).getByRole('columnheader', { name: /AMOUNT/ })
       fireEvent.click(within(header).getAllByRole('button')[0])
       expect(order()).toEqual(['RL-1', 'BL-1'])
       fireEvent.click(within(header).getAllByRole('button')[0])
