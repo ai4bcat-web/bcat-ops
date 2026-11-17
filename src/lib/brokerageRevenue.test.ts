@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { computeMonth, dirtyKeysForRecord, repKeyOf, type MonthPayload, type MonthSource, type RepSplit, type RollupRow, type SampleLite, type ShipmentLite } from './dashboardRollup'
 import {
-  isBrokerageScope, monthRows, monthRowsFromRep, monthsBetween, repRows, tieOut, totalsOf, trailingMonths, NO_REP_LABEL,
+  inDivision, isBrokerageScope, monthChange, monthRows, monthRowsFromRep, monthsBetween, repMonthMatrix, repRows, tieOut, totalsOf, trailingMonths, NO_REP_LABEL,
 } from './brokerageRevenue'
 
 const DIVISIONS = [
@@ -146,5 +146,61 @@ describe('rollup dirty keys for the rep split', () => {
     const before = { id: 's', pickupAppt: '2026-10-05T12:00:00Z', pickupMonth: '2026-10', salesRepCode: null }
     const after = { ...before, salesRepCode: 'JANE DOE' }
     expect(dirtyKeysForRecord('Shipment', before, after).sort()).toEqual(['LG:2026-10', 'M:2026-10', 'M:2026-11'])
+  })
+})
+
+describe('rep by month matrix', () => {
+  const f = (n: number, rev: number, cost: number) => ({ n, rev, cost, prof: rev - cost })
+  const REP_MONTHS = [
+    { month: '2026-10', rep: { 'BROKERAGE|': { 'i:ryne@bcatcorp.com': f(2, 200_000, 150_000), 'i:grp-ivan': f(1, 100_000, 90_000) }, 'ASSETS|': { 'i:ryne@bcatcorp.com': f(5, 900_000, 1) } } },
+    { month: '2026-11', rep: { 'BROKERAGE|': { 'i:ryne@bcatcorp.com': f(3, 400_000, 300_000), '': f(1, 50_000, 60_000) }, 'CAR_SHIPPING|': { 'i:ryne@bcatcorp.com': f(1, 10_000, 5_000) } } },
+  ]
+  const MONTHS = ['2026-10', '2026-11']
+
+  it('splits loads, revenue, expenses and profit by rep and month for one division, biggest profit first, no-rep last', () => {
+    const m = repMonthMatrix(REP_MONTHS, MONTHS, DIVISIONS, NAMES, 'BROKERAGE')
+    expect(m.reps.map((r) => r.label)).toEqual(['Ryne B', 'Ivan Cartage', NO_REP_LABEL])
+    const ryne = m.reps[0]
+    expect(ryne.byMonth.map((x) => [x.loads, x.revenueCents, x.expenseCents, x.profitCents])).toEqual([[2, 200_000, 150_000, 50_000], [3, 400_000, 300_000, 100_000]])
+    expect(ryne.total).toMatchObject({ loads: 5, revenueCents: 600_000, expenseCents: 450_000, profitCents: 150_000, marginBps: 2500 })
+    expect(m.totalsByMonth.map((x) => x.loads)).toEqual([3, 4])
+    expect(m.grand).toMatchObject({ loads: 7, revenueCents: 750_000, profitCents: 150_000 })
+  })
+
+  it('re-cuts the same rows by division and drops reps with nothing in it', () => {
+    const assets = repMonthMatrix(REP_MONTHS, MONTHS, DIVISIONS, NAMES, 'ASSETS')
+    expect(assets.reps.map((r) => r.label)).toEqual(['Ryne B'])
+    expect(assets.grand.loads).toBe(5)
+    const all = repMonthMatrix(REP_MONTHS, MONTHS, DIVISIONS, NAMES, 'ALL')
+    expect(all.grand.loads).toBe(7 + 5 + 1)
+    expect(inDivision('CAR_SHIPPING|', DIVISIONS, 'CAR_SHIPPING')).toBe(true)
+    expect(inDivision('|OWNER_OPERATOR', DIVISIONS, 'ASSETS')).toBe(false)
+  })
+
+  it('every month column of the Brokerage matrix equals the month view built from the same rows', () => {
+    const m = repMonthMatrix(REP_MONTHS, MONTHS, DIVISIONS, NAMES, 'BROKERAGE')
+    const monthView = monthRowsFromRep(REP_MONTHS, MONTHS, DIVISIONS)
+    expect(tieOut(monthView, m.totalsByMonth).ok).toBe(true)
+  })
+
+  it('merges a rep known by profile id and by typed name, and ignores months outside the range', () => {
+    const rows = [{ month: '2026-10', rep: { 'BROKERAGE|': { 'i:ryne@bcatcorp.com': f(1, 100, 50), 'c:Ryne B': f(1, 100, 50) } } }, { month: '2026-09', rep: { 'BROKERAGE|': { 'i:grp-ivan': f(9, 1, 1) } } }]
+    const m = repMonthMatrix(rows, ['2026-10'], DIVISIONS, NAMES, 'BROKERAGE')
+    expect(m.reps).toHaveLength(1)
+    expect(m.reps[0].total.loads).toBe(2)
+  })
+})
+
+describe('month over month change', () => {
+  it('is a percent of the earlier month for money and a count for loads', () => {
+    expect(monthChange(150, 100, 'money')).toEqual({ text: '+50%', dir: 'up' })
+    expect(monthChange(50, 100, 'money')).toEqual({ text: '−50%', dir: 'down' })
+    expect(monthChange(100, 100, 'money')).toEqual({ text: '0%', dir: 'flat' })
+    expect(monthChange(7, 4, 'loads')).toEqual({ text: '+3', dir: 'up' })
+    expect(monthChange(2, 5, 'loads')).toEqual({ text: '−3', dir: 'down' })
+  })
+  it('has nothing to compare against when the earlier month was zero or a loss', () => {
+    expect(monthChange(100, 0, 'money')).toBeNull()
+    expect(monthChange(100, -20, 'money')).toBeNull()
   })
 })

@@ -129,9 +129,9 @@ function KpiSkeleton({ label }: { label: string }) {
   )
 }
 
-/** A grid cell: keeps the visual order while the DOM groups the three rollup cards; `size` sets its span (dashboardGrid.css). */
-function Cell({ order, size, children }: { order: number; size?: 's2' | 's3' | 's6'; children: React.ReactNode }) {
-  return <div className={`dash-cell${size ? ` dash-${size}` : ''}`} style={{ order }}>{children}</div>
+/** A grid cell of the dashboard's tile and panel rows (dashboardGrid.css). */
+function Cell({ children }: { children: React.ReactNode }) {
+  return <div className="dash-cell">{children}</div>
 }
 
 function asOfLabel(iso: string): string {
@@ -251,80 +251,77 @@ export function DashboardPage() {
 
         {canAsk && askOpen && <AssistantChat />}
 
-        {/* ── Top cards: one packed grid across the full width (dashboardGrid.css) ── */}
+        {/* ── Top cards: four KPI tiles, then four panels, on one four-column module (dashboardGrid.css) ── */}
         <div className="dash-top">
           <div
-            className="dash-top-grid"
+            className="dash-stack"
             data-testid="legacy-kpis-all"
             data-state={kpiFinal && needsAppt !== null ? kpi.state : 'loading'}
             data-source={kpi.source ?? ''}
             data-asof={kpi.asOf ?? ''}
             data-kpi-flips={kpi.flips}
           >
-            {/* Loads, Revenue and Broker covered come from the rollup together; `display: contents` keeps them grid items. */}
-            <div
-              data-testid="legacy-kpis"
-              data-state={kpi.state}
-              data-source={kpi.source ?? ''}
-              data-asof={kpi.asOf ?? ''}
-              data-kpi-flips={kpi.flips}
-              style={{ display: 'contents' }}
-            >
-              <Cell order={1} size="s2">
-                {metrics ? (
-                  <LoadsCard
-                    split={metrics.loadsSplit}
-                    delta={metrics.totalLoadsDelta > 0 ? `+${metrics.totalLoadsDelta}` : String(metrics.totalLoadsDelta)}
-                    deltaDir={metrics.totalLoadsDelta > 0 ? 'up' : metrics.totalLoadsDelta < 0 ? 'down' : 'neutral'}
-                    sublabel={sinceLabel(rangeKey)}
-                  />
-                ) : <KpiSkeleton label="Total Loads" />}
-              </Cell>
-              <Cell order={2} size="s3">
-                {metrics ? (
-                  <RevenueCard
-                    split={metrics.revenueSplit}
-                    connected={metrics.revenueConnected}
-                    delta={metrics.revenueConnected ? `${metrics.revenueDelta >= 0 ? '+' : '−'}${cents(Math.abs(metrics.revenueDelta))}` : undefined}
-                    deltaDir={metrics.revenueDelta > 0 ? 'up' : metrics.revenueDelta < 0 ? 'down' : 'neutral'}
-                    sublabel={metrics.revenueConnected ? sinceLabel(rangeKey) : 'Connect rates to loads'}
-                  />
-                ) : <KpiSkeleton label="Revenue" />}
-              </Cell>
-              <Cell order={3} size="s2">
-                {metrics ? (
-                  <BrokerCoveredCard
-                    count={metrics.brokerLoads}
-                    countDelta={metrics.brokerLoadsDelta}
-                    revenue={metrics.brokerRevenue}
-                    revenueDelta={metrics.brokerRevenueDelta}
-                    sublabel={sinceLabel(rangeKey)}
-                  />
-                ) : <KpiSkeleton label="Broker Covered" />}
-              </Cell>
+            <div className="dash-tiles">
+              {/* Loads, Revenue and Broker covered come from the rollup together; `display: contents` keeps them grid items. */}
+              <div
+                data-testid="legacy-kpis"
+                data-state={kpi.state}
+                data-source={kpi.source ?? ''}
+                data-asof={kpi.asOf ?? ''}
+                data-kpi-flips={kpi.flips}
+                style={{ display: 'contents' }}
+              >
+                <Cell>
+                  {metrics ? (
+                    <LoadsCard
+                      split={metrics.loadsSplit}
+                      delta={metrics.totalLoadsDelta > 0 ? `+${metrics.totalLoadsDelta}` : String(metrics.totalLoadsDelta)}
+                      deltaDir={metrics.totalLoadsDelta > 0 ? 'up' : metrics.totalLoadsDelta < 0 ? 'down' : 'neutral'}
+                      sublabel={sinceLabel(rangeKey)}
+                    />
+                  ) : <KpiSkeleton label="Total Loads" />}
+                </Cell>
+                <Cell>
+                  {metrics ? (
+                    <RevenueCard
+                      split={metrics.revenueSplit}
+                      connected={metrics.revenueConnected}
+                      delta={metrics.revenueConnected ? `${metrics.revenueDelta >= 0 ? '+' : '−'}${cents(Math.abs(metrics.revenueDelta))}` : undefined}
+                      deltaDir={metrics.revenueDelta > 0 ? 'up' : metrics.revenueDelta < 0 ? 'down' : 'neutral'}
+                      sublabel={metrics.revenueConnected ? sinceLabel(rangeKey) : 'Connect rates to loads'}
+                    />
+                  ) : <KpiSkeleton label="Revenue" />}
+                </Cell>
+                <Cell>
+                  {metrics ? (
+                    <BrokerCoveredCard
+                      count={metrics.brokerLoads}
+                      countDelta={metrics.brokerLoadsDelta}
+                      revenue={metrics.brokerRevenue}
+                      revenueDelta={metrics.brokerRevenueDelta}
+                      sublabel={sinceLabel(rangeKey)}
+                    />
+                  ) : <KpiSkeleton label="Broker Covered" />}
+                </Cell>
+              </div>
+              <Cell><BatoryCard count={needsAppt} /></Cell>
             </div>
-            <Cell order={4} size="s2"><BatoryCard count={needsAppt} /></Cell>
-            {/* Delivery → Load review, week over week (Ryne 2026-11-15); anyone who works loads. */}
-            {(hasPageAccess('loads') || hasPageAccess('tms')) && (
-              <Cell order={5} size="s3">
-                <LazyWidget enabled={kpiFinal} minHeight={200} label="delivery-to-review"><DeliveryToReviewCard /></LazyWidget>
-              </Cell>
-            )}
-            {/* Accounts receivable (with Factoring) and Accounts payable, each on its own accounting grant. */}
-            {hasPageAccess('invoicing') && (
-              <Cell order={6} size="s6">
-                <LazyWidget enabled={kpiFinal} minHeight={240} label="accounting-ar"><ReceivablesCard /></LazyWidget>
-              </Cell>
-            )}
-            {hasPageAccess('carrierPay') && (
-              <Cell order={7} size="s3">
-                <LazyWidget enabled={kpiFinal} minHeight={240} label="accounting-ap"><PayablesCard /></LazyWidget>
-              </Cell>
-            )}
-            {/* Vendor (non-carrier) bills, next to carrier AP. */}
-            <Cell order={8} size="s3">
-              <VendorApCard onOpen={() => navigate('/tms/vendors')} />
-            </Cell>
+
+            <div className="dash-panels">
+              {/* Accounts receivable (with Factoring) and Accounts payable, each on its own accounting grant. */}
+              {hasPageAccess('invoicing') && (
+                <Cell><LazyWidget enabled={kpiFinal} minHeight={248} label="accounting-ar"><ReceivablesCard /></LazyWidget></Cell>
+              )}
+              {hasPageAccess('carrierPay') && (
+                <Cell><LazyWidget enabled={kpiFinal} minHeight={248} label="accounting-ap"><PayablesCard /></LazyWidget></Cell>
+              )}
+              {/* Delivery → Load review, week over week (Ryne 2026-11-15); anyone who works loads. */}
+              {(hasPageAccess('loads') || hasPageAccess('tms')) && (
+                <Cell><LazyWidget enabled={kpiFinal} minHeight={248} label="delivery-to-review"><DeliveryToReviewCard /></LazyWidget></Cell>
+              )}
+              {/* Vendor (non-carrier) bills, next to carrier AP. */}
+              <Cell><VendorApCard onOpen={() => navigate('/tms/vendors')} /></Cell>
+            </div>
           </div>
         </div>
 

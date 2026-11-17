@@ -75,7 +75,7 @@ export function DashboardSummaryCard({ title, icon, headline, headlineText, subl
       <div
         data-testid={testId ? `${testId}-body` : undefined}
         style={groupsBeside && groups.length > 0
-          ? { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', columnGap: 32, rowGap: 14, alignItems: 'start' }
+          ? { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 170px), 1fr))', columnGap: 32, rowGap: 14, alignItems: 'start' }
           : { display: 'flex', flexDirection: 'column', gap: 14 }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 7, minWidth: 0 }}>

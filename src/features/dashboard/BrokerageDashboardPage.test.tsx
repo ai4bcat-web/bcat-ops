@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { ReactNode } from 'react'
 import { BrokerageSection } from './BrokerageDashboardPage'
@@ -57,14 +57,57 @@ describe('Brokerage cards under the Dashboard', () => {
     expect(within(monthTable).getAllByRole('row').length).toBeLessThan(8)
     expect(screen.getByTestId('brokerage-data-start')).toHaveTextContent('Data starts October 2026')
 
-    // Rep view defaults to last month (October): the other divisions' loads are not counted.
+    // Rep view: reps down the side, October and November across (the data start), Brokerage only. Profit is the default figure.
     await waitFor(() => expect(screen.getByTestId('brokerage-rep-widget')).toBeInTheDocument())
     const reps = screen.getAllByTestId('brokerage-rep-row').map((r) => within(r).getAllByRole('cell').map((c) => c.textContent))
-    expect(reps[0]).toEqual(['Ryne B', '1', '$1,000', '$600', '$400', '40.0%'])
-    expect(reps[1]).toEqual(['Ivan Cartage', '1', '$2,000', '$1,800', '$200', '10.0%'])
-    expect(within(screen.getByTestId('brokerage-rep-none')).getAllByRole('cell')[0]).toHaveTextContent('No sales rep')
+    // Each month: profit 400 / 200; the Total column carries the margin under the figure.
+    expect(reps[0]).toEqual(['Ryne B', '$400', '$400', '$80040.0%'])
+    expect(reps[1]).toEqual(['Ivan Cartage', '$200', '$200', '$40010.0%'])
+    expect(within(screen.getByTestId('brokerage-rep-total')).getAllByRole('cell').map((c) => c.textContent)).toEqual(['Total', '$600', '$600', '$1,20020.0%'])
+    expect(screen.queryByTestId('brokerage-rep-none')).not.toBeInTheDocument()
     expect(screen.getByTestId('brokerage-tie')).toHaveAttribute('data-ok', 'true')
     expect(screen.getByTestId('brokerage-help')).toHaveTextContent('Profit % = profit ÷ revenue')
+  })
+
+  it('shows all four figures per rep, switches the figure and the division, and keeps the columns tied to the month view', async () => {
+    fetchRollup.mockResolvedValue(window(['2026-10', '2026-11'].map((m) => row(m))))
+    fetchRep.mockResolvedValue({ scope: 'ALL', repKey: null, months: ['2026-10', '2026-11'].map(repMonth) })
+    render(<BrokerageSection />)
+    await screen.findByTestId('brokerage-rep-table')
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'Figure' })).getByRole('button', { name: 'All four' }))
+    const ryne = screen.getAllByTestId('brokerage-rep-row')[0]
+    expect(ryne).toBeInTheDocument()
+    const table = screen.getByTestId('brokerage-rep-table')
+    for (const label of ['Loads', 'Gross revenue', 'Expenses', 'Profit']) expect(within(table).getAllByText(label).length).toBeGreaterThan(0)
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'Figure' })).getByRole('button', { name: 'Loads' }))
+    expect(within(screen.getAllByTestId('brokerage-rep-row')[0]).getAllByRole('cell').map((c) => c.textContent)).toEqual(['Ryne B', '1', '1', '2'])
+
+    // Assets holds Ryne's nine loads a month; the tie-out line belongs to Brokerage only.
+    fireEvent.click(within(screen.getByRole('group', { name: 'Division' })).getByRole('button', { name: 'Assets' }))
+    expect(within(screen.getAllByTestId('brokerage-rep-row')[0]).getAllByRole('cell').map((c) => c.textContent)).toEqual(['Ryne B', '9', '9', '18'])
+    expect(screen.queryByTestId('brokerage-tie')).not.toBeInTheDocument()
+  })
+
+  it('shows the change from the month before for finished months and none for the month in progress', async () => {
+    vi.setSystemTime(new Date('2026-12-09T15:00:00Z'))
+    const f = (rev: number, cost: number) => fin(1, rev, cost)
+    const months = ['2026-10', '2026-11', '2026-12']
+    fetchRollup.mockResolvedValue(window(months.map((m) => row(m))))
+    fetchRep.mockResolvedValue({
+      scope: 'ALL', repKey: null,
+      months: months.map((month, i) => ({ month, computedAt: '2026-12-09T14:50:00Z', rep: { 'BROKERAGE|': { 'i:ryne@bcatcorp.com': f([100_000, 150_000, 300_000][i], 50_000) } } })),
+    })
+    render(<BrokerageSection />)
+    await screen.findByTestId('brokerage-rep-table')
+    fireEvent.click(within(screen.getByRole('group', { name: 'Figure' })).getByRole('button', { name: 'Revenue' }))
+    const cells = within(screen.getAllByTestId('brokerage-rep-row')[0]).getAllByRole('cell')
+    // October has nothing before it, November is +50% on October, December is still in progress.
+    expect(within(cells[1]).queryByTestId('rep-month-delta')).not.toBeInTheDocument()
+    expect(within(cells[2]).getByTestId('rep-month-delta')).toHaveTextContent('+50%')
+    expect(within(cells[3]).queryByTestId('rep-month-delta')).not.toBeInTheDocument()
+    expect(screen.getByText(/Dec 26 · to date/)).toBeInTheDocument()
   })
 
   it('shows a rep caller only their own figures and never reads the company rollup rows', async () => {
