@@ -484,6 +484,8 @@ interface AppState {
   // comes into being inside CREATE_SHIPMENT so its PRO is claimed in the same transaction
   // as the shipment number.
   updateLoad: (id: string, patch: Partial<Omit<Load, 'id' | 'createdAt'>>) => Promise<void>
+  /** A shipment the server just deleted: its legs leave this client's working set now (no subscription event exists for a delete). */
+  dropShipmentLoads: (shipmentIds: readonly string[]) => void
   // No deleteLoad: a PRO number is permanent (Ryne, 2026-10-28). The Load model has
   // no delete operation at all; a shipment leaves the working set by being voided.
 
@@ -918,6 +920,12 @@ export const useAppStore = create<AppState>()(
       },
 
       // ── Loads ──────────────────────────────────────────────────────────────
+      dropShipmentLoads: (shipmentIds) => {
+        const gone = new Set(shipmentIds)
+        if (gone.size === 0) return
+        set((s) => ({ loads: s.loads.filter((l) => !(l.shipmentId && gone.has(l.shipmentId))) }))
+      },
+
       updateLoad: async (id, patch) => {
         const before = get().loads.find((l) => l.id === id)
         if (!before) return

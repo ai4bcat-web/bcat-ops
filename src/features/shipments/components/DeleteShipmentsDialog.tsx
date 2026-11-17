@@ -8,6 +8,7 @@
  * this dialog is the explanation and the confirmation, never the permission.
  */
 import { useEffect, useState } from 'react'
+import { useAppStore } from '@/store/useAppStore'
 import { TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsField, TmsInput } from '@/features/tms/kit'
 import {
   deleteShipments, graphqlErrorText, latestDeleteExport, restoreDeletedShipments,
@@ -108,6 +109,7 @@ export function DeleteShipmentsDialog({ shipments, onClose, onDeleted }: {
         confirm: 'DELETE',
         ...(force ? { forceConfirm: 'FORCE' as const } : {}),
       })
+      useAppStore.getState().dropShipmentLoads(response.results.filter((r) => r.ok).map((r) => r.shipmentId))
       setPhase({ kind: 'done', response })
     } catch (err) {
       setPhase({ kind: 'unknown', startedAt, exportPrefix: null })

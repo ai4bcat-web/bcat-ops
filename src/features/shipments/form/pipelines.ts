@@ -280,6 +280,12 @@ export async function runUploadQueued(values: ShipmentFormValues, bundle: Shipme
  * assignment used to run only when the shipment was created, so a pick on an open shipment was dropped on save and the picker
  * snapped back to "Pick a driver". Assign when the picked driver differs from the one the saved shipment shows.
  */
+function wantsSplitDelivery(values: ShipmentFormValues, ctx: PipelineCtx): boolean {
+  const c = values.carrier
+  const pickup = ownFleetDriverByName(ctx.ownFleetRoster ?? [], c.driver1.name)
+  return !!pickup && !!c.deliveryDriverId && c.deliveryDriverId !== pickup.id
+}
+
 async function assignPickedDriver(r: Runner, values: ShipmentFormValues, ctx: PipelineCtx, saved: ShipmentBundle): Promise<void> {
   const wanted = values.carrier.driver1.name.trim()
   if (!values.carrier.isOwnFleet || !wanted) return
@@ -297,6 +303,9 @@ async function assignPickedDriver(r: Runner, values: ShipmentFormValues, ctx: Pi
         truckNumber: driver.truckNumber || undefined,
         trailerId: driver.trailerId ?? undefined,
         trailerNumber: driver.trailerNumber || undefined,
+        // A separate delivery driver is picked on this form: applyDeliveryDriver re-splits the stops right after, so an existing
+        // relay is replaced on purpose and needs no confirmation. With no delivery driver the server's relay guard still applies.
+        flattenSplit: wantsSplitDelivery(values, ctx) ? true : undefined,
       })
     })
     if (r.failed.includes('assignDriver')) { r.message = `Saved, but the driver was not assigned: ${r.message}`; return }
