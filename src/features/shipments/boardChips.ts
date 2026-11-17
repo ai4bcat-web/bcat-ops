@@ -8,6 +8,7 @@ import { checkCallState } from '@/lib/checkCalls'
 import { parseDetentionFlag } from '@/lib/detentionFlag'
 import { chicagoDateStr, formatBoardDate } from '@/lib/date'
 import { boardStatusOf } from '@/lib/shipmentViewDefs'
+import { hasLeftOperations, type ListRow } from '@/lib/shipmentLists'
 import { needsBillingReview, REVIEW_BILLING_LABEL } from '@/lib/reviewBilling'
 import { reviewFactsOfRow } from './batchReview'
 import { docsMissingOf, registerRowText, type ShipmentRow } from './shipmentViews'
@@ -119,13 +120,15 @@ export function scheduledDeliveryLateOf(
  * A live shipment whose scheduled delivery day (the last delivery stop's appointment, or the end of its
  * window) is before today in Chicago time and that is not delivered yet. Day-level on purpose: a load due
  * at 8:00 today is not flagged until tomorrow, and a date-only appointment (stored as Chicago midnight)
- * counts its whole day. Delivered, voided, canceled and draft shipments are never flagged.
+ * counts its whole day. Delivered, voided, canceled and draft shipments, and any load that has left operations (Load Review, invoiced, factored, paid), are never flagged.
  */
 export function pastDeliveryOf(
-  row: Pick<ShipmentRow, 'status' | 'voidedAt' | 'deletedAt' | 'deliveryAppt' | 'deliveryApptEnd'>,
+  row: Pick<ShipmentRow, 'status' | 'voidedAt' | 'deletedAt' | 'deliveryAppt' | 'deliveryApptEnd'> & Partial<ListRow>,
   nowMs: number,
 ): PastDelivery | null {
   if (row.status === 'DRAFT') return null
+  // Pushed to Load Review, released to invoicing, invoiced, factored or paid: operations is done with it, so the delivery date is moot.
+  if (hasLeftOperations({ ...row, status: row.status })) return null
   const board = boardStatusOf(row)
   if (board === 'DELIVERED' || board === 'VOIDED' || board === 'CANCELED') return null
   const late = scheduledDeliveryLateOf(row, nowMs)

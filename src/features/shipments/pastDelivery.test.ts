@@ -35,6 +35,16 @@ describe('pastDeliveryOf', () => {
     expect(pastDeliveryOf(row({ deliveryAppt: null }), NOW)).toBeNull()
   })
 
+  it('never flags a load that has left operations (Load Review, released, invoiced, factored, paid)', () => {
+    const past = '2026-11-01T14:00:00Z'
+    expect(pastDeliveryOf(row({ deliveryAppt: past, arStatus: 'PAID' }), NOW)).toBeNull()
+    expect(pastDeliveryOf(row({ deliveryAppt: past, arStatus: 'INVOICED' }), NOW)).toBeNull()
+    expect(pastDeliveryOf(row({ deliveryAppt: past, invoiceId: 'inv-1' }), NOW)).toBeNull()
+    expect(pastDeliveryOf(row({ deliveryAppt: past, factoringItemId: 'f-1' }), NOW)).toBeNull()
+    expect(pastDeliveryOf(row({ deliveryAppt: past, loadReviewPushedAt: '2026-11-02T00:00:00Z' }), NOW)).toBeNull()
+    expect(pastDeliveryOf(row({ deliveryAppt: past, arStatus: 'DOCS_NEEDED' }), NOW)).not.toBeNull()
+  })
+
   it('backs the pastDeliveryDate board flag', () => {
     expect(matchesFlag(row({ status: 'OPEN', deliveryAppt: '2026-11-05T14:00:00Z' }), 'pastDeliveryDate', NOW)).toBe(true)
     expect(matchesFlag(row({ status: 'DELIVERED', deliveryAppt: '2026-11-05T14:00:00Z' }), 'pastDeliveryDate', NOW)).toBe(false)
