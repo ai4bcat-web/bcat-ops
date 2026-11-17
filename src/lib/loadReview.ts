@@ -13,6 +13,8 @@
  * `loadReviewRefusal` so the server refuses on exactly the sentences the page shows.
  */
 import { isLegacyHistory } from './legacyHistory'
+import { parseDetentionFlag } from './detentionFlag'
+import { parseTonuFlag } from './tonuFlag'
 import { stopPlace } from './stopPlace'
 import type { ApStatus, ArStatus, AssignmentType, LoadWorkflowStatus, ShipmentBuildState, ShipmentStatus } from '../types/tms'
 import {
@@ -29,6 +31,7 @@ import {
 import { isReleasedToInvoicing } from './shipmentLists'
 import {
   NEVER_BLOCKING_DOC_TYPES,
+  accessorialFlagMessage,
   releaseGateError,
   type ReleaseGateReasonCode,
   type ReleaseGateResult,
@@ -128,6 +131,9 @@ export interface LoadReviewRow {
   customerBillingSummary?: string | null
   /** The bill-to customer factors through OTR (customerFactorsForOtr); decides what a car-shipping load still needs. */
   customerFactors?: boolean | null
+  /** Raised billing flags (Shipment.detentionFlag / tonuFlag): either one holds the load out of billing until cleared. */
+  detentionFlag?: unknown
+  tonuFlag?: unknown
 }
 
 /**
@@ -195,6 +201,7 @@ export const GATE_CODE_CHECK: Record<ReleaseGateReasonCode, LoadReviewCheckKey> 
   DRIVER_MISSING: 'details',
   CARRIER_RATE_MISSING: 'charges',
   OPEN_EXCEPTIONS: 'details',
+  ACCESSORIAL_FLAG_OPEN: 'details',
 }
 
 const GATE_CODE_TAB: Record<ReleaseGateReasonCode, LoadReviewAction | null> = {
@@ -207,6 +214,7 @@ const GATE_CODE_TAB: Record<ReleaseGateReasonCode, LoadReviewAction | null> = {
   DRIVER_MISSING: { kind: 'OPEN_TAB', tab: 'carrier' },
   CARRIER_RATE_MISSING: { kind: 'OPEN_TAB', tab: 'carrierPay' },
   OPEN_EXCEPTIONS: { kind: 'OPEN_TAB', tab: 'tracking' },
+  ACCESSORIAL_FLAG_OPEN: { kind: 'OPEN_TAB', tab: 'overview' },
 }
 
 function reason(code: string, message: string, check: LoadReviewCheckKey, action: LoadReviewAction | null): LoadReviewReason {
@@ -330,6 +338,14 @@ export function pendingApRecordNotes(row: Pick<LoadReviewRow, 'assignmentType' |
     })
 }
 
+/** The billing flags raised on a row, in the order the sentence names them. */
+export function openAccessorialFlags(row: Pick<LoadReviewRow, 'detentionFlag' | 'tonuFlag'>): ('detention' | 'tonu')[] {
+  const out: ('detention' | 'tonu')[] = []
+  if (parseDetentionFlag(row.detentionFlag) != null) out.push('detention')
+  if (parseTonuFlag(row.tonuFlag) != null) out.push('tonu')
+  return out
+}
+
 /** What the cached row can say about the release gate; references and the driver rule it cannot see. */
 function gateFromRow(row: LoadReviewRow): LoadReviewReason[] {
   const out: LoadReviewReason[] = []
@@ -356,6 +372,8 @@ function gateFromRow(row: LoadReviewRow): LoadReviewReason[] {
   if (open > 0) {
     out.push(reason('OPEN_EXCEPTIONS', `${open} open exception${open === 1 ? '' : 's'}`, 'details', GATE_CODE_TAB.OPEN_EXCEPTIONS))
   }
+  const held = openAccessorialFlags(row)
+  if (held.length > 0) out.push(reason('ACCESSORIAL_FLAG_OPEN', accessorialFlagMessage(held), 'details', GATE_CODE_TAB.ACCESSORIAL_FLAG_OPEN))
   return out
 }
 

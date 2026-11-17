@@ -26,7 +26,6 @@ import { CompanyTab } from '@/features/tms/brokerage/company/CompanyTab'
 import { AljexReconciliationPage } from '@/features/tms/brokerage/company/AljexReconciliationPage'
 import { ALJEX_SIGNOFF_PAGE_KEY } from '@/lib/aljexReconcile'
 import { UsersPage } from '@/features/users/UsersPage'
-import { DemoPage } from './DemoPage'
 import { SpotQuoterSettingsPage } from '@/features/tms/settings/SpotQuoterSettingsPage'
 import { CarrierSalesSettingsPage } from '@/features/tms/settings/CarrierSalesSettingsPage'
 import { useAuth } from '@/hooks/useAuth'
@@ -60,7 +59,6 @@ const TABS: BrokerageTab[] = [
   { key: 'spot-quoter', label: 'Spot quoter & e-mail', path: 'spot-quoter', pages: [] },
   { key: 'carrier-sales', label: 'Carrier Sales', path: 'carrier-sales', pages: [] },
   { key: 'company', label: 'Company', path: 'company', pages: [] },
-  { key: 'demo', label: 'Demo', path: 'demo', pages: [TMS_PAGE_KEY] },
 ]
 
 /** The deepest tab whose path the URL is on — '' only matches the bare root. */
@@ -119,8 +117,8 @@ export function BrokeragePage() {
         <Route path="carrier-sales" element={<RequireAdmin><CarrierSalesSettingsPage /></RequireAdmin>} />
         <Route path="company/data/aljex-reconciliation" element={<ReconciliationRoute />} />
         <Route path="company/*" element={<RequireAdmin><CompanyTab /></RequireAdmin>} />
-        <Route path="demo" element={<RequirePage page={[TMS_PAGE_KEY]}><DormantPage page="demo"><DemoPage /></DormantPage></RequirePage>} />
-        {/* An unknown tab is a stale link, not a dead end: Settings is the page's home. */}
+        {/* An unknown tab is a stale link, not a dead end: Settings is the page's home.
+            The retired /demo tab lands here too, so old bookmarks keep working. */}
         <Route path="*" element={<Navigate to={ROOT} replace />} />
       </Routes>
     </TmsPage>

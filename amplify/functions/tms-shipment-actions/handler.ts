@@ -188,7 +188,7 @@ import { LEAD_STAGES, promotionFor } from '../../../src/lib/crm/promote'
 import { batchShipmentTask, BATCH_TASK_ACTIONS } from './batch'
 import { INTAKE_ACTIONS, isTenderFileKey, reconcileOpenIntake, runIntakeAction, type IntakeAction, type IntakeDeps } from './intake'
 // ── Step P ──────────────────────────────────────────────────────────────────
-// The demo flow's four shipment-side modules. Same bargain as the quote and
+// The posting, build-gate and carrier-offer modules. Same bargain as the quote and
 // document modules above: they are handed this file's clients, tables and
 // bodies, so a posting, a build gate and a carrier offer all go through the
 // same transaction, the same CAS and the same audit as everything else here.
@@ -221,12 +221,6 @@ import {
   SYSTEM_CALLER_EMAIL,
   type CarrierInboundDeps,
 } from './carrierInbound'
-import {
-  getDemoState,
-  resetDemoData,
-  seedDemoData,
-  type DemoDeps,
-} from './demo'
 // Step J decides stub-vs-live for a board and for RateView. The registry is plain
 // data the Lambda bundles; the credentials are read from SSM and never stored here.
 import { adapterFor } from '../../../src/lib/integrations/adapter'
@@ -424,9 +418,6 @@ const PRO_CLAIM_TABLE_NAME = process.env.PRO_CLAIM_TABLE_NAME ?? ''
 // Integration is read to decide stub-vs-live for a board or RateView.
 const SHIPMENT_POSTING_TABLE_NAME = process.env.SHIPMENT_POSTING_TABLE_NAME ?? ''
 const INTEGRATION_TABLE_NAME = process.env.INTEGRATION_TABLE_NAME ?? ''
-// Step P1/P11. DemoRecord is the seed's own index; ShipmentMessage is read only,
-// for the demo checklist's thread count.
-const DEMO_RECORD_TABLE_NAME = process.env.DEMO_RECORD_TABLE_NAME ?? ''
 const SHIPMENT_MESSAGE_TABLE_NAME = process.env.SHIPMENT_MESSAGE_TABLE_NAME ?? ''
 // Step U. IntakeLoad is staged by workflow-agent and changed only here (INTAKE_*).
 const INTAKE_LOAD_TABLE_NAME = process.env.INTAKE_LOAD_TABLE_NAME ?? ''
@@ -434,8 +425,6 @@ const INTAKE_LOAD_TABLE_NAME = process.env.INTAKE_LOAD_TABLE_NAME ?? ''
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const ADMIN_GROUP = 'ADMIN'
 const SETTINGS_ID = 'default'
-/** BCAT_DEV_STACK=true marks the long-lived dev branch stack. */
-const IS_DEV_STACK = process.env.BCAT_DEV_STACK === 'true'
 
 // Amplify derives GSI names from the plural model name and the key fields.
 // The four the shipment bundle reads come from `_shared/shipmentStore`.
@@ -739,7 +728,7 @@ type Action =
   // Step I — the shipment half of the org defaults. Not quote work and not the
   // loads page's either: org defaults are an admin act in every router here.
   | 'SAVE_SHIPMENT_SETTINGS'
-  // ── Step P — the end-to-end demo flow ──────────────────────────────────────
+  // ── Step P — postings, build gate and carrier offers ──────────────────────────────────────
   // P5: the required-fields gate. P6: the load boards. P4: the market rate a
   // quote is priced from. P7: a carrier's answer to a posting. P1/P11: the seed.
   | 'CHECK_BUILD_GATE'
@@ -755,9 +744,6 @@ type Action =
   | 'LIST_CARRIER_OFFERS'
   | 'SEND_SETUP_PACKET'
   | 'SEND_CARRIER_SETUP_PACKET'
-  | 'GET_DEMO_STATE'
-  | 'SEED_DEMO_DATA'
-  | 'RESET_DEMO_DATA'
   | 'LIST_LOAD_CARRIERS_BY_CARRIER'
   // Step AL: inbound carrier offers (mail and calls). FILE is the carrier-inbox system caller's alone.
   | 'FILE_INBOUND_OFFER'
@@ -847,11 +833,6 @@ const ADMIN_ONLY_ACTIONS: Record<string, true> = {
   REASSIGN_SHIPMENTS_BY_REP_CODE: true,
   RETAG_SHIPMENTS: true,
   SWEEP_POD_DELIVERIES: true,
-  // Step P11. Seeding and resetting the demo mints and voids freight wholesale.
-  // Ryne's rule for the Reset button is owner/ADMIN and dev only; the second half
-  // is enforced below, from the stack's own flag rather than from the token.
-  SEED_DEMO_DATA: true,
-  RESET_DEMO_DATA: true,
 }
 
 const QUOTES_PAGE_GROUP = 'page-quotes'
@@ -2511,7 +2492,7 @@ interface SavedForm {
 interface SaveOrderFormOpts {
   /**
    * The factor-ready rule (src/lib/factorReadyAtCreate) on a strict save. Off only for the server's own
-   * callers — quote conversion and the dev demo seed — never from a request: the flag is not read from input.
+   * callers — quote conversion — never from a request: the flag is not read from input.
    */
   factorCheck?: boolean
 }
@@ -9579,46 +9560,6 @@ const intakeDeps: IntakeDeps = {
   now: nowIso,
 }
 
-const demoDeps: DemoDeps = {
-  tables: {
-    demo: DEMO_RECORD_TABLE_NAME,
-    shipment: SHIPMENT_TABLE_NAME,
-    order: ORDER_TABLE_NAME,
-    load: LOAD_TABLE_NAME,
-    loadCarrier: LOAD_CARRIER_TABLE_NAME,
-    customer: CUSTOMER_TABLE_NAME,
-    carrier: CARRIER_TABLE_NAME,
-    carrierDocument: CARRIER_DOCUMENT_TABLE_NAME,
-    quote: QUOTE_TABLE_NAME,
-    posting: SHIPMENT_POSTING_TABLE_NAME,
-    message: SHIPMENT_MESSAGE_TABLE_NAME,
-    document: SHIPMENT_DOCUMENT_TABLE_NAME,
-    checkCall: LOAD_CHECK_CALL_TABLE_NAME,
-    trackingLink: TRACKING_LINK_TABLE_NAME,
-    settings: SETTINGS_TABLE_NAME,
-    intakeLoad: INTAKE_LOAD_TABLE_NAME,
-  },
-  getById,
-  queryIndex: (tableName, indexName, keyName, keyValue) =>
-    queryIndex(tableName, indexName, keyName, String(keyValue)),
-  scanTable,
-  transact: (items) => transact(items, 'demo'),
-  getSettings: settingsRowOrEmpty,
-  writeAudit,
-  isDevStack: IS_DEV_STACK,
-  actions: {
-    createShipment,
-    saveOrderForm: async (input: Row, caller: Caller) => ({ bundle: (await saveOrderForm(input, caller, { factorCheck: false })).bundle as unknown as Row }),
-    submitOrder: (input: Row, caller: Caller) => submitOrder(input, caller, { factorCheck: false }),
-    setShipmentStatus,
-    assignCarrierRep,
-    bookCarrier,
-    voidShipment,
-  },
-  now: nowIso,
-  randomId: randomUUID,
-}
-
 // ── Step AW D.4: post-invoice change rule ────────────────────────────────────
 
 const guardedRunners: Record<PostInvoiceGuardedAction, (input: Row, caller: Caller) => Promise<Row>> = {
@@ -10041,12 +9982,6 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return sendSetupPacket(carrierOfferDeps, input, caller)
     case 'SEND_CARRIER_SETUP_PACKET':
       return sendCarrierSetupPacket(carrierOfferDeps, input, caller)
-    case 'GET_DEMO_STATE':
-      return getDemoState(demoDeps)
-    case 'SEED_DEMO_DATA':
-      return seedDemoData(demoDeps, input, caller)
-    case 'RESET_DEMO_DATA':
-      return resetDemoData(demoDeps, input, caller)
     case 'LIST_LOAD_CARRIERS_BY_CARRIER':
       return listLoadCarriersByCarrier(input, caller)
     case 'FILE_INBOUND_OFFER':

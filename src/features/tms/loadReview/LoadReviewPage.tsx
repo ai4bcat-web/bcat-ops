@@ -32,6 +32,7 @@ import { MAX_REVIEW_BATCH } from '@/lib/reviewRequirements'
 import './loadReview.css'
 import { DetentionPill } from '@/features/shipments/components/Detention'
 import { TonuPill } from '@/features/shipments/components/Tonu'
+import { ClearFlagsButton } from './ClearFlagsButton'
 
 type ReviewEntry = { row: ShipmentListRow; verdict?: LoadReviewVerdict }
 const PAGE_STEP = 50
@@ -228,7 +229,7 @@ export function LoadReviewPage() {
     { key: 'customer', header: 'Customer', render: ({ row }) => row.customerName ?? '—' },
     { key: 'pod', header: 'POD', render: ({ row }) => <PodPreviewButton shipmentId={row.id} number={row.number ?? null} /> },
     { key: 'lane', header: 'Lane', render: ({ row }) => `${row.originCity ?? '—'} → ${row.destinationCity ?? '—'}` },
-    { key: 'loadStatus', header: 'Load status', render: ({ row }) => <span className="flex items-center gap-1"><StatusPill row={row} inReviewQueue /><DetentionPill flag={row.detentionFlag} /><TonuPill flag={row.tonuFlag} /></span> },
+    { key: 'loadStatus', header: 'Load status', render: ({ row }) => <span className="flex items-center gap-1"><StatusPill row={row} inReviewQueue /><DetentionPill flag={row.detentionFlag} /><TonuPill flag={row.tonuFlag} /><ClearFlagsButton row={row} onCleared={() => void refresh()} /></span> },
     { key: 'delivered', header: 'Delivered', render: ({ row }) => deliveredText(row) },
     { key: 'age', header: 'In review', render: ({ row }) => { const age = reviewAgeDays({ deliveredAt: deliveredTimeOf(row) }, now); return <span title={age == null ? NO_DELIVERY_TIME_TIP : undefined}><TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'No delivery time' : `${age} d`}</TmsBadge></span> } },
     { key: 'rep', header: 'Sales rep', render: ({ row }) => row.salesRepName ?? '—' },

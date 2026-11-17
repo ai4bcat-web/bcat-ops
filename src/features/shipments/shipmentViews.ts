@@ -36,7 +36,6 @@ import type {
   SpecialRequirements,
 } from '@/types/tms'
 
-import { isDemoText } from '@/lib/demoFlow'
 import { customerDisplayName } from '@/lib/customerResolution'
 import { formatBoardDate, formatBoardDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/invoiceBuild'
@@ -587,11 +586,6 @@ export function matchesQuery(row: ShipmentRow, query: string): boolean {
     ?? [row.number, row.customerName, row.originCity, row.destinationCity].filter(Boolean).join(' ')
   ).toLowerCase() + ' ' + (row.carriers ?? []).map((c) => c.name.toLowerCase()).join(' ')
   return q.split(/\s+/).every((term) => hay.includes(term))
-}
-
-/** The "Demo" chip: a walkthrough shipment, recognised by the ZZ DEMO marker in its customer, reference or search text. */
-export function isDemoShipment(row: Pick<ShipmentRow, 'customerName' | 'reference' | 'searchKey'>): boolean {
-  return isDemoText(row.customerName, row.reference, row.searchKey)
 }
 
 // ── Columns ──────────────────────────────────────────────────────────────────

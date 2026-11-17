@@ -124,7 +124,7 @@ describe('gate code mapping', () => {
   // Typed as the full union: adding a gate code without extending this list fails to compile.
   const ALL: Record<ReleaseGateReasonCode, true> = {
     VOIDED: true, CANCELED: true, NOT_DELIVERED: true, DOC_MISSING: true, REFERENCE_MISSING: true,
-    CARRIER_NOT_ASSIGNED: true, DRIVER_MISSING: true, CARRIER_RATE_MISSING: true, OPEN_EXCEPTIONS: true,
+    CARRIER_NOT_ASSIGNED: true, DRIVER_MISSING: true, CARRIER_RATE_MISSING: true, OPEN_EXCEPTIONS: true, ACCESSORIAL_FLAG_OPEN: true,
   }
 
   it('maps every ReleaseGateReasonCode to a real check, and a supplied gate lands each under it', () => {
@@ -199,6 +199,16 @@ describe('evaluateLoadReview — cached row verdict', () => {
       evaluateLoadReview({ row: delivered({ assignmentType: 'CARRIER', apStatus: 'TO_BE_PAID', carriers }) })
     expect(verdict([{ apStatus: 'TO_BE_PAID' }, { apStatus: 'AWAITING_INVOICE' }]).checks.charges.ok).toBe(true)
     expect(verdict([{ apStatus: 'AWAITING_INVOICE' }]).ok).toBe(true)
+  })
+
+  it('holds a row with a raised detention or TONU flag and says how to get out', () => {
+    const flag = { flaggedAt: '2026-11-16T10:00:00Z', flaggedBy: 'ryne@x.com' }
+    const verdict = evaluateLoadReview({ row: delivered({ tonuFlag: flag }) })
+    expect(verdict.ok).toBe(false)
+    expect(verdict.checks.details.reasons.map((r) => r.message)).toContain('Waiting for TONU: clear the flag or add the charge')
+    const both = evaluateLoadReview({ row: delivered({ tonuFlag: flag, detentionFlag: { stopType: 'pickup', ...flag } }) })
+    expect(both.checks.details.reasons.map((r) => r.message)).toContain('Waiting for detention and TONU: clear the flag or add the charge')
+    expect(evaluateLoadReview({ row: delivered({ tonuFlag: null, detentionFlag: null }) }).ok).toBe(true)
   })
 
   it('passes a clean delivered row', () => {

@@ -87,6 +87,13 @@ describe('useArWorklist', () => {
     expect(rows[0].reasons).toEqual([])
   })
 
+  it('says why a flagged order is held: a raised detention or TONU flag', async () => {
+    data.orders = [order('o-flag', 's-flag')]
+    data.shipments = [shipment('s-flag', { tonuFlag: { flaggedAt: '2026-10-06T00:00:00.000Z', flaggedBy: 'ops@bcat.test' } })]
+    const rows = await rowsFor()
+    expect(rows[0].reasons).toEqual(['Waiting for TONU: clear the flag or add the charge'])
+  })
+
   it('DOCS_NEEDED reads full orders only for live shipments, and still drops the voided ones', async () => {
     data.fullOrderReads = []
     data.orders = [
