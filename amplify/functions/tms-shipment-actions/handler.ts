@@ -466,6 +466,7 @@ const transact = (items: TransactWriteItem[], label: string, options?: TransactO
 const readBundle = (shipmentId: string) => storeReadBundle(store, shipmentId)
 const rederiveShipmentStatus = async (shipmentId: string, caller: Caller) => {
   const result = await storeRederiveShipmentStatus(store, shipmentId, caller)
+  await pullBackFromReviewIfNotDelivered(shipmentId, caller)
   await autoPushToReview(shipmentId, caller)
   await reconcileOpenIntake(intakeDeps, shipmentId, caller)
   return result
@@ -3423,6 +3424,32 @@ async function pushToReview(shipmentId: string, caller: Caller): Promise<{ reaso
   // Imported history is checked like any other load once it is in review: work its cached document gate out again.
   await recacheAfterReviewPush(documentDeps, shipmentId, now).catch((err) => console.error('[push-to-review] doc gate recache failed', shipmentId, String(err)))
   return { reasons: [], already: false }
+}
+
+/**
+ * Ryne 2026-11-16: a load in Load Review that is no longer delivered (a leg was re-dispatched, a stop reopened) goes back to Active
+ * shipments. Only while its order is still unreleased (DOCS_NEEDED): once it is invoiced or released the stamp is history.
+ */
+async function pullBackFromReviewIfNotDelivered(shipmentId: string, caller: Caller): Promise<void> {
+  try {
+    const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+    if (!shipment || !shipment.loadReviewPushedAt || shipment.status === 'DELIVERED') return
+    if (shipment.voidedAt || shipment.deletedAt) return
+    const orders = await queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId)
+    if (orders.some((order) => order.arStatus !== 'DOCS_NEEDED')) return
+    const now = nowIso()
+    await transact(
+      [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+        updatedBy: caller.email,
+        updatedAt: now,
+        version: (numberOrNull(shipment.version) ?? 1) + 1,
+      }, null, { remove: ['loadReviewPushedAt', 'loadReviewPushedBy'] })],
+      'load review pull back',
+    )
+    await writeAudit('SHIPMENT', shipmentId, 'PULL_BACK_FROM_LOAD_REVIEW', caller, { reason: `Status is ${String(shipment.status)}, not DELIVERED`, wasPushedAt: shipment.loadReviewPushedAt })
+  } catch (err) {
+    console.error('[shipment-actions] pull back from Load Review failed', shipmentId, err instanceof Error ? err.message : String(err))
+  }
 }
 
 /**
