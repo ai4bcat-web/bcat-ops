@@ -34,6 +34,16 @@ export interface RateConSnapshot {
   driverName: string | null
   /** What this version changed from the one before it (empty on version 1). */
   changes?: string[]
+  /** Staff-only log of every revision issued on this assignment, oldest first. Never printed on the rate con. */
+  history?: RateConHistoryEntry[]
+}
+
+/** One issued revision: what changed since the version before it, and who sent it when. */
+export interface RateConHistoryEntry {
+  version: number
+  at: string
+  by: string | null
+  changes: string[]
 }
 
 /** Printed on version 2 and up. */
@@ -44,6 +54,7 @@ export interface RateConRevision {
 }
 
 const MAX_CHANGES = 20
+const MAX_HISTORY = 25
 const MAX_SNAPSHOT_CHARS = 20_000
 
 const blank = (v: string | null | undefined): string | null => {
@@ -179,7 +190,41 @@ export function parseRateConSnapshot(raw: unknown): RateConSnapshot | null {
   const changes = Array.isArray(v.changes)
     ? v.changes.filter((c): c is string => typeof c === 'string').slice(0, MAX_CHANGES).map((c) => c.replace(/[\r\n]+/g, ' ').slice(0, 200))
     : []
-  return { ...(v as RateConSnapshot), changes }
+  return { ...(v as RateConSnapshot), changes, history: cleanHistory(v.history) }
+}
+
+function cleanHistory(raw: unknown): RateConHistoryEntry[] {
+  if (!Array.isArray(raw)) return []
+  const out: RateConHistoryEntry[] = []
+  for (const e of raw) {
+    if (!e || typeof e !== 'object') continue
+    const r = e as Partial<RateConHistoryEntry>
+    if (typeof r.version !== 'number' || typeof r.at !== 'string') continue
+    out.push({
+      version: r.version,
+      at: r.at.slice(0, 40),
+      by: typeof r.by === 'string' ? r.by.slice(0, 200) : null,
+      changes: Array.isArray(r.changes)
+        ? r.changes.filter((c): c is string => typeof c === 'string').slice(0, MAX_CHANGES).map((c) => c.replace(/[\r\n]+/g, ' ').slice(0, 200))
+        : [],
+    })
+  }
+  return out.slice(-MAX_HISTORY)
+}
+
+/**
+ * The snapshot to store for a send: the browser's snapshot plus the running revision log. The log comes from the
+ * snapshot already stored (never from the browser), with this version's entry appended. Version 1 has no changes
+ * to log and adds no entry.
+ */
+export function withRateConHistory(
+  next: RateConSnapshot, stored: RateConSnapshot | null, version: number, at: string, by: string | null,
+): RateConSnapshot {
+  const prior = stored?.history ?? []
+  const entry: RateConHistoryEntry[] = version >= 2
+    ? [{ version, at, by, changes: (next.changes ?? []).slice(0, MAX_CHANGES) }]
+    : []
+  return { ...next, history: [...prior.filter((h) => h.version !== version), ...entry].slice(-MAX_HISTORY) }
 }
 
 /** The subject a revision rides: the first send's, as a reply, so mail clients keep one thread. */

@@ -152,12 +152,12 @@ export function GeneratedDocumentDialog({
         const doc = await buildLoadSummaryPdf(loadSummaryData(bundle, customer, catalog, checkCalls))
         return { blob: doc.output('blob'), base64: doc.output('datauristring').split('base64,')[1] ?? '' }
       }
-      // A saved copy of revision 2+ carries the same REVISED banner and change list the carrier got.
+      // A saved copy of revision 2+ carries the same REVISED header the carrier got (the change list is staff-only, never printed).
       const input = rateConInput()
       const version = assignment?.rateConVersion ?? 0
       const sent = version >= 2 && assignment ? await getRateConRevision(assignment.id).catch(() => null) : null
       const revision = sent && sent.version >= 2
-        ? { number: sent.version, at: assignment?.rateConSentAt ? new Date(assignment.rateConSentAt) : new Date(), changes: sent.snapshot?.changes ?? [] }
+        ? { number: sent.version, at: assignment?.rateConSentAt ? new Date(assignment.rateConSentAt) : new Date(), changes: [] }
         : null
       const bytes = await buildRateConPdf({ ...input, revision })
       return { blob: new Blob([bytes as BlobPart], { type: 'application/pdf' }), base64: rateConPdfBase64(bytes) }

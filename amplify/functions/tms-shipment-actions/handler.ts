@@ -180,7 +180,7 @@ import {
   postInvoiceCleared, readChangeReason, REASON_REQUIRED_MESSAGE, snapshotOf, type PostInvoiceGuardedAction,
 } from './postInvoice'
 import { salesRepAfterDivisionChange } from '../../../src/lib/divisionSalesRep'
-import { parseRateConSnapshot, rateConThreadHeaders, revisedRateConSubject } from '../../../src/lib/rateConRevision'
+import { parseRateConSnapshot, rateConThreadHeaders, revisedRateConSubject, withRateConHistory } from '../../../src/lib/rateConRevision'
 import { buildAddressDetailsEmail, type AddressDetailsStopInput } from '../../../src/lib/addressDetailsEmail'
 import { factorGapsAtCreate, factorGapsError, orderPoNumber, routeEnds } from '../../../src/lib/factorReadyAtCreate'
 import { carShippingFactorGaps, customerFactorsForOtr, isCarShippingLoad } from '../../../src/lib/reviewRequirements'
@@ -6909,7 +6909,10 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
       rateConDocumentId: documentId,
       rateConVersion: version,
       // Not a schema field: read back only through GET_RATE_CON_REVISION. Null when the browser sent none.
-      rateConSnapshot: snapshot ? JSON.stringify(snapshot) : null,
+      // Its `history` is the staff-only log of what each revision changed (never printed on the rate con).
+      rateConSnapshot: snapshot
+        ? JSON.stringify(withRateConHistory(snapshot, carrier.rateConSnapshot == null ? null : parseRateConSnapshot(carrier.rateConSnapshot), version, now, caller.email ?? null))
+        : null,
       // The signing API's per-token rate limit counts from zero for each new link.
       rateConRequestCount: 0,
       ...(sentRung?.cols ?? {}),

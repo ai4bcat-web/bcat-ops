@@ -25,7 +25,7 @@ import { formatCents } from '@/lib/tmsDirectory'
 import { rateConChargesFor } from '@/lib/carrierBill'
 import { liveCarriersOf, primaryCarrierOf } from '@/lib/carrierTotals'
 import type { RateConInput, RateConStop } from '@/lib/carrierRateCon'
-import { rateConRevisionFor, rateConSnapshotOf, type RateConSnapshot } from '@/lib/rateConRevision'
+import { rateConRevisionFor, rateConSnapshotOf, type RateConHistoryEntry, type RateConSnapshot } from '@/lib/rateConRevision'
 import { readExtras } from '@/features/shipments/form/model'
 import type {
   CarrierContactRecord, CarrierRecord, LoadCarrierRecord, RateConStatus,
@@ -74,6 +74,18 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
   const [mailboxes, setMailboxes] = useState<{ tracking: string; thread: string } | null>(null)
   const [working, setWorking] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // What each revision changed: staff-only, kept on the assignment and never printed on the rate con.
+  const [history, setHistory] = useState<RateConHistoryEntry[]>([])
+  const sentVersion = loadCarrier.rateConVersion ?? 0
+  const loadCarrierIdForHistory = loadCarrier.id
+  useEffect(() => {
+    if (sentVersion < 2) return undefined
+    let live = true
+    getRateConRevision(loadCarrierIdForHistory)
+      .then((r) => { if (live) setHistory(r.snapshot?.history ?? []) })
+      .catch(() => { /* the history is a convenience; the panel works without it */ })
+    return () => { live = false }
+  }, [loadCarrierIdForHistory, sentVersion])
 
   const shipmentIdForMailbox = bundle.shipment?.id ?? ''
   useEffect(() => {
@@ -272,6 +284,22 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
         <Fact label="Signed by" value={loadCarrier.rateConSignerName ?? '—'} />
         <Fact label="Total" value={`$${formatCents(totalCents)}`} />
       </dl>
+
+      {sentVersion >= 2 && history.length > 0 && (
+        <details data-testid="rate-con-revision-history" className="text-xs">
+          <summary className="cursor-pointer tms-muted">Revision history ({history.length}) · internal, not on the rate con</summary>
+          <ol className="mt-2 flex flex-col gap-2">
+            {[...history].reverse().map((h) => (
+              <li key={h.version}>
+                <p className="font-medium">v{h.version} · {formatDateTime(h.at)}{h.by ? ` · ${h.by}` : ''}</p>
+                {h.changes.length > 0
+                  ? <ul className="list-disc pl-4">{h.changes.map((c, i) => <li key={i}>{c}</li>)}</ul>
+                  : <p className="tms-muted">Changes were not recorded.</p>}
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
 
       <RecipientPicker
         options={options}
