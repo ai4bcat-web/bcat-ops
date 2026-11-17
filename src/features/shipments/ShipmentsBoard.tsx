@@ -89,6 +89,7 @@ import { SEED_DIVISIONS, topLevelOf } from '@/lib/ownership'
 import { cn } from '@/lib/utils'
 import { ShipmentDrawer } from './components/ShipmentDrawer'
 import { DetentionDialog, DetentionPill } from './components/Detention'
+import { TonuDialog, TonuPill } from './components/Tonu'
 import { detentionStopGuess } from './detentionStop'
 import { ShipmentRowActions, type ShipmentActionHandlers } from './components/StatusActions'
 import { DeleteShipmentsDialog } from './components/DeleteShipmentsDialog'
@@ -207,6 +208,10 @@ function batchTaskOf(
   action: string,
   driverParams?: (driverId: string) => Record<string, unknown>,
 ): { task: BatchShipmentTask; params: Record<string, unknown> } | null {
+  if (action === 'flag:detention') return { task: 'FLAG_DETENTION', params: {} }
+  if (action === 'flag:detentionClear') return { task: 'CLEAR_DETENTION', params: {} }
+  if (action === 'flag:tonu') return { task: 'FLAG_TONU', params: {} }
+  if (action === 'flag:tonuClear') return { task: 'CLEAR_TONU', params: {} }
   if (action.startsWith('rep:')) return { task: 'SET_SALES_REP', params: { repId: action.slice(4) } }
   if (action.startsWith('carrierRep:')) return { task: 'SET_CARRIER_REP', params: { repId: action.slice(11) } }
   if (action.startsWith('carrierTeam:')) return { task: 'SET_CARRIER_REP', params: { teamKey: action.slice(12) } }
@@ -689,7 +694,7 @@ function BoardPane({
   const [dialogShipment, setDialogShipment] = useState<ShipmentRow | null>(null)
   // Frozen when opened: the auto-refresh must not pull the rows (and this dialog's Restore) out from under it.
   const [deleteTargets, setDeleteTargets] = useState<Array<{ id: string; number: string }> | null>(null)
-  const [dialogKind, setDialogKind] = useState<'unvoid' | 'repoint' | 'cover' | 'detention' | null>(null)
+  const [dialogKind, setDialogKind] = useState<'unvoid' | 'repoint' | 'cover' | 'detention' | 'tonu' | null>(null)
 
   // The page decides what to fetch, so it hears what this pane is asking for: a typed PRO
   // adds that exact row (R4, §4.3). The Voided list is its own pane list, never a facet of All.
@@ -799,6 +804,10 @@ function BoardPane({
   // audit row per shipment.
   const batchActions = useMemo<BatchTaskAction[]>(() => {
     const actions: BatchTaskAction[] = []
+    actions.push({ key: 'flag:detention', label: 'Flag waiting for detention' })
+    actions.push({ key: 'flag:tonu', label: 'Flag waiting for TONU' })
+    actions.push({ key: 'flag:detentionClear', label: 'Clear detention flag' })
+    actions.push({ key: 'flag:tonuClear', label: 'Clear TONU flag' })
     for (const u of staffProfiles) {
       actions.push({ key: `rep:${u.id}`, label: `Change sales rep to ${displayName(u)}` })
     }
@@ -997,6 +1006,7 @@ function BoardPane({
             <StatusPill row={row} />
             {late && <TmsBadge tone="red" title={late.tooltip} data-testid="past-delivery-pill">Past delivery date · {late.daysLate} d</TmsBadge>}
             <DetentionPill flag={row.detentionFlag} onClick={() => { setDialogShipment(row); setDialogKind('detention') }} />
+            <TonuPill flag={row.tonuFlag} onClick={() => { setDialogShipment(row); setDialogKind('tonu') }} />
           </span>
         )
       }
@@ -1171,6 +1181,8 @@ function BoardPane({
         ...(needsCover(row) ? { onCover: () => { setDialogShipment(row); setDialogKind('cover') } } : {}),
         onDetention: () => { setDialogShipment(row); setDialogKind('detention') },
         detentionFlagged: row.detentionFlag != null,
+        onTonu: () => { setDialogShipment(row); setDialogKind('tonu') },
+        tonuFlagged: row.tonuFlag != null,
       }
     },
     [refresh],
@@ -1269,6 +1281,7 @@ function BoardPane({
     let docs = 0
     let pastDelivery = 0
     let detention = 0
+    let tonu = 0
     let ready = 0
     let revenue = 0
     const nowMs = Date.now()
@@ -1285,6 +1298,7 @@ function BoardPane({
       if (docsMissingOf(r).length > 0) docs += 1
       if (pastDeliveryOf(r, nowMs)) pastDelivery += 1
       if (r.detentionFlag != null) detention += 1
+      if (r.tonuFlag != null) tonu += 1
       if (readyForReviewOf(r)) ready += 1
     }
     const split = profitByDivision(deliveredRows, (code) => topLevelOf(divisions, code))
@@ -1348,6 +1362,19 @@ function BoardPane({
           const next = new Set(prev)
           if (next.has('detention')) next.delete('detention')
           else next.add('detention')
+          return next
+        }),
+      },
+      {
+        label: 'TONU',
+        value: tonu,
+        tone: tonu > 0 ? 'warn' : undefined,
+        title: flags.has('tonu') ? 'Showing only shipments waiting for a TONU. Click to show all.' : 'Shipments flagged as waiting for a TONU (truck order not used). Click to show only these.',
+        active: flags.has('tonu'),
+        onClick: () => setFlags((prev) => {
+          const next = new Set(prev)
+          if (next.has('tonu')) next.delete('tonu')
+          else next.add('tonu')
           return next
         }),
       },
@@ -1604,6 +1631,14 @@ function BoardPane({
       {dialogShipment && dialogKind === 'detention' && (
         <DetentionDialog
           target={{ ...dialogShipment, defaultStop: detentionStopGuess(dialogShipment) }}
+          onClose={() => setDialogShipment(null)}
+          onSaved={() => { void handleRefresh() }}
+        />
+      )}
+
+      {dialogShipment && dialogKind === 'tonu' && (
+        <TonuDialog
+          target={dialogShipment}
           onClose={() => setDialogShipment(null)}
           onSaved={() => { void handleRefresh() }}
         />

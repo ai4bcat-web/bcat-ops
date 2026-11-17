@@ -174,6 +174,7 @@ import { shipmentDeleteStore } from './shipmentDeleteStore'
 import { SHIPMENT_ACTIONS_TABLES } from './tableEnv'
 import { parseTrackingPrefs, validateTrackingPrefsOverride, type TrackingPrefsOverride } from '../../../src/lib/trackingPrefs'
 import { parseDetentionFlag, validateDetentionInput, type DetentionFlag } from '../../../src/lib/detentionFlag'
+import { parseTonuFlag, validateTonuInput, type TonuFlag } from '../../../src/lib/tonuFlag'
 import {
   buildPostInvoiceEntry, cleanGuardedInput, diffSnapshots, isInvoicedOrder, isPostInvoiceGuarded, POST_INVOICE_ACTION,
   postInvoiceCleared, readChangeReason, REASON_REQUIRED_MESSAGE, snapshotOf, type PostInvoiceGuardedAction,
@@ -658,6 +659,7 @@ type Action =
   | 'ASSIGN_TRACKER'
   | 'SET_TRACKING_PREFS'
   | 'SET_DETENTION_FLAG'
+  | 'SET_TONU_FLAG'
   | 'BATCH_SHIPMENT_TASK'
   | 'TEST_OWNERSHIP_RULES'
   | 'RETAG_SHIPMENTS'
@@ -4004,6 +4006,38 @@ async function setDetentionFlag(input: Row, caller: Caller): Promise<Row> {
     'shipment',
   )
   await writeAudit('SHIPMENT', shipmentId, flag ? 'FLAG_DETENTION' : 'CLEAR_DETENTION', caller, {
+    from: prior,
+    to: flag,
+  })
+  return { shipment: await getById(SHIPMENT_TABLE_NAME, shipmentId) } as unknown as Row
+}
+
+/**
+ * SET_TONU_FLAG (Ryne 2026-11-16) — flag a shipment as waiting for a TONU (truck order not used), or clear it (`flag: null`).
+ * Same rules as SET_DETENTION_FLAG: any office user may flag, who and when are stamped here (never client-supplied), it is
+ * logged in Activity, nothing is charged (billing adds the accessorial by hand), and a voided shipment is refused.
+ */
+async function setTonuFlag(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  if (!('flag' in input)) throw new Error('flag is required; send null to clear it')
+  const sent = input.flag == null ? null : validateTonuInput(input.flag)
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  assertNotVoided(shipment)
+  const prior = parseTonuFlag(shipment.tonuFlag)
+  if (!sent && !prior) return { shipment }
+  const now = nowIso()
+  const flag: TonuFlag | null = sent ? { ...sent, flaggedAt: now, flaggedBy: caller.email } : null
+  await transact(
+    [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+      tonuFlag: flag,
+      updatedBy: caller.email,
+      updatedAt: now,
+      version: (numberOrNull(shipment.version) ?? 1) + 1,
+    }, null)],
+    'shipment',
+  )
+  await writeAudit('SHIPMENT', shipmentId, flag ? 'FLAG_TONU' : 'CLEAR_TONU', caller, {
     from: prior,
     to: flag,
   })
@@ -9778,6 +9812,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return setTrackingPrefs(input, caller)
     case 'SET_DETENTION_FLAG':
       return setDetentionFlag(input, caller)
+    case 'SET_TONU_FLAG':
+      return setTonuFlag(input, caller)
     case 'ASSIGN_CARRIER_REP':
       return assignCarrierRep(input, caller)
     case 'BATCH_SHIPMENT_TASK':
@@ -9797,6 +9833,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
         setRevTag,
         assignCarrierRep,
         setStatus: setShipmentStatus,
+        setDetentionFlag,
+        setTonuFlag,
         writeAudit,
         pushToReview,
       }, input, caller)) }

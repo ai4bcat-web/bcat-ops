@@ -10,7 +10,7 @@
  * Unvoid and customer re-point remain owner/ADMIN actions, enforced on the server.
  */
 import { useContext, useState } from 'react'
-import { MoreHorizontal, Copy, PauseCircle, PlayCircle, Ban, RotateCcw, Check, X, Truck, Building2, UserMinus, FileSignature, UserCog, Trash2, Hourglass } from 'lucide-react'
+import { MoreHorizontal, Copy, PauseCircle, PlayCircle, Ban, RotateCcw, Check, X, Truck, Building2, UserMinus, FileSignature, UserCog, Trash2, Hourglass, PackageX } from 'lucide-react'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -77,6 +77,9 @@ export interface ShipmentActionHandlers {
   /** Detention flag (Ryne 2026-11-13): open the flag dialog. `detentionFlagged` relabels the item. */
   onDetention?: () => void
   detentionFlagged?: boolean
+  /** TONU flag (Ryne 2026-11-16): open the TONU dialog. `tonuFlagged` relabels the item. */
+  onTonu?: () => void
+  tonuFlagged?: boolean
 }
 
 /** Everything the row menu needs to read, including what the void dialog stamps. */
@@ -140,7 +143,12 @@ export function ShipmentRowActions({ shipment, isAdmin, cancelDeleteAdminOnly, h
           )}
           {handlers.onDetention && (
             <DropdownMenuItem disabled={voided} data-testid="row-detention" onSelect={() => handlers.onDetention?.()}>
-              <Hourglass size={14} className="mr-2" />{handlers.detentionFlagged ? 'Edit detention…' : 'Flag detention…'}
+              <Hourglass size={14} className="mr-2" />{handlers.detentionFlagged ? 'Edit detention…' : 'Flag waiting for detention…'}
+            </DropdownMenuItem>
+          )}
+          {handlers.onTonu && (
+            <DropdownMenuItem disabled={voided} data-testid="row-tonu" onSelect={() => handlers.onTonu?.()}>
+              <PackageX size={14} className="mr-2" />{handlers.tonuFlagged ? 'Edit TONU…' : 'Flag waiting for TONU…'}
             </DropdownMenuItem>
           )}
           <DropdownMenuItem disabled={voided} onSelect={() => setDialog({ kind: 'duplicate' })}>

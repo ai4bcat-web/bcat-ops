@@ -16,7 +16,15 @@ export const BATCH_TASK_ACTIONS = {
   ASSIGN_DRIVER: 'ASSIGN_ASSET',
   // Step AP: pushing a row into the Load Review queue is a Load Review action.
   PUSH_TO_LOAD_REVIEW: 'REVIEW_LOAD',
+  // Ryne 2026-11-16: waiting-for-detention / waiting-for-TONU flags, the same gate as flagging one shipment.
+  FLAG_DETENTION: 'SET_DETENTION_FLAG',
+  CLEAR_DETENTION: 'SET_DETENTION_FLAG',
+  FLAG_TONU: 'SET_TONU_FLAG',
+  CLEAR_TONU: 'SET_TONU_FLAG',
 } as const
+
+/** Statuses after pickup, where a truck held at a stop is held at the delivery. */
+const DELIVERY_PHASE_STATUSES: ReadonlySet<string> = new Set(['PICKED_UP', 'IN_TRANSIT', 'RECOVERED', 'ARRIVED_AT_DELIVERY_TERMINAL', 'OUT_FOR_DELIVERY', 'UNLOADING', 'DELIVERED'])
 
 export interface BatchShipmentDeps {
   getShipment: (shipmentId: string) => Promise<Row | null>
@@ -29,6 +37,8 @@ export interface BatchShipmentDeps {
   setRevTag: (input: Row, caller: Caller) => Promise<unknown>
   assignCarrierRep: (input: Row, caller: Caller) => Promise<unknown>
   setStatus: (input: Row, caller: Caller) => Promise<unknown>
+  setDetentionFlag: (input: Row, caller: Caller) => Promise<unknown>
+  setTonuFlag: (input: Row, caller: Caller) => Promise<unknown>
   writeAudit: (entityType: string, entityId: string, action: string, caller: Caller, changes: Row) => Promise<void>
   /** Step AP: the verdict and, when it is clean, the write. `reasons` non-empty = refused, nothing written. */
   pushToReview: (shipmentId: string, caller: Caller) => Promise<{ reasons: string[]; already: boolean }>
@@ -99,6 +109,21 @@ export async function batchShipmentTask(deps: BatchShipmentDeps, input: Row, cal
           await deps.assignAsset(driverParams, caller)
           break
         }
+        case 'FLAG_DETENTION': {
+          // A batch cannot ask which stop: it is the delivery once the truck has picked up, else the pickup.
+          const stopType = DELIVERY_PHASE_STATUSES.has(String(shipment.status)) ? 'delivery' : 'pickup'
+          await deps.setDetentionFlag({ shipmentId, flag: { stopType, ...(typeof params.note === 'string' ? { note: params.note } : {}) } }, caller)
+          break
+        }
+        case 'CLEAR_DETENTION':
+          await deps.setDetentionFlag({ shipmentId, flag: null }, caller)
+          break
+        case 'FLAG_TONU':
+          await deps.setTonuFlag({ shipmentId, flag: { ...(typeof params.note === 'string' ? { note: params.note } : {}) } }, caller)
+          break
+        case 'CLEAR_TONU':
+          await deps.setTonuFlag({ shipmentId, flag: null }, caller)
+          break
         case 'PUSH_TO_LOAD_REVIEW': {
           const pushed = await deps.pushToReview(shipmentId, caller)
           if (pushed.reasons.length > 0) {

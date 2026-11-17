@@ -34,9 +34,11 @@ import { apptWorkflowStatus, endStatus, statusLabel, STATUS_META, STATUS_TONE_CO
 import { requiresApptProofs } from '@/lib/apptQueue'
 import { isLoadCanceled, isLoadVoided } from '@/lib/shipmentVoid'
 import { PodMark } from './CalendarPaperwork'
+import { AccessorialFlags } from '@/features/shipments/components/AccessorialFlags'
+import { refreshCalendarFlags } from './useLoadReviewMarks'
 
 // ── Column widths ─────────────────────────────────────────────────────────────
-const COL = { color: 20, aljex: 60, pod: 40, shipStatus: 92, tms: 80, pu: 72, trailer: 70, paperwork: 96, puAppt: 130, deAppt: 130, status: 100, route: 260, driver: 160, notes: 200, rate: 68, locations: 220 } as const
+const COL = { color: 20, aljex: 60, pod: 40, shipStatus: 92, tms: 80, pu: 72, trailer: 70, paperwork: 96, puAppt: 130, deAppt: 130, status: 100, route: 260, driver: 160, notes: 200, rate: 68, locations: 220, flags: 128 } as const
 const ROW_H = 28
 const DRAG_HANDLE_W = 16
 
@@ -662,6 +664,26 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
         {loadStatusText(load) || <span style={{ color: 'var(--tms-muted)', fontWeight: 400 }}>—</span>}
       </div>
 
+      {/* Waiting for detention / waiting for TONU: the same flags the Shipments board sets. Only a load with a shipment can carry one. */}
+      <div className="shrink-0 flex items-center px-1.5" style={{ width: COL.flags }}>
+        {load.shipmentId && (
+          <AccessorialFlags
+            target={{
+              id: load.shipmentId,
+              number: load.aljexId,
+              detentionFlag: load.detentionFlag,
+              tonuFlag: load.tonuFlag,
+              pickupName: load.originName,
+              consigneeName: load.destinationName,
+              originCity: load.originCity,
+              destinationCity: load.destinationCity,
+              defaultStop: role === 'delivery' ? 'delivery' : 'pickup',
+            }}
+            onChanged={refreshCalendarFlags}
+          />
+        )}
+      </div>
+
       {/* TMS + PU# — editable inline */}
       <EditableTextCell load={load} field="tmsId"        width={COL.tms} />
       <EditableTextCell load={load} field="pickupNumber" width={COL.pu} />
@@ -1133,6 +1155,7 @@ export function PlannerView({ loads: allLoads, drivers, weekStart, numDays = 7, 
         <ColHeader width={COL.aljex}>Pro #</ColHeader>
         <ColHeader width={COL.pod}>POD</ColHeader>
         <ColHeader width={COL.shipStatus}>Status</ColHeader>
+        <ColHeader width={COL.flags}>Flags</ColHeader>
         <ColHeader width={COL.tms}>TMS</ColHeader>
         <ColHeader width={COL.pu}>PU #</ColHeader>
         <ColHeader width={COL.trailer}>Trailer</ColHeader>

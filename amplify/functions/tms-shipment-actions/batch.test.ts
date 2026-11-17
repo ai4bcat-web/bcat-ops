@@ -13,7 +13,7 @@ function dependencies(): BatchShipmentDeps {
     releaseToBilling: async (input) => {
       if (input.orderId === 'order-b') throw new Error('Not ready for accounting: Missing document: POD')
     },
-    setSalesRep: vi.fn(), setRevTag: vi.fn(), assignCarrierRep: vi.fn(), setStatus: vi.fn(), writeAudit: vi.fn(),
+    setSalesRep: vi.fn(), setRevTag: vi.fn(), assignCarrierRep: vi.fn(), setStatus: vi.fn(), setDetentionFlag: vi.fn(), setTonuFlag: vi.fn(), writeAudit: vi.fn(),
     pushToReview: vi.fn(async () => ({ reasons: [], already: false })),
     getLoadsOf: vi.fn(async () => []),
     assignAsset: vi.fn(),
@@ -163,5 +163,31 @@ describe('batchShipmentTask', () => {
       expect(authorize).toHaveBeenCalledWith('ASSIGN_ASSET', caller)
       expect(deps.assignAsset).not.toHaveBeenCalled()
     })
+  })
+  it('flags and clears waiting-for-TONU on every selected shipment, one failure not stopping the rest', async () => {
+    const deps = dependencies()
+    deps.setTonuFlag = vi.fn(async (input) => { if (input.shipmentId === 'b') throw new Error('Shipment is voided') })
+    const result = await batchShipmentTask(deps, { task: 'FLAG_TONU', shipmentIds: ['a', 'b', 'c'], params: { note: 'Shipper cancelled' } }, caller)
+    expect(result.results.map((r) => r.ok)).toEqual([true, false, true])
+    expect(deps.setTonuFlag).toHaveBeenCalledWith({ shipmentId: 'a', flag: { note: 'Shipper cancelled' } }, caller)
+    await batchShipmentTask(deps, { task: 'CLEAR_TONU', shipmentIds: ['a'] }, caller)
+    expect(deps.setTonuFlag).toHaveBeenLastCalledWith({ shipmentId: 'a', flag: null }, caller)
+  })
+
+  it('flags detention at the pickup before the truck has picked up and at the delivery after, and clears it', async () => {
+    const deps = dependencies()
+    deps.getShipment = async (id) => ({ id, number: `S-${id}`, status: id === 'late' ? 'IN_TRANSIT' : 'DISPATCHED' })
+    deps.setDetentionFlag = vi.fn()
+    await batchShipmentTask(deps, { task: 'FLAG_DETENTION', shipmentIds: ['early', 'late'] }, caller)
+    expect(deps.setDetentionFlag).toHaveBeenNthCalledWith(1, { shipmentId: 'early', flag: { stopType: 'pickup' } }, caller)
+    expect(deps.setDetentionFlag).toHaveBeenNthCalledWith(2, { shipmentId: 'late', flag: { stopType: 'delivery' } }, caller)
+    await batchShipmentTask(deps, { task: 'CLEAR_DETENTION', shipmentIds: ['early'] }, caller)
+    expect(deps.setDetentionFlag).toHaveBeenLastCalledWith({ shipmentId: 'early', flag: null }, caller)
+  })
+
+  it('refuses the flag tasks for a caller who may not flag', async () => {
+    const deps = dependencies()
+    deps.authorize = () => false
+    await expect(batchShipmentTask(deps, { task: 'FLAG_TONU', shipmentIds: ['a'] }, caller)).rejects.toThrow('Forbidden: FLAG_TONU')
   })
 })

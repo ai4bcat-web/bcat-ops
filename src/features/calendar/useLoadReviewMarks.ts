@@ -1,7 +1,15 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useShipments } from '@/hooks/useShipments'
+import { parseDetentionFlag } from '@/lib/detentionFlag'
 import { isReleasedToInvoicing } from '@/lib/shipmentLists'
+import { parseTonuFlag } from '@/lib/tonuFlag'
 import type { Load } from '@/types'
+
+const flagRefreshers = new Set<() => void>()
+/** Re-read the shipments the calendar draws its flags from; called after a detention or TONU flag is saved. */
+export function refreshCalendarFlags(): void {
+  for (const refresh of flagRefreshers) refresh()
+}
 
 /** The revenue divisions the calendar shows. */
 export const CALENDAR_DIVISIONS: readonly string[] = ['ASSETS', 'OWNER_OPERATOR']
@@ -45,24 +53,38 @@ export function useLoadReviewMarks(loads: readonly Load[]): Load[] {
   const windowRead = useShipments({ kind: 'window', months: monthsKey ? monthsKey.split(',') : [] })
   const windowed = windowRead.shipments
   // Not settled = still loading, only part read, or the read failed: in each case a missing row proves nothing, so it must not read as "no division".
+  const refreshWorking = workingRead.refresh
+  const refreshWindow = windowRead.refresh
+  useEffect(() => {
+    const refresh = () => { void refreshWorking?.(); void refreshWindow?.() }
+    flagRefreshers.add(refresh)
+    return () => { flagRefreshers.delete(refresh) }
+  }, [refreshWorking, refreshWindow])
   const shipmentsLoading = [workingRead, windowRead].some((r) => r.loading || r.partial || r.error != null)
   const shipments = useMemo(() => [...working, ...windowed], [working, windowed])
-  const { marked, offCalendar, known } = useMemo(() => {
+  const { marked, offCalendar, known, flags } = useMemo(() => {
     const ids = new Set<string>()
+    const flagsById = new Map<string, { detentionFlag: ReturnType<typeof parseDetentionFlag>; tonuFlag: ReturnType<typeof parseTonuFlag> }>()
     const offCalendarIds = new Set<string>()
     const knownIds = new Set<string>()
     for (const row of shipments) {
       knownIds.add(row.id)
+      const detentionFlag = parseDetentionFlag(row.detentionFlag)
+      const tonuFlag = parseTonuFlag(row.tonuFlag)
+      if (detentionFlag || tonuFlag) flagsById.set(row.id, { detentionFlag, tonuFlag })
       if (row.loadReviewPushedAt || isReleasedToInvoicing(row)) ids.add(row.id)
       if (row.revDivision && !CALENDAR_DIVISIONS.includes(row.revDivision)) offCalendarIds.add(row.id)
     }
-    return { marked: ids, offCalendar: offCalendarIds, known: knownIds }
+    return { marked: ids, offCalendar: offCalendarIds, known: knownIds, flags: flagsById }
   }, [shipments])
   return useMemo(
     () => loads.filter((l) => !loadOffCalendar(l, { offCalendar, known, loading: shipmentsLoading })).map((l) => {
       const green = (l.shipmentId != null && marked.has(l.shipmentId)) || l.status === 'INVOICING'
-      return green === Boolean(l.readyToInvoice) ? l : { ...l, readyToInvoice: green }
+      const flagged = l.shipmentId != null ? flags.get(l.shipmentId) : undefined
+      const sameFlags = (l.detentionFlag ?? null) === (flagged?.detentionFlag ?? null) && (l.tonuFlag ?? null) === (flagged?.tonuFlag ?? null)
+      if (green === Boolean(l.readyToInvoice) && sameFlags) return l
+      return { ...l, readyToInvoice: green, detentionFlag: flagged?.detentionFlag ?? null, tonuFlag: flagged?.tonuFlag ?? null }
     }),
-    [loads, marked, offCalendar, known, shipmentsLoading],
+    [loads, marked, offCalendar, known, flags, shipmentsLoading],
   )
 }

@@ -71,4 +71,14 @@ describe('useLoadReviewMarks', () => {
     expect(result.current.map((l) => l.id)).toEqual(['l41'])
     rows.error = null
   })
+  it('copies the shipment\'s detention and TONU flags onto its loads, so the calendar can show and filter them', () => {
+    const detention = { stopType: 'delivery', flaggedAt: '2026-11-16T10:00:00.000Z', flaggedBy: 'a@b.c' }
+    const tonu = { amount: 250, flaggedAt: '2026-11-16T10:00:00.000Z', flaggedBy: 'a@b.c' }
+    rows.working = [{ id: 'f1', detentionFlag: detention, tonuFlag: tonu }, { id: 'f2' }]
+    rows.windowed = []; rows.loading = false
+    const { result } = renderHook(() => useLoadReviewMarks([load('lf1', 'f1'), load('lf2', 'f2')]))
+    expect(result.current[0]).toMatchObject({ detentionFlag: detention, tonuFlag: tonu })
+    expect(result.current[1]!.detentionFlag ?? null).toBeNull()
+    expect(result.current[1]!.tonuFlag ?? null).toBeNull()
+  })
 })
