@@ -38,9 +38,7 @@ import { getStops, deriveLegacyFields } from '@/lib/stops'
 import { apptNotices } from '@/lib/apptNotify'
 import { sendApptNotices } from '@/lib/sendApptNotices'
 import { useDirectory } from '@/hooks/useDirectory'
-import { ShipmentDrawer } from '@/features/shipments/components/ShipmentDrawer'
-import { getTmsSettings } from '@/lib/apiClient'
-import type { TmsSettings } from '@/types/tms'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
 import {
   formatDateTime, formatDateTimeInput,
   formatDateShort, apptHasTime, PENDING_LABEL,
@@ -269,31 +267,14 @@ function EditLoadDialog({
  * shipment drawer, in place; an explicit Edit goes to the edit form the board's PRO link opens. One record, one place to change, void
  * or cover it. Only a load with no shipment yet (old rows) still opens here.
  */
-function OpenShipmentInstead({ shipmentId, mode, onDone }: { shipmentId: string; mode: 'view' | 'edit'; onDone: () => void }) {
+function OpenShipmentInstead({ shipmentId, onDone }: { shipmentId: string; onDone: () => void }) {
   const navigate = useNavigate()
-  const { isAdmin, user } = useAuth()
-  const { customers, locations } = useDirectory()
-  const [settings, setSettings] = useState<TmsSettings | null>(null)
-  useEffect(() => { if (mode === 'view') getTmsSettings().then(setSettings).catch(() => setSettings(null)) }, [mode])
   useEffect(() => {
-    if (mode !== 'edit') return
-    navigate(`/tms/shipments/${shipmentId}/edit`)
+    navigate(shipmentEditorPath(shipmentId))
     onDone()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shipmentId, mode])
-  if (mode !== 'view') return null
-  return (
-    <ShipmentDrawer
-      shipmentId={shipmentId}
-      onClose={onDone}
-      onChanged={() => { void useAppStore.getState().refreshCalendarData() }}
-      customers={customers}
-      locations={locations}
-      settings={settings}
-      isAdmin={isAdmin}
-      currentUser={user?.email ?? ''}
-    />
-  )
+  }, [shipmentId])
+  return null
 }
 
 export function LoadDrawer() {
@@ -697,7 +678,7 @@ export function LoadDrawer() {
   // SidePanel has no `open` prop — the Sheet honoured one, and without this guard the
   // drawer renders as soon as it mounts and covers the loads list.
   if (inRouter && isOpen && load?.shipmentId && (drawerMode === 'view' || drawerMode === 'edit')) {
-    return <OpenShipmentInstead shipmentId={load.shipmentId} mode={drawerMode} onDone={() => setSelectedLoad(null)} />
+    return <OpenShipmentInstead shipmentId={load.shipmentId} onDone={() => setSelectedLoad(null)} />
   }
   if (!isOpen) return null
 

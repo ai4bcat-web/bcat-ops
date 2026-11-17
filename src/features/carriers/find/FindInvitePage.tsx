@@ -173,7 +173,7 @@ export function FindInvitePage() {
   return (
     <TmsPage
       title="Find & invite a carrier"
-      actions={shipmentId ? <Link className="tms-btn tms-btn-ghost tms-btn-sm" to={`/tms/shipments/${shipmentId}?tab=carrier`}>Back to the shipment</Link> : undefined}
+      actions={shipmentId ? <Link className="tms-btn tms-btn-ghost tms-btn-sm" to={`/tms/shipments/${shipmentId}/edit?tab=carrier`}>Back to the shipment</Link> : undefined}
     >
       <form
         className="mb-3 flex flex-wrap items-center gap-2"

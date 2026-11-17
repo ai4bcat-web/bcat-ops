@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useMemo, useState, useCallback } from 'react'
 import { Loader2, Trash2, FilePlus2, Landmark, Search } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import {
   TmsBadge, TmsButton, TmsCountBadge, TmsDialog, TmsIconButton, TmsInput, TmsSegmentedTabs, TmsStatRow,
   type ColumnDef, type TmsTone,
@@ -17,12 +17,12 @@ import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import '@/features/tms/styles/directory.css'
 import { OtrPanel } from './OtrPanel'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
-import { ShipmentDrawer } from '@/features/shipments/components/ShipmentDrawer'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
 import { useAppStore } from '@/store/useAppStore'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { useAuth } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
-import { createShipment, getTmsSettings } from '@/lib/apiClient'
+import { createShipment } from '@/lib/apiClient'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { canDeleteFactoringItem } from '@/lib/auth/admin'
 import { hasAccountingPage } from '@/lib/accountingAccess'
@@ -35,7 +35,6 @@ import { FactoringDocCell } from './FactoringDocCell'
 import { useResolveLoads } from '@/hooks/useResolveLoads'
 import type { OtrReadiness } from '@/lib/otrInvoice'
 import type { FactoringItem, FactoringItemStatus } from '@/types'
-import type { TmsSettings } from '@/types/tms'
 import { otrStatusMeta } from '@/lib/otrInvoiceStatus'
 import { otrDocsIncomplete, otrDocsErrorMessage } from '@/lib/otrSubmitOutcome'
 import { uploadOtrDocs, resolveLoad, assembleInvoice } from '@/lib/otrClient'
@@ -455,6 +454,8 @@ function OtrStatusFlag({ item }: { item: FactoringItem }) {
 /** `viewTabs`: shown inside Invoicing as its Factored view (Receivable | Factored | Payable). */
 export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const { items, loading, error, pendingIds, refresh, removeItem } = useFactoringItems()
+  // Where a just-created shipment opens (its edit page), rendered as a redirect so this page needs no router hook.
+  const [openPath, setOpenPath] = useState<string | null>(null)
   useResolveLoads(items.map((i) => i.loadId))
   const { user, isAdmin } = useAuth()
   const [search, setSearch] = useState('')
@@ -485,11 +486,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const staffEmail = user?.email ?? ''
   // "Create shipment" on a row whose PRO was never entered in BCAT Ops.
   const [creatingLoadFor, setCreatingLoadFor] = useState<string | null>(null)
-  // Where it lands afterwards: the shipment's own detail.
-  const [openShipmentId, setOpenShipmentId] = useState<string | null>(null)
-  const { customers, locations } = useDirectory()
-  const [settings, setSettings] = useState<TmsSettings | null>(null)
-  useEffect(() => { getTmsSettings().then(setSettings).catch(() => setSettings(null)) }, [])
+  const { customers } = useDirectory()
 
   // Open invoice balances by queue row, so the queue's money matches the Receivables card's.
   const openInvoices = useOpenInvoices()
@@ -703,7 +700,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
                   await assembleInvoice(item.id).catch(() => undefined)
                   await refresh()
                   toast.success(`Shipment ${bundle.shipment.number} created and linked — upload the POD and rate confirmation now`)
-                  setOpenShipmentId(bundle.shipment.id)
+                  setOpenPath(`${shipmentEditorPath(bundle.shipment.id)}?tab=documents`)
                 } catch (err) {
                   toast.error(errorMessage(err))
                 } finally {
@@ -1043,18 +1040,8 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
       {/* Opened by the PRO column — the leg editor, for the documents on it. */}
       <LoadDrawer />
+      {openPath && <Navigate to={openPath} />}
 
-      {/* Where "Create shipment" lands. */}
-      <ShipmentDrawer
-        shipmentId={openShipmentId}
-        onClose={() => setOpenShipmentId(null)}
-        onChanged={refresh}
-        customers={customers}
-        locations={locations}
-        settings={settings}
-        isAdmin={isAdmin}
-        currentUser={staffEmail}
-      />
     </>
   )
 }

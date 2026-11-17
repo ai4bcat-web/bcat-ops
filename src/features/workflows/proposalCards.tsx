@@ -212,7 +212,7 @@ function CarrierBillCard({ run, proposal }: ProposalCardProps & { proposal: Carr
       chip={PROPOSAL_CHIP}
       title="Proposed carrier bill"
       actions={shipmentId ? (
-        <Link className="tms-btn tms-btn-primary tms-btn-sm" to={`/tms/shipments/${shipmentId}?tab=carrierPay`}>
+        <Link className="tms-btn tms-btn-primary tms-btn-sm" to={`/tms/shipments/${shipmentId}/edit?tab=carrierPay`}>
           Open Carrier Pay
         </Link>
       ) : null}

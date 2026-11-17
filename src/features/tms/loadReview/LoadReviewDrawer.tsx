@@ -165,7 +165,7 @@ export function LoadReviewDrawer({ row, focus, onClose, onRefresh, onMoved, onFa
     } finally { setBusy(false) }
   }
   function shipmentLink(tab: string, label: string, newTab = false) {
-    return canOpen ? <Link to={`/tms/shipments/${row.id}?tab=${tab}`} {...(newTab ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{label}</Link>
+    return canOpen ? <Link to={`/tms/shipments/${row.id}/edit?tab=${tab}`} {...(newTab ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{label}</Link>
       : <span title="Needs the Shipments grant">{label}</span>
   }
   const values = {

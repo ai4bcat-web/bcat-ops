@@ -163,7 +163,7 @@ describe('DemoPage', () => {
     const btn = within(p8).getByRole('button', { name: /open/i })
     expect(btn).toBeEnabled()
     fireEvent.click(btn)
-    expect(window.location.pathname + window.location.search).toBe('/tms/shipments/shp-track?tab=tracking')
+    expect(window.location.pathname + window.location.search).toBe('/tms/shipments/shp-track/edit?tab=tracking')
   })
 
   it('opens the seeded intake load on its review page and ticks only while one is open', async () => {

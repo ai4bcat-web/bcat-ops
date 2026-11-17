@@ -182,7 +182,7 @@ export function CustomerLinksPage() {
             variant="ghost"
             size="sm"
             className="tms-link"
-            onClick={() => navigate(`/tms/shipments/${row.link.shipmentId}?tab=tracking`)}
+            onClick={() => navigate(`/tms/shipments/${row.link.shipmentId}/edit?tab=tracking`)}
           >
             {row.shipmentNumber}
           </TmsButton>

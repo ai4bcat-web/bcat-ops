@@ -36,7 +36,7 @@ import { useDirectory } from '@/hooks/useDirectory'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useTrucks } from '@/hooks/useTrucks'
 import { useLoads } from '@/hooks/useLoads'
-import { assignAsset, createLocation, createShipment, getTmsSettings } from '@/lib/apiClient'
+import { assignAsset, createLocation, createShipment } from '@/lib/apiClient'
 import { distinctStopDrivers } from '@/lib/ownAssetDriver'
 import { activeUnits } from '@/lib/fleetActive'
 import { apptNotices } from '@/lib/apptNotify'
@@ -48,10 +48,11 @@ import { loadSchemaFor, type LoadFormValues } from '@/lib/schemas'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import type { TenderPrefill } from '@/lib/intakeTender'
 import type { Stop } from '@/types'
-import type { LocationRecord, ShipmentMode, TmsSettings } from '@/types/tms'
+import type { LocationRecord, ShipmentMode } from '@/types/tms'
 import { TmsAlert, TmsSelect } from '@/features/tms/kit'
 import { MODE_OPTIONS } from '../orderDraft'
-import { ShipmentDrawer } from './ShipmentDrawer'
+import { useNavigate } from 'react-router-dom'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
 import { applyNewShipmentEffects, linkStopsToDirectory as linkStops } from '../newShipmentEffects'
 
 /**
@@ -108,6 +109,7 @@ const ONE_DRIVER_MESSAGE =
   'One driver per Ivan Cartage load. Pick the driver for the whole load, or create one leg per driver.'
 
 export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose, onCreated }: NewShipmentDialogProps) {
+  const navigate = useNavigate()
   const directory = useDirectory()
   const { drivers } = useDrivers()
   const { equipment } = useTrucks()
@@ -115,10 +117,7 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
   // voided load keeps its Pro # forever, so hiding voided rows would let a dead number
   // read as free. The server's claim is the rule either way.
   const { allLoads } = useLoads()
-  const { user, isAdmin } = useAuth()
-  // Only for the detail this hands over to; the form itself needs none of it.
-  const [settings, setSettings] = useState<TmsSettings | null>(null)
-  useEffect(() => { getTmsSettings().then(setSettings).catch(() => setSettings(null)) }, [])
+  const { user } = useAuth()
 
   const [mode, setMode] = useState<ShipmentMode>(defaultMode)
   const [pro, setPro] = useState('')
@@ -129,7 +128,6 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
   const [createCustomerFor, setCreateCustomerFor] = useState<{ name?: string; city?: string } | undefined>(undefined)
   const [createLocationFor, setCreateLocationFor] = useState<{ initial?: { name?: string; city?: string }; stopIndex: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [createdId, setCreatedId] = useState<string | null>(null)
 
   const tender = prefill?.tender
   const linkedCustomer = directory.customers.find((c) => c.id === customerId) ?? null
@@ -374,8 +372,9 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
         rateConKey: tender?.rateConKey,
         actorName: user?.email ?? 'dispatch',
       })
-      setCreatedId(bundle.shipment.id)
       onCreated?.(bundle.shipment.id)
+      onClose()
+      navigate(shipmentEditorPath(bundle.shipment.id))
     } catch (err) {
       // The server's refusal verbatim — a duplicate PRO, a credit hold, an archived
       // customer. Paraphrasing it would hide which of them it was.
@@ -384,22 +383,6 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
       saveInFlight.current = false
       setSaving(false)
     }
-  }
-
-  // The shipment exists: hand straight over to its detail. Never the load drawer.
-  if (createdId) {
-    return (
-      <ShipmentDrawer
-        shipmentId={createdId}
-        onClose={() => { setCreatedId(null); onClose() }}
-        onChanged={() => onCreated?.(createdId)}
-        customers={directory.customers}
-        locations={directory.locations}
-        settings={settings}
-        isAdmin={isAdmin}
-        currentUser={user?.email ?? ''}
-      />
-    )
   }
 
   if (!open) return null

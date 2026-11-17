@@ -64,7 +64,7 @@ vi.mock('@/features/carriers/CarriersPage', () => h.stub(['CarriersPage']))
 vi.mock('@/features/carriers/RateConSignPage', () => h.stub(['RateConSignPage']))
 vi.mock('@/features/carriers/CarriersHub', () => h.stub(['CarriersHub']))
 vi.mock('@/features/shipments/ShipmentsBoard', () => h.stub(['ShipmentsBoard']))
-vi.mock('@/features/shipments/ShipmentPage', () => h.stub(['ShipmentPage']))
+vi.mock('@/features/shipments/tabs/ShipmentTabAnchor', () => h.stub(['ShipmentTabAnchor']))
 vi.mock('@/features/tracking/CustomerTrackPage', () => h.stub(['CustomerTrackPage'], true))
 vi.mock('@/features/tracking/CarrierPingPage', () => h.stub(['CarrierPingPage'], true))
 vi.mock('@/features/tracking/CarrierUploadPage', () => h.stub(['CarrierUploadPage'], true))
@@ -156,7 +156,7 @@ describe('App routes', () => {
     it('/loads/:id goes to the linked shipment', async () => {
       h.getLoads.mockResolvedValue([{ id: 'L1', aljexId: '20001', shipmentId: 'S1' }])
       await visit('/loads/L1')
-      await landed('ShipmentPage|/tms/shipments/S1')
+      await landed('ShipmentTabAnchor|/tms/shipments/S1/edit')
       expect(h.getLoads).toHaveBeenCalledWith(['L1'])
     })
 
@@ -183,7 +183,7 @@ describe('App routes', () => {
     it('/loads?id= resolves the id and keeps the other query params', async () => {
       h.getLoads.mockResolvedValue([{ id: 'L4', aljexId: '20004', shipmentId: 'S4' }])
       await visit('/loads?id=L4&tab=docs')
-      await landed('ShipmentPage|/tms/shipments/S4?tab=docs')
+      await landed('ShipmentTabAnchor|/tms/shipments/S4/edit?tab=docs')
     })
 
     it('bare /loads lands on the board without a lookup', async () => {
@@ -199,7 +199,7 @@ describe('App routes', () => {
     it.each([
       ['/grid', 'ShipmentsBoard|/tms/shipments'],
       ['/shipments', 'ShipmentsBoard|/tms/shipments'],
-      ['/shipments/S9?tab=docs', 'ShipmentPage|/tms/shipments/S9?tab=docs'],
+      ['/shipments/S9?tab=docs', 'ShipmentTabAnchor|/tms/shipments/S9/edit?tab=docs'],
       ['/check-calls', 'TrackingWorkstation|/tms/tracking?assignee=all&focus=checkcalls'],
       ['/documents', 'TrackingWorkstation|/tms/tracking?assignee=all&focus=docs'],
       ['/customers', 'CustomersPage|/tms/customers'],

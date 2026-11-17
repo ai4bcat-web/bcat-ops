@@ -196,7 +196,7 @@ export function collectNotifications(input: CollectInput): NotificationGroup[] {
         title: `${row.label} — check call ${row.state === 'OVERDUE' ? 'overdue' : 'due'}`,
         detail: row.carrierName ?? 'No carrier on the load',
         at: row.nextCheckCallAt,
-        to: row.shipmentId ? `/tms/shipments/${row.shipmentId}?tab=tracking` : CHECK_CALLS_LANDING,
+        to: row.shipmentId ? `/tms/shipments/${row.shipmentId}/edit?tab=tracking` : CHECK_CALLS_LANDING,
       })
     }
     groups.push(group('CHECK_CALLS', 'Check calls', CHECK_CALLS_LANDING, 'Open worklist', items))
@@ -214,7 +214,7 @@ export function collectNotifications(input: CollectInput): NotificationGroup[] {
         title: `${s.number} — POD missing`,
         detail: [s.customerName, s.carrierName].filter(Boolean).join(' · ') || 'Delivered without a signed POD',
         at: s.deliveredAt ?? s.updatedAt ?? null,
-        to: `/tms/shipments/${s.id}?tab=documents`,
+        to: `/tms/shipments/${s.id}/edit?tab=documents`,
       })
     }
     groups.push(group('PODS', 'PODs missing', '/tms/shipments', 'Open shipments', items))
@@ -260,7 +260,7 @@ export function collectNotifications(input: CollectInput): NotificationGroup[] {
             title: `${s.carrierName} — ${label}`,
             detail: `${days < 0 ? 'Expired' : 'Expires'} ${expiry.slice(0, 10)} · on ${s.number}`,
             at: expiry,
-            to: `/tms/shipments/${s.id}?tab=carrier`,
+            to: `/tms/shipments/${s.id}/edit?tab=carrier`,
           })
         }
       }

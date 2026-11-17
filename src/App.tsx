@@ -27,7 +27,6 @@ import { CarriersPage } from '@/features/carriers/CarriersPage'
 import { RateConSignPage } from '@/features/carriers/RateConSignPage'
 import { CarriersHub } from '@/features/carriers/CarriersHub'
 import { ShipmentsBoard } from '@/features/shipments/ShipmentsBoard'
-import { ShipmentPage } from '@/features/shipments/ShipmentPage'
 import CustomerTrackPage from '@/features/tracking/CustomerTrackPage'
 import CarrierPingPage from '@/features/tracking/CarrierPingPage'
 import CarrierUploadPage from '@/features/tracking/CarrierUploadPage'
@@ -158,7 +157,7 @@ export default function App() {
                   <Route path="shipments/intake/:intakeId" element={<RequirePage page={['loads', 'tms', 'intakeReview']}><DormantPage page="intake"><IntakeReviewPage /></DormantPage></RequirePage>} />
                   <Route path="shipments/new" element={<RequirePage page={['loads', 'tms']}><DormantPage page="shipments"><Suspense fallback={null}><ShipmentFormPage mode="create" /></Suspense></DormantPage></RequirePage>} />
                   <Route path="shipments/:id/edit" element={<RequirePage page={['loads', 'tms']}><DormantPage page="shipments"><ShipmentTabAnchor /></DormantPage></RequirePage>} />
-                  <Route path="shipments/:id" element={<RequirePage page={['loads', 'tms']}><DormantPage page="shipments"><ShipmentPage /></DormantPage></RequirePage>} />
+                  <Route path="shipments/:id" element={<ParamRedirect to="/tms/shipments/:id/edit" />} />
                   {/* The old Dispatch "needs cover" workstation is Carrier Sales now. */}
                   <Route path="dispatch" element={<Navigate to="/tms/carrier-sales" replace />} />
                   <Route path="carrier-sales" element={<RequirePage page={['loads', 'tms']}><DormantPage page="carrierSales"><CarrierSalesPage /></DormantPage></RequirePage>} />
@@ -219,7 +218,7 @@ export default function App() {
               <Route path="/loads" element={<LoadRedirect />} />
               <Route path="/loads/:id" element={<LoadRedirect />} />
               <Route path="/shipments" element={<ParamRedirect to="/tms/shipments" />} />
-              <Route path="/shipments/:id" element={<ParamRedirect to="/tms/shipments/:id" />} />
+              <Route path="/shipments/:id" element={<ParamRedirect to="/tms/shipments/:id/edit" />} />
               <Route path="/check-calls" element={<Navigate to={CHECK_CALLS_LANDING} replace />} />
               <Route path="/documents" element={<Navigate to={DOCS_LANDING} replace />} />
               {/* Retired: the driver roster and editor now live in the Files hub. */}

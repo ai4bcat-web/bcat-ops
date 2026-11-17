@@ -190,7 +190,6 @@ vi.mock('@/lib/apiClient', () => ({
 
 vi.mock('@/lib/download', () => ({ saveBlob }))
 
-vi.mock('./components/ShipmentDrawer', () => ({ ShipmentDrawer: () => null }))
 
 function renderBoard(path = '/tms/shipments', initialShipments: ShipmentRow[] = []) {
   __shipments = initialShipments

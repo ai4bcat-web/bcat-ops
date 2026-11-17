@@ -16,7 +16,7 @@ function loadShipmentTarget(
   carried.delete('id')
   if (load?.shipmentId) {
     const qs = carried.toString()
-    return `${SHIPMENTS}/${encodeURIComponent(load.shipmentId)}${qs ? `?${qs}` : ''}`
+    return `${SHIPMENTS}/${encodeURIComponent(load.shipmentId)}/edit${qs ? `?${qs}` : ''}`
   }
   const pro = normalizePro(load?.aljexId)
   if (pro) carried.set('q', pro)

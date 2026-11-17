@@ -52,7 +52,7 @@ const RATE_CON_LABEL: Record<RateConStatus, string> = {
 const PAGE_STEP = 50
 
 function carrierTabPath(shipmentId: string): string {
-  return `/tms/shipments/${shipmentId}?tab=carrier`
+  return `/tms/shipments/${shipmentId}/edit?tab=carrier`
 }
 
 function laneText(row: ShipmentListRow): string {
