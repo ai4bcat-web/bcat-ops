@@ -28,7 +28,7 @@ const DENSE_PATHS = new Set(['/tms/shipments', '/tms/shipments/intake', '/tms/tr
 /** Those pages plus the create / edit shipment form and a carrier profile opened over the Carriers list (`/tms/carriers/:id`). */
 function isDensePath(pathname: string): boolean {
   const path = pathname.replace(/\/+$/, '')
-  return DENSE_PATHS.has(path) || /^\/tms\/shipments\/[^/]+\/edit$/.test(path) || /^\/tms\/carriers\/(?!find$)[^/]+$/.test(path)
+  return DENSE_PATHS.has(path) || /^\/tms\/shipments\/[^/]+\/edit$/.test(path) || /^\/tms\/carriers\/(?!(?:find|remit)$)[^/]+$/.test(path)
 }
 
 /**

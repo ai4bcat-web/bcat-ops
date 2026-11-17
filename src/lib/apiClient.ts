@@ -13,6 +13,7 @@ import type { RateConSnapshot } from '@/lib/rateConRevision'
 import type { McpReviewCard } from '@/lib/integrations/mcpReview'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 import { fuelDedupKey } from '@/lib/driverFuel'
+import { parseFactorRemitMap, type FactorRemitMap } from '@/lib/factorRemit'
 import { fileContentType } from '@/lib/disputeFiles'
 import { fixOfRow, loadPingKey, type TrackingFix } from '@/lib/trackingPings'
 import type { FixedExpenseInput } from './driverPay'
@@ -8465,8 +8466,29 @@ export async function sendRemittance(input: {
 }
 
 /** Save the e-mail a payee's remittance goes to, on the payment method the bill is paid under. */
-export async function setPayeeRemitEmail(input: { billId?: string; carrierId?: string; email: string }): Promise<{ paymentMethodId: string; carrierId: string; email: string }> {
-  return financeAction<{ paymentMethodId: string; carrierId: string; email: string }>('SET_REMIT_EMAIL', input)
+export async function setPayeeRemitEmail(input: { billId?: string; carrierId?: string; email: string }): Promise<{ paymentMethodId: string; carrierId: string; email: string; factorName?: string }> {
+  return financeAction<{ paymentMethodId: string; carrierId: string; email: string; factorName?: string }>('SET_REMIT_EMAIL', input)
+}
+
+/**
+ * Every factoring company's one remittance e-mail, keyed by normalized name. A deploy that predates the
+ * field answers with an empty map, so the columns simply fall back to each carrier's own copy.
+ */
+export async function getFactorRemitEmails(): Promise<FactorRemitMap> {
+  try {
+    const r = await client.graphql({
+      query: 'query GetFactorRemitEmails { getTmsSettings(id: "default") { factorRemitEmails } }',
+    }) as { data: { getTmsSettings: { factorRemitEmails?: unknown } | null } }
+    return parseFactorRemitMap(r.data.getTmsSettings?.factorRemitEmails)
+  } catch (err) {
+    console.warn('[factorRemit] could not read factor e-mails', err)
+    return {}
+  }
+}
+
+/** Set (or clear, with '') a factoring company's remittance e-mail. One address serves every carrier it funds. */
+export async function setFactorRemitEmail(input: { factorName: string; email: string }): Promise<{ factorKey: string; factorName: string; email: string | null }> {
+  return financeAction<{ factorKey: string; factorName: string; email: string | null }>('SET_FACTOR_REMIT_EMAIL', input)
 }
 
 export async function renderRemittancePdf(input: { paymentId: string }): Promise<{ payment: ApPaymentRecord }> {

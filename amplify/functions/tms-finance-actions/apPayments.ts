@@ -48,6 +48,15 @@ import {
   renderRemittanceTableEmail,
 } from '../../../src/lib/shipmentNotices'
 import { buildRemittancePdf, remittanceData, remittanceFilename } from '../../../src/lib/remittancePdf'
+import {
+  effectivePayeeEmail,
+  factorKeyOf,
+  isRemitEmail,
+  parseFactorRemitMap,
+  paysThroughFactor,
+  type FactorRemitMap,
+} from '../../../src/lib/factorRemit'
+import { marshallRow } from '../_shared/shipmentStore'
 import type {
   ApPaymentApplication,
   ApPaymentKind,
@@ -70,6 +79,8 @@ import {
   IDX_PAYMENT_METHODS_BY_CARRIER,
   LOAD_CARRIER_TABLE_NAME,
   NULL_TYPE_VALUE,
+  SETTINGS_ID,
+  SETTINGS_TABLE_NAME,
   SHIPMENT_NOTICE_TABLE_NAME,
   dynamo,
   getById,
@@ -590,6 +601,8 @@ interface RemittanceContext {
   methods: CarrierPaymentMethodRecord[]
   contacts: CarrierContactRecord[]
   division: Division | null
+  /** Each factoring company's one remittance address (`TmsSettings.factorRemitEmails`). */
+  factorEmails: FactorRemitMap
 }
 
 async function readRemittanceContext(paymentRowId: string): Promise<RemittanceContext> {
@@ -611,6 +624,7 @@ async function readRemittanceContext(paymentRowId: string): Promise<RemittanceCo
   const bills = billRows.filter((row): row is Row => row != null) as unknown as CarrierBillRecord[]
   const divisionKey = bills.find((bill) => bill.divisionKey)?.divisionKey ?? null
   const division = divisionKey ? ((await getDivision(divisionKey)) as unknown as Division) : null
+  const factorEmails = parseFactorRemitMap((await getSettings()).factorRemitEmails)
 
   return {
     payment,
@@ -619,6 +633,7 @@ async function readRemittanceContext(paymentRowId: string): Promise<RemittanceCo
     methods: methodRows as unknown as CarrierPaymentMethodRecord[],
     contacts: contactRows as unknown as CarrierContactRecord[],
     division,
+    factorEmails,
   }
 }
 
@@ -668,9 +683,10 @@ function emailList(value: unknown, label: string): string[] {
 }
 
 /**
- * The payee's remit address, the way the Remit to column reads it: the address snapshotted on the bill,
- * else the payment method the bill names, else the carrier's preferred (or any) active method, and only
- * then the carrier's accounting contacts and own address.
+ * The payee's remit address, the way the Remit to column reads it. A carrier paid through a factor goes to
+ * the factor's one address; otherwise the address snapshotted on the bill, then the payment method the bill
+ * names, then the carrier's preferred (or any) active method, and only then the carrier's accounting
+ * contacts and own address.
  */
 export function remitRecipientsFor(context: {
   payment: Row
@@ -678,15 +694,20 @@ export function remitRecipientsFor(context: {
   carrier: CarrierRecord | null
   contacts: CarrierContactRecord[]
   methods: CarrierPaymentMethodRecord[]
+  factorEmails?: FactorRemitMap
 }): string[] {
+  const named = context.methods.find((row) => row.id === context.bills[0]?.paymentMethodId)
+  const active = context.methods.filter((row) => row.status !== 'INACTIVE')
+  const method = named ?? active.find((row) => row.isPreferred) ?? active[0] ?? null
+  if (paysThroughFactor(method)) {
+    const shared = effectivePayeeEmail(method, context.factorEmails)
+    if (shared.includes('@')) return [shared]
+  }
   const snapshot = [
     (context.payment.remitTo as { payeeEmail?: string | null } | null | undefined)?.payeeEmail,
     ...context.bills.map((bill) => bill.remitTo?.payeeEmail),
   ].map((email) => (email ?? '').trim()).find((email) => email.includes('@'))
   if (snapshot) return [snapshot]
-  const named = context.methods.find((row) => row.id === context.bills[0]?.paymentMethodId)
-  const active = context.methods.filter((row) => row.status !== 'INACTIVE')
-  const method = named ?? active.find((row) => row.isPreferred) ?? active[0] ?? null
   return remittanceRecipients(context.carrier, context.contacts, method)
 }
 
@@ -768,6 +789,13 @@ export async function setPayeeRemitEmail(input: Row, caller: Caller): Promise<Ro
     throw new Error('This carrier has no payment info on file. Add it on the carrier profile, then the remit e-mail can be saved there.')
   }
 
+  // A carrier paid through a factor has no address of its own: the factor's one address is what every
+  // remittance to that factor uses, so that is what gets saved.
+  if (paysThroughFactor(method)) {
+    const saved = await writeFactorRemitEmail(String(method.factorName), email, caller)
+    return { paymentMethodId: method.id, carrierId, email: saved.email, factorName: saved.name }
+  }
+
   const now = nowIso()
   await transact(
     [updateTx(CARRIER_PAYMENT_METHOD_TABLE_NAME, method.id, { payeeEmail: email, updatedAt: now, updatedBy: caller.email })],
@@ -780,6 +808,64 @@ export async function setPayeeRemitEmail(input: Row, caller: Caller): Promise<Ro
     email,
   })
   return { paymentMethodId: method.id, carrierId, email }
+}
+
+/**
+ * Set (or clear, with an empty address) the one remittance e-mail a factoring company is paid at. It is kept
+ * on the settings row, keyed by the factor's normalized name, and read in front of every carrier's own copy.
+ * Written against the map as it was read, so two people saving different factors at once cannot lose one.
+ */
+async function writeFactorRemitEmail(
+  factorName: string,
+  email: string,
+  caller: Caller,
+): Promise<{ key: string; name: string; email: string }> {
+  const key = factorKeyOf(factorName)
+  if (!key) throw new Error('Name the factoring company')
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const settings = await getSettings()
+    const current = parseFactorRemitMap(settings.factorRemitEmails)
+    const previous = current[key] ?? null
+    const next: FactorRemitMap = { ...current }
+    if (email) {
+      next[key] = { name: previous?.name ?? factorName.trim(), email, updatedAt: nowIso(), updatedBy: caller.email }
+    } else {
+      delete next[key]
+    }
+    const hadMap = settings.factorRemitEmails != null
+    try {
+      await transact(
+        [updateTx(
+          SETTINGS_TABLE_NAME,
+          SETTINGS_ID,
+          { __typename: 'TmsSettings', factorRemitEmails: next },
+          hadMap
+            ? { condition: '#factorRemitEmails = :before', extraValues: { ':before': marshallRow({ before: settings.factorRemitEmails }).before } }
+            : { condition: 'attribute_not_exists(#factorRemitEmails)' },
+        )],
+        'factor remit e-mail',
+      )
+    } catch (err) {
+      if (attempt < 2 && /cancel|conditional/i.test(String(err))) continue
+      throw err
+    }
+    await writeAudit('FACTOR_REMIT_EMAIL', key, 'SET_FACTOR_REMIT_EMAIL', caller, {
+      factorName,
+      previous: previous?.email ?? null,
+      email: email || null,
+    })
+    return { key, name: previous?.name ?? factorName.trim(), email }
+  }
+  throw new Error('Could not save: the factor list changed while saving. Try again.')
+}
+
+/** Save a factoring company's remittance e-mail from the Profiles list. An empty address clears it. */
+export async function setFactorRemitEmail(input: Row, caller: Caller): Promise<Row> {
+  const factorName = assertString(input.factorName, 'factorName').trim()
+  const raw = typeof input.email === 'string' ? input.email.trim() : ''
+  if (raw && !isRemitEmail(raw)) throw new Error('Enter one valid e-mail address')
+  const saved = await writeFactorRemitEmail(factorName, raw, caller)
+  return { factorKey: saved.key, factorName: saved.name, email: saved.email || null }
 }
 
 export async function sendRemittance(input: Row, caller: Caller): Promise<Row> {

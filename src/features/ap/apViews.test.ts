@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ageOpenItems } from '@/lib/arAging'
+import { applyFactorRemit } from '@/lib/factorRemit'
 import type { CarrierBillRecord } from '@/types/tms'
 import {
   billsInReview, sharedProIndex, sharedProLabel, siblingCarriers, awaitingInvoiceTotals,
@@ -131,6 +132,14 @@ describe('who is paid and where', () => {
     expect(remitEmailOf(bill({ remitTo: { name: 'x', payeeEmail: 'snap@carrier.test' } }), info)).toBe('snap@carrier.test')
     expect(remitEmailOf(bill({}), info)).toBe('ap@carrier.test')
     expect(remitEmailOf(bill({ carrierId: 'other' }), info)).toBe('')
+  })
+
+  it('remits a carrier paid through a factor to the factor\'s address, over what was snapshotted on the bill', () => {
+    const factored = [{ id: 'pm1', carrierId: 'car1', recipientType: 'FACTOR', factorName: 'OTR Capital LLC', payeeEmail: 'old@otr.test', isPreferred: true, status: 'ACTIVE' }] as never
+    const laidOver = applyFactorRemit(factored, { 'OTR CAPITAL': { name: 'OTR Capital LLC', email: 'remit@otr.test' } })
+    expect(remitEmailOf(bill({ remitTo: { name: 'x', payeeEmail: 'snap@otr.test' } }), laidOver)).toBe('remit@otr.test')
+    // A carrier that is paid directly keeps the snapshot.
+    expect(remitEmailOf(bill({ remitTo: { name: 'x', payeeEmail: 'snap@carrier.test' } }), info)).toBe('snap@carrier.test')
   })
 })
 

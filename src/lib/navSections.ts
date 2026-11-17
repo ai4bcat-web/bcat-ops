@@ -261,6 +261,7 @@ const CRUMBS: CrumbRule[] = [
   { path: '/tms/carriers', crumbs: [{ label: 'Carriers', to: '/tms/carriers/find' }, { label: 'Carrier list' }] },
   { path: '/tms/carriers', prefix: true, crumbs: [{ label: 'Carriers', to: '/tms/carriers' }, { label: 'Details' }] },
   { path: '/tms/carriers/find', crumbs: [{ label: 'Carriers', to: '/tms/carriers/find' }, { label: 'Find & Invite' }] },
+  { path: '/tms/carriers/remit', crumbs: [{ label: 'Carriers', to: '/tms/carriers' }, { label: 'Remit e-mails' }] },
   { path: '/tms/invoicing', crumbs: [ACCOUNTING, { label: 'Accounts Receivable' }] },
   { path: '/tms/invoicing/invoices', prefix: true, crumbs: [ACCOUNTING, AR, { label: 'Invoice' }] },
   { path: '/tms/invoicing/payable', crumbs: [ACCOUNTING, { label: 'Accounts Payable' }] },
