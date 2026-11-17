@@ -42,7 +42,6 @@ import { CounterDialog } from './components/CounterDialog'
 import { MarkLostDialog } from './components/MarkLostDialog'
 import { OutcomeBadge } from './components/OutcomeBadge'
 import { SendQuoteDialog } from './components/SendQuoteDialog'
-import { DemoCustomersView } from './demo/DemoCustomersView'
 import type { QuoteRecord } from '@/types/tms'
 import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
@@ -98,7 +97,7 @@ const EMPTY_TEXT: Record<QuoteTabKey, string> = {
   offers: 'No offer is out with a carrier.',
 }
 
-export function QuotesPage({ onRealCount }: { onRealCount?: (n: number | null) => void } = {}) {
+export function QuotesPage() {
   // One clock for the whole board: every chip, every gate and the strip answer as of the
   // same instant, so a row cannot read "Expires in 1h" beside a disabled Convert.
   const [now, setNow] = useState(() => new Date().toISOString())
@@ -113,7 +112,6 @@ export function QuotesPage({ onRealCount }: { onRealCount?: (n: number | null) =
   const [query, setQuery] = useState('')
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [pageSize, setPageSize] = useState(50)
-  const [customersDemo, setCustomersDemo] = useState(false)
 
   const months = useMemo(() => lastThreeMonths(asOf), [asOf])
   const [month, setMonth] = useState(() => months[0])
@@ -131,9 +129,6 @@ export function QuotesPage({ onRealCount }: { onRealCount?: (n: number | null) =
       .finally(() => setMonthLoading(false)),
   [month])
   useEffect(() => { loadMonth() }, [loadMonth])
-  // Tells the Quote page how many real quotes there are, so demo data can default on only when there are none.
-  const realCount = worklist.loading || monthLoading ? null : worklist.open.length + monthRows.length
-  useEffect(() => { onRealCount?.(realCount) }, [onRealCount, realCount])
 
   // The floor a quote's margin is read against; a failed read leaves the chip neutral
   // rather than inventing a threshold nobody configured.
@@ -558,13 +553,10 @@ export function QuotesPage({ onRealCount }: { onRealCount?: (n: number | null) =
         : []),
     ]
 
-  if (customersDemo) return <DemoCustomersView onBack={() => setCustomersDemo(false)} />
-
   return (
     <>
       <TmsListPage<QuoteRecord>
         title="Quote · Spot quotes"
-        actions={<TmsButton onClick={() => setCustomersDemo(true)}>Customers (demo)</TmsButton>}
         primaryAction={{ label: 'Quote', onClick: () => navigate('/tms/rates/new') }}
         search={{ value: query, onChange: setQuery, placeholder: 'Search quotes, customers, lanes' }}
         onRefresh={() => void refreshAll()}

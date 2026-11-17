@@ -157,11 +157,9 @@ describe('the quote board', () => {
     await waitFor(() => expect(screen.getAllByTestId('quote-outcome').map((n) => n.textContent)).toEqual(['Won']))
   })
 
-  it('opens the clearly-labelled demo Customers view and returns to the real list', async () => {
+  it('has no demo data or demo Customers button', async () => {
     await setup()
-    fireEvent.click(screen.getByRole('button', { name: /customers \(demo\)/i }))
-    expect(screen.getAllByTestId('demo-badge').length).toBeGreaterThan(0)
-    fireEvent.click(screen.getByRole('button', { name: /back to spot quotes/i }))
-    expect(screen.getByRole('button', { name: /customers \(demo\)/i })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /customers \(demo\)/i })).toBeNull()
+    expect(screen.queryByTestId('demo-badge')).toBeNull()
   })
 })

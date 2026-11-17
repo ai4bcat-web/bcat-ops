@@ -183,13 +183,9 @@ describe('CarrierSalesPage', () => {
     expect(screen.queryByTestId('channel-voice')).toBeNull()
   })
 
-  it('lists the labelled Demo loads and a demo row opens the voice + email panel', async () => {
+  it('shows no demo loads', async () => {
     await renderPage()
-    const demo = screen.getByTestId('demo-loads')
-    expect(within(demo).getAllByText('DEMO DATA').length).toBeGreaterThan(1)
-    fireEvent.click(within(demo).getByRole('button', { name: 'Open offers for DEMO-4102' }))
-    expect(screen.getByTestId('channel-voice')).toBeTruthy()
-    expect(screen.getByTestId('channel-email')).toBeTruthy()
-    expect(screen.getByTestId('demo-banner')).toBeTruthy()
+    expect(screen.queryByTestId('demo-loads')).toBeNull()
+    expect(screen.queryByText('DEMO DATA')).toBeNull()
   })
 })

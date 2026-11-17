@@ -3,13 +3,12 @@
  * from each, a suggested rate and a suggested response. The mailbox is read-only: nothing
  * is sent or drafted from here; the rep copies the response and sends it from Gmail.
  */
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Settings } from 'lucide-react'
-import { TmsAlert, TmsBadge, TmsButton, TmsEmptyState, TmsPage, TmsSelect, TmsTable, TmsTabStrip, type ColumnDef } from '@/features/tms/kit'
+import { TmsAlert, TmsBadge, TmsButton, TmsEmptyState, TmsPage, TmsTable, TmsTabStrip, type ColumnDef } from '@/features/tms/kit'
 import { spotAction } from '@/lib/apiClient'
-import { SPOT_FIXTURES } from '@/lib/spot/fixtures'
 import { resolveSpotSettings } from '@/lib/spot/settings'
 import type { SpotRequestRow, SpotSuggestion } from '@/lib/spot/types'
 import { AddRequestDialog } from './AddRequestDialog'
@@ -31,7 +30,7 @@ const STATUS_TONE: Record<string, 'blue' | 'green' | 'orange' | 'gray' | 'red'> 
 }
 const MATCH_CHIP: Record<string, string> = { EMAIL: 'Known contact', DOMAIN: 'Domain match', AMBIGUOUS: 'Ambiguous', NONE: 'Unknown sender' }
 
-export function SpotInboxPage({ onRealCount }: { onRealCount?: (n: number | null) => void } = {}) {
+export function SpotInboxPage() {
   const { status, loading: statusLoading, error: statusError, refresh: refreshStatus } = useSpotStatus()
   const [params, setParams] = useSearchParams()
   const [tabKey, setTabKey] = useState('new')
@@ -44,11 +43,7 @@ export function SpotInboxPage({ onRealCount }: { onRealCount?: (n: number | null
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [fixtureId, setFixtureId] = useState('')
   const openId = params.get('request')
-  // Tells the Quote page how many real requests there are, so demo data can default on only for an empty inbox.
-  const realCount = counts ? Math.max(rows.length, counts.new + counts.needsInfo) : null
-  useEffect(() => { onRealCount?.(realCount) }, [onRealCount, realCount])
 
   const select = (id: string | null) => {
     const next = new URLSearchParams(params)
@@ -87,12 +82,6 @@ export function SpotInboxPage({ onRealCount }: { onRealCount?: (n: number | null
       const { stats } = await spotAction('SPOT_POLL_NOW', {})
       toast.message(`Checked ${stats.listed} message${stats.listed === 1 ? '' : 's'}; ${stats.stored} new request${stats.stored === 1 ? '' : 's'}`)
     }, 'Inbox checked')
-
-  const loadSample = () =>
-    act(async () => {
-      await spotAction('SPOT_SIM_INJECT', { fixtureId })
-      await spotAction('SPOT_POLL_NOW', {})
-    }, 'Sample mail loaded')
 
   if (statusLoading || !status) {
     return (
@@ -191,19 +180,6 @@ export function SpotInboxPage({ onRealCount }: { onRealCount?: (n: number | null
         {connection?.lastPollAt ? <span className="tms-muted">Checked {relativeTime(connection.lastPollAt)}</span> : null}
         <TmsBadge tone="gray" data-testid="spot-readonly-chip">Read-only mailbox</TmsBadge>
         <span className="tms-spot-strip-spacer" />
-        {simulated ? (
-          <>
-            <TmsSelect
-              aria-label="Sample mail"
-              data-testid="spot-sim-fixture"
-              value={fixtureId}
-              placeholder="Sample mail…"
-              options={SPOT_FIXTURES.map((f) => ({ value: f.id, label: `${f.label.toLowerCase().replace('_', ' ')} · ${f.note}` }))}
-              onChange={(e) => setFixtureId(e.target.value)}
-            />
-            <TmsButton data-testid="spot-sim-load" disabled={busy || !fixtureId} onClick={() => void loadSample()}>Load sample mail</TmsButton>
-          </>
-        ) : null}
         <TmsButton data-testid="spot-poll-now" disabled={busy || !live} onClick={() => void checkNow()}>Check now</TmsButton>
       </div>
 
@@ -223,18 +199,6 @@ export function SpotInboxPage({ onRealCount }: { onRealCount?: (n: number | null
               (Gmail sign-in). Nothing is read from anyone’s mailbox until then.{' '}
               <Link to="/tms/brokerage/integrations">Open Integrations</Link>
             </span>
-            {status.devStack ? (
-              <div className="tms-spot-banner-actions">
-                <TmsButton
-                  variant="primary"
-                  data-testid="spot-connect-simulated"
-                  disabled={busy}
-                  onClick={() => void act(() => spotAction('SPOT_CONNECT_SIMULATED', {}), 'Simulated inbox connected')}
-                >
-                  Use simulated inbox
-                </TmsButton>
-              </div>
-            ) : null}
           </TmsAlert>
         </div>
       ) : null}

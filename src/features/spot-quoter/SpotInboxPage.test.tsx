@@ -138,7 +138,7 @@ beforeEach(() => {
 })
 
 describe('Spot inbox connection states', () => {
-  it('explains an unconfigured Gmail and offers no dev shortcut on a real stack', async () => {
+  it('explains an unconfigured Gmail and offers no dev shortcut', async () => {
     setup({ status: status({ gmailProvider: { mode: 'STUB', health: null }, connection: null }) })
     draw()
     expect(await screen.findByTestId('spot-not-configured')).toBeInTheDocument()
@@ -146,23 +146,12 @@ describe('Spot inbox connection states', () => {
     expect(screen.queryByTestId('spot-sim-load')).toBeNull()
   })
 
-  it('offers the simulated inbox on the dev stack and connects it', async () => {
-    setup({ status: status({ devStack: true, gmailProvider: { mode: 'STUB', health: null }, connection: null }) })
-    draw()
-    fireEvent.click(await screen.findByTestId('spot-connect-simulated'))
-    await waitFor(() => expect(calls('SPOT_CONNECT_SIMULATED')).toHaveLength(1))
-  })
-
-  it('paints a simulated inbox as simulated and lets a sample mail be loaded', async () => {
+  it('paints a simulated inbox as simulated', async () => {
     setup({ status: status({ devStack: true, connection: { ...CONNECTION, mode: 'SIMULATED' } as never }) })
     draw()
     expect(await screen.findByTestId('spot-simulated-badge')).toHaveTextContent('SIMULATED INBOX')
     // Every connection state carries the one connection-chip hook (the verification harness waits on it).
     expect(screen.getByTestId('spot-conn-chip')).toContainElement(screen.getByTestId('spot-simulated-badge'))
-    fireEvent.change(screen.getByTestId('spot-sim-fixture'), { target: { value: 'req-van-clear' } })
-    fireEvent.click(screen.getByTestId('spot-sim-load'))
-    await waitFor(() => expect(calls('SPOT_SIM_INJECT')[0][1]).toEqual({ fixtureId: 'req-van-clear' }))
-    await waitFor(() => expect(calls('SPOT_POLL_NOW').length).toBeGreaterThan(0))
   })
 
   it('shows Connect Gmail when the provider is live and the rep has not connected', async () => {
