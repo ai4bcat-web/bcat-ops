@@ -49,6 +49,7 @@ import { useShipments, type ShipmentListRow } from '@/hooks/useShipments'
 import { readyFactsOf } from './readyFacts'
 import { exportOutstandingReceivables } from '@/lib/opsExports'
 import { useDirectory } from '@/hooks/useDirectory'
+import { EditCustomerBillingDialog } from '@/features/shipments/form/EditCustomerBillingDialog'
 import {
   batchGenerateInvoices, getTmsSettings, graphqlErrorText, voidInvoice,
 } from '@/lib/apiClient'
@@ -105,7 +106,8 @@ type ArDialog =
   | { kind: 'batchFactor'; rows: ArQueueRow[] }
   | { kind: 'void'; invoice: InvoiceRecord }
   | { kind: 'changeCustomer'; invoice: InvoiceRecord }
-  | { kind: 'why'; pro: string; reason: string }
+  | { kind: 'why'; pro: string; reason: string; customerId?: string | null }
+  | { kind: 'editCustomer'; customerId: string }
 
 /** One shipment the batch would not bill, and exactly what the release gate said. */
 interface BatchRefusal {
@@ -144,6 +146,16 @@ const QUEUE_TAB_STATUS: Record<'ready' | 'invoiced', ArQueueStatus> = {
   invoiced: 'INVOICED',
 }
 
+
+/** Blocked-row reasons that live on the customer: the Why dialog offers the billing / MC editor for these. */
+const CUSTOMER_FIXABLE = /billing method|payment method|\bMC\b|AP e-?mail/i
+const BILLING_LABEL: Record<string, string> = { FACTOR: 'Factor (OTR)', MANUAL: 'Manual invoice' }
+
+/** "3 loads are in Ready to Invoice for this customer." — what the change touches right now. */
+function readyLoadsText(rows: readonly ArQueueRow[], customerId: string): string {
+  const n = rows.filter((row) => row.customerId === customerId).length
+  return n === 0 ? '' : `${n} load${n === 1 ? ' is' : 's are'} in Ready to Invoice for this customer.`
+}
 
 const GROUP_BY_KEY = 'tms:ar:groupBy'
 const BILLED_BY_KEY = 'tms:ar:billedBy'
@@ -194,7 +206,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     try { localStorage.setItem(GROUP_BY_KEY, next) } catch { /* per-viewer convenience only */ }
   }
 
-  const { customers } = useDirectory({ locations: false })
+  const { customers, refresh: refreshDirectory } = useDirectory({ locations: false })
   const [selected, setSelected] = useState<string[]>([])
   // Customer / rev division / due filters live in the URL (`?customer=…&div=…&due=…`) so a
   // filtered view can be shared; the division card writes the same state.
@@ -513,7 +525,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onBatchGenerate: runBatchGenerate,
       factorReadiness,
       onBatchFactor: (rows) => setDialog({ kind: 'batchFactor', rows }),
-      onWhy: (row: ArQueueRow, reason: string) => setDialog({ kind: 'why', pro: String(row.shipmentNumber ?? row.orderId), reason }),
+      onWhy: (row: ArQueueRow, reason: string) => setDialog({ kind: 'why', pro: String(row.shipmentNumber ?? row.orderId), reason, customerId: row.customerId }),
+      onEditCustomer: (customerId: string) => setDialog({ kind: 'editCustomer', customerId }),
       onReview: (invs) => setDialog({ kind: 'review', invoices: invs }),
       onEdit: (inv) => setDialog({ kind: 'edit', invoice: inv }),
       onStatement: (customerId, customerName) => setDialog({ kind: 'statement', customerId, customerName }),
@@ -637,7 +650,26 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         />
       )}
       {dialog?.kind === 'why' && (
-        <TmsDialog open onOpenChange={(open) => { if (!open) setDialog(null) }} title={`Why ${dialog.pro} can't be picked`} description={dialog.reason} footer={<TmsButton variant="primary" onClick={() => setDialog(null)}>Close</TmsButton>} />
+        <TmsDialog
+          open onOpenChange={(open) => { if (!open) setDialog(null) }} title={`Why ${dialog.pro} can't be picked`} description={dialog.reason}
+          footer={<>
+            {dialog.customerId && customerById.has(dialog.customerId) && CUSTOMER_FIXABLE.test(dialog.reason) && (
+              <TmsButton data-testid="ar-why-edit-customer" onClick={() => setDialog({ kind: 'editCustomer', customerId: dialog.customerId as string })}>Edit customer billing / MC</TmsButton>
+            )}
+            <TmsButton variant="primary" onClick={() => setDialog(null)}>Close</TmsButton>
+          </>}
+        />
+      )}
+      {dialog?.kind === 'editCustomer' && customerById.get(dialog.customerId) && (
+        <EditCustomerBillingDialog
+          key={dialog.customerId}
+          customer={customerById.get(dialog.customerId)!}
+          source="AR_READY_TO_INVOICE"
+          reason="Fixed from Ready to Invoice"
+          context={`This changes ${customerById.get(dialog.customerId)!.name} for all of its loads. ${readyLoadsText(queue.READY, dialog.customerId)} Setting Factor does not send anything to OTR; it only decides how this customer's invoices go out.`}
+          onClose={() => setDialog(null)}
+          onSaved={() => { void refreshDirectory(); setFactorVersion((v) => v + 1); void refreshAll() }}
+        />
       )}
       {dialog?.kind === 'changeCustomer' && (
         <ChangeInvoiceCustomerDialog
@@ -817,7 +849,7 @@ function queueView({
   status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, factorByItemId, customerById,
   attachmentPlans, boardById, shipmentsById, months, month, paidLoading, onMonth, onSelect, invoiceErrors, invoicesRunning, onRetryInvoice, onBatchGenerate, onReview, onEdit,
   onStatement, paymentFacts,
-  factorReadiness, onBatchFactor, onWhy,
+  factorReadiness, onBatchFactor, onWhy, onEditCustomer,
 }: {
   status: ArQueueStatus
   rows: ArQueueRow[]
@@ -849,6 +881,8 @@ function queueView({
   onBatchFactor?: (rows: ArQueueRow[]) => void
   /** Why a row's checkbox is disabled, said in a dialog (Ryne 2026-11-16). */
   onWhy: (row: ArQueueRow, reason: string) => void
+  /** Ready to invoice: open the customer's billing method / MC editor (Ryne 2026-11-16). */
+  onEditCustomer: (customerId: string) => void
   onReview: (invoices: InvoiceRecord[]) => void
   onEdit: (invoice: InvoiceRecord) => void
   /** Invoiced, grouped by customer: e-mail that customer's aging report from the group header. */
@@ -907,6 +941,11 @@ function queueView({
     if (r?.factorBilled && !r.ready) return `Not ready to factor: ${r.missing.join('; ')}`
     return null
   }
+  // The customer's own billing method and MC, editable in place from Ready to invoice (they decide Factor vs Manual and what OTR needs).
+  const customerOf = (row: ArQueueRow) => (row.customerId ? customerById.get(row.customerId) : undefined)
+  const billingOf = (row: ArQueueRow) => customerOf(row)?.billingMethod ?? (customerOf(row)?.factored ? 'FACTOR' : null)
+  const billingText = (row: ArQueueRow) => (billingOf(row) ? BILLING_LABEL[billingOf(row) as string] ?? String(billingOf(row)) : 'Not set')
+  const mcText = (row: ArQueueRow) => customerOf(row)?.mcNumber?.trim() || '—'
   const factorReadyRows = rows.filter((row) => selected.includes(row.orderId) && readinessOf(row)?.factorBilled && readinessOf(row)?.ready)
 
   // Internal only: carrier rate and profit never leave this screen (see readyFacts.ts).
@@ -944,6 +983,10 @@ function queueView({
       text: (row) => invoiceEmailsOf(row).to.join(', ') || (row.factored ? '' : 'No AP email'),
     },
     { key: 'customer', header: 'Customer', group: 'Shipment', text: (row) => row.customerName, filter: 'multi', optionsOf: (row) => opt(row.customerName) },
+    ...(ready ? [
+      { key: 'billing', header: 'Payment method', group: 'Customer', text: billingText, filter: 'multi', optionsOf: (row: ArQueueRow) => opt(billingText(row)) } as Col<ArQueueRow>,
+      { key: 'mc', header: 'MC #', group: 'Customer', text: mcText } as Col<ArQueueRow>,
+    ] : []),
     ...readyColumns,
     { key: 'division', header: 'Rev division', group: 'Shipment', text: (row) => row.revDivisionName, filter: 'multi', optionsOf: (row) => opt(row.revDivisionName) },
     { key: 'rep', header: 'Sales rep', group: 'Shipment', text: (row) => row.salesRepName, filter: 'multi', optionsOf: (row) => opt(row.salesRepName) },
@@ -1027,6 +1070,23 @@ function queueView({
         }
         if (to.length === 0) return <TmsBadge tone="red" title="This customer has no AP e-mail on file">No AP email</TmsBadge>
         return <span title={tip}>{to[0]}{to.length > 1 ? ` +${to.length - 1}` : ''}</span>
+      }
+      case 'billing':
+      case 'mc': {
+        const c = customerOf(row)
+        const text = key === 'billing' ? billingText(row) : mcText(row)
+        const missing = key === 'billing' ? !billingOf(row) : text === '—'
+        if (!c) return <span className="tms-muted">—</span>
+        return (
+          <span className="flex items-center gap-1">
+            {missing ? <TmsBadge tone="red">{key === 'billing' ? 'Not set' : 'No MC'}</TmsBadge> : <span>{text}</span>}
+            {canRelease && (
+              <button type="button" className="tms-link text-xs" data-testid={`ar-edit-${key}`} aria-label={`Edit ${key === 'billing' ? 'payment method' : 'MC number'} for ${c.name}`} onClick={() => onEditCustomer(c.id)}>
+                {missing ? 'Set' : 'Edit'}
+              </button>
+            )}
+          </span>
+        )
       }
       case 'via':
         return row.factored

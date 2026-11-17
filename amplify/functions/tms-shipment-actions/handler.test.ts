@@ -5844,6 +5844,43 @@ describe('READY_TO_INVOICE', () => {
         expect((await run()).results[0]).toMatchObject({ ok: true, message: 'Already in Load Review' })
       })
 
+      it('moves a load back to Active, holds the auto-push, and a person pushing again lifts the hold (Ryne 2026-11-16)', async () => {
+        const ids = await reviewable()
+        const push = () => call('BATCH_SHIPMENT_TASK', { task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: [ids.shipmentId] }, REVIEWER) as Promise<{ results: { ok: boolean }[] }>
+        expect((await push()).results[0].ok).toBe(true)
+        const back = (await call('BATCH_SHIPMENT_TASK', { task: 'RETURN_TO_ACTIVE', shipmentIds: [ids.shipmentId], params: { note: 'wrong delivery time' } }, REVIEWER)) as { results: { ok: boolean; message: string | null }[] }
+        expect(back.results[0]).toMatchObject({ ok: true, message: null })
+        const row = table(TABLES.shipment).get(ids.shipmentId)!
+        expect(row.loadReviewPushedAt).toBeUndefined()
+        expect(row.loadReviewHeldNote).toBe('wrong delivery time')
+        expect(row.loadReviewHeldAt).toBeTruthy()
+        // Not in review any more: asking again is a harmless no-op.
+        const again = (await call('BATCH_SHIPMENT_TASK', { task: 'RETURN_TO_ACTIVE', shipmentIds: [ids.shipmentId] }, REVIEWER)) as { results: { ok: boolean; message: string | null }[] }
+        expect(again.results[0]).toMatchObject({ ok: true, message: 'Was not in Load Review' })
+        // The automatic sweep leaves a held load alone.
+        const swept = (await call('PUSH_READY_TO_LOAD_REVIEW', {}, ADMIN)) as { pushed: number }
+        expect(swept.pushed).toBe(0)
+        expect(table(TABLES.shipment).get(ids.shipmentId)!.loadReviewPushedAt).toBeUndefined()
+        // A person pushing it again puts it back in review and clears the hold.
+        expect((await push()).results[0].ok).toBe(true)
+        const pushedAgain = table(TABLES.shipment).get(ids.shipmentId)!
+        expect(pushedAgain.loadReviewPushedAt).toBeTruthy()
+        expect(pushedAgain.loadReviewHeldAt).toBeUndefined()
+      })
+
+      it('refuses to move a load back once it is released to billing or invoiced', async () => {
+        const ids = await reviewable()
+        await call('BATCH_SHIPMENT_TASK', { task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: [ids.shipmentId] }, REVIEWER)
+        await ready(ids.orderId, { review: REVIEW })
+        const refused = (await call('BATCH_SHIPMENT_TASK', { task: 'RETURN_TO_ACTIVE', shipmentIds: [ids.shipmentId] }, REVIEWER)) as { results: { ok: boolean; message: string | null }[] }
+        expect(refused.results[0].ok).toBe(false)
+        expect(refused.results[0].message).toMatch(/already moved to billing/)
+        expect(table(TABLES.shipment).get(ids.shipmentId)!.loadReviewPushedAt).toBeTruthy()
+        table(TABLES.order).set(ids.orderId, { ...table(TABLES.order).get(ids.orderId)!, invoiceId: 'inv-1', arStatus: 'UNPAID' })
+        const invoiced = (await call('BATCH_SHIPMENT_TASK', { task: 'RETURN_TO_ACTIVE', shipmentIds: [ids.shipmentId] }, REVIEWER)) as { results: { ok: boolean; message: string | null }[] }
+        expect(invoiced.results[0].message).toMatch(/already invoiced/)
+      })
+
       it('refuses the tenth shipment of a batch before any row is touched', async () => {
         const ids = await reviewable()
         const shipmentIds = Array.from({ length: 10 }, () => ids.shipmentId)

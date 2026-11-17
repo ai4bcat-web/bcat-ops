@@ -1868,6 +1868,10 @@ export interface ShipmentRecord {
   /** Step AP: set when the shipment was pushed into Load Review from the board. */
   loadReviewPushedAt?: string | null
   loadReviewPushedBy?: string | null
+  /** Set when a person moved the load back to Active; the automatic push to Load Review stays off until it is pushed again. */
+  loadReviewHeldAt?: string | null
+  loadReviewHeldBy?: string | null
+  loadReviewHeldNote?: string | null
   /**
    * Aljex codes stored verbatim by the import so Settings > Users can map them to people later
    * (`AljexCodeMap`). `salesRepId` stays null until a mapping is applied.
@@ -2259,6 +2263,7 @@ export type BatchShipmentTask =
   | 'CLEAR_DETENTION'
   | 'FLAG_TONU'
   | 'CLEAR_TONU'
+  | 'RETURN_TO_ACTIVE'
 
 export interface BatchShipmentTaskRowResult {
   shipmentId: string

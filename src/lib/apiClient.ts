@@ -2433,7 +2433,7 @@ function withParsedPrefs<T>(result: T): T {
 const SHIPMENT_ALJEX_FIELDS = ['salesRepCode', 'createdByCode', 'serviceRepCode', 'dispatcherCode', 'osd']
 let shipmentsHaveAljexCodes = true
 // Step AP: the Load Review push stamp. Own flag, same reason.
-const SHIPMENT_REVIEW_PUSH_FIELDS = ['loadReviewPushedAt', 'loadReviewPushedBy']
+const SHIPMENT_REVIEW_PUSH_FIELDS = ['loadReviewPushedAt', 'loadReviewPushedBy', 'loadReviewHeldAt', 'loadReviewHeldBy', 'loadReviewHeldNote']
 let shipmentsHaveReviewPush = true
 
 /** Every Shipment read, with each newer group dropped and retried if the backend predates it. */
@@ -3397,6 +3397,10 @@ export async function pushReadyToLoadReview(): Promise<{ checked: number; pushed
 /** Push shipments into Load Review. A row that misses the customer's requirements comes back `ok: false` with `reasons`. */
 export async function pushToLoadReview(shipmentIds: string[]): Promise<BatchShipmentTaskResult> {
   return batchShipmentTask({ task: 'PUSH_TO_LOAD_REVIEW', shipmentIds })
+}
+/** Move shipments back out of Load Review to the Active board (refused once they are in billing or invoiced). */
+export async function returnToActive(shipmentIds: string[], note?: string): Promise<BatchShipmentTaskResult> {
+  return batchShipmentTask({ task: 'RETURN_TO_ACTIVE', shipmentIds, params: note ? { note } : {} })
 }
 /** Load Review's release to billing; the marker is what makes the server run the review gate. Reviewer grant only. */
 export async function releaseFromLoadReview(shipmentIds: string[]): Promise<BatchShipmentTaskResult> {

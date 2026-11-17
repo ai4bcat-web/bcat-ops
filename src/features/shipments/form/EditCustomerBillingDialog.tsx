@@ -9,13 +9,19 @@ import { TmsButton, TmsDialog, TmsField, TmsInput, TmsSelect } from '@/features/
 import { EmailChipsInput } from '@/features/directory/components/EmailChipsInput'
 import { apEmailList, apEmailTokens } from '@/lib/apEmails'
 import { patchCustomer, plainSaveError } from '@/lib/apiClient'
+import { normalizeMc } from '@/lib/mcNumber'
 import type { CustomerRecord } from '@/types/tms'
 
 type Billing = NonNullable<CustomerRecord['billingMethod']> | ''
 
-export function EditCustomerBillingDialog({ customer, onClose, onSaved }: {
+export function EditCustomerBillingDialog({ customer, onClose, onSaved, context, source = 'SHIPMENT_EDITOR', reason = 'Fixed from the shipment (What\'s missing)' }: {
   customer: CustomerRecord
   onClose: () => void
+  /** Where the change applies, said under the title ("12 loads in Ready to Invoice…"). */
+  context?: string
+  /** `changeSource` and `changeReason` written on the customer's History. */
+  source?: string
+  reason?: string
   /** After a successful save: the page re-reads the customers and the load's REQS. */
   onSaved: () => void
 }) {
@@ -26,8 +32,10 @@ export function EditCustomerBillingDialog({ customer, onClose, onSaved }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const mcCheck = normalizeMc(mc)
   const save = async () => {
     if (busy) return
+    if (!mcCheck.ok) { setError('The MC # should be digits only, like 123456 (the letters MC in front are fine).'); return }
     setBusy(true)
     setError(null)
     try {
@@ -35,10 +43,11 @@ export function EditCustomerBillingDialog({ customer, onClose, onSaved }: {
         billingMethod: (billing || null) as CustomerRecord['billingMethod'],
         apEmail: emails[0] ?? null,
         apEmailsExtra: emails.length > 1 ? emails.slice(1) : null,
-        mcNumber: mc.trim() || null,
+        // Unchanged text is left exactly as stored; a typed value is saved as digits only.
+        mcNumber: mc.trim() === (customer.mcNumber ?? '').trim() ? (customer.mcNumber ?? null) : mcCheck.value,
         paymentTermsDays: terms.trim() === '' ? null : Number(terms),
-        changeReason: 'Fixed from the shipment (What\'s missing)',
-        changeSource: 'SHIPMENT_EDITOR',
+        changeReason: reason,
+        changeSource: source,
       } as Parameters<typeof patchCustomer>[1], customer.updatedAt ?? '')
       toast.success(`Saved ${customer.name}`)
       onSaved()
@@ -52,7 +61,7 @@ export function EditCustomerBillingDialog({ customer, onClose, onSaved }: {
   return (
     <TmsDialog
       open onOpenChange={(v) => { if (!v && !busy) onClose() }} title={`Edit ${customer.name}`}
-      description="This changes the customer for all of its loads."
+      description={context ?? 'This changes the customer for all of its loads.'}
       footer={(
         <>
           <TmsButton variant="ghost" data-testid="edit-customer-cancel" disabled={busy} onClick={onClose}>Cancel</TmsButton>
@@ -72,7 +81,7 @@ export function EditCustomerBillingDialog({ customer, onClose, onSaved }: {
           <EmailChipsInput value={emails} label="AP e-mail" disabled={busy} placeholder="ap@customer.com — paste or type several" onChange={setEmails} />
         </TmsField>
         <div className="tms-grid tms-grid-2">
-          <TmsField label="MC #" htmlFor="edit-customer-mc">
+          <TmsField label="MC #" htmlFor="edit-customer-mc" hint={!mcCheck.ok ? 'Digits only, like 123456.' : mcCheck.warning ?? undefined}>
             <TmsInput id="edit-customer-mc" data-testid="edit-customer-mc" value={mc} disabled={busy} onChange={(e) => setMc(e.target.value)} />
           </TmsField>
           <TmsField label="Payment terms (days)" htmlFor="edit-customer-terms">
