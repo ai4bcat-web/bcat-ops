@@ -445,6 +445,17 @@ function serializeLoadInput<T extends { stops?: unknown; sortOrder?: unknown; cu
       out = rest as unknown as T
     }
   }
+  // And the two driver mirrors. The stops hold the drivers and the shipment actions (SET_STOP_DRIVERS / ASSIGN_ASSET) own both
+  // mirrors: a driver change never reaches this write, because the store routes it through the server first. A stops save
+  // (an appointment screenshot, a note, a colour) still re-derives them from the stops, and when a load's mirror and its first/last
+  // stop disagree that is a "change", so AppSync refused the WHOLE save with "Unauthorized on [deliveryDriverId, pickupDriverId]"
+  // and the screenshot never attached. Whatever the caller sent, the mirrors never go out on a client write.
+  for (const field of ['pickupDriverId', 'deliveryDriverId'] as const) {
+    if (field in (out as object)) {
+      const { [field]: _drop, ...rest } = out as T & Record<typeof field, unknown>
+      out = rest as unknown as T
+    }
+  }
   if (!loadsHaveStops) {
     const { stops: _drop, ...rest } = out as T & { stops?: unknown }
     return rest as T
