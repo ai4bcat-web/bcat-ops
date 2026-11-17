@@ -34,11 +34,13 @@ function sizeLabel(bytes: number): string {
   return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
 }
 
-export function LoadReviewDocuments({ shipmentId, readOnly = false, disabled = false, onChanged }: {
+export function LoadReviewDocuments({ shipmentId, readOnly = false, disabled = false, deleteReason = 'Deleted in Load Review', onChanged }: {
   shipmentId: string
   /** The load has been released: the files are shown, nothing is offered. */
   readOnly?: boolean
   disabled?: boolean
+  /** What the audit entry says when a file is deleted from here. */
+  deleteReason?: string
   /** A file landed or was replaced: the drawer runs the review again. */
   onChanged: () => Promise<void>
 }) {
@@ -103,7 +105,7 @@ export function LoadReviewDocuments({ shipmentId, readOnly = false, disabled = f
   const remove = async (doc: ShipmentDocumentRecord) => {
     setDeleting(true)
     try {
-      await voidDocument({ documentId: doc.id, reason: 'Deleted in Load Review' })
+      await voidDocument({ documentId: doc.id, reason: deleteReason })
       toast.success(`Deleted ${doc.name}`)
       setConfirmDelete(null)
       await saved()

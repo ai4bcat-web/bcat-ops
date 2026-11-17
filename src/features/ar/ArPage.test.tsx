@@ -73,6 +73,12 @@ const boardRows = vi.hoisted(() => ({ current: [] as unknown[] }))
 vi.mock('@/hooks/useShipments', () => ({ useShipments: () => ({ shipments: boardRows.current, loading: false, error: null, partial: false }) }))
 // The dialogs are mount-to-open and fetch their own context; their behaviour has its own
 // tests, and here they would only drag the finance Lambda into a test about the board.
+// The documents card has its own tests; here only whether it opens, for which shipment, and whether it may change anything.
+vi.mock('@/features/tms/loadReview/LoadReviewDocuments', () => ({
+  LoadReviewDocuments: ({ shipmentId, readOnly }: { shipmentId: string; readOnly?: boolean }) => (
+    <div data-testid="docs-card" data-shipment={shipmentId} data-readonly={String(!!readOnly)} />
+  ),
+}))
 vi.mock('./components/GenerateInvoiceDialog', () => ({ GenerateInvoiceDialog: () => null }))
 vi.mock('./components/EmailInvoiceDialog', () => ({ EmailInvoiceDialog: () => null }))
 vi.mock('./components/ReceivePaymentDialog', () => ({ ReceivePaymentDialog: () => null }))
@@ -626,5 +632,60 @@ describe('Ready to invoice: batch Factor', () => {
     factorReady.current = {}
     directoryCustomers.current = []
     authGroups.current = []
+  })
+})
+
+describe('Ready to invoice: replace or delete the POD and rate confirmation (Ryne 2026-11-17)', () => {
+  const plan = (pod: 'ATTACHED' | 'MISSING') => [{ invoiceId: 'INV-000123', invoicePdf: 'ATTACHED', pod, rateCon: 'MISSING', count: 1, items: [], tooBig: false, carrierPayFlags: [] }]
+
+  it('the POD chip on a draft opens the documents for that shipment, open for changes', async () => {
+    authGroups.current = ['page-invoicing']
+    ;(apiClient.getInvoiceAttachmentPlans as Mock).mockResolvedValue(plan('ATTACHED'))
+    openSet.splice(0, openSet.length, invoice())
+    await setup({})
+    await settle()
+    fireEvent.click(await screen.findByTestId('ar-docs-pod'))
+    const card = await screen.findByTestId('docs-card')
+    expect(card.getAttribute('data-shipment')).toBe('s1')
+    expect(card.getAttribute('data-readonly')).toBe('false')
+    expect(screen.queryByText(/Already sent or with OTR/)).toBeNull()
+    ;(apiClient.getInvoiceAttachmentPlans as Mock).mockResolvedValue([])
+    authGroups.current = []
+  })
+
+  it('the RC chip and the row\'s Documents button open the same card', async () => {
+    authGroups.current = ['page-invoicing']
+    ;(apiClient.getInvoiceAttachmentPlans as Mock).mockResolvedValue(plan('MISSING'))
+    openSet.splice(0, openSet.length, invoice())
+    await setup({})
+    await settle()
+    fireEvent.click(await screen.findByTestId('ar-docs-rc'))
+    expect((await screen.findByTestId('docs-card')).getAttribute('data-shipment')).toBe('s1')
+    ;(apiClient.getInvoiceAttachmentPlans as Mock).mockResolvedValue([])
+    authGroups.current = []
+  })
+
+  it('an invoice that has already been sent shows its files and says why nothing is offered', async () => {
+    authGroups.current = ['page-invoicing']
+    ;(apiClient.getInvoiceAttachmentPlans as Mock).mockResolvedValue(plan('ATTACHED'))
+    openSet.splice(0, openSet.length, invoice({ sentAt: '2026-11-16T12:00:00.000Z', sentTo: 'ap@acmefoods.com', sentCount: 1 }))
+    await setup()
+    fireEvent.click(screen.getByRole('tab', { name: /^Invoiced/ }))
+    await settle()
+    fireEvent.click(await screen.findByTestId('ar-docs-open'))
+    expect((await screen.findByTestId('docs-card')).getAttribute('data-readonly')).toBe('true')
+    expect(screen.getByText(/Already sent or with OTR/)).toBeTruthy()
+    ;(apiClient.getInvoiceAttachmentPlans as Mock).mockResolvedValue([])
+    authGroups.current = []
+  })
+
+  it('the Why? dialog offers the documents when the blocker is the POD or the rate confirmation', async () => {
+    factorReady.current = { o1: { orderId: 'o1', factorBilled: true, ready: false, missing: ['Missing document: RATE_CON — Rate confirmation'] } }
+    await setup({ UNBILLED: [worklistRow()] })
+    await settle()
+    fireEvent.click(screen.getByTestId('ar-why'))
+    fireEvent.click(await screen.findByTestId('ar-why-docs'))
+    expect(await screen.findByTestId('docs-card')).toBeTruthy()
+    factorReady.current = {}
   })
 })
