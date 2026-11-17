@@ -1,11 +1,14 @@
 /**
- * An owner operator's POD is the delivery (Ryne 2026-11-16, 20039).
+ * An own-fleet driver's POD is the delivery (Ryne 2026-11-16, 20039; widened the same day to
+ * local drivers and box trucks: "if a pod gets updated for an owner operator or local driver it
+ * should automatically move the load all the way to delivered status").
  *
- * Owner operators are not asked to tap Arrived / Departed at each stop; the POD they send is
- * the proof the freight was delivered. So when a POD lands on a load an owner operator is on,
- * every stop time still blank is filled in and the load walks to Delivered through the same
- * stop-time ladder a person typing the times would use. Ivan's local drivers and box trucks
- * are not touched: their app records the stops itself.
+ * Owner operators, Ivan's local drivers and box trucks are covered, however the driver is
+ * grouped (Driver.fleetGroup OWNER_OPERATOR / AMAZON / LOCAL / BOX_TRUCK, or the legacy
+ * driverType OWNER_OPERATOR / COMPANY when no fleet is set; Shipment.revSubdivision says the
+ * same). When a POD lands on such a load, every stop time still blank is filled in and the load
+ * walks to Delivered through the same stop-time ladder a person typing the times would use.
+ * Real times are never overwritten. A brokerage load on an outside carrier is not covered.
  *
  * Pure and relative-import only: the tmsShipmentActions Lambda bundles this file by path.
  */
@@ -18,10 +21,24 @@ export interface OoLoadFacts {
   driver?: DriverOwnershipInputs | null
 }
 
-export function isOwnerOperatorLoad(facts: OoLoadFacts): boolean {
-  if (facts.revSubdivision === 'OWNER_OPERATOR') return true
-  return facts.driver ? driverOwnershipKind(facts.driver) === 'OWNER_OPERATOR' : false
+/** The groups whose POD delivers the load. */
+export const POD_DELIVERS_KINDS: readonly string[] = ['OWNER_OPERATOR', 'LOCAL', 'BOX_TRUCK', 'COMPANY']
+
+export function isPodDeliveredLoad(facts: OoLoadFacts): boolean {
+  if (facts.revSubdivision && POD_DELIVERS_KINDS.includes(facts.revSubdivision)) return true
+  const kind = facts.driver ? driverOwnershipKind(facts.driver) : null
+  return kind != null && POD_DELIVERS_KINDS.includes(kind)
 }
+
+/** Which group the rule matched, for the audit note. */
+export function podDeliveryGroup(facts: OoLoadFacts): string {
+  const kind = facts.driver ? driverOwnershipKind(facts.driver) : null
+  const g = kind ?? facts.revSubdivision ?? ''
+  return g === 'OWNER_OPERATOR' ? 'owner operator' : g === 'BOX_TRUCK' ? 'box truck' : 'local driver'
+}
+
+/** @deprecated kept for old imports; use isPodDeliveredLoad. */
+export const isOwnerOperatorLoad = isPodDeliveredLoad
 
 export interface PodStop {
   id: string

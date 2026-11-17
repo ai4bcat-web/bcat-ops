@@ -248,6 +248,7 @@ import {
   canTransitionShipmentStatus,
   isTruckloadMode,
   loadStatusFromStopTimes,
+  shipmentStatusFromLoads,
 } from '../../../src/lib/shipmentStatus'
 import {
   INCIDENT_TYPES,
@@ -348,7 +349,7 @@ import type {
   TmsSettings as TmsSettingsRecord,
 } from '../../../src/types/tms'
 import { carryStopState } from './stopCarry'
-import { isOwnerOperatorLoad, ooPodStopOps, type PodStop } from '../../../src/lib/ooPodDelivery'
+import { isPodDeliveredLoad, podDeliveryGroup, ooPodStopOps, type PodStop } from '../../../src/lib/ooPodDelivery'
 import { unlinkedShipments, UNLINKED_SHIPMENT_FIELDS } from './unlinkedShipments'
 
 const dynamo = new DynamoDBClient({})
@@ -698,6 +699,8 @@ type Action =
   | 'EMAIL_BOL'
   | 'SEND_ADDRESS_DETAILS'
   | 'ATTACH_DRIVER_DOC'
+  | 'DELIVER_ON_POD'
+  | 'SWEEP_POD_DELIVERIES'
   // The invoice the accounting post generated, filed on its shipment as a document (system caller: tms-finance-actions).
   | 'ATTACH_INVOICE_DOC'
   | 'REVIEW_DOCUMENT'
@@ -841,6 +844,7 @@ const ADMIN_ONLY_ACTIONS: Record<string, true> = {
   SET_ALJEX_CODE_MAP: true,
   REASSIGN_SHIPMENTS_BY_REP_CODE: true,
   RETAG_SHIPMENTS: true,
+  SWEEP_POD_DELIVERIES: true,
   // Step P11. Seeding and resetting the demo mints and voids freight wholesale.
   // Ryne's rule for the Reset button is owner/ADMIN and dev only; the second half
   // is enforced below, from the stack's own flag rather than from the token.
@@ -947,10 +951,11 @@ export const SYSTEM_CALLERS: Record<string, readonly Action[]> = {
   'carrier-inbox': ['FILE_INBOUND_OFFER'],
   // A driver's finished POD upload files its pages on the shipment (waiting for review).
   'driver-app-api': ['ATTACH_DRIVER_DOC'],
+  // A POD that reached the shipment through the carrier portal or an inbound e-mail delivers an own-fleet load too.
+  'tracking-api': ['LOG_CHECK_CALL', 'DELIVER_ON_POD'],
   // A generated invoice's PDF is filed on its shipment as an INVOICE document.
   'finance-actions': ['ATTACH_INVOICE_DOC'],
-  // A driver's "on site / departed / delivered" tap on the tracking link is filed as a stop event.
-  'tracking-api': ['LOG_CHECK_CALL'],
+  // A driver's "on site / departed / delivered" tap on the tracking link is filed as a stop event (tracking-api, above).
 }
 
 export async function authorize(action: Action, identity?: AppSyncIdentity | null, systemCaller?: string | null): Promise<Caller> {
@@ -2766,14 +2771,20 @@ async function submitOrder(input: Row, caller: Caller, opts: SaveOrderFormOpts =
 
   const now = nowIso()
   const load = saved.bundle.loads[0]
+  // Submitting opens a draft for sourcing. It never takes a load backwards: a truck that already dispatched, moved or delivered (the
+  // driver app and the stop times got there first; 20010, 20001, 20029) keeps the status its stops prove, and the shipment follows it.
+  const loadStatus: LoadWorkflowStatus = load
+    ? (load.status === 'CANCELED' ? 'SOURCING' : loadStatusFromStopTimes(stopTimesOf(readStops(load as unknown as Row)), (load.status ?? 'SOURCING') as LoadWorkflowStatus))
+    : 'SOURCING'
+  const shipmentStatus = shipmentStatusFromLoads([{ status: loadStatus }], null)
   await transact(
     [
       updateItemTx(
         SHIPMENT_TABLE_NAME,
         shipmentId,
         {
-          status: 'OPEN',
-          previousStatus: 'DRAFT',
+          status: shipmentStatus,
+          previousStatus: String(shipment.status ?? 'DRAFT'),
           statusChangedAt: now,
           statusChangedBy: caller.email,
           updatedBy: caller.email,
@@ -2791,10 +2802,8 @@ async function submitOrder(input: Row, caller: Caller, opts: SaveOrderFormOpts =
     assertLoadWriteOk(
       await client.models.Load.update({
         id: String(load.id),
-        status: 'SOURCING',
-        statusChangedAt: now,
-        statusChangedBy: caller.email,
-        statusSource: 'USER',
+        status: loadStatus,
+        ...(loadStatus !== load.status || loadStatus === 'SOURCING' ? { statusChangedAt: now, statusChangedBy: caller.email, statusSource: 'USER' as const } : {}),
         carrierRepId: carrierRepId ?? load.carrierRepId ?? null,
         updatedBy: caller.email,
       }),
@@ -5059,10 +5068,11 @@ function applyStopOp(stopsIn: StopRow[], op: StopOp, stopId: string | null, patc
 }
 
 /**
- * After a POD is filed on a shipment: an owner operator's POD is the delivery (Ryne 2026-11-16).
- * Fills the blank stop times and walks the load to Delivered through updateStop, so the check
- * calls, rollup, board and settlements move exactly as if a person had typed the times. Never
- * fails the upload: anything that refuses (no driver, a stale load) is logged and left alone.
+ * After a POD is filed on a shipment: an owner operator's, local driver's or box truck's POD is
+ * the delivery (Ryne 2026-11-16). Fills the blank stop times and walks the load to Delivered
+ * through updateStop, so the check calls, rollup, board and settlements move exactly as if a
+ * person had typed the times. Never fails the upload: anything that refuses (no driver, a stale
+ * load) is logged and left alone.
  */
 async function afterPodFiled(result: Row, input: Row, caller: Caller): Promise<Row> {
   const doc = (result as { document?: Row }).document
@@ -5075,43 +5085,114 @@ async function afterPodFiled(result: Row, input: Row, caller: Caller): Promise<R
     const submissionId = optionalString(input.submissionId, 100) ?? optionalString(doc?.submissionId, 100)
     const submission = submissionId && DRIVER_SUBMISSION_TABLE_NAME ? await getById(DRIVER_SUBMISSION_TABLE_NAME, submissionId) : null
     const podAt = String(submission?.createdAt ?? doc?.createdAt ?? nowIso())
-    const delivered = await deliverOwnerOperatorOnPod(shipmentId, podAt, caller)
+    const delivered = await deliverOnPod(shipmentId, podAt, caller)
     if (delivered.length === 0) return result
     return { ...result, bundle: await readBundle(shipmentId) } as Row
   } catch (err) {
-    console.warn('[oo-pod-delivered] skipped', shipmentId, err instanceof Error ? err.message : err)
+    console.warn('[pod-auto-delivered] skipped', shipmentId, err instanceof Error ? err.message : err)
     return result
   }
 }
 
-/** Every owner-operator load on the shipment that is not delivered yet, delivered at `podAt`. Returns the load ids moved. */
-export async function deliverOwnerOperatorOnPod(shipmentId: string, podAt: string, caller: Caller): Promise<string[]> {
+/** One load a POD delivered (or would, on a dry run). */
+export interface PodDelivery { loadId: string; group: string; stops: string[] }
+
+/**
+ * Every own-fleet load on the shipment that is not delivered yet, delivered at `podAt`: owner operators, local drivers and box
+ * trucks (src/lib/ooPodDelivery.ts). A relay or multi-leg shipment completes only through its final leg (the highest leg number);
+ * an earlier leg's stops are never marked. Brokerage loads on an outside carrier are left alone. The change is silent: no
+ * customer milestone e-mail, no text, no tracking link, nothing to factoring (the load is stamped BACKFILL, which the notifier skips).
+ */
+export async function deliverOnPod(shipmentId: string, podAt: string, caller: Caller, opts: { dryRun?: boolean } = {}): Promise<PodDelivery[]> {
   const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
-  if (!shipment || shipment.voidedAt || shipment.status === 'CANCELED') return []
+  if (!shipment || shipment.voidedAt || shipment.deletedAt || shipment.status === 'CANCELED') return []
   const loadIds = (Array.isArray(shipment.loadIds) ? shipment.loadIds : []).map(String)
-  const moved: string[] = []
+  const loads: Row[] = []
   for (const loadId of loadIds) {
     const load = await getById(LOAD_TABLE_NAME, loadId)
-    if (!load || load.voidedAt || load.status === 'CANCELED' || isDeliveredOrLater(load.status)) continue
+    if (load && !load.voidedAt && load.status !== 'CANCELED') loads.push(load)
+  }
+  // The final delivery is on the last leg; a POD on a multi-leg shipment is that leg's.
+  const finalLeg = loads.reduce((max, l) => Math.max(max, numberOrNull(l.leg) ?? 1), 1)
+  const moved: PodDelivery[] = []
+  for (const load of loads) {
+    if (loads.length > 1 && (numberOrNull(load.leg) ?? 1) !== finalLeg) continue
+    if (isDeliveredOrLater(load.status)) continue
+    const loadId = String(load.id)
     const driverId = optionalString(load.deliveryDriverId, 100) ?? optionalString(load.pickupDriverId, 100)
     const driver = driverId ? await getById(DRIVER_TABLE_NAME, driverId) : null
-    if (!isOwnerOperatorLoad({ revSubdivision: optionalString(shipment.revSubdivision, 60), driver: driver as { fleetGroup?: string | null; driverType?: string | null } | null })) continue
+    const facts = { revSubdivision: optionalString(shipment.revSubdivision, 60), driver: driver as { fleetGroup?: string | null; driverType?: string | null } | null }
+    if (!isPodDeliveredLoad(facts)) continue
     const stops = readStops(load) as unknown as PodStop[]
     const at = Date.parse(podAt) > Date.now() ? nowIso() : podAt
-    const ops = ooPodStopOps(stops, at)
-    if (ops.length === 0) continue
-    await updateStop({
-      loadId,
-      expectedUpdatedAt: String(load.updatedAt ?? ''),
-      ops: ops.map((o) => ({ op: 'SET_TIMES', stopId: o.stopId, patch: o.patch })),
-    }, caller)
-    await writeAudit('LOAD', loadId, 'OO_POD_DELIVERED', caller, { shipmentId, podAt: at, note: 'Delivered (POD uploaded, owner operator)', stops: ops.map((o) => o.stopId) })
-    moved.push(loadId)
+    let ops = ooPodStopOps(stops, at)
+    if (ops.length === 0) {
+      // Every time is already stamped (the driver app recorded the stops) yet the load never moved: re-apply the last delivery's own
+      // times so the same stop-time ladder derives Delivered. Nothing is changed or overwritten.
+      const lastDelivery = [...stops].filter((st) => st.type === 'delivery').sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0)).pop()
+      if (!lastDelivery?.departedAt || loadStatusFromStopTimes(stopTimesOf(readStops(load)), (load.status ?? null) as LoadWorkflowStatus | null) !== 'DELIVERED') continue
+      ops = [{ stopId: lastDelivery.id, patch: { arrivedAt: lastDelivery.arrivedAt ?? lastDelivery.departedAt, departedAt: lastDelivery.departedAt } }]
+    }
+    const group = podDeliveryGroup(facts)
+    if (!opts.dryRun) {
+      await updateStop({
+        loadId,
+        expectedUpdatedAt: String(load.updatedAt ?? ''),
+        ops: ops.map((o) => ({ op: 'SET_TIMES', stopId: o.stopId, patch: o.patch })),
+      }, caller, { silent: true })
+      await writeAudit('LOAD', loadId, 'POD_AUTO_DELIVERED', caller, { shipmentId, podAt: at, note: `Delivered automatically: POD received (${group})`, stops: ops.map((o) => o.stopId) })
+    }
+    moved.push({ loadId, group, stops: ops.map((o) => o.stopId) })
   }
   return moved
 }
 
-async function updateStop(input: Row, caller: Caller): Promise<Row> {
+/** DELIVER_ON_POD: the carrier portal and the inbound e-mail intake tell us a POD was filed; the same rule as a dashboard upload. */
+async function deliverOnPodAction(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const podAt = optionalString(input.podAt, 40) ?? nowIso()
+  const delivered = await deliverOnPod(shipmentId, podAt, caller)
+  return { shipmentId, delivered } as unknown as Row
+}
+
+/**
+ * SWEEP_POD_DELIVERIES (owner/ADMIN): the same rule for loads that already have a POD but never moved, and the shipment status for
+ * a load that is delivered while its shipment still reads Open. Dry run unless `dryRun: false`.
+ */
+async function sweepPodDeliveries(input: Row, caller: Caller): Promise<Row> {
+  const dryRun = input.dryRun !== false
+  const only = Array.isArray(input.shipmentIds) ? new Set((input.shipmentIds as unknown[]).map(String)) : null
+  const done = new Set(['DELIVERED', 'INVOICED', 'PAID', 'CLOSED', 'CANCELED', 'VOIDED'])
+  const shipments = (await scanTable(SHIPMENT_TABLE_NAME)).filter((sh) => !sh.voidedAt && !sh.deletedAt && !done.has(String(sh.status)) && (!only || only.has(String(sh.id))))
+  const delivered: Row[] = []
+  const rederived: Row[] = []
+  const failed: Row[] = []
+  for (const sh of shipments) {
+    const shipmentId = String(sh.id)
+    try {
+      const bundle = await readBundle(shipmentId)
+      const pods = ((bundle as unknown as { documents?: Row[] }).documents ?? []).filter((d) => d.type === 'POD' && d.status === 'ACTIVE')
+      if (pods.length > 0) {
+        const podAt = pods.map((d) => String(d.createdAt ?? '')).filter(Boolean).sort()[0] ?? nowIso()
+        const moved = await deliverOnPod(shipmentId, podAt, caller, { dryRun })
+        for (const m of moved) delivered.push({ pro: sh.number, shipmentId, ...m })
+        if (moved.length > 0) continue
+      }
+      // A delivered load under a shipment that still reads Open or Draft: re-derive it from its loads.
+      const loads = ((bundle as unknown as { loads?: Row[] }).loads ?? []).filter((l) => !l.voidedAt)
+      const derived = shipmentStatusFromLoads(loads.map((l) => ({ status: (l.status ?? null) as LoadWorkflowStatus | null })), (sh.status ?? null) as ShipmentStatus | null)
+      if (derived === 'DELIVERED' && sh.status !== 'DELIVERED') {
+        if (!dryRun) await rederiveShipmentStatus(shipmentId, caller)
+        rederived.push({ pro: sh.number, shipmentId, from: sh.status, to: derived })
+      }
+    } catch (err) {
+      failed.push({ pro: sh.number, shipmentId, error: err instanceof Error ? err.message : String(err) })
+    }
+  }
+  return { dryRun, delivered, rederived, failed } as unknown as Row
+}
+
+async function updateStop(input: Row, caller: Caller, opts: { silent?: boolean } = {}): Promise<Row> {
   const loadId = assertString(input.loadId, 'loadId')
   const expectedUpdatedAt = assertExpectedUpdatedAt(input)
   // `ops` applies several changes in one read-modify-write: the stop order is checked once,
@@ -5198,7 +5279,7 @@ async function updateStop(input: Row, caller: Caller): Promise<Row> {
         ...legacy,
         pickupMonth: monthOf(legacy.pickupAppt as string),
         ...(derivedStatus && derivedStatus !== currentStatus
-          ? { status: derivedStatus, statusChangedAt: now, statusChangedBy: caller.email, statusSource: 'USER' }
+          ? { status: derivedStatus, statusChangedAt: now, statusChangedBy: caller.email, statusSource: opts.silent ? 'BACKFILL' : 'USER' }
           : {}),
         updatedBy: caller.email,
       },
@@ -9794,6 +9875,10 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return sendAddressDetails(input, caller)
     case 'ATTACH_DRIVER_DOC':
       return afterPodFiled(await attachDriverDoc(documentDeps, input, caller), input, caller)
+    case 'DELIVER_ON_POD':
+      return deliverOnPodAction(input, caller)
+    case 'SWEEP_POD_DELIVERIES':
+      return sweepPodDeliveries(input, caller)
     case 'ATTACH_INVOICE_DOC':
       return attachInvoiceDoc(documentDeps, input, caller)
     case 'REVIEW_DOCUMENT':

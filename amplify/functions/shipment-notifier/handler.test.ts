@@ -238,6 +238,17 @@ describe('notifyLoadStream', () => {
     expect(db.all(TABLES.shipmentNotice)).toHaveLength(1)
   })
 
+  it('says nothing for a silent status: a POD that delivered an own-fleet load is stamped BACKFILL', async () => {
+    const { db, ses, deps } = setup()
+    db.seed(TABLES.trackingLink, {
+      __typename: 'TrackingLink', id: 'tok-customer', kind: 'CUSTOMER_VIEW', shipmentId: 'ship-1',
+      status: 'ACTIVE', showCarrier: false, expiresAt: '2026-11-28T00:00:00.000Z',
+    })
+    const summary = await notifyLoadStream(moved(loadRow(), loadRow({ status: 'IN_TRANSIT', statusSource: 'BACKFILL' })), deps)
+    expect(summary).toMatchObject({ considered: 0, sent: 0 })
+    expect(ses.sent).toHaveLength(0)
+  })
+
   it('says nothing to the customer about a voided shipment', async () => {
     const { db, ses, deps } = setup()
     db.seed(TABLES.shipment, {

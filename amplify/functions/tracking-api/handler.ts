@@ -1060,6 +1060,23 @@ async function uploadCommitRoute(token: string, event: FnUrlEvent) {
     ExpressionAttributeValues: { ':now': nowIso, ':one': 1 },
   }))
 
+  // A POD on an own-fleet load (owner operator, local driver, box truck) is the delivery; tms-shipment-actions applies the rule.
+  // Never waits on it and never fails the upload.
+  if (file.type === 'POD' && SHIPMENT_ACTIONS_FUNCTION) {
+    try {
+      await lambdaClient.send(new InvokeCommand({
+        FunctionName: SHIPMENT_ACTIONS_FUNCTION,
+        InvocationType: 'Event',
+        Payload: Buffer.from(JSON.stringify({
+          systemCaller: 'tracking-api',
+          arguments: { action: 'DELIVER_ON_POD', input: JSON.stringify({ shipmentId: link.shipmentId, podAt: nowIso }) },
+        })),
+      }))
+    } catch (err) {
+      console.error('[tracking-api] POD delivery hand-off failed', err instanceof Error ? err.message : String(err))
+    }
+  }
+
   return reply(200, { ok: true, documentId: file.documentId, uploadedAt: nowIso })
 }
 
