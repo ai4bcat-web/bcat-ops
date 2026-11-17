@@ -84,7 +84,7 @@ function Cell({ value, prev, metric, bold, color, withDelta }: {
  * side, months across, a Total column), one figure at a time or all four, and a grouped chart of the chosen figure.
  * Every column adds up to that month's row in the month view above it; the month still in progress shows no change.
  */
-export function BrokerageRepWidget({ repMonths, divisions, names, months, monthRows, current, ready, own }: {
+export function BrokerageRepWidget({ repMonths, divisions, names, months, monthRows, current, ready, own, hideChart }: {
   repMonths: RepMonth[]
   divisions: DivisionShape[]
   names: RepNames
@@ -98,6 +98,8 @@ export function BrokerageRepWidget({ repMonths, divisions, names, months, monthR
   ready: boolean
   /** A rep caller sees only their own row. */
   own: boolean
+  /** Table only: the Dashboard draws its own charts above. */
+  hideChart?: boolean
 }) {
   const isMobile = useIsMobile()
   const [metric, setMetric] = useState<RepMetric>('profit')
@@ -180,7 +182,7 @@ export function BrokerageRepWidget({ repMonths, divisions, names, months, monthR
         <div data-testid="brokerage-rep-empty" style={{ padding: 24, fontSize: 13, color: 'var(--tms-muted)' }}>No delivered loads with a rate in these months for this division.</div>
       ) : (
         <>
-          <div style={{ padding: '10px 14px 0' }}>
+          {!hideChart && <div style={{ padding: '10px 14px 0' }}>
             <ResponsiveContainer width="100%" height={isMobile ? 220 : 260}>
               <BarChart data={chart.data} margin={{ top: 6, right: 8, bottom: 0, left: 0 }} barGap={2} barCategoryGap="24%">
                 <CartesianGrid stroke="var(--tms-chart-grid)" strokeDasharray="3 4" vertical={false} />
@@ -198,7 +200,7 @@ export function BrokerageRepWidget({ repMonths, divisions, names, months, monthR
                 {chart.series.map((s) => <Bar key={s.key} dataKey={s.key} name={s.label} fill={s.color} radius={[2, 2, 0, 0]} />)}
               </BarChart>
             </ResponsiveContainer>
-          </div>
+          </div>}
 
           <div style={{ overflowX: 'auto', padding: '4px 6px 12px' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }} data-testid="brokerage-rep-table">

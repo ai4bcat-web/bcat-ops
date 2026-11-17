@@ -19,6 +19,8 @@ import { useLegacyDashboardKpis, type DateRangeKey } from './useLegacyDashboardK
 import { useBatoryApptCount } from './useBatoryApptCount'
 import { BrokerageSection } from './BrokerageDashboardPage'
 import { LazyWidget } from './LazyWidget'
+import { Sparkline, type TrendPoint } from './Sparkline'
+import { useLegacyTrend } from './useLegacyTrend'
 import { PayablesCard, ReceivablesCard } from './AccountingSection'
 import './dashboardGrid.css'
 import { DeliveryToReviewCard } from './DeliveryToReviewCard'
@@ -32,12 +34,13 @@ const sinceLabel = (rangeKey: DateRangeKey) => `vs. previous ${RANGES.find((r) =
 const signed = (n: number, fmt: (v: number) => string) => `${n >= 0 ? '+' : '−'}${fmt(Math.abs(n))}`
 const dirOf = (n: number): 'up' | 'down' | 'neutral' => (n > 0 ? 'up' : n < 0 ? 'down' : 'neutral')
 
-function BrokerCoveredCard({ count, countDelta, revenue, revenueDelta, sublabel }: {
-  count: number; countDelta: number; revenue: number; revenueDelta: number; sublabel: string
+function BrokerCoveredCard({ count, countDelta, revenue, revenueDelta, sublabel, trend }: {
+  count: number; countDelta: number; revenue: number; revenueDelta: number; sublabel: string; trend?: TrendPoint[]
 }) {
   return (
     <DashCard label="Broker covered" icon={<Handshake size={15} />}>
       <Headline value={<>{count} <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--tms-muted)' }}>loads</span></>} delta={signed(countDelta, String)} deltaDir={dirOf(countDelta)} />
+      {trend && <Sparkline points={trend} label="Broker-covered loads" format={(v) => `${v} load${v === 1 ? '' : 's'}`} color="var(--tms-badge-purple)" />}
       <DashRows>
         <DashRow color="var(--tms-badge-purple)" label="Revenue" value={cents(revenue)} />
         <DashRow color="var(--tms-chart-9)" label="Change" value={<span style={{ color: revenueDelta > 0 ? 'var(--tms-badge-green)' : revenueDelta < 0 ? 'var(--tms-badge-red)' : undefined }}>{signed(revenueDelta, cents)}</span>} />
@@ -56,17 +59,19 @@ const FLEET_COLORS: Record<string, string> = {
  * Revenue, and which fleet earned it. One total answers "how did we do"; the bar is the shape of the month and the
  * rows are the numbers. Broker-covered and driverless loads keep their own rows so the parts add up to the headline.
  */
-function RevenueCard({ split, delta, deltaDir, sublabel, connected }: {
+function RevenueCard({ split, delta, deltaDir, sublabel, connected, trend }: {
   split: RevenueSplit
   delta?: string
   deltaDir: 'up' | 'down' | 'neutral'
   sublabel: string
   connected: boolean
+  trend?: TrendPoint[]
 }) {
   const shown = split.byBucket.filter((b) => b.revenue > 0)
   return (
     <DashCard label="Revenue" icon={<DollarSign size={15} />}>
       <Headline value={connected ? cents(split.total) : '$0'} delta={connected ? delta : undefined} deltaDir={deltaDir} caption={sublabel} />
+      {trend && <Sparkline points={trend} label="Revenue" format={cents} color="var(--tms-chart-5)" />}
       <SplitBar parts={shown.map((b) => ({ key: b.bucket, value: b.revenue, color: FLEET_COLORS[b.bucket], title: `${b.label}: ${cents(b.revenue)}` }))} />
       <DashRows>
         {shown.map((b) => (
@@ -86,16 +91,18 @@ function RevenueCard({ split, delta, deltaDir, sublabel, connected }: {
  * Total loads, and which fleet ran them — the same shape as the revenue card beside it. The breakdown counts every
  * load, rated or not, so it always adds to the headline.
  */
-function LoadsCard({ split, delta, deltaDir, sublabel }: {
+function LoadsCard({ split, delta, deltaDir, sublabel, trend }: {
   split: LoadsSplit
   delta: string
   deltaDir: 'up' | 'down' | 'neutral'
   sublabel: string
+  trend?: TrendPoint[]
 }) {
   const shown = split.byBucket.filter((b) => b.loads > 0)
   return (
     <DashCard label="Total loads" icon={<Package size={15} />}>
       <Headline value={split.total} delta={delta} deltaDir={deltaDir} caption={sublabel} />
+      {trend && <Sparkline points={trend} label="Total loads" format={(v) => `${v} loads`} color="var(--tms-chart-1)" />}
       <SplitBar parts={shown.map((b) => ({ key: b.bucket, value: b.loads, color: FLEET_COLORS[b.bucket], title: `${b.label}: ${b.loads}` }))} />
       <DashRows>
         {shown.map((b) => <DashRow key={b.bucket} color={FLEET_COLORS[b.bucket]} label={b.label} value={b.loads} />)}
@@ -167,6 +174,7 @@ export function DashboardPage() {
   const metrics = kpi.kpis
   const kpiFinal = kpi.state !== 'loading'
   const needsAppt = useBatoryApptCount()
+  const trend = useLegacyTrend()
 
   const navigate = useNavigate()
   const { hasPageAccess, isAdmin } = useAuth()
@@ -278,6 +286,7 @@ export function DashboardPage() {
                       delta={metrics.totalLoadsDelta > 0 ? `+${metrics.totalLoadsDelta}` : String(metrics.totalLoadsDelta)}
                       deltaDir={metrics.totalLoadsDelta > 0 ? 'up' : metrics.totalLoadsDelta < 0 ? 'down' : 'neutral'}
                       sublabel={sinceLabel(rangeKey)}
+                      trend={trend?.loads}
                     />
                   ) : <KpiSkeleton label="Total Loads" />}
                 </Cell>
@@ -289,6 +298,7 @@ export function DashboardPage() {
                       delta={metrics.revenueConnected ? `${metrics.revenueDelta >= 0 ? '+' : '−'}${cents(Math.abs(metrics.revenueDelta))}` : undefined}
                       deltaDir={metrics.revenueDelta > 0 ? 'up' : metrics.revenueDelta < 0 ? 'down' : 'neutral'}
                       sublabel={metrics.revenueConnected ? sinceLabel(rangeKey) : 'Connect rates to loads'}
+                      trend={trend?.revenue}
                     />
                   ) : <KpiSkeleton label="Revenue" />}
                 </Cell>
@@ -300,6 +310,7 @@ export function DashboardPage() {
                       revenue={metrics.brokerRevenue}
                       revenueDelta={metrics.brokerRevenueDelta}
                       sublabel={sinceLabel(rangeKey)}
+                      trend={trend?.broker}
                     />
                   ) : <KpiSkeleton label="Broker Covered" />}
                 </Cell>

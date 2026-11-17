@@ -39,3 +39,8 @@
   .dash-panels { grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); }
   .dash-panels > .dash-cell:last-child:nth-child(odd) { grid-column: auto; }
 }
+
+/* Softer, rounder cards on the dashboard only; the rest of the app keeps its look. */
+.dash-card { border-radius: 14px; transition: box-shadow 0.15s ease, transform 0.15s ease; }
+.dash-card:hover { box-shadow: var(--tms-shadow-pop); }
+@media (prefers-reduced-motion: reduce) { .dash-card { transition: none; } }
