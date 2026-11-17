@@ -480,6 +480,18 @@ describe('the AR dense grid', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
     authGroups.current = []
   })
+
+  it('lists a factored draft in Ready to invoice while Billed is set to Manually invoiced (14902 / 14868 / 14916)', async () => {
+    authGroups.current = ['page-invoicing']
+    localStorage.setItem('tms:ar:billedBy', 'manual')
+    openSet.splice(0, openSet.length, invoice({ factored: true }))
+    await setup({})
+    await settle()
+    const grid = screen.getByRole('table', { name: 'Ready to invoice' })
+    expect(within(grid).getByRole('checkbox', { name: 'Select S-1001' })).toBeTruthy()
+    localStorage.removeItem('tms:ar:billedBy')
+    authGroups.current = []
+  })
 })
 
 describe('Ready to invoice: lane, carrier and margin (internal)', () => {
