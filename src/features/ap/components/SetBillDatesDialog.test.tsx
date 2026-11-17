@@ -55,4 +55,40 @@ describe('SetBillDatesDialog', () => {
     expect(field('Invoice date').value).toBe('2026-10-30')
     expect(field('Due date').value).toBe('2026-11-29')
   })
+
+  it('offers quick pay: 6% off for 2 days, 3% off for 10, and previews the discount, amount and forced due date', async () => {
+    const onDone = vi.fn()
+    render(<SetBillDatesDialog bill={bill()} open onOpenChange={vi.fn()} onDone={onDone} />)
+    fireEvent.change(field('Invoice date'), { target: { value: '2026-11-02' } })
+    expect(field('Due date').value).toBe('2026-12-02') // Net 30 by default
+    fireEvent.click(screen.getByLabelText(/2-day quick pay/))
+    expect(field('Due date').value).toBe('2026-11-04')
+    const amounts = screen.getByLabelText('Quick pay amounts')
+    expect(amounts.textContent).toContain('$1,400.00')
+    expect(amounts.textContent).toContain('−$84.00')
+    expect(amounts.textContent).toContain('$1,316.00')
+    fireEvent.click(screen.getByLabelText(/10-day quick pay/))
+    expect(field('Due date').value).toBe('2026-11-12')
+    expect(screen.getByLabelText('Quick pay amounts').textContent).toContain('$1,358.00')
+    fireEvent.click(screen.getByRole('button', { name: 'Save dates' }))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    expect(setBillDates).toHaveBeenCalledWith({ billId: 'cb:lc-1:1', billDate: '2026-11-02', dueAt: '2026-11-12', billNumber: null, quickPayDays: 10 })
+  })
+
+  it('goes back to the standard due date when quick pay is switched off, and sends no quick pay when none was chosen', async () => {
+    render(<SetBillDatesDialog bill={bill()} open onOpenChange={vi.fn()} onDone={vi.fn()} />)
+    fireEvent.change(field('Invoice date'), { target: { value: '2026-11-02' } })
+    fireEvent.click(screen.getByLabelText(/2-day quick pay/))
+    fireEvent.click(screen.getByLabelText('No quick pay'))
+    expect(field('Due date').value).toBe('2026-12-02')
+    fireEvent.click(screen.getByRole('button', { name: 'Save dates' }))
+    await waitFor(() => expect(setBillDates).toHaveBeenCalled())
+    expect(setBillDates.mock.calls[0][0]).not.toHaveProperty('quickPayDays')
+  })
+
+  it('does not offer quick pay to a carrier paid through a factor', () => {
+    render(<SetBillDatesDialog bill={bill({ payeeKind: 'FACTOR' })} open onOpenChange={vi.fn()} onDone={vi.fn()} />)
+    expect((screen.getByLabelText(/2-day quick pay/) as HTMLInputElement).closest('fieldset')?.disabled).toBe(true)
+    expect(screen.getByText(/Paid through a factor/)).toBeTruthy()
+  })
 })

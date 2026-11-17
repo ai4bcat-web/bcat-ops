@@ -647,15 +647,25 @@ export async function voidBill(input: Row, caller: Caller): Promise<Row> {
  * invoice, and it clears the pending flag, which is what lets approval go ahead. It also corrects the dates
  * of any other bill still IN_REVIEW. Once a bill is approved or has money on it the dates are part of what
  * was approved and paid against, so the way to change them is Unapprove (or Void and re-record).
+ *
+ * `quickPayDays` is optional. Left out, quick pay is untouched. 2 or 10 puts the bill on AP quick pay in the same
+ * write: the fee comes off what we pay, the terms become those days and the due date is the invoice date plus them
+ * (whatever `dueAt` says), so the dates and the discount can never be saved apart. 0 or null takes the bill back
+ * to standard terms. A factored carrier is never discounted.
  */
 export async function setBillDates(input: Row, caller: Caller): Promise<Row> {
   const billId = assertString(input.billId, 'billId')
   const billDate = dateOf(input.billDate, 'billDate', '')
-  const dueAt = dateOf(input.dueAt, 'dueAt', '')
+  const typedDueAt = dateOf(input.dueAt, 'dueAt', '')
   if (!billDate) throw new Error('The invoice date is required')
-  if (!dueAt) throw new Error('The due date is required')
-  if (dueAt < billDate) throw new Error('The due date cannot be before the invoice date')
+  if (!typedDueAt) throw new Error('The due date is required')
+  if (typedDueAt < billDate) throw new Error('The due date cannot be before the invoice date')
   const billNumber = optionalString(input.billNumber, 64)
+  // Present (even as null or 0) means "set quick pay as I say"; absent means leave it alone.
+  const quickPayRequested = Object.prototype.hasOwnProperty.call(input, 'quickPayDays')
+  const quickPayDays = quickPayRequested ? optionalInteger(input.quickPayDays, { min: 0, label: 'quickPayDays' }) : null
+  const option = quickPayDays ? apQuickPayOption(quickPayDays) : null
+  if (quickPayDays && !option) throw new Error(`${quickPayDays} days is not one of the quick-pay options (2 days at 6%, 10 days at 3%)`)
 
   const bill = await readBill(billId)
   if (bill.status !== 'IN_REVIEW') {
@@ -666,10 +676,39 @@ export async function setBillDates(input: Row, caller: Caller): Promise<Row> {
   if ((bill.paidCents ?? 0) + (bill.creditedCents ?? 0) > 0) {
     throw new Error('Money has already been applied to this bill; its dates cannot change')
   }
+  if (option && bill.payeeKind === 'FACTOR') {
+    throw new Error('This carrier is paid through a factor; quick pay does not apply to a factored bill')
+  }
+
+  // Quick pay touches the bill and its assignment together, as SET_BILL_QUICK_PAY does.
+  const changesQuickPay = quickPayRequested && (option != null || bill.quickPay === true)
+  const context = changesQuickPay ? await readAssignmentContext(bill.loadCarrierId) : null
+  const quickPay = option != null
+  const termsDays = !changesQuickPay ? null
+    : option ? option.days
+    : billTermsDays({ ...context!.loadCarrier, quickPay: false }, context!.carrier, context!.settings)
+  const money = changesQuickPay
+    ? rebilledMoney({ ...bill, quickPay, quickPayFeeBps: option?.feeBps ?? null }, bill.grossCents)
+    : null
+  // Quick pay sets the due date: the invoice date plus the quick-pay days, whatever the form said.
+  const dueAt = option ? billDueDate(billDate, option.days) : typedDueAt
 
   const now = nowIso()
   await transact(
     [
+      ...(changesQuickPay && money ? [updateTx(
+        LOAD_CARRIER_TABLE_NAME,
+        bill.loadCarrierId,
+        {
+          quickPay,
+          quickPayDays: option?.days ?? null,
+          quickPayFeeBps: option?.feeBps ?? null,
+          quickPayFeeCents: option ? money.quickPayFeeCents : null,
+          updatedAt: now,
+          updatedBy: caller.email,
+        },
+        { condition: 'attribute_exists(id)' },
+      )] : []),
       updateTx(
         CARRIER_BILL_TABLE_NAME,
         billId,
@@ -678,6 +717,15 @@ export async function setBillDates(input: Row, caller: Caller): Promise<Row> {
           billMonth: billDate.slice(0, 7),
           dueAt,
           ...(billNumber ? { billNumber } : {}),
+          ...(changesQuickPay && money ? {
+            quickPay,
+            quickPayDays: option?.days ?? null,
+            quickPayFeeBps: option?.feeBps ?? null,
+            quickPayFeeCents: money.quickPayFeeCents,
+            netCents: money.netCents,
+            balanceCents: money.balanceCents,
+            termsDays,
+          } : {}),
           datesPending: false,
           // Written unchanged so the condition below can name it (`status` is a reserved word).
           status: 'IN_REVIEW',
@@ -696,8 +744,92 @@ export async function setBillDates(input: Row, caller: Caller): Promise<Row> {
     'bill dates',
   )
   await writeAudit('CarrierBill', billId, 'SET_BILL_DATES', caller, {
-    from: { billDate: bill.billDate, dueAt: bill.dueAt, billNumber: bill.billNumber ?? null, datesPending: bill.datesPending === true },
-    to: { billDate, dueAt, billNumber: billNumber ?? bill.billNumber ?? null },
+    from: { billDate: bill.billDate, dueAt: bill.dueAt, billNumber: bill.billNumber ?? null, datesPending: bill.datesPending === true, ...(changesQuickPay ? { quickPayDays: bill.quickPayDays ?? null, feeCents: bill.quickPayFeeCents ?? 0, netCents: bill.netCents } : {}) },
+    to: { billDate, dueAt, billNumber: billNumber ?? bill.billNumber ?? null, ...(changesQuickPay && money ? { quickPayDays: option?.days ?? null, feeCents: money.quickPayFeeCents, netCents: money.netCents } : {}) },
+  })
+  return { bill: (await getById(CARRIER_BILL_TABLE_NAME, billId)) ?? {} }
+}
+
+/**
+ * Send a bill back to Expected: it forgets its invoice date and due date and waits for the carrier's invoice again.
+ *
+ * Aging is where a bill sits once it has real dates, so "return to Expected" is the way out of Aging when the dates
+ * were wrong or the invoice is not really in. The bill goes back to IN_REVIEW with `datesPending` set, the placeholder
+ * dates it was created with (its recorded day, due by the carrier's standard terms), and any quick pay taken off, so
+ * the amount owed is the original carrier pay again. An approved bill is taken back to review in the same write.
+ * Refused once money has touched it, for a bill on a pay run (take it off first) and for a bill already in Expected.
+ */
+export async function returnBillToExpected(input: Row, caller: Caller): Promise<Row> {
+  const billId = assertString(input.billId, 'billId')
+  const reason = optionalString(input.reason, MAX_NOTE) ?? 'Returned to Expected'
+
+  const bill = await readBill(billId)
+  const lock = billMoneyLockReason(bill, { allowApproved: true })
+  if (lock) throw new Error(lock)
+  if (bill.datesPending === true && bill.status === 'IN_REVIEW') throw new Error('That bill is already in Expected')
+
+  const context = await readAssignmentContext(bill.loadCarrierId)
+  const termsDays = billTermsDays({ ...context.loadCarrier, quickPay: false }, context.carrier, context.settings)
+  const billDate = String(bill.recordedAt ?? '').slice(0, 10) || bill.billDate
+  const dueAt = billDueDate(billDate, termsDays)
+  const money = rebilledMoney({ ...bill, quickPay: false, quickPayFeeBps: null }, bill.grossCents)
+
+  const now = nowIso()
+  await transact(
+    [
+      updateTx(
+        CARRIER_BILL_TABLE_NAME,
+        billId,
+        {
+          status: 'IN_REVIEW',
+          datesPending: true,
+          billDate,
+          billMonth: billDate.slice(0, 7),
+          dueAt,
+          termsDays,
+          quickPay: false,
+          quickPayDays: null,
+          quickPayFeeBps: null,
+          quickPayFeeCents: 0,
+          netCents: money.netCents,
+          balanceCents: money.balanceCents,
+          note: reason,
+          updatedAt: now,
+          updatedBy: caller.email,
+          version: (bill.version ?? 1) + 1,
+        },
+        {
+          remove: ['approvedAt', 'approvedBy', 'selectedForPayment', 'selectedAt', 'selectedBy'],
+          condition: 'version = :expectedVersion AND paidCents = :paid AND creditedCents = :credited',
+          extraValues: {
+            ':expectedVersion': { N: String(bill.version ?? 1) },
+            ':paid': { N: String(bill.paidCents ?? 0) },
+            ':credited': { N: String(bill.creditedCents ?? 0) },
+          },
+        },
+      ),
+      updateTx(
+        LOAD_CARRIER_TABLE_NAME,
+        bill.loadCarrierId,
+        {
+          apStatus: 'IN_REVIEW',
+          apStatusChangedAt: now,
+          quickPay: false,
+          quickPayDays: null,
+          quickPayFeeBps: null,
+          quickPayFeeCents: null,
+          updatedAt: now,
+          updatedBy: caller.email,
+        },
+        { condition: 'invoiceId = :billId', extraValues: { ':billId': { S: billId } } },
+      ),
+    ],
+    'return bill to expected',
+  )
+  await writeAudit('CarrierBill', billId, 'RETURN_BILL_TO_EXPECTED', caller, {
+    reason,
+    from: { status: bill.status, billDate: bill.billDate, dueAt: bill.dueAt, quickPayDays: bill.quickPayDays ?? null, feeCents: bill.quickPayFeeCents ?? 0, netCents: bill.netCents },
+    to: { status: 'IN_REVIEW', billDate, dueAt, quickPayDays: null, feeCents: 0, netCents: money.netCents },
   })
   return { bill: (await getById(CARRIER_BILL_TABLE_NAME, billId)) ?? {} }
 }

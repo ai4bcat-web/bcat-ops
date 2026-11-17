@@ -2197,6 +2197,83 @@ describe('SET_BILL_DATES (bills created by Move to billing)', () => {
   })
 })
 
+describe('SET_BILL_DATES with quick pay (Add invoice date dialog)', () => {
+  async function pendingBill(): Promise<Row> {
+    seedAssignment()
+    const bill = await recordBill({ billDate: '2026-11-12' })
+    table(TABLES.carrierBill).set(String(bill.id), { ...table(TABLES.carrierBill).get(String(bill.id))!, datesPending: true, billNumber: null })
+    return bill
+  }
+
+  it('2-day quick pay takes 6% off, sets the due date to invoice date + 2 days, and saves the dates in the same write', async () => {
+    const bill = await pendingBill()
+    const out = (await call('SET_BILL_DATES', { billId: bill.id, billDate: '2026-11-02', dueAt: '2026-12-02', quickPayDays: 2 })) as { bill: Row }
+    expect(out.bill).toMatchObject({
+      billDate: '2026-11-02', dueAt: '2026-11-04', datesPending: false, status: 'IN_REVIEW',
+      quickPay: true, quickPayDays: 2, quickPayFeeBps: 600, quickPayFeeCents: 10_800, netCents: 169_200, balanceCents: 169_200, termsDays: 2,
+    })
+    expect(table(TABLES.loadCarrier).get(LOAD_CARRIER_ID)).toMatchObject({ quickPay: true, quickPayDays: 2, quickPayFeeBps: 600 })
+    const audit = [...table(TABLES.audit).values()].find((row) => row.action === 'SET_BILL_DATES')
+    expect(JSON.stringify(audit)).toContain('quickPayDays')
+  })
+
+  it('10-day quick pay takes 3% off and is due invoice date + 10 days', async () => {
+    const bill = await pendingBill()
+    const out = (await call('SET_BILL_DATES', { billId: bill.id, billDate: '2026-11-02', dueAt: '2026-12-02', quickPayDays: 10 })) as { bill: Row }
+    expect(out.bill).toMatchObject({ dueAt: '2026-11-12', quickPayFeeBps: 300, quickPayFeeCents: 5_400, netCents: 174_600, termsDays: 10 })
+  })
+
+  it('leaves quick pay alone when quickPayDays is not sent, and takes it off when sent as null', async () => {
+    const bill = await pendingBill()
+    await call('SET_BILL_DATES', { billId: bill.id, billDate: '2026-11-02', dueAt: '2026-12-02', quickPayDays: 2 })
+    // Correcting the dates without quickPayDays keeps the quick pay (and the date the caller typed).
+    const kept = (await call('SET_BILL_DATES', { billId: bill.id, billDate: '2026-11-03', dueAt: '2026-11-20' })) as { bill: Row }
+    expect(kept.bill).toMatchObject({ quickPay: true, netCents: 169_200, dueAt: '2026-11-20' })
+    const off = (await call('SET_BILL_DATES', { billId: bill.id, billDate: '2026-11-03', dueAt: '2026-12-03', quickPayDays: null })) as { bill: Row }
+    expect(off.bill).toMatchObject({ quickPay: false, quickPayFeeCents: 0, netCents: 180_000, dueAt: '2026-12-03' })
+  })
+
+  it('refuses an option that is not offered and a factored carrier, and writes nothing', async () => {
+    const bill = await pendingBill()
+    await expect(call('SET_BILL_DATES', { billId: bill.id, billDate: '2026-11-02', dueAt: '2026-12-02', quickPayDays: 7 })).rejects.toThrow(/not one of the quick-pay options/)
+    table(TABLES.carrierBill).set(String(bill.id), { ...table(TABLES.carrierBill).get(String(bill.id))!, payeeKind: 'FACTOR' })
+    await expect(call('SET_BILL_DATES', { billId: bill.id, billDate: '2026-11-02', dueAt: '2026-12-02', quickPayDays: 2 })).rejects.toThrow(/factor/)
+    expect(table(TABLES.carrierBill).get(String(bill.id))!.datesPending).toBe(true)
+  })
+})
+
+describe('RETURN_BILL_TO_EXPECTED (Aging → Expected)', () => {
+  it('takes an approved quick-pay bill back to Expected: dates pending, review status, quick pay off, the original amount owed', async () => {
+    seedAssignment()
+    const bill = await recordBill({ billDate: '2026-11-01' })
+    await call('SET_BILL_QUICK_PAY', { billId: bill.id, quickPayDays: 2 })
+    await call('APPROVE_BILL', { billId: bill.id })
+    const out = (await call('RETURN_BILL_TO_EXPECTED', { billId: bill.id, reason: 'wrong invoice date' })) as { bill: Row }
+    expect(out.bill).toMatchObject({ status: 'IN_REVIEW', datesPending: true, quickPay: false, quickPayFeeCents: 0, netCents: 180_000, balanceCents: 180_000 })
+    expect(out.bill.approvedAt).toBeUndefined()
+    expect(table(TABLES.loadCarrier).get(LOAD_CARRIER_ID)!.quickPay).toBe(false)
+    expect([...table(TABLES.audit).values()].some((row) => row.action === 'RETURN_BILL_TO_EXPECTED')).toBe(true)
+  })
+
+  it('refuses a bill already in Expected, a bill on a pay run, and a bill with money on it', async () => {
+    seedAssignment()
+    const bill = await recordBill({})
+    await call('SET_BILL_DATES', { billId: bill.id, billDate: '2026-11-02', dueAt: '2026-12-02' })
+    await call('RETURN_BILL_TO_EXPECTED', { billId: bill.id })
+    await expect(call('RETURN_BILL_TO_EXPECTED', { billId: bill.id })).rejects.toThrow(/already in Expected/)
+    await call('SET_BILL_DATES', { billId: bill.id, billDate: '2026-11-02', dueAt: '2026-12-02' })
+    await call('APPROVE_BILL', { billId: bill.id })
+    await call('SELECT_BILLS_FOR_PAYMENT', { billIds: [bill.id] })
+    await expect(call('RETURN_BILL_TO_EXPECTED', { billId: bill.id })).rejects.toThrow(/pay run/)
+    table(TABLES.carrierBill).set(String(bill.id), { ...table(TABLES.carrierBill).get(String(bill.id))!, selectedForPayment: false, paidCents: 5_000 })
+    await expect(call('RETURN_BILL_TO_EXPECTED', { billId: bill.id })).rejects.toThrow(/Money has already been applied/)
+  })
+
+  it('needs AP access, like every other bill action', async () => {
+    await expect(call('RETURN_BILL_TO_EXPECTED', { billId: 'x' }, DISPATCHER)).rejects.toThrow(/Forbidden/)
+  })
+})
+
 describe('SET_BILL_QUICK_PAY (AP quick pay: 2 days at 6%, 10 days at 3%)', () => {
   it('takes 6% off for 2-day pay, sets the terms and due date, and caches the choice on the assignment', async () => {
     seedAssignment()

@@ -26,7 +26,7 @@ import type {
   ShipmentDocumentType,
 } from '@/types/tms'
 
-export type ApTabKey = 'awaiting' | 'expected' | 'aging' | 'selected' | 'paid' | 'payments' | 'report' | 'inbox' | 'review'
+export type ApTabKey = 'awaiting' | 'expected' | 'aging' | 'selected' | 'cash' | 'paid' | 'payments' | 'report' | 'inbox'
 
 /**
  * The payable ladder as Ryne reads it: a bill is Expected until somebody enters the carrier's invoice
@@ -39,11 +39,11 @@ export const AP_TABS: { key: ApTabKey; label: string }[] = [
   { key: 'expected', label: 'Expected' },
   { key: 'aging', label: 'Aging' },
   { key: 'selected', label: 'Selected' },
+  { key: 'cash', label: 'Cash requirements' },
   { key: 'paid', label: 'Paid' },
   { key: 'payments', label: 'Payments & credits' },
   { key: 'report', label: 'Aging by carrier' },
   { key: 'inbox', label: 'AP inbox' },
-  { key: 'review', label: 'Needs review' },
 ]
 
 export const BILL_STATUS_LABEL: Record<CarrierBillStatus, string> = {
