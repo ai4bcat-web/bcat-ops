@@ -912,7 +912,7 @@ export async function updateDocument(deps: DocumentDeps, input: Row, caller: Cal
   assertPlacement(bundle, { orderId, loadCarrierId })
   if (type && type !== doc.type) {
     const refusal = billedPaperworkRefusal(bundle, doc)
-    if (refusal) throw new Error(refusal)
+    if (refusal && !(await paperworkOpenToChange(deps, bundle))) throw new Error(refusal)
   }
 
   const now = nowIso()
@@ -972,6 +972,48 @@ export function billedPaperworkRefusal(bundle: Pick<Bundle, 'orders'>, doc: Row)
   return 'This load is already invoiced, and this document went out with the invoice. Upload a corrected copy instead of removing or retyping it.'
 }
 
+const INVOICE_TABLE_NAME = process.env.INVOICE_TABLE_NAME ?? ''
+const FACTORING_ITEM_TABLE_NAME = process.env.FACTORING_ITEM_TABLE_NAME ?? ''
+
+/** A queue row that has not reached OTR: the invoice is still ours to change. */
+const NOT_SUBMITTED_FACTORING_STATUSES = new Set(['NEED_TO_FACTOR', 'MANUAL_INVOICE'])
+
+/**
+ * Has this invoice left the building? It has when it was e-mailed or marked sent, any money was applied,
+ * it is no longer a plain issued invoice, or the factor has it (an OTR id, or a queue row past Need to
+ * factor). An invoice made automatically when the load moved to billing and not yet sent or factored is
+ * a draft: its POD and rate confirmation may still be fixed (Ryne 2026-11-17, from Ready to Invoice).
+ */
+export function invoiceHasGoneOut(invoice: Row | null, factoringItem: Row | null): boolean {
+  if (!invoice) return false
+  if (invoice.status && invoice.status !== 'ISSUED') return true
+  if (invoice.sentAt || invoice.markedSentAt) return true
+  if (Number(invoice.sentCount ?? 0) > 0) return true
+  if (Number(invoice.paidCents ?? 0) > 0) return true
+  if (invoice.otrInvoiceId) return true
+  if (factoringItem && !NOT_SUBMITTED_FACTORING_STATUSES.has(String(factoringItem.status ?? ''))) return true
+  return false
+}
+
+/**
+ * True when every invoice on the shipment's orders is still an unsent, unfactored draft, so the billed
+ * paperwork may be removed or retyped. False as soon as any invoice has gone out (the refusal stands).
+ */
+async function paperworkOpenToChange(deps: DocumentDeps, bundle: Pick<Bundle, 'orders'>): Promise<boolean> {
+  if (!INVOICE_TABLE_NAME) return false
+  const orders = bundle.orders.filter((o) => o.invoiceId || o.arStatus === 'UNPAID' || o.arStatus === 'PAID')
+  if (orders.length === 0) return false
+  for (const order of orders) {
+    if (order.arStatus === 'PAID' || !order.invoiceId) return false
+    const invoice = await getById(deps.store.db, INVOICE_TABLE_NAME, String(order.invoiceId))
+    if (!invoice) return false
+    const itemId = String(invoice.factoringItemId ?? order.factoringItemId ?? '')
+    const item = itemId && FACTORING_ITEM_TABLE_NAME ? await getById(deps.store.db, FACTORING_ITEM_TABLE_NAME, itemId) : null
+    if (invoiceHasGoneOut(invoice, item)) return false
+  }
+  return true
+}
+
 /**
  * Take a document off the shipment. The row survives as VOID and the S3 object is
  * kept: the bucket grants no delete, and a file somebody emailed out last week
@@ -994,7 +1036,7 @@ export async function voidDocument(deps: DocumentDeps, input: Row, caller: Calle
   const shipmentId = String(doc.shipmentId)
   const bundle = await liveBundle(deps, shipmentId)
   const refusal = billedPaperworkRefusal(bundle, doc)
-  if (refusal) throw new Error(refusal)
+  if (refusal && !(await paperworkOpenToChange(deps, bundle))) throw new Error(refusal)
   const now = nowIso()
   const patch: Row = {
     status: 'VOID',

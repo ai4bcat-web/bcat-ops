@@ -38,7 +38,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Download, FileBarChart, Landmark, Mail } from 'lucide-react'
 import { toast } from 'sonner'
 import { BillingGapsPanel } from './components/BillingGapsPanel'
-import { Eye, RefreshCw } from 'lucide-react'
+import { Eye, FileText, RefreshCw } from 'lucide-react'
 import {
   TmsBadge, TmsButton, TmsCard, TmsDialog, TmsHeadBand, TmsSelect, TmsSummaryChips, TmsTabStrip, TmsTabs,
   type TmsTabGroup,
@@ -82,6 +82,8 @@ import { BATCH_FACTOR_LIMIT } from './batchFactor'
 import { useFactorReadiness, type FactorReadiness } from './useFactorReadiness'
 import { useBillingGrant, BILLING_GRANT_MESSAGE } from './useBillingGrant'
 import { attachmentStateText, useInvoiceAttachmentPlans } from './useInvoiceAttachmentPlans'
+import { DOCS_LOCKED_MESSAGE, DOC_FIXABLE, docsLockedReason } from './arDocuments'
+import { ArDocumentsDrawer } from './components/ArDocumentsDrawer'
 import type { InvoiceAttachmentPlanRow } from '@/lib/invoiceDelivery'
 import type { FactoringItem } from '@/types'
 import { AccountingReportsDialog } from '@/features/finance/AccountingReportsDialog'
@@ -106,7 +108,8 @@ type ArDialog =
   | { kind: 'batchFactor'; rows: ArQueueRow[] }
   | { kind: 'void'; invoice: InvoiceRecord }
   | { kind: 'changeCustomer'; invoice: InvoiceRecord }
-  | { kind: 'why'; pro: string; reason: string; customerId?: string | null }
+  | { kind: 'why'; pro: string; reason: string; customerId?: string | null; shipmentId?: string | null; row?: ArQueueRow }
+  | { kind: 'docs'; row: ArQueueRow }
   | { kind: 'editCustomer'; customerId: string }
 
 /** One shipment the batch would not bill, and exactly what the release gate said. */
@@ -296,7 +299,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       .map((row) => row.invoiceId).filter((id): id is string => !!id),
     [tab, queue],
   )
-  const { plans: attachmentPlans } = useInvoiceAttachmentPlans(planIds)
+  const { plans: attachmentPlans, refresh: refreshPlans } = useInvoiceAttachmentPlans(planIds)
 
   // The customer filter narrows every figure; the division filter narrows the totals card while the
   // division card keeps showing each division's share (of the selected customers) to pick from.
@@ -342,6 +345,13 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const closeAndRefresh = () => {
     setDialog(null)
     void refreshAll()
+  }
+
+  // A POD or rate confirmation was replaced, deleted or uploaded: the chips, the "Why?" reasons and the Factor button re-read.
+  const docsChanged = async () => {
+    refreshPlans()
+    setFactorVersion((v) => v + 1)
+    await refreshAll()
   }
 
   const factorReadiness = useFactorReadiness(queue.READY, tab === 'ready', factorVersion)
@@ -528,7 +538,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onBatchGenerate: runBatchGenerate,
       factorReadiness,
       onBatchFactor: (rows) => setDialog({ kind: 'batchFactor', rows }),
-      onWhy: (row: ArQueueRow, reason: string) => setDialog({ kind: 'why', pro: String(row.shipmentNumber ?? row.orderId), reason, customerId: row.customerId }),
+      onWhy: (row: ArQueueRow, reason: string) => setDialog({ kind: 'why', pro: String(row.shipmentNumber ?? row.orderId), reason, customerId: row.customerId, shipmentId: row.shipmentId, row }),
+      onDocs: (row: ArQueueRow) => setDialog({ kind: 'docs', row }),
       onEditCustomer: (customerId: string) => setDialog({ kind: 'editCustomer', customerId }),
       onReview: (invs) => setDialog({ kind: 'review', invoices: invs }),
       onEdit: (inv) => setDialog({ kind: 'edit', invoice: inv }),
@@ -659,8 +670,22 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
             {dialog.customerId && customerById.has(dialog.customerId) && CUSTOMER_FIXABLE.test(dialog.reason) && (
               <TmsButton data-testid="ar-why-edit-customer" onClick={() => setDialog({ kind: 'editCustomer', customerId: dialog.customerId as string })}>Edit customer billing / MC</TmsButton>
             )}
+            {dialog.row && DOC_FIXABLE.test(dialog.reason) && (
+              <TmsButton data-testid="ar-why-docs" onClick={() => setDialog({ kind: 'docs', row: dialog.row as ArQueueRow })}>Open documents</TmsButton>
+            )}
             <TmsButton variant="primary" onClick={() => setDialog(null)}>Close</TmsButton>
           </>}
+        />
+      )}
+      {dialog?.kind === 'docs' && (
+        <ArDocumentsDrawer
+          pro={String(dialog.row.shipmentNumber ?? dialog.row.orderId)}
+          shipmentId={dialog.row.shipmentId}
+          lockedReason={dialog.row.status === 'READY'
+            ? docsLockedReason(dialog.row.invoice, dialog.row.invoice?.factoringItemId ? factorByItemId.get(dialog.row.invoice.factoringItemId) : dialog.row.factorItem)
+            : DOCS_LOCKED_MESSAGE}
+          onClose={() => setDialog(null)}
+          onChanged={docsChanged}
         />
       )}
       {dialog?.kind === 'editCustomer' && customerById.get(dialog.customerId) && (
@@ -852,7 +877,7 @@ function queueView({
   status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, factorByItemId, customerById,
   attachmentPlans, boardById, shipmentsById, months, month, paidLoading, onMonth, onSelect, invoiceErrors, invoicesRunning, onRetryInvoice, onBatchGenerate, onReview, onEdit,
   onStatement, paymentFacts,
-  factorReadiness, onBatchFactor, onWhy, onEditCustomer,
+  factorReadiness, onBatchFactor, onWhy, onDocs, onEditCustomer,
 }: {
   status: ArQueueStatus
   rows: ArQueueRow[]
@@ -884,6 +909,8 @@ function queueView({
   onBatchFactor?: (rows: ArQueueRow[]) => void
   /** Why a row's checkbox is disabled, said in a dialog (Ryne 2026-11-16). */
   onWhy: (row: ArQueueRow, reason: string) => void
+  /** Open the row's POD / rate confirmation to replace, delete or upload (Ryne 2026-11-17). */
+  onDocs: (row: ArQueueRow) => void
   /** Ready to invoice: open the customer's billing method / MC editor (Ryne 2026-11-16). */
   onEditCustomer: (customerId: string) => void
   onReview: (invoices: InvoiceRecord[]) => void
@@ -1151,7 +1178,16 @@ function queueView({
           ? 'BCAT Logistics / brokerage invoices never carry a rate confirmation'
           : key === 'attRc' && state === 'MISSING' ? 'Ivan Cartage invoice: no customer rate confirmation on file'
             : key === 'attPod' && state === 'MISSING' ? 'No POD on file — the invoice will go without it' : undefined
-        return state ? <TmsBadge tone={tone} title={tip}>{attachmentStateText(state)}</TmsBadge> : <span className="tms-muted">…</span>
+        if (!state) return <span className="tms-muted">…</span>
+        if (key === 'attPdf') return <TmsBadge tone={tone} title={tip}>{attachmentStateText(state)}</TmsBadge>
+        // The POD and RC chips open the documents: replace, delete or upload without leaving the list.
+        return (
+          <button type="button" className="tms-link-reset" style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer' }} data-testid={`ar-docs-${key === 'attPod' ? 'pod' : 'rc'}`}
+            aria-label={`${key === 'attPod' ? 'POD' : 'Rate confirmation'} for PRO ${row.shipmentNumber ?? row.shipmentId}: open the documents`}
+            title={tip ?? 'Open the documents to replace, delete or upload'} onClick={() => onDocs(row)}>
+            <TmsBadge tone={tone}>{attachmentStateText(state)}</TmsBadge>
+          </button>
+        )
       }
       case 'attGuard': {
         const plan = row.invoiceId ? attachmentPlans.get(row.invoiceId) : undefined
@@ -1192,6 +1228,7 @@ function queueView({
         if (!inv) return null
         return (
           <span className="flex items-center justify-end gap-1">
+            <button type="button" className="tms-icon-btn tms-icon-btn-plain" aria-label={`Documents for PRO ${row.shipmentNumber ?? row.shipmentId}`} title="POD and rate confirmation: replace or delete" data-testid="ar-docs-open" onClick={() => onDocs(row)}><FileText size={15} /></button>
             <button type="button" className="tms-icon-btn tms-icon-btn-plain" aria-label={`View or edit invoice ${inv.number}`} title="Open invoice" onClick={() => onEdit(inv)}><Eye size={15} /></button>
           </span>
         )
