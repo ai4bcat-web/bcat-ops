@@ -29,3 +29,13 @@ export function clampRange(range: MonthRange, current: string): MonthRange {
   return { from, to }
 }
 
+
+/** A short money figure for headlines and sentences: $950, $44.0k, $1.2M. */
+export function moneyCompact(cents: number): string {
+  const sign = cents < 0 ? '−' : ''
+  const d = Math.abs(cents) / 100
+  if (d >= 1_000_000) return `${sign}$${(d / 1_000_000).toFixed(1)}M`
+  if (d >= 10_000) return `${sign}$${(d / 1000).toFixed(1)}k`
+  if (d >= 1000) return `${sign}$${(d / 1000).toFixed(2).replace(/0$/, '')}k`
+  return `${sign}$${Math.round(d)}`
+}

@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Wallet } from 'lucide-react'
-import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } from 'recharts'
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { useProfitReview } from '@/hooks/useProfitReview'
 import { monthMetrics } from '@/lib/profitReview'
 import { useAmazonProfitability, aggregateAmazon } from '@/hooks/useAmazonProfitability'
@@ -70,22 +70,25 @@ export function YearProfitWidget() {
           )}
         </div>
 
-        {/* Month over month, each source its own bar, the combined total as a line */}
-        <div style={{ flex: 1, minWidth: 0, padding: '10px 12px 4px' }}>
-          <ResponsiveContainer width="100%" height={isMobile ? 190 : 170}>
-            <ComposedChart data={data} margin={{ top: 6, right: 12, bottom: 0, left: 0 }} barGap={2} barCategoryGap="28%">
+        {/* Month over month: one line, the combined profit. The three sources are the figures on the left. */}
+        <div style={{ flex: 1, minWidth: 0, padding: '14px 12px 6px' }}>
+          <div style={{ fontSize: 12.5, color: 'var(--tms-muted)', padding: '0 8px 4px' }}>Combined profit by month</div>
+          <ResponsiveContainer width="100%" height={190}>
+            <AreaChart data={data} margin={{ top: 8, right: 14, bottom: 0, left: 0 }}>
+              <defs>
+                <linearGradient id="yearProfitFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--tms-chart-5)" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="var(--tms-chart-5)" stopOpacity={0.02} />
+                </linearGradient>
+              </defs>
               <CartesianGrid stroke="var(--tms-chart-grid)" strokeDasharray="3 4" vertical={false} />
               <XAxis dataKey="month" tick={{ fill: 'var(--tms-chart-axis)', fontSize: 11 }} axisLine={false} tickLine={false} />
               <YAxis tickFormatter={(v) => moneyK(Number(v))} tick={{ fill: 'var(--tms-chart-axis)', fontSize: 11 }} axisLine={false} tickLine={false} width={48} />
               <ReferenceLine y={0} stroke="var(--tms-chart-9)" />
-              <Tooltip formatter={(value, name) => [money0(Number(value)), String(name)]} labelFormatter={(l, p) => { const d = p?.[0]?.payload as { partial?: boolean } | undefined; return `${l}${d?.partial ? ' (to date)' : ''}` }}
+              <Tooltip formatter={(value) => [money0(Number(value)), 'Combined profit']} labelFormatter={(l, p) => { const d = p?.[0]?.payload as { partial?: boolean } | undefined; return `${l}${d?.partial ? ' (to date)' : ''}` }}
                 contentStyle={{ background: 'var(--tms-card)', color: 'var(--tms-text)', border: '1px solid var(--tms-border)', borderRadius: 8, fontSize: 12, boxShadow: 'var(--tms-shadow-pop)' }} />
-              <Legend wrapperStyle={{ fontSize: 11 }} iconType="square" iconSize={8} />
-              <Bar dataKey="ivan" name="Ivan + box truck" fill={COLORS.ivan} radius={[2, 2, 0, 0]} />
-              <Bar dataKey="oo" name="Owner operators" fill={COLORS.oo} radius={[2, 2, 0, 0]} />
-              <Bar dataKey="amazon" name="Amazon" fill={COLORS.amazon} radius={[2, 2, 0, 0]} />
-              <Line type="monotone" dataKey="total" name="Combined" stroke={COLORS.total} strokeWidth={2} dot={{ r: 3 }} />
-            </ComposedChart>
+              <Area type="monotone" dataKey="total" name="Combined profit" stroke="var(--tms-chart-5)" strokeWidth={2} fill="url(#yearProfitFill)" dot={{ r: 3, fill: 'var(--tms-card)', stroke: 'var(--tms-chart-5)', strokeWidth: 2 }} activeDot={{ r: 5 }} />
+            </AreaChart>
           </ResponsiveContainer>
         </div>
       </div>
