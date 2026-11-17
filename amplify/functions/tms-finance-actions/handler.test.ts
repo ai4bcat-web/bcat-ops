@@ -1799,6 +1799,83 @@ describe('review regressions', () => {
     expect((table(TABLES.invoice).get(invoiceId)!.remitTo as Row).name).not.toBe('OTR Solutions')
   })
 
+  describe('invoice method follows the customer (Ryne 2026-11-16)', () => {
+    const factoredDraft = async () => {
+      table(TABLES.customer).set(CUSTOMER_ID, { ...table(TABLES.customer).get(CUSTOMER_ID)!, factored: true })
+      await call('SAVE_AR_SETTINGS', { factorRemitTo: { name: 'OTR Solutions', noticeText: 'Assigned to OTR Solutions.' } })
+      const { invoiceId } = await generate()
+      await call('SEND_TO_FACTOR', { invoiceId })
+      return invoiceId
+    }
+
+    it('takes an unsent factored draft to manual: off the queue, off the order, remit-to no longer the factor', async () => {
+      const invoiceId = await factoredDraft()
+      const itemId = String(table(TABLES.invoice).get(invoiceId)!.factoringItemId)
+      expect(table(TABLES.factoring).get(itemId)!.status).toBe('NEED_TO_FACTOR')
+
+      const out = (await call('SET_INVOICE_METHOD', { invoiceId, method: 'MANUAL' })) as Row
+      expect(out).toMatchObject({ changed: true, customerChanged: true, from: 'FACTOR', to: 'MANUAL' })
+      const invoice = table(TABLES.invoice).get(invoiceId)!
+      expect(invoice.factored).toBe(false)
+      expect(invoice.factoringItemId).toBeUndefined()
+      expect((invoice.remitTo as Row).name).not.toBe('OTR Solutions')
+      expect(table(TABLES.factoring).get(itemId)).toMatchObject({ status: 'ARCHIVED', manualReason: 'CUSTOMER_METHOD' })
+      expect(table(TABLES.order).get(ORDER_ID)!.factoringItemId).toBeUndefined()
+      expect(table(TABLES.customer).get(CUSTOMER_ID)).toMatchObject({ billingMethod: 'MANUAL', factored: false })
+      expect(auditRows('SET_INVOICE_METHOD', 'Invoice')).toHaveLength(1)
+      expect(sesSend).not.toHaveBeenCalled()
+    })
+
+    it('puts a manual draft back through the factor, reviving the parked queue row', async () => {
+      const invoiceId = await factoredDraft()
+      const itemId = String(table(TABLES.invoice).get(invoiceId)!.factoringItemId)
+      await call('SET_INVOICE_METHOD', { invoiceId, method: 'MANUAL' })
+      await call('SET_INVOICE_METHOD', { invoiceId, method: 'FACTOR' })
+      const invoice = table(TABLES.invoice).get(invoiceId)!
+      expect(invoice).toMatchObject({ factored: true, factoringItemId: itemId })
+      expect((invoice.remitTo as Row).name).toBe('OTR Solutions')
+      expect(table(TABLES.factoring).get(itemId)!.status).toBe('NEED_TO_FACTOR')
+    })
+
+    it('a customer edit moves its unsent factored drafts to manual, and the other way', async () => {
+      const invoiceId = await factoredDraft()
+      table(TABLES.customer).set(CUSTOMER_ID, { ...table(TABLES.customer).get(CUSTOMER_ID)!, billingMethod: 'MANUAL', factored: false })
+      const out = (await call('SYNC_CUSTOMER_METHOD', { customerId: CUSTOMER_ID })) as { changed: Row[]; skipped: Row[] }
+      expect(out.changed).toHaveLength(1)
+      expect(out.changed[0]).toMatchObject({ invoiceId, from: 'FACTOR', to: 'MANUAL' })
+      expect(table(TABLES.invoice).get(invoiceId)!.factored).toBe(false)
+
+      table(TABLES.customer).set(CUSTOMER_ID, { ...table(TABLES.customer).get(CUSTOMER_ID)!, billingMethod: 'FACTOR', factored: true })
+      const back = (await call('SYNC_CUSTOMER_METHOD', { customerId: CUSTOMER_ID })) as { changed: Row[] }
+      expect(back.changed).toHaveLength(1)
+      expect(table(TABLES.invoice).get(invoiceId)!.factored).toBe(true)
+    })
+
+    it('a method chosen for this invoice only survives a later customer edit', async () => {
+      const invoiceId = await factoredDraft()
+      const itemId = String(table(TABLES.invoice).get(invoiceId)!.factoringItemId)
+      await call('SET_INVOICE_METHOD', { invoiceId, method: 'MANUAL', scope: 'invoice' })
+      expect(table(TABLES.factoring).get(itemId)!.manualReason).toBe('PIN_MANUAL')
+      // The profile is untouched by an invoice-only choice.
+      expect(table(TABLES.customer).get(CUSTOMER_ID)!.factored).toBe(true)
+
+      const out = (await call('SYNC_CUSTOMER_METHOD', { customerId: CUSTOMER_ID })) as { changed: Row[]; skipped: Row[] }
+      expect(out.changed).toHaveLength(0)
+      expect(out.skipped[0]).toMatchObject({ invoiceId })
+      expect(table(TABLES.invoice).get(invoiceId)!.factored).toBe(false)
+    })
+
+    it('leaves an invoice that was already sent alone', async () => {
+      const invoiceId = await factoredDraft()
+      await call('MARK_SENT', { invoiceId, note: 'faxed to their AP desk' })
+      await expect(call('SET_INVOICE_METHOD', { invoiceId, method: 'MANUAL' })).rejects.toThrow(/already gone to the customer/)
+      table(TABLES.customer).set(CUSTOMER_ID, { ...table(TABLES.customer).get(CUSTOMER_ID)!, billingMethod: 'MANUAL', factored: false })
+      const out = (await call('SYNC_CUSTOMER_METHOD', { customerId: CUSTOMER_ID })) as { changed: Row[] }
+      expect(out.changed).toHaveLength(0)
+      expect(table(TABLES.invoice).get(invoiceId)!.factored).toBe(true)
+    })
+  })
+
   it('refuses a factor remit-to with no name', async () => {
     await expect(call('SAVE_AR_SETTINGS', { factorRemitTo: { email: 'ap@otr.test' } })).rejects.toThrow(/factorRemitTo\.name/)
   })
