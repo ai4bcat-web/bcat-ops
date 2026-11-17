@@ -156,6 +156,21 @@ describe('renderInvoiceEmail', () => {
     expect(email({ companyName: 'IVAN Cartage Co' }).subject).toBe('Invoice for Pro # S-10042 Attached from IVAN Cartage Co')
   })
 
+  it('puts the customer reference beside the PRO in the subject, and leaves it alone when there is none', () => {
+    expect(email({ po: 'FR-113188-3' }).subject).toBe('Invoice for Pro # S-10042 · Ref # FR-113188-3 Attached from BCAT Logistics Corporation')
+    expect(email({ po: 'FR-113188-3', companyName: 'IVAN Cartage Co' }).subject).toBe('Invoice for Pro # S-10042 · Ref # FR-113188-3 Attached from IVAN Cartage Co')
+    for (const po of [null, undefined, '', '   ']) {
+      expect(email({ po }).subject).toBe('Invoice for Pro # S-10042 Attached from BCAT Logistics Corporation')
+    }
+  })
+
+  it('collapses blanks in the reference and caps a long one', () => {
+    expect(email({ po: ' FR-1\n 2 ' }).subject).toContain('· Ref # FR-1 2 Attached')
+    const long = email({ po: 'X'.repeat(80) }).subject
+    expect(long).toContain(`${'X'.repeat(37)}... Attached from`)
+    expect(long.length).toBeLessThan(120)
+  })
+
   it('leads with the PRO and PO, then the agreed body word for word', () => {
     expect(email({ po: 'FR-113188-3' }).body).toBe(`PRO # S-10042 · PO # FR-113188-3\n\n${EXPECTED_INVOICE_BODY}`)
   })

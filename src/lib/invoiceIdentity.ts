@@ -25,9 +25,17 @@ export function invoiceCompanyName(revDivision: string | null | undefined, revSu
   return invoiceBrandingFor(revDivision, revSubdivision).key === 'IVAN' ? 'IVAN Cartage Co' : 'BCAT Logistics Corporation'
 }
 
-/** `Invoice for Pro # 20027 Attached from BCAT Logistics Corporation`. */
-export function invoiceEmailSubject(pro: string, companyName: string): string {
-  return `Invoice for Pro # ${pro} Attached from ${companyName}`
+const MAX_SUBJECT_REF_CHARS = 40
+
+/**
+ * `Invoice for Pro # 20027 Attached from BCAT Logistics Corporation`, or with the customer's reference
+ * beside the PRO: `Invoice for Pro # 20027 · Ref # FR-113188-3 Attached from ...` (Ryne, 2026-11-17).
+ * `ref` is the same value as the body's PO line (`invoicePoNumber`); a blank one leaves the subject as it was.
+ */
+export function invoiceEmailSubject(pro: string, companyName: string, ref?: string | null): string {
+  const clean = (ref ?? '').replace(/\s+/g, ' ').trim()
+  const shown = clean.length > MAX_SUBJECT_REF_CHARS ? `${clean.slice(0, MAX_SUBJECT_REF_CHARS - 3).trimEnd()}...` : clean
+  return `Invoice for Pro # ${pro}${shown ? ` · Ref # ${shown}` : ''} Attached from ${companyName}`
 }
 
 /** `PRO # 20027 · PO # FR-113188-3` (or just the PRO when there is no PO). */

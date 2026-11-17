@@ -346,7 +346,7 @@ export interface InvoiceEmailInput {
 export function renderInvoiceEmail(input: InvoiceEmailInput): { subject: string; body: string } {
   const pro = input.invoice.shipmentNumber || input.invoice.number
   return {
-    subject: invoiceEmailSubject(pro, input.companyName || 'BCAT Logistics Corporation'),
+    subject: invoiceEmailSubject(pro, input.companyName || 'BCAT Logistics Corporation', input.po),
     // The reference line is the only thing added above Ryne's fixed wording.
     body: `${invoiceReferenceLine(pro, input.po)}\n\n${INVOICE_EMAIL_BODY}`,
   }
