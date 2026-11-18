@@ -2315,6 +2315,7 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
       return Object.fromEntries(Object.entries(map).map(([k, c]) => [k, c.allowed.length > 1 ? c : c.default]))
     }, 'divisionSalesReps'),
     progressSteps: keep(input.progressSteps, validateProgressSteps, 'progressSteps'),
+    emptyTruckDailyValueCents: keep(input.emptyTruckDailyValueCents, (v) => optionalInteger(v, { min: 0 }), 'emptyTruckDailyValueCents'),
     costManualEntries: keep(input.costManualEntries, validateCostManualEntries, 'costManualEntries'),
     paymentTerms: keep(input.paymentTerms, (v) => validatePaymentTerms(v, { defaultPaymentTermsDays: defaultPaymentTermsDays as number | undefined }), 'paymentTerms'),
 

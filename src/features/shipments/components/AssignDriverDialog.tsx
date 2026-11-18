@@ -34,6 +34,8 @@ export interface AssignDriverDialogProps {
   trailers: Equipment[]
   isAdmin: boolean
   busy: boolean
+  /** Opens with this driver picked (the Dispatch empty-trucks list books one driver on one open load). */
+  initialDriverId?: string
   onClose: () => void
   /** Rejection text is shown inline and the dialog stays open; success closes it. */
   onConfirm: (input: AssignDriverFields) => Promise<void>
@@ -49,7 +51,7 @@ function currentDeliveryDriverId(load: ShipmentLoad, activeLeg: LoadCarrierRecor
 }
 
 export function AssignDriverDialog({
-  load, activeLeg, drivers, trucks, trailers, isAdmin, busy, onClose, onConfirm,
+  load, activeLeg, drivers, trucks, trailers, isAdmin, busy, initialDriverId, onClose, onConfirm,
 }: AssignDriverDialogProps) {
   const ownLeg = activeLeg?.kind === 'OWN_ASSET' ? activeLeg : null
   const roster = useOwnFleetRoster({ drivers, trucks, trailers })
@@ -57,9 +59,10 @@ export function AssignDriverDialog({
   const activeTrailers = trailers.filter((t) => t.active !== false)
 
   const startDriver = ownLeg?.driverId && roster.some((d) => d.id === ownLeg.driverId) ? ownLeg.driverId : ''
-  const [driverId, setDriverId] = useState(startDriver)
-  const [truckId, setTruckId] = useState(ownLeg?.truckId ?? '')
-  const [trailerId, setTrailerId] = useState(ownLeg?.trailerId ?? '')
+  const suggested = !ownLeg && initialDriverId ? roster.find((d) => d.id === initialDriverId) : undefined
+  const [driverId, setDriverId] = useState(startDriver || suggested?.id || '')
+  const [truckId, setTruckId] = useState(ownLeg?.truckId ?? suggested?.truckId ?? '')
+  const [trailerId, setTrailerId] = useState(ownLeg?.trailerId ?? suggested?.trailerId ?? '')
   const [touched, setTouched] = useState({ truck: false, trailer: false })
   const [flatten, setFlatten] = useState(false)
   const [reason, setReason] = useState('')

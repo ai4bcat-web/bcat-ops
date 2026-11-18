@@ -1,7 +1,7 @@
 import { TruckAssignSelect } from '@/components/TruckAssignSelect'
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, Archive, ArchiveRestore, MessageSquarePlus, RefreshCw, Search, Settings, UserPlus, UserCheck, Loader2, AlertTriangle, Phone, MessageSquare, Hash, ExternalLink, Send, SlidersHorizontal, PanelRightClose, Trash2 } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -30,6 +30,7 @@ import { FilterDialog } from './FilterDialog'
 import { applyFilters, readFilters, writeFilters, filterCount, type DispatchFilters } from './dispatchFilters'
 import { conversationColor, initialsOf } from './conversationColor'
 import { DriverSchedulePanel } from './DriverSchedulePanel'
+import { EmptyTrucksView } from './EmptyTrucksView'
 import { unitTypeOf, unitKindLabel, unitTypeEditable, nextUnitType, UNIT_TYPE_LABEL } from '@/lib/unitType'
 import { useLoadPaperwork } from '@/hooks/useLoadPaperwork'
 import { loadHasPod } from '@/lib/podPresence'
@@ -61,6 +62,14 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
   const isMobile = useIsMobile()
   // One-column behaviour for phones and for the drawer alike.
   const narrow = isMobile || compact
+  // The page has two views: the text conversations, and where own-fleet trucks go empty. The drawer is always conversations.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const view: 'MESSAGES' | 'EMPTY' = !compact && searchParams.get('view') === 'empty' ? 'EMPTY' : 'MESSAGES'
+  const chooseView = (next: 'MESSAGES' | 'EMPTY') => setSearchParams((prev) => {
+    const p = new URLSearchParams(prev)
+    if (next === 'EMPTY') p.set('view', 'empty'); else p.delete('view')
+    return p
+  }, { replace: true })
   const { drivers, updateDriver } = useDrivers()
   const d = useDispatch()
   const [tab, setTab] = useState<Tab>('OPEN')
@@ -219,6 +228,14 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
             ? <>Drivers text and call <strong style={{ color: 'var(--tms-text-2)' }}>{prettyPhone(d.status.dispatchNumber)}</strong>{d.status.ringing ? ` · calls ring ${d.status.ringing} phone${d.status.ringing === 1 ? '' : 's'}` : ' · calls go to voicemail'}</>
             : 'One number the whole team texts and calls drivers from.'}
         </p>
+      </div>
+      <div role="group" aria-label="Dispatch view" style={{ display: 'inline-flex', gap: 2, padding: 2, border: '1px solid var(--tms-border)', borderRadius: 8, flexShrink: 0 }}>
+        {([['MESSAGES', 'Messages'], ['EMPTY', 'Empty trucks']] as const).map(([key, label]) => (
+          <button key={key} type="button" onClick={() => chooseView(key)} aria-pressed={view === key}
+            style={{ fontSize: 12.5, padding: '4px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', background: view === key ? 'var(--tms-surface-hover)' : 'transparent', color: view === key ? 'var(--tms-text)' : 'var(--tms-muted)', fontWeight: view === key ? 700 : 500 }}>
+            {label}
+          </button>
+        ))}
       </div>
       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
         <Button size="sm" className="h-8 gap-1.5" onClick={() => setNewOpen(true)}><MessageSquarePlus className="size-3.5" />{isMobile ? '' : 'New message'}</Button>
@@ -394,10 +411,12 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       {compact ? compactBar : header}
       {banner}
-      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        {showList ? list : null}
-        {showThread ? thread : null}
-      </div>
+      {view === 'EMPTY' ? <EmptyTrucksView /> : (
+        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+          {showList ? list : null}
+          {showThread ? thread : null}
+        </div>
+      )}
       {newOpen ? <NewMessageDialog onClose={() => setNewOpen(false)} onStart={async (input) => {
         const c = await d.start(input)
         setTab(c.status === 'ARCHIVED' ? 'ARCHIVED' : 'OPEN')
