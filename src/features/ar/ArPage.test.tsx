@@ -57,6 +57,12 @@ vi.mock('@/lib/apiClient', () => ({
   renderInvoicePdf: vi.fn(),
   markInvoiceSent: vi.fn(),
   getInvoicePdfUrl: vi.fn().mockResolvedValue('blob:pdf'),
+  getShipmentBundle: vi.fn().mockResolvedValue({ shipment: { id: 's1', version: 1 }, orders: [], loads: [], loadCarriers: [], charges: [], financials: [], documents: [] }),
+  recalcCharges: vi.fn(),
+  reviseInvoice: vi.fn(),
+  prepareDocumentUpload: vi.fn(),
+  putPresignedFile: vi.fn(),
+  commitDocument: vi.fn(),
   previewInvoice: vi.fn(),
   previewInvoicePacket: vi.fn().mockResolvedValue({ invoiceId: 'x', name: 'Invoice.pdf', url: null, pages: [], separate: [], error: null }),
   readyToInvoice: vi.fn(),
@@ -688,5 +694,84 @@ describe('Ready to invoice: replace or delete the POD and rate confirmation (Ryn
     fireEvent.click(await screen.findByTestId('ar-why-docs'))
     expect(await screen.findByTestId('docs-card')).toBeTruthy()
     factorReady.current = {}
+  })
+})
+
+describe('Ready to invoice: edit the amount before sending (Ryne 2026-11-18)', () => {
+  const bundle = {
+    shipment: { id: 's1', version: 3 }, orders: [{ id: 'o1' }], loads: [{ id: 'load-1' }], loadCarriers: [],
+    charges: [{ id: 'c1', side: 'CUSTOMER', orderId: 'o1', loadId: 'load-1', loadCarrierId: null, code: 'LINEHAUL', label: 'Linehaul', calculatedBy: 'FLAT',
+      rateCents: 250_000, amountCents: 250_000, count: 1, isRate: true, release: null, note: null, sortOrder: 0 }],
+    financials: [{ id: 'load-1', frozenAt: null }], documents: [],
+  }
+
+  it('a draft row offers Edit amount; it opens the editor with the customer lines', async () => {
+    authGroups.current = ['page-invoicing']
+    ;(apiClient.getShipmentBundle as Mock).mockResolvedValue(bundle)
+    openSet.splice(0, openSet.length, invoice())
+    await setup({})
+    await settle()
+    const grid = screen.getByRole('table', { name: 'Ready to invoice' })
+    fireEvent.click(within(grid).getByTestId('ar-edit-amount'))
+    expect(await screen.findByText(/Edit invoice · INV-000123/)).toBeTruthy()
+    expect(await screen.findByLabelText('Linehaul amount')).toBeTruthy()
+    authGroups.current = []
+  })
+
+  it('saving marks the draft Edited in the list', async () => {
+    authGroups.current = ['page-invoicing']
+    ;(apiClient.getShipmentBundle as Mock).mockResolvedValue(bundle)
+    ;(apiClient.recalcCharges as Mock).mockResolvedValue(bundle)
+    ;(apiClient.reviseInvoice as Mock).mockResolvedValue({ invoice: invoice({ totalCents: 260_000 }), revision: 1 })
+    openSet.splice(0, openSet.length, invoice())
+    await setup({})
+    await settle()
+    const grid = screen.getByRole('table', { name: 'Ready to invoice' })
+    fireEvent.click(within(grid).getByTestId('ar-edit-amount'))
+    const amount = await screen.findByLabelText('Linehaul amount')
+    fireEvent.change(amount, { target: { value: '2600' } })
+    fireEvent.blur(amount)
+    fireEvent.click(screen.getByRole('button', { name: 'Save amount' }))
+    await settle()
+    expect(apiClient.recalcCharges).toHaveBeenCalledWith(expect.objectContaining({ shipmentId: 's1', changeReason: 'Rate edited before sending' }))
+    expect(within(screen.getByRole('table', { name: 'Ready to invoice' })).getByText('Edited')).toBeTruthy()
+    authGroups.current = []
+  })
+
+  it('no Edit amount without the billing grant, and none once the invoice was sent', async () => {
+    authGroups.current = []
+    openSet.splice(0, openSet.length, invoice())
+    await setup({})
+    await settle()
+    expect(screen.queryByTestId('ar-edit-amount')).toBeNull()
+    authGroups.current = ['page-invoicing']
+    openSet.splice(0, openSet.length, invoice({ sentAt: '2026-11-16T12:00:00.000Z', sentCount: 1 }))
+    await setup({})
+    await settle()
+    expect(screen.queryByTestId('ar-edit-amount')).toBeNull()
+    authGroups.current = []
+  })
+
+  it('the dialog also replaces the POD or rate confirmation, and the list reads the attachment chips again', async () => {
+    authGroups.current = ['page-invoicing']
+    const withDocs = { ...bundle, documents: [{ id: 'pod-1', shipmentId: 's1', type: 'POD', name: 'POD S-1001.pdf', status: 'ACTIVE', orderId: 'o1', uploadedBy: 'x', uploadedAt: '2026-11-18T12:00:00.000Z' }] }
+    ;(apiClient.getShipmentBundle as Mock).mockResolvedValue(withDocs)
+    ;(apiClient.getInvoiceAttachmentPlans as Mock).mockResolvedValue([{ invoiceId: 'INV-000123', invoicePdf: 'ATTACHED', pod: 'ATTACHED', rateCon: 'MISSING', count: 1, items: [], tooBig: false, carrierPayFlags: [] }])
+    ;(apiClient.prepareDocumentUpload as Mock).mockResolvedValue({ uploadUrl: 'https://s3/put', s3Key: 'shipment-docs/s1/sdoc-new-new.pdf', documentId: 'sdoc-new' })
+    ;(apiClient.putPresignedFile as Mock).mockResolvedValue(undefined)
+    ;(apiClient.commitDocument as Mock).mockResolvedValue({})
+    openSet.splice(0, openSet.length, invoice())
+    await setup({})
+    await settle()
+    const callsBefore = (apiClient.getInvoiceAttachmentPlans as Mock).mock.calls.length
+    fireEvent.click(within(screen.getByRole('table', { name: 'Ready to invoice' })).getByTestId('ar-edit-amount'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Replace POD S-1001.pdf' }))
+    fireEvent.change(screen.getByLabelText('Document file'), { target: { files: [new File(['%PDF'], 'pod-new.pdf', { type: 'application/pdf' })] } })
+    fireEvent.click(screen.getByRole('button', { name: /^Replace$/ }))
+    await settle()
+    expect(apiClient.commitDocument).toHaveBeenCalledWith(expect.objectContaining({ shipmentId: 's1', type: 'POD', replacesDocumentId: 'pod-1' }))
+    expect((apiClient.getInvoiceAttachmentPlans as Mock).mock.calls.length).toBeGreaterThan(callsBefore)
+    ;(apiClient.getInvoiceAttachmentPlans as Mock).mockResolvedValue([])
+    authGroups.current = []
   })
 })

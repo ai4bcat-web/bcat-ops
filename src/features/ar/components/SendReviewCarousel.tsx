@@ -17,8 +17,12 @@ import { InvoicePacketFrame } from './InvoicePacketFrame'
 import { formatCents } from '@/lib/invoiceBuild'
 import { invoiceAttachmentName, invoiceCompanyName, invoicePoNumber } from '@/lib/invoiceIdentity'
 import { renderInvoiceEmail } from '@/lib/shipmentNotices'
+import type { FactoringItem } from '@/types'
 import type { CustomerRecord, InvoiceRecord, ShipmentRecord, TmsSettings } from '@/types/tms'
 import { INVOICE_FROM_ADDRESS, isFactoredInvoice, manualRecipients, sendBlockers } from '../sendReview'
+import { rateEditBlock } from '../invoiceRateEdit'
+import { docsLockedReason } from '../arDocuments'
+import { EditInvoiceRateDialog } from './EditInvoiceRateDialog'
 import { attachmentStateText, useInvoiceAttachmentPlans } from '../useInvoiceAttachmentPlans'
 import { DOCUMENT_TYPE_LABELS } from '@/lib/shipmentDocuments'
 import type { InvoiceAttachmentItem } from '@/lib/invoiceDelivery'
@@ -27,8 +31,16 @@ import { AttachmentInfo, AttachmentRow, AttachmentsSection, InvoiceEmailSection,
 
 interface Result { invoiceId: string; number: string; ok: boolean; text: string }
 
-export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAdmin = false, onClose, onDone }: {
+export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAdmin = false, canEditAmount = false, factorByItemId, editedIds, onEdited, onClose, onDone }: {
   invoices: InvoiceRecord[]
+  /** May change an invoice's amount before it goes (the people who can release invoices). */
+  canEditAmount?: boolean
+  /** The factoring rows, to tell an invoice already with OTR (its amount can no longer change here). */
+  factorByItemId?: ReadonlyMap<string, FactoringItem>
+  /** Invoices whose amount was changed already this session. */
+  editedIds?: ReadonlySet<string>
+  /** An amount was saved here: the page keeps the mark and refreshes. */
+  onEdited?: (invoiceId: string) => void
   /** Owner / ADMIN: may send past a carrier-pay CONTENT flag with a reason (never past a carrier document). */
   isAdmin?: boolean
   customerById: Map<string, CustomerRecord>
@@ -43,6 +55,9 @@ export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAd
   const [packetErrors, setPacketErrors] = useState<Record<string, string | null>>({})
   const [sending, setSending] = useState(false)
   const [results, setResults] = useState<Result[] | null>(null)
+  const [editingAmount, setEditingAmount] = useState(false)
+  const [editedHere, setEditedHere] = useState<ReadonlySet<string>>(() => new Set())
+  const isEdited = (id: string) => editedHere.has(id) || (editedIds?.has(id) ?? false)
 
   useEffect(() => {
     let alive = true
@@ -52,7 +67,9 @@ export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAd
 
   const current = batch[Math.min(index, batch.length - 1)]
   const batchIds = useMemo(() => batch.map((inv) => inv.id), [batch])
-  const { plans } = useInvoiceAttachmentPlans(batchIds)
+  const { plans, refresh: refreshPlans } = useInvoiceAttachmentPlans(batchIds)
+  /** Bumped when a POD or rate confirmation is replaced: the PDF preview re-reads what the customer opens. */
+  const [filesEpoch, setFilesEpoch] = useState(0)
   // Per invoice: documents taken out of this e-mail, and an admin's override reason for content flags.
   const [excluded, setExcluded] = useState<Record<string, string[]>>({})
   const [overrides, setOverrides] = useState<Record<string, string>>({})
@@ -75,16 +92,20 @@ export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAd
   }, [customerById, settings, plans, openFlags, packetErrors])
   const blocked = batch.filter((inv) => blockersOf(inv).length > 0)
   const sendable = batch.filter((inv) => blockersOf(inv).length === 0)
+  const sendableCents = sendable.reduce((sum, inv) => sum + inv.totalCents, 0)
 
   const go = useCallback((delta: number) => setIndex((i) => Math.max(0, Math.min(batch.length - 1, i + delta))), [batch.length])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Typing in the amount editor (or any box) must not turn the page behind it.
+      const el = e.target as HTMLElement | null
+      if (editingAmount || el?.tagName === 'INPUT' || el?.tagName === 'TEXTAREA' || el?.tagName === 'SELECT') return
       if (e.key === 'ArrowLeft') go(-1)
       if (e.key === 'ArrowRight') go(1)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [go])
+  }, [go, editingAmount])
 
   const page = useMemo(() => {
     if (!current) return null
@@ -108,6 +129,17 @@ export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAd
     setBatch((rows) => rows.filter((row) => row.id !== current?.id))
     setIndex((i) => Math.max(0, Math.min(i, batch.length - 2)))
   }
+
+  /** An amount was saved on the current invoice: the batch carries the new invoice, its preview and e-mail follow. */
+  const amountSaved = (fresh: InvoiceRecord) => {
+    setBatch((rows) => rows.map((row) => (row.id === fresh.id ? { ...row, ...fresh } : row)))
+    setEditedHere((prev) => new Set(prev).add(fresh.id))
+    onEdited?.(fresh.id)
+    setEditingAmount(false)
+  }
+  const currentItem = current?.factoringItemId ? factorByItemId?.get(current.factoringItemId) ?? null : null
+  const amountBlock = current ? rateEditBlock(current, currentItem) : null
+  const filesBlock = current ? docsLockedReason(current, currentItem) : null
 
   const sendAll = async () => {
     setSending(true)
@@ -165,6 +197,7 @@ export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAd
         <>
           <span className="mr-auto flex flex-wrap items-center gap-2 text-sm" role="status" aria-label="Batch summary">
             <TmsBadge tone="green">{sendable.length} ready</TmsBadge>
+            <span aria-label="Batch total" className="tms-muted">Batch total <strong>{formatCents(sendableCents)}</strong></span>
             {blocked.length > 0 && (
               <span style={{ color: 'var(--tms-badge-red)' }}>
                 <TmsBadge tone="red">{blocked.length} blocked</TmsBadge> {blocked.map((inv) => inv.number).join(', ')} — left out
@@ -195,12 +228,19 @@ export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAd
                 <span>{current.customerName}</span>
                 <span aria-hidden="true">·</span>
                 <span className="send-review-amount">{formatCents(current.totalCents)}</span>
+                {isEdited(current.id) && <TmsBadge tone="gray" title="The amount was changed before sending">Edited</TmsBadge>}
                 {page.company && <><span aria-hidden="true">·</span><span>{page.company}</span></>}
                 {page.po && <><span aria-hidden="true">·</span><span>PO {page.po}</span></>}
                 <TmsBadge tone={page.factored ? 'purple' : 'blue'}>{page.factored ? 'OTR' : 'Manual'}</TmsBadge>
               </span>
             </span>
             <span className="send-review-actions">
+              {canEditAmount && !amountBlock && (
+                <TmsButton size="sm" variant="ghost" aria-label={`Edit amount of invoice ${current.number}`} disabled={sending} onClick={() => setEditingAmount(true)}>Edit amount</TmsButton>
+              )}
+              {canEditAmount && !filesBlock && (
+                <TmsButton size="sm" variant="ghost" aria-label={`Replace files of invoice ${current.number}`} disabled={sending} onClick={() => setEditingAmount(true)}>Replace files</TmsButton>
+              )}
               <Link className="tms-btn tms-btn-ghost tms-btn-sm" to={`/tms/invoicing/invoices/${current.id}`} target="_blank" aria-label={`Edit invoice ${current.number}`}>
                 <ExternalLink size={13} /> Edit invoice
               </Link>
@@ -235,7 +275,7 @@ export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAd
               <div className="send-review-col send-review-pdf">
                 <InvoiceEmailSection title="PDF the customer opens" icon={<FileSearch size={14} />} label="PDF preview">
                   <InvoicePacketFrame
-                    key={current.id}
+                    key={`${current.id}:${current.pdfVersion ?? ''}:${current.totalCents}:${filesEpoch}`}
                     invoiceId={current.id}
                     pdfKey={current.pdfKey}
                     excludeDocumentIds={excluded[current.id]}
@@ -247,6 +287,16 @@ export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAd
             </div>
           )}
         </div>
+      )}
+      {editingAmount && current && (
+        <EditInvoiceRateDialog
+          invoice={current}
+          factoringItem={currentItem}
+          plan={plans.get(current.id)}
+          onClose={() => setEditingAmount(false)}
+          onSaved={(fresh) => amountSaved(fresh)}
+          onFilesChanged={() => { refreshPlans(); setFilesEpoch((n) => n + 1) }}
+        />
       )}
     </TmsDialog>
   )

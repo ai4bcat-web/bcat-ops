@@ -36,6 +36,7 @@ export const ACTION_SENTENCE: Record<string, string> = {
   FLAG_TONU: 'flagged waiting for TONU',
   CLEAR_TONU: 'cleared the TONU flag',
   RECALC_CHARGES: 'recalculated the charges',
+  REPLACE_DOCUMENT: 'replaced a document',
   PUSH_TO_LOAD_REVIEW: 'pushed the shipment to Load Review',
   RETURN_TO_ACTIVE: 'moved the shipment back to Active shipments',
   LOAD_REVIEW_RELEASED: 'released the shipment from Load Review',

@@ -1194,6 +1194,55 @@ describe('REVISE_INVOICE', () => {
     expect(table(TABLES.invoice).get(invoiceId)).toMatchObject({ totalCents: 255_000, revision: 2 })
   })
 
+  describe('rate edited before sending (Ryne 2026-11-18)', () => {
+    /** What RECALC_CHARGES leaves behind: the shipment's customer lines at their new amounts. */
+    const editCustomerCharges = (linehaulCents: number, fscCents?: number) => {
+      table(TABLES.charge).set('chg-1', { ...table(TABLES.charge).get('chg-1')!, rateCents: linehaulCents, amountCents: linehaulCents })
+      if (fscCents != null) {
+        table(TABLES.charge).set('chg-fsc', {
+          id: 'chg-fsc', shipmentId: SHIPMENT_ID, orderId: ORDER_ID, loadId: LOAD_ID, side: 'CUSTOMER', code: 'FSC', label: 'Fuel surcharge',
+          rateCents: fscCents, count: 1, amountCents: fscCents, isRate: false, sortOrder: 2, createdBy: 'a@b.c',
+        })
+      }
+    }
+
+    it('re-reads the edited customer lines into the same draft invoice, keeps its adjustments and re-renders at the new total', async () => {
+      const { invoiceId } = await generate()
+      const before = table(TABLES.invoice).get(invoiceId)!
+      await call('REVISE_INVOICE', { invoiceId, adjustments: [{ kind: 'CREDIT', description: 'Detention waived', amountCents: 10_000, reason: 'customer request' }] })
+      editCustomerCharges(262_587, 32_587)
+      const keep = (table(TABLES.invoice).get(invoiceId)!.adjustments as Row[])
+      const out = (await call('REVISE_INVOICE', { invoiceId, adjustments: keep, reason: 'Rate edited before sending' })) as { revision: number; invoice: Row }
+      expect(out.revision).toBe(1)
+      const after = table(TABLES.invoice).get(invoiceId)!
+      expect(after).toMatchObject({ subtotalCents: 295_174, totalCents: 285_174, balanceCents: 285_174 })
+      expect((after.lines as Row[]).filter((l) => l.code !== 'ADJUSTMENT').map((l) => [l.code, l.amountCents])).toEqual([['LINEHAUL', 262_587], ['FSC', 32_587]])
+      expect(after.adjustments).toHaveLength(1)
+      expect(String(after.pdfFingerprint)).toContain('285174')
+      expect(after.pdfFingerprint).not.toBe(before.pdfFingerprint)
+      expect(table(TABLES.invoice).size).toBe(1)
+    })
+
+    it('a factored draft is re-rendered with the factor stamp at the new amount, and the order balance follows', async () => {
+      table(TABLES.customer).set(CUSTOMER_ID, { ...table(TABLES.customer).get(CUSTOMER_ID)!, factored: true })
+      await call('SAVE_AR_SETTINGS', { factorRemitTo: { name: 'OTR Solutions', noticeText: 'Assigned to OTR Solutions.' } })
+      const { invoiceId } = await generate()
+      expect(table(TABLES.invoice).get(invoiceId)!.factored).toBe(true)
+      editCustomerCharges(275_000)
+      await call('REVISE_INVOICE', { invoiceId, adjustments: [], reason: 'Rate edited before sending' })
+      const after = table(TABLES.invoice).get(invoiceId)!
+      expect(after).toMatchObject({ totalCents: 275_000, factored: true })
+      expect(String(after.pdfFingerprint)).toMatch(/275000.*\|factored$/)
+      expect(table(TABLES.order).get(ORDER_ID)).toMatchObject({ arBalanceCents: 275_000 })
+    })
+
+    it('refuses an edit that would take the invoice to zero', async () => {
+      const { invoiceId } = await generate()
+      editCustomerCharges(0)
+      await expect(call('REVISE_INVOICE', { invoiceId, adjustments: [] })).rejects.toThrow(/more than zero/)
+    })
+  })
+
   it('refuses once money is applied, and refuses an adjustment without a reason', async () => {
     const { invoiceId } = await generate()
     await expect(call('REVISE_INVOICE', { invoiceId, adjustments: [{ kind: 'CREDIT', description: 'x', amountCents: 100 }] })).rejects.toThrow(/reason/)
