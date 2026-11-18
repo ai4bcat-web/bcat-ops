@@ -25,6 +25,8 @@ export interface BillShipmentFacts {
   /** Revenue division / sub-division codes off the shipment. */
   revDivision?: string | null
   revSubdivision?: string | null
+  /** The customer the load was hauled for, as the shipment (else its order) names it. Internal: never on carrier output. */
+  customerName?: string | null
 }
 
 export type BillFactsIndex = ReadonlyMap<string, BillShipmentFacts>
@@ -48,9 +50,35 @@ export function billFactsIndex(shipments: readonly ShipmentRecord[], orders: rea
       delivered: Boolean(deliveredAt) || shipment.status === 'DELIVERED',
       revDivision: shipment.revDivision ?? null,
       revSubdivision: shipment.revSubdivision ?? null,
+      customerName: (shipment.customerName ?? orderByShipment.get(shipment.id)?.customerName ?? '').trim() || null,
     })
   }
   return out
+}
+
+/** The customer a bill's load was hauled for, or null when the shipment has not been read or carries no name. */
+export function billCustomerName(bill: Pick<CarrierBillRecord, 'shipmentId'>, facts: BillFactsIndex): string | null {
+  return facts.get(bill.shipmentId)?.customerName ?? null
+}
+
+/**
+ * Whole days `asOf` (a Chicago date) is past the bill's due date: positive when overdue, 0 on the due date,
+ * negative before it. Null when the bill has no due date to age by (still waiting on the carrier's invoice
+ * date) or nothing is owed any more (paid, void). The same `daysLate` the Aging chip and the buckets use,
+ * so this column and the Aging tab always agree.
+ */
+export function billDaysPastDue(
+  bill: Pick<CarrierBillRecord, 'dueAt' | 'status' | 'datesPending'>,
+  asOf: string,
+): number | null {
+  if (bill.status === 'PAID' || bill.status === 'VOID') return null
+  if (bill.datesPending === true || !/^\d{4}-\d{2}-\d{2}/.test(bill.dueAt ?? '')) return null
+  return daysLate(bill.dueAt, asOf)
+}
+
+/** `12 days late`, `1 day late` (as the AR chip words it); null when the bill is not late. */
+export function daysLateLabel(days: number): string {
+  return `${days} day${days === 1 ? '' : 's'} late`
 }
 
 /** Brought over from Aljex: written by the import, never through Load review. */
