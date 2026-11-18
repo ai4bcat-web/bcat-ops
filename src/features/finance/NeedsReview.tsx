@@ -25,7 +25,8 @@ import {
 } from '@/features/openQuestions/openQuestions'
 import { reviewItems, type ReviewItem } from './needsReviewItems'
 import { useAuthUser } from '@/hooks/useAuth'
-import { financeAction, setDeliveredDate, type FinanceReviewShipment } from '@/lib/apiClient'
+import { setDeliveredDate, type FinanceReviewShipment } from '@/lib/apiClient'
+import { MarkReviewedDialog } from './MarkReviewedDialog'
 import { errorText } from '@/lib/errorText'
 import { formatDateShort } from '@/lib/date'
 import { shipmentEditorPath } from '@/lib/shipmentLinks'
@@ -85,13 +86,7 @@ export function NeedsReviewList({ rows, error, side, onCleared, invoiceFor, onOp
         .catch(() => autoResolved.current.delete(q.id))
     }
   }, [unlinked.loaded, unlinked.error, unlinked.total, unlinked.rows, openLinkQs, onQuestionSaved])
-  const clear = (row: FinanceReviewShipment) => {
-    setBusy(row.id)
-    financeAction('CLEAR_FINANCE_REVIEW', { shipmentId: row.id })
-      .then(() => { toast.success(`PRO ${row.number ?? row.id} cleared from Needs review`); onCleared() })
-      .catch((e: unknown) => toast.error(errorText(e) || 'Could not clear the flag'))
-      .finally(() => setBusy(null))
-  }
+  const [clearing, setClearing] = useState<FinanceReviewShipment | null>(null)
   const [editing, setEditing] = useState<{ id: string; day: string } | null>(null)
   const saveDelivered = (row: FinanceReviewShipment, day: string) => {
     if (!day) { toast.error('Pick the delivered date'); return }
@@ -191,7 +186,7 @@ export function NeedsReviewList({ rows, error, side, onCleared, invoiceFor, onOp
     {
       key: 'actions', header: '',
       render: (it) => (it.kind === 'flag'
-        ? <TmsButton size="sm" variant="ghost" disabled={busy === it.row.id} onClick={() => clear(it.row)}>Mark reviewed</TmsButton>
+        ? <TmsButton size="sm" variant="ghost" disabled={busy === it.row.id} onClick={() => setClearing(it.row)}>Mark reviewed</TmsButton>
         : (
           <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
             {isLinkCustomerQuestion(it.question) ? (
@@ -226,6 +221,7 @@ export function NeedsReviewList({ rows, error, side, onCleared, invoiceFor, onOp
         <span className="tms-muted">{`${shown.length} row${shown.length === 1 ? '' : 's'}`}</span>
       </div>
       <TmsTable columns={columns} rows={shown} rowKey={(it) => it.key} empty={status === 'RESOLVED' ? 'Nothing resolved yet.' : 'Nothing needs review.'} />
+      {clearing && <MarkReviewedDialog flag={clearing} showApNote={side === 'AP'} onClose={() => setClearing(null)} onCleared={onCleared} />}
       <TmsDialog
         open={answeringItem != null}
         onOpenChange={(open) => { if (!open) setAnswering(null) }}

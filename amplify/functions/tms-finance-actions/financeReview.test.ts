@@ -34,7 +34,19 @@ describe('clearFinanceReview', () => {
     await expect(clearFinanceReview({ shipmentId: 'shp-1' }, caller)).resolves.toEqual({ shipmentId: 'shp-1', cleared: true })
     const [[writes]] = store.transact.mock.calls as unknown as [[{ options: { remove: string[] } }[]]]
     expect(writes[0].options.remove).toEqual(['financeReviewAt', 'financeReviewReason', 'financeReviewApNote'])
-    expect(store.writeAudit).toHaveBeenCalledWith('SHIPMENT', 'shp-1', 'CLEAR_FINANCE_REVIEW', caller, { reason: 'No customer rate', note: null })
+    expect(store.writeAudit).toHaveBeenCalledWith('SHIPMENT', 'shp-1', 'CLEAR_FINANCE_REVIEW', caller, {
+      reason: 'No customer rate', apNote: null, flaggedAt: '2026-11-13T00:00:00Z', note: null,
+    })
+  })
+
+  it('keeps the AP note, the raised date and the reviewer note in the audit entry', async () => {
+    store.getById.mockResolvedValue({
+      id: 'shp-3', financeReviewAt: '2026-11-12T10:00:00Z', financeReviewReason: 'Rate differs', financeReviewApNote: 'Carrier billed 1,100',
+    })
+    await clearFinanceReview({ shipmentId: 'shp-3', note: 'Checked: matches the rate con' }, caller)
+    expect(store.writeAudit).toHaveBeenCalledWith('SHIPMENT', 'shp-3', 'CLEAR_FINANCE_REVIEW', caller, {
+      reason: 'Rate differs', apNote: 'Carrier billed 1,100', flaggedAt: '2026-11-12T10:00:00Z', note: 'Checked: matches the rate con',
+    })
   })
 
   it('is a no-op on a shipment with no flag', async () => {

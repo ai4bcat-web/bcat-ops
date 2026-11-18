@@ -41,6 +41,7 @@ import { AP_STRIP_LABELS } from '@/features/ar/agingStripLabels'
 import { ReasonDialog } from '@/features/ar/components/ReasonDialog'
 import { agingChipFor, formatDay, lastThreeMonths, monthLabel } from '@/features/ar/arViews'
 import { useNeedsReview } from '@/features/finance/useNeedsReview'
+import { MarkReviewedDialog } from '@/features/finance/MarkReviewedDialog'
 import {
   AP_PAYMENT_KIND_LABEL, AP_PAYMENT_METHOD_LABEL, AP_PAYEE_KIND_LABEL, AP_TABS, BILL_STATUS_LABEL,
   EMPTY_TO_BE_PAID_FILTERS, applyToBePaidFilters, avgDaysToPayBills, awaitingInvoiceTotals, billCarrierOptions,
@@ -117,6 +118,8 @@ type ApDialog =
   | { kind: 'approve'; bill: CarrierBillRecord; thenSelect?: boolean }
   | { kind: 'return'; bill: CarrierBillRecord }
   | { kind: 'dates'; bill: CarrierBillRecord }
+  /** Staff checked a Needs review flag: clear it, with an optional note. */
+  | { kind: 'clear-review'; shipmentId: string }
   | { kind: 'charges'; loadCarrierId: string; shipmentId: string; bill?: CarrierBillRecord }
   | { kind: 'pay'; carrierId: string; billIds?: string[] }
   | { kind: 'credit'; carrierId: string }
@@ -517,6 +520,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onDates: (bill) => setDialog({ kind: 'dates', bill }),
       infos: payInfos,
       onAddRemit: addRemitFor,
+      onClearReview: (bill) => setDialog({ kind: 'clear-review', shipmentId: bill.shipmentId }),
     })
     : tab === 'aging' || tab === 'selected' ? payableView({
       mode: tab,
@@ -836,6 +840,14 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           onConfirm={(reason) => runUnapprove(dialog.bill, reason)}
         />
       )}
+      {dialog?.kind === 'clear-review' && reviewByShipment.get(dialog.shipmentId) && (
+        <MarkReviewedDialog
+          flag={reviewByShipment.get(dialog.shipmentId) as FinanceReviewShipment}
+          showApNote
+          onClose={() => setDialog(null)}
+          onCleared={() => needsReview.refresh()}
+        />
+      )}
       {drawerBill && (
         <BillDrawer
           bill={drawerBill}
@@ -845,6 +857,8 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           onChanged={() => void refreshAll()}
           onAdjustPay={chargesFor}
           onSetDates={(bill) => setDialog({ kind: 'dates', bill })}
+          reviewFlag={reviewByShipment.get(drawerBill.shipmentId)}
+          onClearReview={(bill) => setDialog({ kind: 'clear-review', shipmentId: bill.shipmentId })}
           onPaymentInfo={(bill) => setDialog({ kind: 'payinfo', bill })}
         />
       )}
@@ -1126,7 +1140,7 @@ function awaitingView({ banner, rows, shared, busy, onRecord }: {
 /* ── In review ───────────────────────────────────────────────────────────── */
 
 function reviewView({
-  banner, bills, review, facts, onOpen, shared, busy, onDates, infos, onAddRemit,
+  banner, bills, review, facts, onOpen, shared, busy, onDates, infos, onAddRemit, onClearReview,
 }: {
   banner: ReactNode
   bills: CarrierBillRecord[]
@@ -1139,6 +1153,7 @@ function reviewView({
   onDates: (bill: CarrierBillRecord) => void
   infos: readonly CarrierPaymentInfo[]
   onAddRemit: (bill: CarrierBillRecord) => void
+  onClearReview: (bill: CarrierBillRecord) => void
 }): ListView {
   const pendingDates = (bill: CarrierBillRecord) => bill.datesPending === true
   const flagOf = (bill: CarrierBillRecord) => review.get(bill.shipmentId)
@@ -1185,18 +1200,31 @@ function reviewView({
       key: 'actions',
       header: '',
       text: () => '',
-      width: 170,
+      width: 290,
       ...ACTIONS,
       render: (bill) => (
-        <button
-          type="button"
-          className="tms-link whitespace-nowrap"
-          aria-label={`Add invoice date for bill ${bill.billNumber ?? bill.id}`}
-          disabled={busy}
-          onClick={(event) => { event.stopPropagation(); onDates(bill) }}
-        >
-          {pendingDates(bill) ? 'Add invoice date' : 'Change dates'}
-        </button>
+        <span className="inline-flex items-center gap-3 whitespace-nowrap">
+          <button
+            type="button"
+            className="tms-link whitespace-nowrap"
+            aria-label={`Add invoice date for bill ${bill.billNumber ?? bill.id}`}
+            disabled={busy}
+            onClick={(event) => { event.stopPropagation(); onDates(bill) }}
+          >
+            {pendingDates(bill) ? 'Add invoice date' : 'Change dates'}
+          </button>
+          {flagOf(bill) && (
+            <button
+              type="button"
+              className="tms-link whitespace-nowrap"
+              aria-label={`Mark bill ${bill.billNumber ?? bill.id} reviewed`}
+              disabled={busy}
+              onClick={(event) => { event.stopPropagation(); onClearReview(bill) }}
+            >
+              Mark reviewed
+            </button>
+          )}
+        </span>
       ),
     },
   ]

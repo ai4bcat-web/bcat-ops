@@ -11,7 +11,7 @@ import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { TmsBadge, TmsButton, TmsDrawer } from '@/features/tms/kit'
-import { graphqlErrorText, setBillQuickPay, type CarrierPaymentInfo } from '@/lib/apiClient'
+import { graphqlErrorText, setBillQuickPay, type CarrierPaymentInfo, type FinanceReviewShipment } from '@/lib/apiClient'
 import { billMoneyLockReason } from '@/lib/carrierBill'
 import { AP_QUICK_PAY_OPTIONS } from '@/lib/quickPay'
 import { formatCents } from '@/lib/invoiceBuild'
@@ -21,7 +21,7 @@ import { BILL_STATUS_LABEL, payToLabel, paymentInfoFor, remitEmailOf } from '../
 import { estimatedDueAt, proOf, termsLabel, type BillFactsIndex } from '../apQueue'
 import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
-export function BillDrawer({ bill, facts, infos, onClose, onChanged, onAdjustPay, onSetDates, onPaymentInfo }: {
+export function BillDrawer({ bill, facts, infos, onClose, onChanged, onAdjustPay, onSetDates, onPaymentInfo, reviewFlag, onClearReview }: {
   bill: CarrierBillRecord
   facts: BillFactsIndex
   infos: readonly CarrierPaymentInfo[]
@@ -31,6 +31,9 @@ export function BillDrawer({ bill, facts, infos, onClose, onChanged, onAdjustPay
   onAdjustPay: (bill: CarrierBillRecord) => void
   onSetDates: (bill: CarrierBillRecord) => void
   onPaymentInfo: (bill: CarrierBillRecord) => void
+  /** The shipment's Needs review flag, when it has one, and the way to mark it checked. */
+  reviewFlag?: Pick<FinanceReviewShipment, 'financeReviewReason' | 'financeReviewApNote'>
+  onClearReview?: (bill: CarrierBillRecord) => void
 }) {
   const [busy, setBusy] = useState(false)
   const fact = facts.get(bill.shipmentId)
@@ -105,6 +108,18 @@ export function BillDrawer({ bill, facts, infos, onClose, onChanged, onAdjustPay
             </div>
           )}
         </section>
+
+        {reviewFlag && (
+          <section className={section} aria-label="Needs review">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <TmsBadge tone="red">Needs review</TmsBadge>
+              {onClearReview && <TmsButton variant="ghost" size="sm" disabled={busy} onClick={() => onClearReview(bill)}>Mark reviewed</TmsButton>}
+            </div>
+            <p className="m-0 mt-2 text-sm">
+              {[reviewFlag.financeReviewReason, reviewFlag.financeReviewApNote].map((t) => t?.trim()).filter(Boolean).join(' · ') || 'Flagged for a check.'}
+            </p>
+          </section>
+        )}
 
         <section className={section} aria-label="Load and payee">
           <h3 className={heading}>Bill details</h3>

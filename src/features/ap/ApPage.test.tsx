@@ -21,10 +21,21 @@ import { ApPage } from './ApPage'
 const worklistMock = vi.hoisted(() => vi.fn())
 const openBillsMock = vi.hoisted(() => vi.fn())
 const carrierApMock = vi.hoisted(() => vi.fn())
+const needsReviewRows = vi.hoisted(() => ({ rows: [] as unknown[] }))
+const needsReviewRefresh = vi.hoisted(() => vi.fn())
 
 vi.mock('@/hooks/useApWorklist', () => ({ useApWorklist: worklistMock }))
 vi.mock('@/hooks/useOpenBills', () => ({ useOpenBills: openBillsMock }))
 vi.mock('@/hooks/useCarrierAp', () => ({ useCarrierAp: carrierApMock }))
+vi.mock('@/features/finance/useNeedsReview', () => ({
+  useNeedsReview: () => ({ rows: needsReviewRows.rows, questions: [], error: null, refresh: needsReviewRefresh, replaceQuestion: vi.fn() }),
+  openReviewCount: () => 0,
+}))
+vi.mock('@/features/finance/MarkReviewedDialog', () => ({
+  MarkReviewedDialog: ({ flag, onCleared }: { flag: { id: string }; onCleared: () => void }) => (
+    <button type="button" onClick={onCleared}>confirm clear for {flag.id}</button>
+  ),
+}))
 // Every bill in these tests is on a delivered load (the Payables rule); PO and delivery are fixed.
 vi.mock('./useBillFacts', () => ({
   useBillFacts: () => ({
@@ -316,6 +327,23 @@ describe('the AP board', () => {
     expect(table.getByText(/^Later/).closest('tr')?.textContent).toContain('$800.00')
     expect(table.getByText('Total open AP').closest('tr')?.textContent).toContain('$2,300.00')
     expect(screen.getByText(/How this is counted/)).toBeTruthy()
+  })
+
+  it('puts Mark reviewed on a flagged Expected bill only, and refreshes the flags after it is cleared', async () => {
+    needsReviewRows.rows = [{ id: 's1', number: '14433', financeReviewAt: '2026-11-13T20:00:00Z', financeReviewReason: 'Rate differs', financeReviewApNote: null }]
+    needsReviewRefresh.mockClear()
+    try {
+      await setup({ bills: [bill({ status: 'IN_REVIEW', datesPending: true, billNumber: 'BL-9' })] })
+      fireEvent.click(screen.getByRole('button', { name: 'Mark bill BL-9 reviewed' }))
+      fireEvent.click(screen.getByRole('button', { name: 'confirm clear for s1' }))
+      expect(needsReviewRefresh).toHaveBeenCalled()
+    } finally { needsReviewRows.rows = [] }
+  })
+
+  it('offers no Mark reviewed on an unflagged Expected bill', async () => {
+    needsReviewRows.rows = []
+    await setup({ bills: [bill({ status: 'IN_REVIEW', datesPending: true, billNumber: 'BL-9' })] })
+    expect(screen.queryByRole('button', { name: /reviewed$/ })).toBeNull()
   })
 
   it('draws Aging by carrier like the receivables aging: a row per carrier whose twisty opens its bills', async () => {

@@ -48,8 +48,23 @@ describe('NeedsReviewList', () => {
     const onCleared = vi.fn()
     render(<MemoryRouter><NeedsReviewList side="AR" rows={[rows[1]]} error={null} onCleared={onCleared} /></MemoryRouter>)
     fireEvent.click(screen.getByRole('button', { name: 'Mark reviewed' }))
+    // The row button opens the dialog; the clear happens on its own Mark reviewed.
+    expect(financeAction).not.toHaveBeenCalled()
+    const buttons = await screen.findAllByRole('button', { name: 'Mark reviewed' })
+    fireEvent.click(buttons[buttons.length - 1])
     await waitFor(() => expect(onCleared).toHaveBeenCalled())
     expect(financeAction).toHaveBeenCalledWith('CLEAR_FINANCE_REVIEW', { shipmentId: 'shp-1' })
+  })
+
+  it('sends the note typed in the dialog and keeps the carrier note off the AR side', async () => {
+    financeAction.mockResolvedValue({ cleared: true })
+    render(<MemoryRouter><NeedsReviewList side="AR" rows={[{ ...rows[1], financeReviewApNote: 'Carrier billed 1,100' }]} error={null} onCleared={() => {}} /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: 'Mark reviewed' }))
+    expect(screen.queryByText(/Carrier billed 1,100/)).toBeNull()
+    fireEvent.change(await screen.findByLabelText('Note'), { target: { value: 'Checked: rate con matches' } })
+    const buttons = screen.getAllByRole('button', { name: 'Mark reviewed' })
+    fireEvent.click(buttons[buttons.length - 1])
+    await waitFor(() => expect(financeAction).toHaveBeenCalledWith('CLEAR_FINANCE_REVIEW', { shipmentId: 'shp-1', note: 'Checked: rate con matches' }))
   })
 
   it('adds a missing delivered date through SET_DELIVERED_DATE and refreshes', async () => {
