@@ -3948,3 +3948,70 @@ describe('APPROVE_BILL on a bill that carries no payee (the Aljex and AR-sheet i
     expect(approved.bill.docsOverrideNote).toBe('good to go')
   })
 })
+
+describe('bills whose assignment carries no invoiceId (Aljex carry-over bills)', () => {
+  /** The assignment of an imported bill was written with no link to the bill: the attribute is simply absent. */
+  function unlinkAssignment(): void {
+    const row = { ...table(TABLES.loadCarrier).get(LOAD_CARRIER_ID)! }
+    delete row.invoiceId
+    table(TABLES.loadCarrier).set(LOAD_CARRIER_ID, row)
+  }
+  const pay = (billId: unknown, cents: number): Promise<unknown> =>
+    call('RECORD_AP_PAYMENT', {
+      carrierId: CARRIER_ID, paidAt: '2026-11-18', method: 'ACH', reference: '11246315175', amountCents: cents,
+      applications: [{ billId, amountCents: cents }],
+    })
+
+  it('records the payment instead of "changed by someone else", and makes the link', async () => {
+    seedAssignment()
+    const bill = await recordBill({ approve: true })
+    unlinkAssignment()
+    expect((table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row).invoiceId).toBeUndefined()
+
+    await pay(bill.id, 180_000)
+
+    expect((table(TABLES.carrierBill).get(String(bill.id)) as Row).status).toBe('PAID')
+    const assignment = table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row
+    expect(assignment.apStatus).toBe('PAID')
+    expect(assignment.invoiceId).toBe(bill.id)
+  })
+
+  it('also takes the payment when the link is stored as an explicit NULL', async () => {
+    seedAssignment()
+    const bill = await recordBill({ approve: true })
+    table(TABLES.loadCarrier).set(LOAD_CARRIER_ID, { ...table(TABLES.loadCarrier).get(LOAD_CARRIER_ID)!, invoiceId: null })
+    await pay(bill.id, 180_000)
+    expect((table(TABLES.carrierBill).get(String(bill.id)) as Row).status).toBe('PAID')
+    expect((table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row).invoiceId).toBe(bill.id)
+  })
+
+  it('approves, sends back to review and voids a bill whose assignment has no link', async () => {
+    seedAssignment()
+    const bill = await recordBill({})
+    unlinkAssignment()
+    const approved = (await call('APPROVE_BILL', { billId: bill.id })) as { bill: Row }
+    expect(approved.bill.status).toBe('TO_BE_PAID')
+    expect((table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row).apStatus).toBe('TO_BE_PAID')
+    expect((table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row).invoiceId).toBe(bill.id)
+
+    unlinkAssignment()
+    await call('UNAPPROVE_BILL', { billId: bill.id, reason: 'wrong rate' })
+    expect((table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row).apStatus).toBe('IN_REVIEW')
+
+    unlinkAssignment()
+    await call('VOID_BILL', { billId: bill.id, reason: 'Entered against the wrong carrier' })
+    expect((table(TABLES.carrierBill).get(String(bill.id)) as Row).status).toBe('VOID')
+    expect((table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row).apStatus).toBe('AWAITING_INVOICE')
+  })
+
+  it('still refuses when the assignment now belongs to a different bill, and moves nothing', async () => {
+    seedAssignment()
+    const bill = await recordBill({ approve: true })
+    table(TABLES.loadCarrier).set(LOAD_CARRIER_ID, { ...table(TABLES.loadCarrier).get(LOAD_CARRIER_ID)!, invoiceId: 'cb:other:2' })
+    await expect(pay(bill.id, 180_000)).rejects.toThrow(/changed by someone else/)
+    expect((table(TABLES.carrierBill).get(String(bill.id)) as Row).status).toBe('TO_BE_PAID')
+    expect((table(TABLES.carrierBill).get(String(bill.id)) as Row).paidCents).toBe(0)
+    expect((table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row).invoiceId).toBe('cb:other:2')
+    expect(table(TABLES.apPayment).size).toBe(0)
+  })
+})

@@ -82,6 +82,7 @@ import {
   SETTINGS_ID,
   SETTINGS_TABLE_NAME,
   SHIPMENT_NOTICE_TABLE_NAME,
+  assignmentOwnedBy,
   dynamo,
   getById,
   getDivision,
@@ -315,6 +316,7 @@ async function apLedgerWrites(
         bill.loadCarrierId,
         {
           apStatus: settled ? 'PAID' : 'TO_BE_PAID',
+          invoiceId: planned.id,
           apBalanceCents: balanceCents,
           apStatusChangedAt: now,
           ...(settled ? { apPaidAt: now } : { apOpen: 'OPEN' }),
@@ -325,10 +327,10 @@ async function apLedgerWrites(
           // `apOpen` must LEAVE the row on PAID and come back when a reversal reopens
           // it; it is never written as null, which an index key refuses outright.
           remove: settled ? ['apOpen'] : direction === 'REVERSE' ? ['apPaidAt'] : [],
-          // The assignment is only moved if it still belongs to this bill: a void and
-          // re-record between the read and the write must not repaint the new one.
-          condition: 'invoiceId = :billId',
-          extraValues: { ':billId': { S: planned.id } },
+          // The assignment is only moved if it still belongs to this bill (or to none yet, as
+          // on Aljex carry-over bills): a void and re-record between the read and the write
+          // must not repaint the new one.
+          ...assignmentOwnedBy(planned.id),
         },
       ),
     )

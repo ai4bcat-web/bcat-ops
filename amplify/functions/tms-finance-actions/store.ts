@@ -387,6 +387,23 @@ export function unsetCondition(field: string): string {
   return `(attribute_not_exists(${field}) OR attribute_type(${field}, :nullType))`
 }
 
+/**
+ * The write condition for moving a bill's assignment (its LoadCarrier row) along with the bill:
+ * the assignment must still belong to THIS bill, or to no bill yet.
+ *
+ * Bills carried over from Aljex were written with no `LoadCarrier.invoiceId`, so a bare
+ * `invoiceId = :billId` refused every approve, payment, send-back and void on them with
+ * "changed by someone else": 62 of the 71 bills on To be paid on 2026-11-18. An assignment
+ * that already points at a DIFFERENT bill (void and re-record) is still refused. Callers also
+ * SET `invoiceId` in the same write, so the link is made the first time the bill moves.
+ */
+export function assignmentOwnedBy(billId: string): { condition: string; extraValues: Record<string, AttributeValue> } {
+  return {
+    condition: `(${unsetCondition('invoiceId')} OR invoiceId = :billId)`,
+    extraValues: { ':billId': { S: billId }, ':nullType': NULL_TYPE_VALUE },
+  }
+}
+
 /** Put a row that must not already exist. */
 export function putTx(tableName: string, item: Row): TransactWriteItem {
   return {
