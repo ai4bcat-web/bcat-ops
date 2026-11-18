@@ -21,11 +21,16 @@ function bill(patch: Partial<CarrierBillRecord> = {}): CarrierBillRecord {
 
 const facts = new Map([['s1', { shipmentNumber: '20027', po: 'FR-113188-3', deliveredAt: '2026-11-12T07:11:00Z', delivered: true }]])
 
-function draw(b: CarrierBillRecord, handlers: Partial<Record<'onChanged' | 'onAdjustPay' | 'onSetDates', () => void>> = {}) {
+function draw(
+  b: CarrierBillRecord,
+  handlers: Partial<Record<'onChanged' | 'onAdjustPay' | 'onSetDates' | 'onClearReview', () => void>> = {},
+  reviewFlag?: { financeReviewReason?: string | null; financeReviewApNote?: string | null },
+) {
   render(
     <MemoryRouter>
       <BillDrawer bill={b} facts={facts} infos={[]} onClose={vi.fn()} onChanged={handlers.onChanged ?? vi.fn()}
-        onAdjustPay={handlers.onAdjustPay ?? vi.fn()} onSetDates={handlers.onSetDates ?? vi.fn()} onPaymentInfo={vi.fn()} />
+        onAdjustPay={handlers.onAdjustPay ?? vi.fn()} onSetDates={handlers.onSetDates ?? vi.fn()} onPaymentInfo={vi.fn()}
+        reviewFlag={reviewFlag} onClearReview={handlers.onClearReview} />
     </MemoryRouter>,
   )
 }
@@ -43,6 +48,19 @@ describe('BillDrawer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Adjust carrier pay' }))
     expect(onSetDates).toHaveBeenCalled()
     expect(onAdjustPay).toHaveBeenCalled()
+  })
+
+  it('shows a Needs review flag with its reasons and a Mark reviewed button; no flag, no section', () => {
+    const onClearReview = vi.fn()
+    draw(bill(), { onClearReview }, { financeReviewReason: 'Rate differs', financeReviewApNote: 'Carrier billed 1,100' })
+    expect(screen.getByText('Rate differs · Carrier billed 1,100')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Mark reviewed' }))
+    expect(onClearReview).toHaveBeenCalledWith(expect.objectContaining({ id: 'b1' }))
+  })
+
+  it('has no Needs review section when the shipment is not flagged', () => {
+    draw(bill())
+    expect(screen.queryByRole('button', { name: 'Mark reviewed' })).toBeNull()
   })
 
   it('puts the bill on 2-day quick pay and shows each fee before the click', async () => {

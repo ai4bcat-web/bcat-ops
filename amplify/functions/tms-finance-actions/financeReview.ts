@@ -26,8 +26,12 @@ export async function clearFinanceReview(input: Row, caller: Caller): Promise<Ro
       condition: 'attribute_exists(id)',
     }),
   ], 'needs-review clear')
+  // The flag is gone from the shipment, so this entry is where it stays readable: what it said, when it was raised,
+  // and what the person who checked it wrote (the reviewer is the audit's own actor).
   await writeAudit('SHIPMENT', shipmentId, 'CLEAR_FINANCE_REVIEW', caller, {
     reason: shipment.financeReviewReason ?? null,
+    apNote: shipment.financeReviewApNote ?? null,
+    flaggedAt: shipment.financeReviewAt ?? null,
     note: note ?? null,
   })
   return { shipmentId, cleared: true }
