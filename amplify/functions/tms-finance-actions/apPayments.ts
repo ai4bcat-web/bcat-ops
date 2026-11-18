@@ -48,6 +48,7 @@ import {
   renderRemittanceTableEmail,
 } from '../../../src/lib/shipmentNotices'
 import { buildRemittancePdf, remittanceData, remittanceFilename } from '../../../src/lib/remittancePdf'
+import { normalizeCcList, remittanceCcFor } from '../../../src/lib/remittanceCc'
 import {
   effectivePayeeEmail,
   factorKeyOf,
@@ -885,7 +886,11 @@ export async function sendRemittance(input: Row, caller: Caller): Promise<Row> {
   const to = emailList(input.to, 'to').length > 0
     ? emailList(input.to, 'to')
     : remitRecipientsFor(context)
-  const cc = emailList(input.cc, 'cc')
+  // A manual send names its own copy list (the dialog pre-fills the standing one and may edit it);
+  // the automatic send names none, so it gets the standing list: billing@bcatcorp.com unless an admin changed it.
+  const cc = input.cc != null
+    ? normalizeCcList(emailList(input.cc, 'cc')).filter((email) => !to.some((t) => t.trim().toLowerCase() === email))
+    : remittanceCcFor(settings.remittanceCcEmails as string[] | null | undefined, to)
   const tableLayout = optionalString(input.layout, 16) === 'TABLE'
   if (to.length === 0 && !copyOnly) {
     throw new Error('Nobody is listed to receive this remittance; add an accounting contact or type an address')
@@ -954,6 +959,7 @@ export async function sendRemittance(input: Row, caller: Caller): Promise<Row> {
         ? {
             remittanceSentAt: now,
             remittanceSentTo: to.join(', '),
+            remittanceSentCc: cc.length > 0 ? cc.join(', ') : null,
             remittanceCount,
             lastNoticeId: noticeId,
           }

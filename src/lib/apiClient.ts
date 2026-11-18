@@ -1441,7 +1441,7 @@ const TMS_SETTINGS_V7_FIELDS = [
 // Step G's AP settings. Its own flag again, for the same reason.
 const TMS_SETTINGS_V8_FIELDS = [
   'apApprovalAdminOnly', 'apPostingAdminOnly', 'apRequireSignedRateCon',
-  'remittanceEmailTemplate', 'apBillDocsRequired',
+  'remittanceEmailTemplate', 'remittanceCcEmails', 'apBillDocsRequired',
 ]
 // Step H's quotes & rates settings. Its own flag again, for the same reason.
 const TMS_SETTINGS_V9_FIELDS = [
@@ -8158,7 +8158,7 @@ const AP_PAYMENT_FIELDS = `
   id carrierId payeeKind kind paidAt method reference
   amountCents appliedCents unappliedCents applications creditApplications remitTo
   loadCarrierId reversesPaymentId reversedByPaymentId
-  pdfKey pdfVersion remittanceSentAt remittanceSentTo remittanceCount remittanceAttempts
+  pdfKey pdfVersion remittanceSentAt remittanceSentTo remittanceSentCc remittanceCount remittanceAttempts
   markedSentAt markedSentBy markedSentNote lastNoticeId note
   createdBy createdAt updatedAt
 `

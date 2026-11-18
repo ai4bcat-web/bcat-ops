@@ -263,8 +263,14 @@ describe('renderRemittanceEmail', () => {
 
   it('lists what was actually put against each bill, not the bill net', () => {
     const { body } = remittance()
-    expect(body).toContain('  • BL-55012 — shipment BC-1001 — $2475.00')
-    expect(body).toContain('  • BC-1002-1 — shipment BC-1002 — $1450.00')
+    expect(body).toContain('  • BC-1001 — $2475.00')
+    expect(body).toContain('  • BC-1002 — $1450.00')
+  })
+
+  it('never prints the carrier invoice number', () => {
+    const { body } = remittance()
+    expect(body).not.toContain('BL-55012')
+    expect(body).not.toContain('BL-55013')
   })
 
   it('falls back to the default wording when the template cannot name the payment', () => {
@@ -348,11 +354,12 @@ describe('renderRemittanceTableEmail', () => {
     { id: 'b2', billNumber: null, billDate: '2026-10-20', shipmentNumber: '14611', loadNumber: null, netCents: 50_000 },
   ]
 
-  it('opens with the fixed line and tables PRO, invoice number, invoice date and what was paid, with a total', () => {
+  it('opens with the fixed line and tables PRO, invoice date and what was paid, with a total', () => {
     const mail = renderRemittanceTableEmail({ payment, bills, brokerName: 'BCAT Logistics' })
     expect(mail.body.startsWith('Please find remittance for the below shipments attached:\n')).toBe(true)
     expect(mail.body).toContain('14610')
-    expect(mail.body).toContain('INV-9')
+    expect(mail.body).not.toContain('INV-9')
+    expect(mail.body).not.toContain('Carrier invoice')
     expect(mail.body).toContain('2026-10-16')
     expect(mail.body).toContain('$1000.00')
     expect(mail.body).toMatch(/Total\s+\$1500\.00/)
@@ -368,8 +375,16 @@ describe('renderRemittanceTableEmail', () => {
     expect(mail.body.toLowerCase()).not.toMatch(/margin|customer|rate/)
   })
 
-  it('escapes what a carrier typed into an invoice number', () => {
-    const mail = renderRemittanceTableEmail({ payment, bills: [{ ...bills[0], billNumber: '<b>x</b>' }, bills[1]], brokerName: 'BCAT' })
+  it('prints the base PRO only, with no leg suffix and no carrier invoice number', () => {
+    const mail = renderRemittanceTableEmail({ payment, bills: [{ ...bills[0], billNumber: 'INV-9' }, bills[1]], brokerName: 'BCAT' })
+    expect(mail.body).toMatch(/^14610\s/m)
+    expect(mail.body).not.toMatch(/14610-\d/)
+    expect(mail.html).not.toContain('INV-9')
+    expect(mail.html).not.toContain('Carrier invoice')
+  })
+
+  it('escapes what is typed into a PRO', () => {
+    const mail = renderRemittanceTableEmail({ payment, bills: [{ ...bills[0], shipmentNumber: '<b>x</b>' }, bills[1]], brokerName: 'BCAT' })
     expect(mail.html).not.toContain('<b>x</b>')
     expect(mail.html).toContain('&lt;b&gt;')
   })

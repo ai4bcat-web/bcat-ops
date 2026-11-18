@@ -38,6 +38,7 @@ import {
   rebilledMoney,
 } from '../../../src/lib/carrierBill'
 import { apQuickPayOption } from '../../../src/lib/quickPay'
+import { isCcEmail } from '../../../src/lib/remittanceCc'
 import { evaluateDocGate } from '../../../src/lib/shipmentDocuments'
 import type { DocGateResult } from '../../../src/types/tms'
 import type {
@@ -1045,9 +1046,24 @@ export async function saveApSettings(input: Row, caller: Caller): Promise<Row> {
     : assertArrayOf<string>(input.apBillDocsRequired, 'apBillDocsRequired', (item, index) =>
         assertString(item, `apBillDocsRequired[${index}]`), 20)
 
+  // The copy list: omitted leaves it alone, [] copies nobody, anything else must be valid e-mail addresses.
+  let remittanceCc: string[] | null = null
+  if (input.remittanceCcEmails != null) {
+    const raw = assertArrayOf<string>(input.remittanceCcEmails, 'remittanceCcEmails', (item, index) =>
+      assertString(item, `remittanceCcEmails[${index}]`), 10)
+    remittanceCc = []
+    for (const entry of raw) {
+      const email = entry.trim().toLowerCase()
+      if (!email) continue
+      if (!isCcEmail(email)) throw new Error(`"${entry}" is not a valid e-mail address`)
+      if (!remittanceCc.includes(email)) remittanceCc.push(email)
+    }
+  }
+
   const now = nowIso()
   const patch: Row = { __typename: 'TmsSettings', updatedAt: now, updatedBy: caller.email }
   if (template) patch.remittanceEmailTemplate = template
+  if (remittanceCc) patch.remittanceCcEmails = remittanceCc
   if (docsRequired) patch.apBillDocsRequired = docsRequired
   const approvalAdminOnly = optionalBoolean(input.apApprovalAdminOnly)
   if (approvalAdminOnly != null) patch.apApprovalAdminOnly = approvalAdminOnly

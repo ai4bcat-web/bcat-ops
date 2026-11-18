@@ -363,6 +363,7 @@ export interface BillPaymentLine {
   remittanceAttempts?: number
   remittanceSentAt?: string | null
   remittanceSentTo?: string | null
+  remittanceSentCc?: string | null
   markedSentAt?: string | null
 }
 
@@ -381,6 +382,7 @@ export function billPaymentLines(payments: readonly ApPaymentRecord[]): Map<stri
         remittanceAttempts: p.remittanceAttempts ?? 0,
         remittanceSentAt: p.remittanceSentAt ?? null,
         remittanceSentTo: p.remittanceSentTo ?? null,
+        remittanceSentCc: p.remittanceSentCc ?? null,
         markedSentAt: p.markedSentAt ?? null,
       })
     }

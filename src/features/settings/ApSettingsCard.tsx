@@ -17,10 +17,11 @@
 import { useEffect, useState } from 'react'
 import { Banknote, Save } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsButton, TmsField, TmsTextarea } from '@/features/tms/kit'
+import { TmsButton, TmsField, TmsInput, TmsTextarea } from '@/features/tms/kit'
 import { DocumentTypesField } from '@/features/documents/DocumentTypesField'
 import { getTmsSettings, saveApSettings } from '@/lib/apiClient'
 import { CARRIER_UPLOADABLE_TYPES } from '@/lib/shipmentDocuments'
+import { DEFAULT_REMITTANCE_CC, isCcEmail } from '@/lib/remittanceCc'
 import { DEFAULT_REMITTANCE_EMAIL_TEMPLATE, templateHasReference } from '@/lib/shipmentNotices'
 import type { TmsSettings } from '@/types/tms'
 import { CheckRow, ErrorText, Hint, Loading, SettingsCard, Stack } from './settingsKit'
@@ -32,6 +33,8 @@ export function ApSettingsCard() {
   const [requireSignedRateCon, setRequireSignedRateCon] = useState(true)
   const [billDocs, setBillDocs] = useState<string[]>([])
   const [remittanceTemplate, setRemittanceTemplate] = useState('')
+  // Who is copied on every remittance e-mail, comma separated. Blank copies nobody.
+  const [remittanceCc, setRemittanceCc] = useState(DEFAULT_REMITTANCE_CC.join(', '))
   const [error, setError] = useState<string | null>(null)
 
   // State is written only inside the promise chain (react-hooks/set-state-in-effect).
@@ -42,6 +45,7 @@ export function ApSettingsCard() {
         setRequireSignedRateCon(s?.apRequireSignedRateCon !== false)
         setBillDocs(s?.apBillDocsRequired ?? [])
         setRemittanceTemplate(s?.remittanceEmailTemplate ?? '')
+        setRemittanceCc((s?.remittanceCcEmails ?? DEFAULT_REMITTANCE_CC).join(', '))
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Could not load settings'))
       .finally(() => setLoading(false))
@@ -55,9 +59,17 @@ export function ApSettingsCard() {
       return
     }
 
+    const ccList = remittanceCc.split(/[,;\s]+/).map((e) => e.trim().toLowerCase()).filter(Boolean)
+    const badCc = ccList.find((e) => !isCcEmail(e))
+    if (badCc) {
+      setError(`"${badCc}" is not a valid e-mail address for the remittance copy`)
+      return
+    }
+
     setSaving(true)
     try {
       await saveApSettings({
+        remittanceCcEmails: [...new Set(ccList)],
         apRequireSignedRateCon: requireSignedRateCon,
         // Nothing ticked means "whatever the carrier upload link asks for", not "nothing".
         apBillDocsRequired: billDocs.length > 0 ? billDocs : null,
@@ -107,6 +119,18 @@ export function ApSettingsCard() {
               value={remittanceTemplate}
               onChange={(e) => setRemittanceTemplate(e.target.value)}
               placeholder={DEFAULT_REMITTANCE_EMAIL_TEMPLATE}
+            />
+          </TmsField>
+
+          <TmsField
+            label="Copy every remittance to"
+            hint="Added as a copy on every remittance e-mail, automatic or sent by hand. Separate addresses with commas. Leave blank to copy nobody."
+          >
+            <TmsInput
+              aria-label="Copy every remittance to"
+              value={remittanceCc}
+              onChange={(e) => setRemittanceCc(e.target.value)}
+              placeholder="billing@bcatcorp.com"
             />
           </TmsField>
 

@@ -2816,8 +2816,8 @@ describe('automatic remittance on payment', () => {
     ...over,
   })
   const rawOf = (callIndex = 0) => {
-    const input = sesSend.mock.calls[callIndex][0] as { input: { Content: { Raw: { Data: Uint8Array } }; Destination: { ToAddresses: string[] } } }
-    return { raw: new TextDecoder().decode(input.input.Content.Raw.Data), to: input.input.Destination.ToAddresses }
+    const input = sesSend.mock.calls[callIndex][0] as { input: { Content: { Raw: { Data: Uint8Array } }; Destination: { ToAddresses: string[]; CcAddresses?: string[] } } }
+    return { raw: new TextDecoder().decode(input.input.Content.Raw.Data), to: input.input.Destination.ToAddresses, cc: input.input.Destination.CcAddresses }
   }
 
   it('e-mails the payee once, with the table in the body and the advice attached, and stamps the payment', async () => {
@@ -2829,14 +2829,49 @@ describe('automatic remittance on payment', () => {
     }))) as { payment: Row }
 
     expect(sesSend).toHaveBeenCalledTimes(1)
-    const { raw, to } = rawOf()
+    const { raw, to, cc } = rawOf()
     expect(to).toEqual(['remit@wheeler.test'])
+    // billing@bcatcorp.com is copied on every remittance unless an admin saved a different list.
+    expect(cc).toEqual(['billing@bcatcorp.com'])
     expect(raw).toContain('multipart/alternative')
     expect(raw).toContain('application/pdf')
     const row = table(TABLES.apPayment).get(String(paid.payment.id)) as Row
     expect(row.remittanceSentAt).toBeTruthy()
     expect(row.remittanceSentTo).toBe('remit@wheeler.test')
+    expect(row.remittanceSentCc).toBe('billing@bcatcorp.com')
     expect(row.remittanceCount).toBe(1)
+  })
+
+  it('copies the saved list instead when an admin changed it', async () => {
+    seedAssignment()
+    const bill = await recordBill({ approve: true })
+    await call('SAVE_AP_SETTINGS', { remittanceCcEmails: [' Owner@bcatcorp.com ', 'ap@bcatcorp.com'] })
+    await call('RECORD_AP_PAYMENT', payBody({ amountCents: 180_000, applications: [{ billId: bill.id, amountCents: 180_000 }] }))
+    expect(rawOf().cc).toEqual(['owner@bcatcorp.com', 'ap@bcatcorp.com'])
+  })
+
+  it('copies nobody when the saved list is empty', async () => {
+    seedAssignment()
+    const bill = await recordBill({ approve: true })
+    await call('SAVE_AP_SETTINGS', { remittanceCcEmails: [] })
+    await call('RECORD_AP_PAYMENT', payBody({ amountCents: 180_000, applications: [{ billId: bill.id, amountCents: 180_000 }] }))
+    expect(rawOf().cc).toBeUndefined()
+  })
+
+  it('refuses a copy list with something that is not an e-mail address', async () => {
+    await expect(call('SAVE_AP_SETTINGS', { remittanceCcEmails: ['not-an-email'] })).rejects.toThrow(/valid e-mail/i)
+  })
+
+  it('a manual send uses the copy list it was given, and does not copy the payee twice', async () => {
+    vi.stubEnv('AP_AUTO_REMITTANCE', 'off')
+    seedAssignment()
+    const bill = await recordBill({ approve: true })
+    const paid = (await call('RECORD_AP_PAYMENT', payBody({ amountCents: 180_000, applications: [{ billId: bill.id, amountCents: 180_000 }] }))) as { payment: Row }
+    await call('SEND_REMITTANCE', { paymentId: paid.payment.id, cc: ['billing@bcatcorp.com', 'remit@wheeler.test'] })
+    expect(rawOf().cc).toEqual(['billing@bcatcorp.com'])
+    sesSend.mockClear()
+    await call('SEND_REMITTANCE', { paymentId: paid.payment.id, cc: [] })
+    expect(rawOf().cc).toBeUndefined()
   })
 
   it('does not send again when the same payment is posted twice', async () => {

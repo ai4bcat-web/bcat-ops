@@ -370,12 +370,13 @@ export function remittanceStatusOf(
     remittanceAttempts?: number
     remittanceSentAt?: string | null
     remittanceSentTo?: string | null
+    remittanceSentCc?: string | null
     markedSentAt?: string | null
   } | undefined,
   remitEmail: string,
 ): RemittanceStatus {
   if (line?.remittanceSentAt) {
-    return { label: `Emailed ${line.remittanceSentAt.slice(0, 10)}`, tone: 'green', needsEmail: false, title: line.remittanceSentTo ? `Sent to ${line.remittanceSentTo}` : undefined }
+    return { label: `Emailed ${line.remittanceSentAt.slice(0, 10)}`, tone: 'green', needsEmail: false, title: line.remittanceSentTo ? `Sent to ${line.remittanceSentTo}${line.remittanceSentCc ? ` · cc ${line.remittanceSentCc}` : ''}` : undefined }
   }
   if (line?.markedSentAt) return { label: `Marked sent ${line.markedSentAt.slice(0, 10)}`, tone: 'gray', needsEmail: false }
   if ((line?.remittanceAttempts ?? 0) > 0) {

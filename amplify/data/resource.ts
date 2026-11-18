@@ -1255,6 +1255,7 @@ const schema = a.schema(stageTypes({
       apPostingAdminOnly:       a.boolean(),     // true — payment/credit/reversal/void
       apRequireSignedRateCon:   a.boolean(),     // true — unsigned blocks approval
       remittanceEmailTemplate:  a.string(),      // must contain {reference}
+      remittanceCcEmails:       a.string().array(), // copied on every remittance e-mail; unset = billing@bcatcorp.com, [] = nobody
       apBillDocsRequired:       a.string().array(), // defaults to requiredCarrierUploadTypes
 
       // ── Quotes & rates org defaults (Step H) ──────────────────────────────
@@ -2672,6 +2673,7 @@ const schema = a.schema(stageTypes({
       pdfVersion:      a.integer(),
       remittanceSentAt: a.datetime(),
       remittanceSentTo: a.string(),            // comma-joined
+      remittanceSentCc: a.string(),            // comma-joined; who was copied on that send
       remittanceCount: a.integer(),
       markedSentAt:    a.datetime(),
       markedSentBy:    a.string(),
