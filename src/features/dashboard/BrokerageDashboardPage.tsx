@@ -49,7 +49,6 @@ export function BrokerageSection() {
     () => (data.state === 'ready' ? brokerageInsights(byMonth, repReady ? brokerageMatrix.reps : [], brokerageMatrix.grand, current) : []),
     [data.state, byMonth, repReady, brokerageMatrix, current],
   )
-  const rangeLabel = `${range.from <= FIRST_MONTH ? 'Since' : 'Last'} ${preset.label.toLowerCase()}`.replace('Last year to date', 'Year to date')
 
   return (
     <section aria-label="Brokerage" data-testid="brokerage-section">
@@ -89,6 +88,7 @@ export function BrokerageSection() {
                   <li><b>Month:</b> the month a load was delivered: the actual time at its last delivery stop (read in Chicago time), else its delivered date, else its delivery appointment. The lane history uses the same date. A load is counted once it is delivered and priced.</li>
                   <li><b>Revenue:</b> what the customer is charged for the load (the sum of its customer charge lines: line haul, fuel and accessorials), the same figure the TMS revenue and margin cards use.</li>
                   <li><b>Expense:</b> what the carrier charges us for the load (the sum of its carrier charge lines: carrier rate and carrier accessorials), the same cost those margin cards use.</li>
+                  <li><b>The five cards at the top:</b> the month in progress, to date, with last month in full beside each. They do not change with the 3 / 6 / 12 months / Year to date buttons; those set the chart, the takeaways and the table below.</li>
                   <li><b>Profit</b> = revenue − expense. <b>Profit margin</b> = profit ÷ revenue; a month or rep with no revenue shows a dash.</li>
                   <li><b>By sales rep:</b> the rep on the load or shipment (profile name, group reps such as Ivan Cartage, BCAT and Owner Operators as their own rows, or the typed rep name when there is no login). Loads with no rep are the &quot;No sales rep&quot; row, so the rep total equals the month total. The Division switch re-cuts the same loads by revenue division (Brokerage includes anything under it).</li>
                   <li><b>Table at the bottom:</b> every rep by month, with the change from the month before. The month in progress is shown to date with no change. Expenses are never colored as good or bad.</li>
@@ -115,7 +115,7 @@ export function BrokerageSection() {
 
         {data.state !== 'unavailable' && data.state !== 'error' && (
           <>
-            <BrokerageOverview rows={byMonth} current={current} loading={data.state === 'loading'} insights={insights} rangeLabel={rangeLabel} />
+            <BrokerageOverview rows={byMonth} current={current} loading={data.state === 'loading'} insights={insights} />
 
             <section aria-label="By sales rep" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Who earns what</h3>

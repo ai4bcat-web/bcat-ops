@@ -1,10 +1,10 @@
 import { useMemo } from 'react'
 import { Bar, BarChart, CartesianGrid, Legend, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Lightbulb } from 'lucide-react'
-import { totalsOf, type MonthMeasures } from '@/lib/brokerageRevenue'
+import type { MonthMeasures } from '@/lib/brokerageRevenue'
 import { useIsMobile } from '@/hooks/useIsMobile'
-import { money0, moneyCompact, moneyK, netColor, pct } from './brokerageFormat'
-import { monthShort, type Insight } from './brokerageInsights'
+import { money0, moneyCompact, moneyK, netColor, pct, previousMonth } from './brokerageFormat'
+import { monthName, monthShort, type Insight } from './brokerageInsights'
 
 const TONE: Record<Insight['tone'], string> = { good: 'var(--tms-badge-green)', watch: 'var(--tms-badge-orange)', neutral: 'var(--tms-chart-9)' }
 
@@ -19,19 +19,20 @@ function Kpi({ label, value, caption, color, testId }: { label: string; value: s
 }
 
 /**
- * The Brokerage headline: five figures for the chosen range (revenue, expenses, profit, margin, loads), one revenue-expenses-profit chart by month, and a few
- * plain-English takeaways. Everything finer (rep by month, every figure) sits behind the table at the bottom.
+ * The Brokerage headline: five figures for the month in progress, to date (revenue, expenses, profit, margin, loads), each with last month in full
+ * beside it; one revenue-expenses-profit chart by month for the chosen range; and a few plain-English takeaways. The range picker drives the chart and
+ * the takeaways, never the headline figures. Everything finer (rep by month, every figure) sits behind the table at the bottom.
  */
-export function BrokerageOverview({ rows, current, loading, insights, rangeLabel }: {
+export function BrokerageOverview({ rows, current, loading, insights }: {
   rows: MonthMeasures[]
   current: string
   loading: boolean
   insights: Insight[]
-  rangeLabel: string
 }) {
   const isMobile = useIsMobile()
-  const totals = useMemo(() => totalsOf(rows), [rows])
   const now = rows.find((r) => r.month === current)
+  const last = rows.find((r) => r.month === previousMonth(current))
+  const mtd = now ?? { month: current, loads: 0, revenueCents: 0, expenseCents: 0, profitCents: 0, marginBps: null }
   const data = useMemo(() => rows.map((r) => ({
     month: monthShort(r.month) + (r.month === current ? ' · to date' : ''),
     revenue: r.revenueCents / 100,
@@ -39,16 +40,18 @@ export function BrokerageOverview({ rows, current, loading, insights, rangeLabel
     profit: r.profitCents / 100,
   })), [rows, current])
   const dash = loading ? '…' : undefined
-  const thisMonth = (cents: number | undefined) => (now && cents !== undefined ? `${moneyCompact(cents)} so far this month` : rangeLabel)
+  const eyebrow = `${monthName(current)} to date`
+  // Last month in full, so the month in progress has something to be read against (it is not the same days, and says so).
+  const lastFull = (text: string | undefined) => (last && text !== undefined ? `${monthName(last.month)} in full: ${text}` : `${monthShort(current)}, delivered so far`)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(5, minmax(0, 1fr))', gap: 14 }}>
-        <Kpi testId="brokerage-total-revenue" label="Revenue" value={dash ?? money0(totals.revenueCents)} caption={thisMonth(now?.revenueCents)} />
-        <Kpi testId="brokerage-total-expenses" label="Expenses" value={dash ?? money0(totals.expenseCents)} caption={thisMonth(now?.expenseCents)} />
-        <Kpi testId="brokerage-total-profit" label="Profit" value={dash ?? money0(totals.profitCents)} color={netColor(totals.profitCents)} caption={thisMonth(now?.profitCents)} />
-        <Kpi testId="brokerage-total-profit-pct" label="Profit margin" value={dash ?? pct(totals.marginBps)} color={netColor(totals.profitCents)} caption="Profit ÷ revenue" />
-        <Kpi testId="brokerage-total-loads" label="Loads delivered" value={dash ?? String(totals.loads)} caption={now ? `${now.loads} so far this month` : rangeLabel} />
+        <Kpi testId="brokerage-total-revenue" label={`Revenue · ${eyebrow}`} value={dash ?? money0(mtd.revenueCents)} caption={lastFull(last && moneyCompact(last.revenueCents))} />
+        <Kpi testId="brokerage-total-expenses" label={`Expenses · ${eyebrow}`} value={dash ?? money0(mtd.expenseCents)} caption={lastFull(last && moneyCompact(last.expenseCents))} />
+        <Kpi testId="brokerage-total-profit" label={`Profit · ${eyebrow}`} value={dash ?? money0(mtd.profitCents)} color={netColor(mtd.profitCents)} caption={lastFull(last && moneyCompact(last.profitCents))} />
+        <Kpi testId="brokerage-total-profit-pct" label={`Profit margin · ${eyebrow}`} value={dash ?? pct(mtd.marginBps)} color={netColor(mtd.profitCents)} caption={last ? lastFull(pct(last.marginBps)) : 'Profit ÷ revenue'} />
+        <Kpi testId="brokerage-total-loads" label={`Loads delivered · ${eyebrow}`} value={dash ?? String(mtd.loads)} caption={lastFull(last && String(last.loads))} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 2fr) minmax(0, 1fr)', gap: 14, alignItems: 'stretch' }}>
