@@ -1,10 +1,10 @@
 /**
- * The shipment facts the Payables rows need (PRO, PO, delivery), read by id for the bills on hand:
+ * The shipment facts the Payables rows need (PRO, customer ref, delivery), read by id for the bills on hand:
  * the shipments through `loadWorklistShipments` and their orders in one batched index read, never a
  * full board read. Re-read when the set of shipments changes, not on every poll of the bills.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { listOrdersByShipmentIds } from '@/lib/apiClient'
+import { listLoadsByShipmentIds, listOrdersByShipmentIds } from '@/lib/apiClient'
 import { loadWorklistShipments } from '@/lib/worklistShipments'
 import { billFactsIndex, type BillShipmentFacts } from './apQueue'
 import type { CarrierBillRecord } from '@/types/tms'
@@ -17,8 +17,10 @@ export function useBillFacts(bills: readonly CarrierBillRecord[]): { facts: Map<
     if (!key) return
     let alive = true
     const ids = key.split(',')
-    Promise.all([loadWorklistShipments(ids), listOrdersByShipmentIds(ids)])
-      .then(([shipments, orders]) => { if (alive) setState({ key, facts: billFactsIndex(shipments, orders) }) })
+    // The loads only supply the Customer Ref's last-resort `tmsId`; a failed read leaves the reference to the order.
+    const loadsRead = listLoadsByShipmentIds(ids).catch(() => [])
+    Promise.all([loadWorklistShipments(ids), listOrdersByShipmentIds(ids), loadsRead])
+      .then(([shipments, orders, loads]) => { if (alive) setState({ key, facts: billFactsIndex(shipments, orders, loads) }) })
       .catch(() => { if (alive) setState((prev) => ({ ...prev, key })) })
     return () => { alive = false }
   }, [key])

@@ -92,14 +92,14 @@ export function ApReportDialog({ kind, bills, facts, infos, asOf, onKind, onClos
           <table className="ap-report-table w-full text-xs tabular-nums">
             <thead>
               <tr>
-                <th>PRO</th><th>PO</th><th>Carrier</th><th>Pay to</th><th>Invoice date</th><th>Due</th>
+                <th>PRO</th><th>Customer ref #</th><th>Carrier</th><th>Pay to</th><th>Invoice date</th><th>Due</th>
                 <th className="text-right">Carrier pay</th><th className="text-right">QP fee</th><th className="text-right">Net</th><th className="text-right">Balance</th><th className="text-right">Days</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.billId}>
-                  <td>{r.pro}</td><td>{r.po || '—'}</td><td>{r.carrier}</td><td>{r.payTo}</td>
+                  <td>{r.pro}</td><td>{r.customerRef || '—'}</td><td>{r.carrier}</td><td>{r.payTo}</td>
                   <td>{r.invoiceDate ? formatDay(r.invoiceDate) : 'Pending'}</td>
                   <td>{r.dueAt ? `${r.dueEstimated ? '~' : ''}${formatDay(r.dueAt)}` : '—'}</td>
                   <td className="text-right">{formatCents(r.grossCents)}</td>

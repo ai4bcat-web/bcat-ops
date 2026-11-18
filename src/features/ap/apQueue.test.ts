@@ -15,7 +15,7 @@ function bill(patch: Partial<CarrierBillRecord> = {}): CarrierBillRecord {
   }
 }
 
-const delivered: BillShipmentFacts = { shipmentNumber: '20027', po: 'FR-113188-3', deliveredAt: '2026-11-12T07:11:00Z', delivered: true }
+const delivered: BillShipmentFacts = { shipmentNumber: '20027', customerRef: 'FR-113188-3', deliveredAt: '2026-11-12T07:11:00Z', delivered: true }
 
 describe('payablesQueue', () => {
   it('keeps delivered loads from the Load review flow, holds Aljex bills behind the toggle, and drops undelivered and unread ones', () => {
@@ -37,10 +37,25 @@ describe('payablesQueue', () => {
 })
 
 describe('billFactsIndex', () => {
-  it('reads the PO off the order and delivery off the shipment', () => {
+  it('reads the customer ref off the order and delivery off the shipment', () => {
     const shipments = [{ id: 's1', number: '20027', status: 'DELIVERED', deliveredAt: null } as unknown as ShipmentRecord]
     const orders = [{ id: 'o1', shipmentId: 's1', references: [{ code: 'PO', value: ' FR-1 ' }] } as unknown as OrderRecord]
-    expect(billFactsIndex(shipments, orders).get('s1')).toEqual({ shipmentNumber: '20027', po: 'FR-1', deliveredAt: null, delivered: true, revDivision: null, revSubdivision: null, customerName: null })
+    expect(billFactsIndex(shipments, orders).get('s1')).toEqual({ shipmentNumber: '20027', customerRef: 'FR-1', deliveredAt: null, delivered: true, revDivision: null, revSubdivision: null, customerName: null })
+  })
+
+  it('reads the customer ref the way every other page does: PO, then the Aljex customer ref, then the load tmsId', () => {
+    const shipments = ['s1', 's2', 's3', 's4'].map((id) => ({ id, number: id, status: 'DELIVERED' }) as unknown as ShipmentRecord)
+    const orders = [
+      { id: 'o1', shipmentId: 's1', references: [{ code: 'CUSTOMER_REF', value: 'HLBU3875551' }, { code: 'PO', value: 'FR-112579-1' }] },
+      { id: 'o2', shipmentId: 's2', references: [{ code: 'CUSTOMER_REF', value: 'TCNU3502224' }] },
+      { id: 'o3', shipmentId: 's3', references: [{ code: 'PO', value: 'INTERNAL-ONLY', visibility: 'INTERNAL' }] },
+    ] as unknown as OrderRecord[]
+    const loads = [{ shipmentId: 's3', tmsId: 'CMAU0913560' }, { shipmentId: 's4', tmsId: null }]
+    const facts = billFactsIndex(shipments, orders, loads)
+    expect(facts.get('s1')?.customerRef).toBe('FR-112579-1')
+    expect(facts.get('s2')?.customerRef).toBe('TCNU3502224')
+    expect(facts.get('s3')?.customerRef).toBe('CMAU0913560')
+    expect(facts.get('s4')?.customerRef).toBeNull()
   })
 
   it('names the customer from the shipment, else its order, and bills read it by shipment', () => {
@@ -93,7 +108,7 @@ describe('reports', () => {
   it('estimates the due date of a bill still waiting on its invoice date from delivery + terms', () => {
     expect(estimatedDueAt(bill({ datesPending: true }), facts)).toBe('2026-12-03')
     const [row] = apReportRows([bill({ datesPending: true })], facts, [], '2026-11-12')
-    expect(row).toMatchObject({ invoiceDate: null, dueAt: '2026-12-03', dueEstimated: true, daysAging: null, po: 'FR-113188-3' })
+    expect(row).toMatchObject({ invoiceDate: null, dueAt: '2026-12-03', dueEstimated: true, daysAging: null, customerRef: 'FR-113188-3' })
   })
 
   it('totals by carrier and in all, and writes a CSV with both', () => {
