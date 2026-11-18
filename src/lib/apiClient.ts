@@ -8414,6 +8414,12 @@ export async function voidBill(input: { billId: string; reason: string }): Promi
   return financeAction<{ bill: CarrierBillRecord }>('VOID_BILL', input)
 }
 
+/** Delete a payable: coded reason plus optional detail; the shipment's history records who did it. */
+export type BillDeleteReason = 'DUPLICATE' | 'WRONG_CARRIER' | 'LOAD_CANCELLED' | 'ENTERED_IN_ERROR' | 'OTHER'
+export async function deleteBill(input: { billId: string; reasonCode: BillDeleteReason; reason?: string }): Promise<{ bill: CarrierBillRecord }> {
+  return financeAction<{ bill: CarrierBillRecord }>('DELETE_BILL', input)
+}
+
 /** The carrier invoice's own dates (and number) for a bill still in review; clears `datesPending`. */
 export async function setBillDates(input: {
   billId: string

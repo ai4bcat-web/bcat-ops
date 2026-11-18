@@ -28,7 +28,7 @@ import { useCarriers } from '@/hooks/useCarriers'
 import { exportOutstandingPayables } from '@/lib/opsExports'
 import {
   getFactorRemitEmails, getShipmentDocumentUrl, getTmsSettings, graphqlErrorText, listBillsByMonth, listCarrierPaymentInfo, reverseApPayment,
-  returnBillToExpected, selectBillsForPayment, unapproveBill, unselectBills, voidBill, type CarrierPaymentInfo, type FinanceReviewShipment,
+  returnBillToExpected, selectBillsForPayment, unapproveBill, unselectBills, deleteBill, type BillDeleteReason, type CarrierPaymentInfo, type FinanceReviewShipment,
 } from '@/lib/apiClient'
 import {
   AGING_BUCKETS, AGING_BUCKET_LABEL, apAgingCsv, type AgingPartySummary,
@@ -67,6 +67,7 @@ import { SendRemittanceDialog } from './components/SendRemittanceDialog'
 import { SetBillDatesDialog } from './components/SetBillDatesDialog'
 import { UpdateCarrierChargesDialog } from './components/UpdateCarrierChargesDialog'
 import { BillDrawer } from './components/BillDrawer'
+import { DeleteBillDialog } from './components/DeleteBillDialog'
 import { ApReportDialog } from './components/ApReportDialogs'
 import { ApAgingReportTable } from './components/ApAgingReportTable'
 import { CashRequirementsTab } from './components/CashRequirementsTab'
@@ -133,7 +134,7 @@ type ApDialog =
   | { kind: 'pay'; carrierId: string; billIds?: string[] }
   | { kind: 'credit'; carrierId: string }
   | { kind: 'remittance'; payment: ApPaymentRecord }
-  | { kind: 'void'; bill: CarrierBillRecord }
+  | { kind: 'delete'; bill: CarrierBillRecord }
   | { kind: 'unapprove'; bill: CarrierBillRecord }
   | { kind: 'reverse'; payment: ApPaymentRecord }
   | { kind: 'payinfo'; bill: CarrierBillRecord }
@@ -413,14 +414,14 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       .finally(() => setBusy(false))
   }
 
-  const runVoid = (bill: CarrierBillRecord, reason: string) => {
+  const runDelete = (bill: CarrierBillRecord, reasonCode: BillDeleteReason, detail: string) => {
     setBusy(true)
-    voidBill({ billId: bill.id, reason })
+    deleteBill({ billId: bill.id, reasonCode, ...(detail ? { reason: detail } : {}) })
       .then(() => {
-        toast.success(`Bill ${bill.billNumber ?? bill.id} voided`)
+        toast.success(`Bill ${bill.billNumber ?? bill.id} deleted`)
         closeAndRefresh()
       })
-      .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not void the bill'))
+      .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not delete the bill'))
       .finally(() => setBusy(false))
   }
 
@@ -582,6 +583,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onAddRemit: addRemitFor,
       onPayTo: payToFor,
       onClearReview: (bill) => setDialog({ kind: 'clear-review', shipmentId: bill.shipmentId }),
+      onDelete: (bill) => setDialog({ kind: 'delete', bill }),
     })
     : tab === 'aging' || tab === 'selected' ? payableView({
       mode: tab,
@@ -615,7 +617,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onApprove: (bill) => setDialog({ kind: 'approve', bill }),
       onDates: (bill) => setDialog({ kind: 'dates', bill }),
       onCharges: chargesFor,
-      onVoid: (bill) => setDialog({ kind: 'void', bill }),
+      onDelete: (bill) => setDialog({ kind: 'delete', bill }),
       onUnapprove: (bill) => setDialog({ kind: 'unapprove', bill }),
       onSelectForPayment: runSelect,
       onUnselect: runUnselect,
@@ -876,15 +878,12 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           onDone={closeAndRefresh}
         />
       )}
-      {dialog?.kind === 'void' && (
-        <ReasonDialog
-          title={`Void bill ${dialog.bill.billNumber ?? dialog.bill.id}`}
-          description="Voiding releases the assignment for a fresh bill and leaves this one on the record. It cannot be undone."
-          label="Why it is being voided"
-          confirmLabel="Void bill"
+      {dialog?.kind === 'delete' && (
+        <DeleteBillDialog
+          title={`Delete bill ${dialog.bill.billNumber ?? dialog.bill.id}`}
           busy={busy}
           onClose={() => setDialog(null)}
-          onConfirm={(reason) => runVoid(dialog.bill, reason)}
+          onConfirm={(code, detail) => runDelete(dialog.bill, code, detail)}
         />
       )}
       {dialog?.kind === 'remit-email' && (
@@ -961,6 +960,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           reviewFlag={reviewByShipment.get(drawerBill.shipmentId)}
           onClearReview={(bill) => setDialog({ kind: 'clear-review', shipmentId: bill.shipmentId })}
           onPaymentInfo={(bill) => setDialog({ kind: 'payinfo', bill })}
+          onDelete={(bill) => setDialog({ kind: 'delete', bill })}
         />
       )}
       {reportsOpen && <AccountingReportsDialog side="AP" asOf={asOf} initialKind={reportsOpen === 'menu' ? null : reportsOpen} onClose={() => setReportsOpen(null)} />}
@@ -1333,7 +1333,7 @@ function awaitingView({ banner, rows, shared, busy, onRecord }: {
 /* ── In review ───────────────────────────────────────────────────────────── */
 
 function reviewView({
-  banner, bills, review, facts, onOpen, shared, busy, onDates, infos, onAddRemit, onPayTo, onClearReview, asOf,
+  banner, bills, review, facts, onOpen, shared, busy, onDates, infos, onAddRemit, onPayTo, onClearReview, onDelete, asOf,
 }: {
   banner: ReactNode
   asOf: string
@@ -1349,6 +1349,7 @@ function reviewView({
   onAddRemit: (bill: CarrierBillRecord) => void
   onPayTo: (bill: CarrierBillRecord) => void
   onClearReview: (bill: CarrierBillRecord) => void
+  onDelete: (bill: CarrierBillRecord) => void
 }): ListView {
   const pendingDates = (bill: CarrierBillRecord) => bill.datesPending === true
   const flagOf = (bill: CarrierBillRecord) => review.get(bill.shipmentId)
@@ -1395,7 +1396,7 @@ function reviewView({
       key: 'actions',
       header: '',
       text: () => '',
-      width: 290,
+      width: 360,
       ...ACTIONS,
       render: (bill) => (
         <span className="inline-flex items-center gap-3 whitespace-nowrap">
@@ -1419,6 +1420,15 @@ function reviewView({
               Mark reviewed
             </button>
           )}
+          <button
+            type="button"
+            className="tms-link whitespace-nowrap"
+            aria-label={`Delete bill ${bill.billNumber ?? bill.id}`}
+            disabled={busy}
+            onClick={(event) => { event.stopPropagation(); onDelete(bill) }}
+          >
+            Delete
+          </button>
         </span>
       ),
     },
@@ -1426,7 +1436,7 @@ function reviewView({
 
   return view<CarrierBillRecord>({
     // v4: Customer and Days past due were added (2026-11-18); v3 added Remit to. A saved column layout from an older grid must not hide them.
-    gridId: 'ap-expected-v4',
+    gridId: 'ap-expected-v5',
     cardLayout: { title: 'pro', party: 'carrier', amount: 'amount', pills: ['status'] },
     banner,
     columns,
@@ -1456,7 +1466,7 @@ function reviewView({
  */
 function payableView({
   mode, errorBanner, facts, onOpen, bills, allBills, shared, infos, review, gatesOf, filters, showFilters, selected, asOf, busy,
-  onToggleFilters, onFilters, onSelect, onInfo, onPay, onPaySelected, onApprove, onDates, onCharges, onVoid, onUnapprove,
+  onToggleFilters, onFilters, onSelect, onInfo, onPay, onPaySelected, onApprove, onDates, onCharges, onDelete, onUnapprove,
   onSelectForPayment, onUnselect, onReturnToExpected, onMoveToSelected, onAddRemit, onPayTo,
 }: {
   mode: 'aging' | 'selected'
@@ -1484,7 +1494,7 @@ function payableView({
   onApprove: (bill: CarrierBillRecord) => void
   onDates: (bill: CarrierBillRecord) => void
   onCharges: (bill: CarrierBillRecord) => void
-  onVoid: (bill: CarrierBillRecord) => void
+  onDelete: (bill: CarrierBillRecord) => void
   onUnapprove: (bill: CarrierBillRecord) => void
   onSelectForPayment: (ids: string[]) => void
   onUnselect: (ids: string[]) => void
@@ -1613,7 +1623,7 @@ function payableView({
       key: 'actions',
       header: '',
       text: () => '',
-      width: mode === 'aging' ? 340 : 400,
+      width: mode === 'aging' ? 340 : 460,
       ...ACTIONS,
       render: (bill) => (
         <span className="flex justify-end gap-1 whitespace-nowrap">
@@ -1622,7 +1632,7 @@ function payableView({
               <TmsButton variant="ghost" size="sm" aria-label={`Change dates for bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onDates(bill)}>Dates</TmsButton>
               <TmsButton variant="ghost" size="sm" aria-label={`Approve bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onApprove(bill)}>Approve</TmsButton>
               <TmsButton variant="ghost" size="sm" aria-label={`Update carrier charges for bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onCharges(bill)}>Update charges</TmsButton>
-              <TmsButton variant="ghost" size="sm" aria-label={`Void bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onVoid(bill)}>Void</TmsButton>
+              <TmsButton variant="ghost" size="sm" aria-label={`Delete bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onDelete(bill)}>Delete</TmsButton>
             </>
           ) : (
             <>
@@ -1631,6 +1641,9 @@ function payableView({
                 <TmsButton variant="ghost" size="sm" aria-label={`Move bill ${bill.billNumber ?? bill.id} back to Aging`} title={AP_ACTION_COPY.backToAging.hint} disabled={busy} onClick={() => onUnselect([bill.id])}>{AP_ACTION_COPY.backToAging.label}</TmsButton>
               )}
               <TmsButton variant="ghost" size="sm" aria-label={`Send bill ${bill.billNumber ?? bill.id} back to review`} title={AP_ACTION_COPY.sendBackToReview.hint} disabled={busy} onClick={() => onUnapprove(bill)}>{AP_ACTION_COPY.sendBackToReview.label}</TmsButton>
+              {bill.status === 'TO_BE_PAID' && (
+                <TmsButton variant="ghost" size="sm" aria-label={`Delete bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onDelete(bill)}>Delete</TmsButton>
+              )}
             </>
           )}
         </span>
@@ -1707,6 +1720,25 @@ function payableView({
         </button>
       ),
     },
+    {
+      key: 'delete',
+      header: '',
+      text: () => '',
+      width: 90,
+      ...ACTIONS,
+      render: (bill) => (
+        <button
+          type="button"
+          className="tms-link whitespace-nowrap"
+          aria-label={`Delete bill ${bill.billNumber ?? bill.id}`}
+          disabled={busy || bill.selectedForPayment === true || (bill.paidCents ?? 0) + (bill.creditedCents ?? 0) > 0}
+          title={bill.selectedForPayment === true ? 'Take the bill off the pay run first' : (bill.paidCents ?? 0) + (bill.creditedCents ?? 0) > 0 ? 'Money has been applied; reverse the payment first' : undefined}
+          onClick={(event) => { event.stopPropagation(); onDelete(bill) }}
+        >
+          Delete
+        </button>
+      ),
+    },
   ]
 
   const overdue = bills.filter((bill) => agingChipFor(bill.dueAt, asOf).late)
@@ -1738,7 +1770,7 @@ function payableView({
   const narrowed = bills.length !== allBills.length
 
   return view<CarrierBillRecord>({
-    gridId: mode === 'aging' ? 'ap-aging-v4' : 'ap-selected-v3',
+    gridId: mode === 'aging' ? 'ap-aging-v5' : 'ap-selected-v4',
     cardLayout: mode === 'aging' ? { title: 'pro', party: 'carrier', amount: 'amount' } : { title: 'bill', party: 'carrier', amount: 'balance', pills: ['status'] },
     onRowClick: onOpen,
     kpis,

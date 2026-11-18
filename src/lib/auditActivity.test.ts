@@ -36,6 +36,10 @@ describe('actionSentence', () => {
     expect(actionSentence('INTAKE_EXTRACTED')).toBe('extracted the fields from the e-mail')
     expect(actionSentence('update', 'Load')).toBe('updated the load')
   })
+  it('words a deleted or voided carrier bill', () => {
+    expect(actionSentence('CARRIER_BILL_DELETED')).toBe('deleted a carrier bill')
+    expect(actionSentence('CARRIER_BILL_VOIDED')).toBe('voided a carrier bill')
+  })
   it('humanises an action it does not know, and does not trip on inherited keys', () => {
     expect(actionSentence('REASSIGN_SHIPMENTS_BY_REP_CODE')).toBe('reassign shipments by rep code')
     expect(actionSentence('setCustomerRate')).toBe('set customer rate')

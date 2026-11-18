@@ -18,6 +18,7 @@ import { ageOpenItems } from '@/lib/arAging'
 import { chicagoDateStr } from '@/lib/date'
 import { listCarrierPaymentInfo } from '@/lib/apiClient'
 import { ApPage } from './ApPage'
+import { deleteBill } from '@/lib/apiClient'
 
 const worklistMock = vi.hoisted(() => vi.fn())
 const authState = vi.hoisted(() => ({ isAdmin: false }))
@@ -67,6 +68,7 @@ vi.mock('@/lib/apiClient', () => ({
   listLoadCarriersByLoads: legsMock,
   listOwnershipDivisions: vi.fn().mockResolvedValue([]),
   voidBill: vi.fn(),
+  deleteBill: vi.fn(),
   unapproveBill: vi.fn(),
   reverseApPayment: vi.fn(),
   listCarrierPaymentInfo: vi.fn().mockResolvedValue([]),
@@ -284,6 +286,52 @@ describe('the AP board', () => {
 
     expect(screen.getByRole('button', { name: 'Move bill BL-7788 to Selected' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Return bill BL-7788 to Expected' })).toBeTruthy()
+  })
+
+  describe('Delete bill', () => {
+    it('offers Delete on an Expected bill, an Aging bill and a Selected bill', async () => {
+      await setup({
+        rowsByTab: { IN_REVIEW: [worklistRow()] },
+        bills: [
+          bill({ id: 'cb:1', status: 'IN_REVIEW', datesPending: true, billNumber: 'IR-9' }),
+          bill({ id: 'cb:2', status: 'TO_BE_PAID', billNumber: 'TB-1' }),
+          bill({ id: 'cb:3', status: 'TO_BE_PAID', billNumber: 'SEL-3', selectedForPayment: true }),
+        ],
+      })
+      fireEvent.click(screen.getByRole('tab', { name: /^Expected/ }))
+      expect(screen.getByRole('button', { name: 'Delete bill IR-9' })).toBeTruthy()
+      fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
+      expect(screen.getByRole('button', { name: 'Delete bill TB-1' })).toBeTruthy()
+      fireEvent.click(screen.getByRole('tab', { name: /^Selected/ }))
+      expect(screen.getByRole('button', { name: 'Delete bill SEL-3' })).toBeTruthy()
+    })
+
+    it('needs a reason, sends it with the code, and refreshes after the bill is gone', async () => {
+      vi.mocked(deleteBill).mockResolvedValue({ bill: bill({ status: 'VOID' }) })
+      await setup()
+      fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
+      fireEvent.click(screen.getByRole('button', { name: 'Delete bill BL-7788' }))
+
+      const confirm = screen.getByRole('button', { name: 'Delete bill' }) as HTMLButtonElement
+      expect(confirm.disabled).toBe(true)
+      fireEvent.change(screen.getByLabelText('Why it is being deleted'), { target: { value: 'DUPLICATE' } })
+      expect(confirm.disabled).toBe(false)
+      await act(async () => { fireEvent.click(confirm) })
+      expect(deleteBill).toHaveBeenCalledWith({ billId: 'cb:lc1:1', reasonCode: 'DUPLICATE' })
+    })
+
+    it('asks for details when the reason is Other', async () => {
+      vi.mocked(deleteBill).mockResolvedValue({ bill: bill({ status: 'VOID' }) })
+      await setup()
+      fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
+      fireEvent.click(screen.getByRole('button', { name: 'Delete bill BL-7788' }))
+      fireEvent.change(screen.getByLabelText('Why it is being deleted'), { target: { value: 'OTHER' } })
+      const confirm = screen.getByRole('button', { name: 'Delete bill' }) as HTMLButtonElement
+      expect(confirm.disabled).toBe(true)
+      fireEvent.change(screen.getByLabelText('Details'), { target: { value: 'Carrier never moved it' } })
+      await act(async () => { fireEvent.click(confirm) })
+      expect(deleteBill).toHaveBeenCalledWith({ billId: 'cb:lc1:1', reasonCode: 'OTHER', reason: 'Carrier never moved it' })
+    })
   })
 
   /**

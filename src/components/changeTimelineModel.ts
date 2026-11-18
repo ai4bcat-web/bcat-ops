@@ -35,6 +35,8 @@ const EVENT_LABEL: Record<string, { title: string; tone: TimelineTone }> = {
   CREATE_CREDIT: { title: 'Credit created', tone: 'amber' },
   WRITE_OFF: { title: 'Written off', tone: 'red' },
   VOID_INVOICE: { title: 'Invoice voided', tone: 'red' },
+  CARRIER_BILL_DELETED: { title: 'Carrier bill deleted', tone: 'red' },
+  CARRIER_BILL_VOIDED: { title: 'Carrier bill voided', tone: 'red' },
   OVER_CREDIT_LIMIT: { title: 'Over the credit limit at release', tone: 'amber' },
   REPOINT_INVOICED_CUSTOMER: { title: 'Customer re-pointed', tone: 'amber' },
 }
@@ -69,6 +71,12 @@ export function changeDetails(payload: Record<string, unknown>): string[] {
   return lines
 }
 
+/** `Bill BL-7788 · Blue Line Trucking`: which payable left Payable, from a CARRIER_BILL_* entry's payload. */
+function billDetails(payload: Record<string, unknown>): string[] {
+  const parts = [payload.bill ? `Bill ${show(payload.bill)}` : '', typeof payload.carrier === 'string' ? payload.carrier : ''].filter(Boolean)
+  return parts.length ? [parts.join(' · ')] : []
+}
+
 /** Oldest first, copies of one post-invoice change folded, unrecognised audit actions left out. */
 export function timelineEvents(rows: readonly AuditLogEntry[]): TimelineEvent[] {
   const seen = new Set<string>()
@@ -78,6 +86,7 @@ export function timelineEvents(rows: readonly AuditLogEntry[]): TimelineEvent[] 
     if (!label) continue
     const payload = payloadOf(row)
     const isChange = row.action === ('POST_INVOICE_CHANGE' as string)
+    const isBillEvent = (row.action as string).startsWith('CARRIER_BILL_')
     const at = isChange && typeof payload.at === 'string' ? payload.at : row.createdAt
     if (isChange) {
       const key = `${at}|${row.user}|${String(payload.sourceAction ?? '')}|${String(payload.reason ?? '')}`
@@ -90,8 +99,9 @@ export function timelineEvents(rows: readonly AuditLogEntry[]): TimelineEvent[] 
       title: isChange && typeof payload.sourceAction === 'string' ? `${label.title} (${payload.sourceAction})` : label.title,
       tone: label.tone,
       user: row.user,
-      reason: isChange && typeof payload.reason === 'string' ? payload.reason : null,
-      details: isChange ? changeDetails(payload) : [],
+      reason: isChange && typeof payload.reason === 'string' ? payload.reason
+        : isBillEvent && typeof payload.why === 'string' ? payload.why : null,
+      details: isChange ? changeDetails(payload) : isBillEvent ? billDetails(payload) : [],
     })
   }
   return events.sort((a, b) => a.at.localeCompare(b.at))
