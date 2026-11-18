@@ -68,6 +68,7 @@ import {
   batchShipmentTask,
   duplicateShipment,
   getTmsSettings,
+  deleteShipmentColumnTemplate,
   listShipmentColumnTemplates,
   listShipmentsByNumber,
   listShipmentIdsBySearch,
@@ -136,6 +137,11 @@ import {
   teamTemplateNameFor,
   type TeamColumnLayout,
 } from './teamColumnLayout'
+import {
+  allowedColumnKeys, holdsAnyAccountingPage, limitLayoutToAllowed, personalRow, pickLayout, readLayoutMode, readSeenTeamUpdate,
+  resolvePersonalLayout, teamDefaultIsNewer, teamUpdatedAtFor, writeLayoutMode, writeSeenTeamUpdate, type LayoutMode,
+} from './personalLayout'
+import { personalTemplateId } from '@/lib/personalColumnLayout'
 import { GRID_DEFAULT_PREFIX } from '@/features/tms/grid/orgGridDefault'
 import type { BatchShipmentTask, CustomerRecord, ShipmentColumnTemplateRecord, TmsSettings, UserProfileRecord } from '@/types/tms'
 import { REVIEW_BILLING_LABEL, needsBillingReview, reviewBillingNote } from '@/lib/reviewBilling'
@@ -657,11 +663,38 @@ function BoardPane({
     () => resolveListLayout(list, columnTemplates, SHIPMENT_COLUMN_KEYS, SHIPMENT_DEFAULT_COLUMNS, SHIPMENT_DEFAULT_FROZEN, SHIPMENT_INTRODUCED_COLUMNS),
     [list, columnTemplates],
   )
-  // An admin's unsaved edit of the current list's team layout; null outside edit mode. Switching lists drops it so an edit never lands on another list.
+  // Everybody can keep a layout of their own for this list next to the team's. Money columns need an accounting page.
+  const { user: authUser } = useAuth()
+  const moneyAllowed = useMemo(() => holdsAnyAccountingPage(authUser?.groups, authUser?.email), [authUser?.groups, authUser?.email])
+  const allowedKeys = useMemo(() => allowedColumnKeys(SHIPMENT_COLUMN_KEYS, moneyAllowed, teamLayout.columns), [moneyAllowed, teamLayout.columns])
+  const layoutUserKey = userId ?? email
+  const [layoutMode, setLayoutModeState] = useState<LayoutMode>(() => readLayoutMode(layoutUserKey, list))
+  useEffect(() => { setLayoutModeState(readLayoutMode(layoutUserKey, list)) }, [layoutUserKey, list])
+  const setLayoutMode = useCallback((mode: LayoutMode) => {
+    setLayoutModeState(mode)
+    writeLayoutMode(layoutUserKey, list, mode)
+  }, [layoutUserKey, list])
+  const myLayout = useMemo(() => {
+    const own = resolvePersonalLayout(list, columnTemplates, email, SHIPMENT_COLUMN_KEYS, SHIPMENT_DEFAULT_COLUMNS, SHIPMENT_DEFAULT_FROZEN)
+    return own ? limitLayoutToAllowed(own, allowedKeys) : null
+  }, [list, columnTemplates, email, allowedKeys])
+  const picked = pickLayout(layoutMode, myLayout, teamLayout)
+  const [seenTeamAt, setSeenTeamAt] = useState<string | null>(() => readSeenTeamUpdate(layoutUserKey, list))
+  useEffect(() => { setSeenTeamAt(readSeenTeamUpdate(layoutUserKey, list)) }, [layoutUserKey, list])
+  const teamNewer = picked.source === 'mine' && teamDefaultIsNewer(list, columnTemplates, email, seenTeamAt)
+  const markTeamSeen = useCallback(() => {
+    const at = teamUpdatedAtFor(list, columnTemplates)
+    if (!at) return
+    writeSeenTeamUpdate(layoutUserKey, list, at)
+    setSeenTeamAt(at)
+  }, [list, columnTemplates, layoutUserKey])
+  // An unsaved edit of the current list's layout, the team's (admins) or the person's own; null outside edit mode.
+  // Switching lists drops it so an edit never lands on another list.
   const [layoutDraft, setLayoutDraft] = useState<TeamColumnLayout | null>(null)
+  const [draftKind, setDraftKind] = useState<'team' | 'mine'>('team')
   useEffect(() => { setLayoutDraft(null) }, [list])
   const [layoutSaving, setLayoutSaving] = useState(false)
-  const layout = layoutDraft ?? teamLayout
+  const layout = layoutDraft ?? picked.layout
   const columnKeys = layout.columns
   const [columnsOpen, setColumnsOpen] = useState(false)
   const [filters, setFilters] = useState<DenseFilters>(() => saved.filters ?? {})
@@ -770,7 +803,11 @@ function BoardPane({
         pinned: layoutDraft.pinned,
         shared: true,
       })
-      toast.success(`${listLabel(list)} layout saved. Everyone sees it now.`)
+      toast.success(
+        myLayout && layoutMode === 'mine'
+          ? `${listLabel(list)} team layout saved. You are looking at your own layout; switch to Team layout to see it.`
+          : `${listLabel(list)} layout saved. Everyone sees it now.`,
+      )
       setLayoutDraft(null)
       refreshTemplates()
     } catch (err) {
@@ -778,7 +815,48 @@ function BoardPane({
     } finally {
       setLayoutSaving(false)
     }
-  }, [layoutDraft, refreshTemplates, list])
+  }, [layoutDraft, refreshTemplates, list, myLayout, layoutMode])
+
+  const saveMyLayout = useCallback(async () => {
+    if (!layoutDraft || !email) return
+    setLayoutSaving(true)
+    try {
+      await saveShipmentColumnTemplate({
+        id: personalTemplateId(list, email),
+        name: `My ${listLabel(list)} layout`,
+        columns: layoutDraft.columns,
+        widths: layoutDraft.widths,
+        pinned: layoutDraft.pinned,
+        shared: false,
+      })
+      toast.success(`Your ${listLabel(list)} layout is saved. Only you see it.`)
+      setLayoutDraft(null)
+      setLayoutMode('mine')
+      markTeamSeen()
+      refreshTemplates()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Save failed')
+    } finally {
+      setLayoutSaving(false)
+    }
+  }, [layoutDraft, email, list, refreshTemplates, setLayoutMode, markTeamSeen])
+
+  /** Drops this person's own layout for the list, so the team default shows again. */
+  const resetMyLayout = useCallback(async () => {
+    if (!email || !personalRow(list, columnTemplates, email)) return
+    setLayoutSaving(true)
+    try {
+      await deleteShipmentColumnTemplate({ id: personalTemplateId(list, email) })
+      toast.success(`Back to the team layout for ${listLabel(list)}.`)
+      setLayoutDraft(null)
+      setLayoutMode('team')
+      refreshTemplates()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Reset failed')
+    } finally {
+      setLayoutSaving(false)
+    }
+  }, [email, list, columnTemplates, refreshTemplates, setLayoutMode])
 
   /** Every active shipment (the Active list, ignoring this page's tab, filters and columns) with every stored field. */
   const exportAllActive = useCallback(() => {
@@ -1412,16 +1490,53 @@ function BoardPane({
         <TmsButton size="sm" variant="secondary" data-testid="export-active-shipments" title="Every active shipment with every field" onClick={exportAllActive}>
           <Download size={14} aria-hidden="true" /> Export all active
         </TmsButton>
-        {isAdmin && !layoutDraft && (
-          <TmsButton size="sm" variant="secondary" onClick={() => setLayoutDraft({ columns: [...teamLayout.columns], widths: { ...teamLayout.widths }, pinned: [...teamLayout.pinned] })}>
-            <Columns3 size={14} aria-hidden="true" /> Edit layout
+        {!layoutDraft && myLayout && (
+          <TmsSegmentedTabs
+            aria-label="Which layout to use"
+            size="sm"
+            active={picked.source}
+            onSelect={(key) => setLayoutMode(key === 'team' ? 'team' : 'mine')}
+            tabs={[{ key: 'mine', label: 'My layout' }, { key: 'team', label: 'Team layout' }]}
+          />
+        )}
+        {!layoutDraft && (
+          <TmsButton
+            size="sm" variant="secondary" data-testid="customize-my-layout"
+            title="Choose your own columns, order, widths and frozen columns. Only you see them."
+            onClick={() => { setDraftKind('mine'); setLayoutDraft({ columns: [...picked.layout.columns], widths: { ...picked.layout.widths }, pinned: [...picked.layout.pinned] }) }}
+          >
+            <Columns3 size={14} aria-hidden="true" /> {myLayout ? 'Edit my layout' : 'Customize layout'}
           </TmsButton>
         )}
-        {isAdmin && layoutDraft && (
+        {isAdmin && !layoutDraft && (
+          <TmsButton
+            size="sm" variant="secondary" title="Change the layout everyone starts from"
+            onClick={() => { setDraftKind('team'); setLayoutDraft({ columns: [...teamLayout.columns], widths: { ...teamLayout.widths }, pinned: [...teamLayout.pinned] }) }}
+          >
+            <Columns3 size={14} aria-hidden="true" /> Edit team layout
+          </TmsButton>
+        )}
+        {teamNewer && !layoutDraft && (
+          <span className="flex items-center gap-2 text-xs text-muted-foreground" role="status" data-testid="team-layout-updated">
+            The team layout was updated.
+            <TmsButton size="sm" variant="ghost" onClick={() => { setLayoutMode('team'); markTeamSeen() }}>Switch to it</TmsButton>
+            <TmsButton size="sm" variant="ghost" onClick={markTeamSeen}>Keep mine</TmsButton>
+          </span>
+        )}
+        {layoutDraft && (
           <>
-            <span className="text-xs text-muted-foreground" role="status">Editing the team layout for {listLabel(list)}: drag headers, resize, or use Columns.</span>
-            {JSON.stringify(layoutDraft) !== JSON.stringify(teamLayout) ? (
-              <TmsBadge tone="orange" data-testid="layout-unsaved" title="Apply only changes this editing view. Save as team default to keep it for everyone.">Not saved yet</TmsBadge>
+            <span className="text-xs text-muted-foreground" role="status">
+              {draftKind === 'team'
+                ? `Editing the team layout for ${listLabel(list)}: drag headers, resize, or use Columns.`
+                : `Editing your own layout for ${listLabel(list)}: drag headers, resize, or use Columns. Only you see it.`}
+            </span>
+            {JSON.stringify(layoutDraft) !== JSON.stringify(draftKind === 'team' ? teamLayout : picked.layout) ? (
+              <TmsBadge
+                tone="orange" data-testid="layout-unsaved"
+                title={draftKind === 'team'
+                  ? 'Apply only changes this editing view. Save as team default to keep it for everyone.'
+                  : 'Apply only changes this editing view. Save my layout to keep it.'}
+              >Not saved yet</TmsBadge>
             ) : null}
             <TmsButton size="sm" variant="secondary" onClick={() => setColumnsOpen(true)}>
               <Columns3 size={14} aria-hidden="true" /> Columns
@@ -1432,9 +1547,22 @@ function BoardPane({
             >
               Fit widths
             </TmsButton>
-            <TmsButton size="sm" variant="primary" disabled={layoutSaving} onClick={() => void saveTeamLayout()}>
-              Save as team default
-            </TmsButton>
+            {draftKind === 'team' ? (
+              <TmsButton size="sm" variant="primary" disabled={layoutSaving} onClick={() => void saveTeamLayout()}>
+                Save as team default
+              </TmsButton>
+            ) : (
+              <>
+                <TmsButton size="sm" variant="primary" disabled={layoutSaving} onClick={() => void saveMyLayout()}>
+                  Save my layout
+                </TmsButton>
+                {myLayout && (
+                  <TmsButton size="sm" variant="ghost" disabled={layoutSaving} title="Delete your own layout and use the team layout" onClick={() => void resetMyLayout()}>
+                    Reset to team layout
+                  </TmsButton>
+                )}
+              </>
+            )}
             <TmsButton size="sm" variant="ghost" disabled={layoutSaving} onClick={() => setLayoutDraft(null)}>
               Cancel
             </TmsButton>
@@ -1562,9 +1690,9 @@ function BoardPane({
         results={batchResults}
       />
 
-      {isAdmin && layoutDraft && (
+      {layoutDraft && (
         <ColumnsDialog
-          catalog={SHIPMENT_GRID_COLUMNS}
+          catalog={draftKind === 'team' ? SHIPMENT_GRID_COLUMNS : SHIPMENT_GRID_COLUMNS.filter((c) => allowedKeys.includes(c.key))}
           title={`Columns for ${listLabel(list)}`}
           open={columnsOpen}
           onOpenChange={setColumnsOpen}
@@ -1573,7 +1701,11 @@ function BoardPane({
           pinned={layoutDraft.pinned}
           onApply={(next) => {
             setLayoutDraft({ columns: next.columns, widths: next.widths, pinned: next.pinned })
-            toast.success(`Applied: ${next.columns.length} columns, ${next.pinned.length} frozen. Click Save as team default to keep it for everyone.`)
+            toast.success(
+              draftKind === 'team'
+                ? `Applied: ${next.columns.length} columns, ${next.pinned.length} frozen. Click Save as team default to keep it for everyone.`
+                : `Applied: ${next.columns.length} columns, ${next.pinned.length} frozen. Click Save my layout to keep it.`,
+            )
           }}
         />
       )}

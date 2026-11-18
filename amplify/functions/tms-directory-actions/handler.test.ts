@@ -5,6 +5,7 @@
  * Data client is not mocked; merge tests rely on the raw-SDK path for Customer/Location/etc.
  */
 
+import { personalTemplateId } from '../../../src/lib/personalColumnLayout'
 import type { AttributeValue } from '@aws-sdk/client-dynamodb'
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
 import { SYNTHETIC_EIN } from '../../../src/test/syntheticTaxIds'
@@ -3020,6 +3021,36 @@ describe('SAVE_COLUMN_TEMPLATE and DELETE_COLUMN_TEMPLATE', () => {
       handler(event('DELETE_COLUMN_TEMPLATE', { id: 't-private' }, identity({ email: 'bob@bcatcorp.com', groups: ['page-tms'] }))),
     ).rejects.toThrow(/Forbidden/)
     expect(tables.templates.has('t-private')).toBe(true)
+  })
+
+  it('lets a team member save and delete their own personal Shipments layout, forced private', async () => {
+    const tables = columnTemplateTables()
+    const id = personalTemplateId('active', 'dennis@bcatcorp.com')
+    const saved = (await handler(event('SAVE_COLUMN_TEMPLATE', {
+      id, name: 'My Active layout', columns: ['status', 'proNumber'], widths: { proNumber: 120 }, pinned: ['proNumber'], shared: true,
+    }, TMS_CALLER))) as Record<string, unknown>
+    expect(saved).toMatchObject({ id, shared: false, ownerEmail: 'dennis@bcatcorp.com', columns: ['status', 'proNumber'], pinned: ['proNumber'] })
+    expect(tables.templates.get(id)).toBeTruthy()
+    await handler(event('DELETE_COLUMN_TEMPLATE', { id }, TMS_CALLER))
+    expect(tables.templates.has(id)).toBe(false)
+  })
+
+  it('refuses a personal layout id that names somebody else, for save and delete, even from an admin', async () => {
+    const aliceId = personalTemplateId('active', 'alice@bcatcorp.com')
+    const tables = columnTemplateTables({ 'ShipmentColumnTemplate-test': [template({ id: aliceId })] })
+    await expect(
+      handler(event('SAVE_COLUMN_TEMPLATE', { id: aliceId, name: 'Hacked', columns: ['status'] }, TMS_CALLER)),
+    ).rejects.toThrow('a personal column layout can only be saved by its owner')
+    await expect(
+      handler(event('SAVE_COLUMN_TEMPLATE', { id: aliceId, name: 'Hacked', columns: ['status'] }, ADMIN)),
+    ).rejects.toThrow('a personal column layout can only be saved by its owner')
+    await expect(
+      handler(event('DELETE_COLUMN_TEMPLATE', { id: aliceId }, TMS_CALLER)),
+    ).rejects.toThrow('a personal column layout can only be saved by its owner')
+    await expect(
+      handler(event('SAVE_COLUMN_TEMPLATE', { id: 'shipments-user-active-forged', name: 'Forged', columns: ['status'] }, TMS_CALLER)),
+    ).rejects.toThrow('a personal column layout can only be saved by its owner')
+    expect(tables.templates.get(aliceId)).toMatchObject({ name: 'Template' })
   })
 
   it('lets only the owner write a grid default layout, with that grid\'s own column keys (forced shared)', async () => {
