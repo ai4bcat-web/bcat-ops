@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
-import { monthRows, monthRowsFromRep, monthsBetween, repMonthMatrix, trailingMonths } from '@/lib/brokerageRevenue'
-import { TZ } from '@/lib/date'
+import { monthRows, monthRowsFromRep, monthRowsThroughDay, monthsBetween, repMonthMatrix, trailingMonths } from '@/lib/brokerageRevenue'
+import { TZ, chicagoDateStr } from '@/lib/date'
 import { BrokerageOverview } from './BrokerageOverview'
 import { BrokerageRepChart } from './BrokerageRepChart'
 import { BrokerageRepWidget } from './BrokerageRepWidget'
-import { brokerageInsights } from './brokerageInsights'
-import { FIRST_MONTH, clampRange, type MonthRange } from './brokerageFormat'
+import { brokerageInsights, type SamePeriod } from './brokerageInsights'
+import { FIRST_MONTH, clampRange, previousMonth, type MonthRange } from './brokerageFormat'
 import { useBrokerageDashboard } from './useBrokerageDashboard'
 
 interface Preset { key: string; label: string; range: (current: string) => MonthRange }
@@ -25,7 +25,10 @@ const asOfLabel = (iso: string) => new Date(iso).toLocaleTimeString('en-US', { h
  * DashboardRollup rows the other dashboards read.
  */
 export function BrokerageSection() {
-  const current = new Date().toISOString().slice(0, 7)
+  // Chicago's month and day (not UTC's): the month in progress and the day it has reached decide what last month is read against.
+  const today = chicagoDateStr(new Date())
+  const current = today.slice(0, 7)
+  const throughDay = Number(today.slice(8, 10))
   const [presetKey, setPresetKey] = useState('6')
   const preset = PRESETS.find((p) => p.key === presetKey) ?? PRESETS[1]
   const range = useMemo(() => clampRange(preset.range(current), current), [preset, current])
@@ -45,9 +48,19 @@ export function BrokerageSection() {
     () => repMonthMatrix(data.repMonths, months, data.divisions, data.names, 'BROKERAGE'),
     [data.repMonths, months, data.divisions, data.names],
   )
+  // Last month's first `throughDay` days, from the company day rows. A rep caller has only month totals (no days): null.
+  const same = useMemo<SamePeriod | null>(() => {
+    const month = previousMonth(current)
+    if (own || data.state !== 'ready' || !data.rows.some((r) => r.payload.month === month)) return null
+    // A shorter last month ends on its own last day (the 30th is read against February 28th).
+    const lastDay = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).getDate()
+    const through = Math.min(throughDay, lastDay)
+    const [measures] = monthRowsThroughDay(data.rows, [month], data.divisions, through)
+    return measures ? { month, through, measures } : null
+  }, [own, data.state, data.rows, data.divisions, current, throughDay])
   const insights = useMemo(
-    () => (data.state === 'ready' ? brokerageInsights(byMonth, repReady ? brokerageMatrix.reps : [], brokerageMatrix.grand, current) : []),
-    [data.state, byMonth, repReady, brokerageMatrix, current],
+    () => (data.state === 'ready' ? brokerageInsights(byMonth, repReady ? brokerageMatrix.reps : [], brokerageMatrix.grand, current, same) : []),
+    [data.state, byMonth, repReady, brokerageMatrix, current, same],
   )
 
   return (
@@ -88,7 +101,7 @@ export function BrokerageSection() {
                   <li><b>Month:</b> the month a load was delivered: the actual time at its last delivery stop (read in Chicago time), else its delivered date, else its delivery appointment. The lane history uses the same date. A load is counted once it is delivered and priced.</li>
                   <li><b>Revenue:</b> what the customer is charged for the load (the sum of its customer charge lines: line haul, fuel and accessorials), the same figure the TMS revenue and margin cards use.</li>
                   <li><b>Expense:</b> what the carrier charges us for the load (the sum of its carrier charge lines: carrier rate and carrier accessorials), the same cost those margin cards use.</li>
-                  <li><b>The five cards at the top:</b> the month in progress, to date, with last month in full beside each. They do not change with the 3 / 6 / 12 months / Year to date buttons; those set the chart, the takeaways and the table below.</li>
+                  <li><b>The five cards at the top:</b> the month in progress, to date, with the same days of last month beside each (on the 18th, Nov 1–18 against Oct 1–18). A sales rep, who sees only their own month totals, sees last month in full instead. They do not change with the 3 / 6 / 12 months / Year to date buttons; those set the chart, the takeaways and the table below.</li>
                   <li><b>Profit</b> = revenue − expense. <b>Profit margin</b> = profit ÷ revenue; a month or rep with no revenue shows a dash.</li>
                   <li><b>By sales rep:</b> the rep on the load or shipment (profile name, group reps such as Ivan Cartage, BCAT and Owner Operators as their own rows, or the typed rep name when there is no login). Loads with no rep are the &quot;No sales rep&quot; row, so the rep total equals the month total. The Division switch re-cuts the same loads by revenue division (Brokerage includes anything under it).</li>
                   <li><b>Table at the bottom:</b> every rep by month, with the change from the month before. The month in progress is shown to date with no change. Expenses are never colored as good or bad.</li>
@@ -115,7 +128,7 @@ export function BrokerageSection() {
 
         {data.state !== 'unavailable' && data.state !== 'error' && (
           <>
-            <BrokerageOverview rows={byMonth} current={current} loading={data.state === 'loading'} insights={insights} />
+            <BrokerageOverview rows={byMonth} current={current} loading={data.state === 'loading'} insights={insights} same={same} />
 
             <section aria-label="By sales rep" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Who earns what</h3>

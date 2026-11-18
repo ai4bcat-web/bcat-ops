@@ -29,3 +29,19 @@ describe('brokerageInsights', () => {
     expect(out).toEqual([])
   })
 })
+
+describe('the month so far is read against the same days of last month', () => {
+  const m = (month: string, loads: number, profitCents: number): MonthMeasures => ({ month, loads, revenueCents: profitCents * 4, expenseCents: profitCents * 3, profitCents, marginBps: 2500 })
+  const rows = [m('2026-09', 10, 3_000_000), m('2026-10', 12, 4_400_000), m('2026-11', 6, 157_000)]
+  const grand = { loads: 6, revenueCents: 628_000, expenseCents: 471_000, profitCents: 157_000, marginBps: 2500 }
+
+  it('uses "Oct 1–18 was …" when the day rows are known', () => {
+    const out = brokerageInsights(rows, [], grand, '2026-11', { month: '2026-10', through: 18, measures: { loads: 7, revenueCents: 2_000_000, expenseCents: 1_500_000, profitCents: 500_000, marginBps: 2500 } })
+    expect(out.find((i) => i.key === 'pace')?.text).toBe('Nov so far: $1.57k profit on 6 loads. Oct 1–18 was $5.0k.')
+  })
+
+  it('falls back to last month in full without them (a rep sees month totals only)', () => {
+    const out = brokerageInsights(rows, [], grand, '2026-11', null)
+    expect(out.find((i) => i.key === 'pace')?.text).toBe('Nov so far: $1.57k profit on 6 loads. Oct finished at $44.0k.')
+  })
+})

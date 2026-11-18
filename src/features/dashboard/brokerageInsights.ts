@@ -12,7 +12,13 @@ export const monthShort = (m: string) => `${monthName(m)} ${m.slice(0, 4)}`
  * how the month in progress is going, the best month, and who brings in the profit. Nothing here is a new number:
  * every sentence restates a figure the charts show.
  */
-export function brokerageInsights(rows: readonly MonthMeasures[], reps: readonly RepMonthRow[], grand: Measures, current: string): Insight[] {
+/** The previous month cut to the same days as the month in progress ("Oct 1-18"); `through` is the last day counted. */
+export interface SamePeriod { month: string; through: number; measures: Measures }
+
+/** `Oct 1–18` (just `Oct 1` for the first day). */
+export const samePeriodLabel = (p: Pick<SamePeriod, 'month' | 'through'>) => `${monthName(p.month)} 1${p.through > 1 ? `–${p.through}` : ''}`
+
+export function brokerageInsights(rows: readonly MonthMeasures[], reps: readonly RepMonthRow[], grand: Measures, current: string, same?: SamePeriod | null): Insight[] {
   const out: Insight[] = []
   const done = rows.filter((r) => r.month < current && r.loads > 0)
   const last = done[done.length - 1]
@@ -35,9 +41,12 @@ export function brokerageInsights(rows: readonly MonthMeasures[], reps: readonly
     const loads = `${now.loads} load${now.loads === 1 ? '' : 's'}`
     out.push({
       key: 'pace', tone: 'neutral',
-      text: last
-        ? `${monthName(current)} so far: ${moneyCompact(now.profitCents)} profit on ${loads}. ${monthName(last.month)} finished at ${moneyCompact(last.profitCents)}.`
-        : `${monthName(current)} so far: ${moneyCompact(now.profitCents)} profit on ${loads}.`,
+      // The same days of last month when they are known (a rep caller's figures have no day rows), else last month in full.
+      text: same
+        ? `${monthName(current)} so far: ${moneyCompact(now.profitCents)} profit on ${loads}. ${samePeriodLabel(same)} was ${moneyCompact(same.measures.profitCents)}.`
+        : last
+          ? `${monthName(current)} so far: ${moneyCompact(now.profitCents)} profit on ${loads}. ${monthName(last.month)} finished at ${moneyCompact(last.profitCents)}.`
+          : `${monthName(current)} so far: ${moneyCompact(now.profitCents)} profit on ${loads}.`,
     })
   }
 
