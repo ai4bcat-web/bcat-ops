@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { laneKeyFor, laneKey3For, laneLabelFor, laneSampleFor, type LaneSampleInput } from './laneKey'
+import { laneKeyFor, laneKey3For, laneLabelFor, laneSampleFor, laneSampleRefreshReason, type LaneSampleInput } from './laneKey'
 import type { Stop } from '../types'
 import { aliasMap } from './integrations/postalAliases'
 
@@ -331,5 +331,48 @@ describe('laneSampleFor', () => {
     expect(sample?.teamKey).toBeNull()
     expect(sample?.invoiceId).toBeNull()
     expect(sample?.invoiceMonth).toBeNull()
+  })
+})
+
+describe('laneSampleRefreshReason', () => {
+  const sample = { date: '2026-11-03', revenueCents: 150000, costCents: 110000, profitCents: 40000, revDivision: 'BROKERAGE', revSubdivision: null, salesRepId: 'rep-1' }
+  const current = {
+    sample,
+    day: '2026-11-03',
+    financials: { revenueCents: 150000, costCents: 110000, profitCents: 40000 },
+    revDivision: 'BROKERAGE',
+    revSubdivision: null,
+    salesRepId: 'rep-1',
+  }
+
+  it('is null for a sample that says what the load says', () => {
+    expect(laneSampleRefreshReason(current)).toBeNull()
+  })
+
+  it('says missing when the delivered load has no sample', () => {
+    expect(laneSampleRefreshReason({ ...current, sample: null })).toBe('missing')
+  })
+
+  it('says date when the sample sits on another Chicago day (so possibly another month)', () => {
+    expect(laneSampleRefreshReason({ ...current, day: '2026-11-01', sample: { ...sample, date: '2026-10-30' } })).toBe('date')
+  })
+
+  it('says stale when the carrier cost was recorded after the sample was taken', () => {
+    expect(laneSampleRefreshReason({ ...current, sample: { ...sample, costCents: 0, profitCents: 150000 } })).toBe('stale')
+  })
+
+  it('says stale when the load was re-tagged or given a subdivision afterwards', () => {
+    expect(laneSampleRefreshReason({ ...current, revDivision: 'CAR_SHIPPING' })).toBe('stale')
+    expect(laneSampleRefreshReason({ ...current, revSubdivision: 'LOCAL' })).toBe('stale')
+  })
+
+  it('says stale when the rep changed, but not when the sample has no rep of its own', () => {
+    expect(laneSampleRefreshReason({ ...current, salesRepId: 'rep-2' })).toBe('stale')
+    expect(laneSampleRefreshReason({ ...current, sample: { ...sample, salesRepId: null }, salesRepId: 'rep-2' })).toBeNull()
+  })
+
+  it('leaves the money alone when the load has no financials row, and reads absent money as zero', () => {
+    expect(laneSampleRefreshReason({ ...current, financials: null, sample: { ...sample, costCents: 5 } })).toBeNull()
+    expect(laneSampleRefreshReason({ ...current, sample: { ...sample, costCents: undefined }, financials: { revenueCents: 150000, costCents: 0, profitCents: 40000 } })).toBeNull()
   })
 })

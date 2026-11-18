@@ -151,7 +151,7 @@ import {
   rejectOffer,
   requestOffers,
 } from './offers'
-import { deliveredDayOfLoad } from '../../../src/lib/laneKey'
+import { deliveredDayOfLoad, laneSampleRefreshReason } from '../../../src/lib/laneKey'
 import {
   excludeLaneSample,
   isDeliveredOrLater,
@@ -463,7 +463,7 @@ const rederiveShipmentStatus = async (shipmentId: string, caller: Caller) => {
   await autoPushToReview(shipmentId, caller)
   await reconcileOpenIntake(intakeDeps, shipmentId, caller)
   // A load delivered by its stops, a check call or the driver app is a lane sample too.
-  await ensureDeliveredLaneSamples(quoteDeps, result as { loads?: Row[] })
+  await ensureDeliveredLaneSamples(quoteDeps, result as { loads?: Row[]; shipment?: Row | null; financials?: Row[] })
   return result
 }
 
@@ -5251,11 +5251,13 @@ async function sweepPodDeliveries(input: Row, caller: Caller): Promise<Row> {
 }
 
 /**
- * RESAMPLE_DELIVERED_LOADS (ADMIN): bring the lane samples the dashboards count from in line with the loads. A delivered
- * load with no sample (delivered by its stops, a check call or the driver app before `ensureDeliveredLaneSamples`
- * existed) is missing from every Brokerage figure; a sample dated on the appointment sits in a different month than the
- * delivery. Dry run unless `apply: true`; `from` / `to` (`YYYY-MM`) bound the months looked at (a load counts when its
- * delivered month or its sample's month is inside); `limit` caps one apply (default 300).
+ * RESAMPLE_DELIVERED_LOADS (ADMIN): bring the lane samples the dashboards count from in line with the loads, by the same
+ * rule every other path uses (`laneSampleRefreshReason`). A delivered load with no sample is missing from every
+ * Brokerage figure; a sample dated on the appointment sits in a different month than the delivery; a sample taken before
+ * the carrier's cost was recorded, or before the load was re-tagged or given another rep, still shows the old money,
+ * division or rep. Dry run unless `apply: true`; `from` / `to` (`YYYY-MM`) bound the months looked at (a load counts when
+ * its delivered month or its sample's month is inside); `limit` caps one apply (default 300). A voided or deleted
+ * shipment is never sampled.
  */
 async function resampleDeliveredLoads(input: Row, caller: Caller): Promise<Row> {
   const apply = input.apply === true
@@ -5267,33 +5269,49 @@ async function resampleDeliveredLoads(input: Row, caller: Caller): Promise<Row> 
   const from = month(input.from, 'from') ?? '0000-00'
   const to = month(input.to, 'to') ?? '9999-99'
   const limit = Math.min(Math.max(numberOrNull(input.limit) ?? 300, 1), 1000)
-  const [loads, samples] = await Promise.all([
-    scanTableSegmented(LOAD_TABLE_NAME, ['id', 'aljexId', 'status', 'stops', 'deliveredAt', 'voidedAt']),
-    scanTableSegmented(LANE_RATE_SAMPLE_TABLE_NAME, ['id', 'date', 'sampleMonth']),
+  const [loads, samples, financials, shipments] = await Promise.all([
+    scanTableSegmented(LOAD_TABLE_NAME, ['id', 'aljexId', 'status', 'stops', 'deliveredAt', 'voidedAt', 'shipmentId', 'revDivision', 'revSubdivision', 'salesRepId']),
+    scanTableSegmented(LANE_RATE_SAMPLE_TABLE_NAME, ['id', 'date', 'sampleMonth', 'revenueCents', 'costCents', 'profitCents', 'revDivision', 'revSubdivision', 'salesRepId']),
+    scanTableSegmented(LOAD_FINANCIALS_TABLE_NAME, ['id', 'loadId', 'revenueCents', 'costCents', 'profitCents']),
+    scanTableSegmented(SHIPMENT_TABLE_NAME, ['id', 'revDivision', 'revSubdivision', 'salesRepId', 'voidedAt', 'deletedAt']),
   ])
   const sampleById = new Map(samples.map((row) => [String(row.id), row]))
+  const financialsByLoad = new Map(financials.map((row) => [String(row.loadId ?? row.id), row]))
+  const shipmentById = new Map(shipments.map((row) => [String(row.id), row]))
   const missing: Row[] = []
   const redated: Row[] = []
+  const stale: Row[] = []
   for (const load of loads) {
     if (load.voidedAt || !isDeliveredOrLater(load.status)) continue
     const id = String(load.id)
+    const shipment = shipmentById.get(String(load.shipmentId ?? '')) ?? null
+    if (shipment && (shipment.voidedAt || shipment.deletedAt)) continue
     const day = deliveredDayOfLoad(readStops(load) as never, typeof load.deliveredAt === 'string' ? load.deliveredAt : null)
     const sample = sampleById.get(`lrs:${id}`)
     const inRange = (m: string | null | undefined) => !!m && m >= from && m <= to
     if (!inRange(day?.slice(0, 7)) && !inRange(sample ? String(sample.sampleMonth ?? '') : null)) continue
-    if (!sample) missing.push({ loadId: id, pro: load.aljexId ?? null, day })
-    else if (day && sample.date !== day) redated.push({ loadId: id, pro: load.aljexId ?? null, from: sample.date, to: day })
+    const reason = laneSampleRefreshReason({
+      sample: (sample ?? null) as never,
+      day,
+      financials: (financialsByLoad.get(id) ?? null) as never,
+      revDivision: (load.revDivision ?? shipment?.revDivision ?? null) as string | null,
+      revSubdivision: (load.revSubdivision ?? shipment?.revSubdivision ?? null) as string | null,
+      salesRepId: (load.salesRepId ?? shipment?.salesRepId ?? null) as string | null,
+    })
+    if (reason === 'missing') missing.push({ loadId: id, pro: load.aljexId ?? null, day })
+    else if (reason === 'date') redated.push({ loadId: id, pro: load.aljexId ?? null, from: sample?.date ?? null, to: day })
+    else if (reason === 'stale') stale.push({ loadId: id, pro: load.aljexId ?? null, day })
   }
-  const todo = [...missing, ...redated].slice(0, limit)
+  const todo = [...missing, ...redated, ...stale].slice(0, limit)
   let attempted = 0
   if (apply) {
     for (const row of todo) {
       await writeLaneSample(quoteDeps, String(row.loadId))
       attempted += 1
     }
-    await writeAudit('LOAD', 'RESAMPLE_DELIVERED_LOADS', 'RESAMPLE_DELIVERED_LOADS', caller, { from, to, missing: missing.length, redated: redated.length, attempted })
+    await writeAudit('LOAD', 'RESAMPLE_DELIVERED_LOADS', 'RESAMPLE_DELIVERED_LOADS', caller, { from, to, missing: missing.length, redated: redated.length, stale: stale.length, attempted })
   }
-  return { apply, from, to, missing, redated, attempted, capped: missing.length + redated.length > limit } as unknown as Row
+  return { apply, from, to, missing, redated, stale, attempted, capped: missing.length + redated.length + stale.length > limit } as unknown as Row
 }
 
 async function updateStop(input: Row, caller: Caller, opts: { silent?: boolean } = {}): Promise<Row> {

@@ -8,6 +8,11 @@
  * ladder the staff actions use, so a leg that was reported by a driver reads on
  * the board exactly like one a dispatcher called in.
  *
+ * It is also where a delivered load becomes a dashboard figure: every path that delivers a load
+ * (the driver app, a POD close, the tracking automation, a check call, a staff edit of the stops) writes the
+ * Load row, so a Load record that is delivered and whose delivery, tag or rep just changed gets its
+ * `LaneRateSample` written or refreshed here (`ensureLaneSampleForLoad`, the rule every other path uses).
+ *
  * Side effects are deliberately tiny and provable:
  *   • legacy own-fleet loads (no `shipmentId`) are ignored entirely;
  *   • the only writes are LoadCheckCall (Put), Load (Update), Order (references:
@@ -33,6 +38,7 @@ import {
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import {
   getById,
+  queryIndex,
   readStops,
   rederiveShipmentStatus,
   shipmentStoreFromEnv,
@@ -51,6 +57,7 @@ import { splitCityState } from '../../../src/lib/locationAutoSave'
 import { LOAD_WORKFLOW_STATUSES, type StopTimesLike } from '../../../src/lib/shipmentStatus'
 import type { LoadStatusSource, LoadWorkflowStatus, StopEventType } from '../../../src/types/tms'
 import { deliveredAtUnsetGuard } from '../_shared/deliveredAtStamp'
+import { ensureLaneSampleForLoad, isDeliveredOrLater, type LaneSampleDeps } from '../tms-shipment-actions/laneSamples'
 
 const dynamo = new DynamoDBClient({})
 
@@ -73,6 +80,8 @@ export interface ProjectorDeps {
   checkCallTable: string
   /** The driver roster, cached per container by the Lambda entry point. */
   drivers: () => Promise<DriverRoster>
+  /** Reads and writes the lane sample of a delivered load; absent where the stack has no sample table. */
+  laneSample?: LaneSampleDeps
 }
 
 export interface ProjectorSummary {
@@ -507,10 +516,34 @@ async function projectRecord(record: StreamRecord, deps: ProjectorDeps): Promise
   return summary
 }
 
+/** What on a Load decides which month, division and rep its sample counts in. */
+function sampleFacts(load: Row): string {
+  return JSON.stringify([load.status ?? null, load.deliveredAt ?? null, load.revDivision ?? null, load.revSubdivision ?? null, load.salesRepId ?? null, load.stops ?? null, load.voidedAt ?? null])
+}
+
+/**
+ * A delivered load whose delivery, tag or rep changed gets its lane sample written or refreshed. Gated on the
+ * image diff so an update that moves none of those (a trailer, a last-known position) costs no read.
+ * Never throws: a statistics row is not a reason to fail a stream batch.
+ */
+async function sampleDeliveredLoad(record: StreamRecord, deps: ProjectorDeps): Promise<boolean> {
+  if (!deps.laneSample || record.eventName !== 'MODIFY') return false
+  const newImage = record.dynamodb?.NewImage
+  if (!newImage) return false
+  const load = unmarshall(newImage) as Row
+  if (!load.shipmentId || !isDeliveredOrLater(load.status)) return false
+  const oldImage = record.dynamodb?.OldImage
+  if (oldImage && sampleFacts(unmarshall(oldImage) as Row) === sampleFacts(load)) return false
+  const wrote = await ensureLaneSampleForLoad(deps.laneSample, load)
+  if (wrote) console.log('[load-tracking-projector] lane sample written', { loadId: load.id })
+  return wrote
+}
+
 export async function projectLoadStream(event: StreamEvent, deps: ProjectorDeps): Promise<ProjectorSummary> {
   const total: ProjectorSummary = { records: 0, considered: 0, events: 0, skipped: 0, statusWrites: 0, conflicts: 0, mirrored: 0 }
   for (const record of event.Records ?? []) {
     total.records += 1
+    await sampleDeliveredLoad(record, deps)
     const one = await projectRecord(record, deps)
     if (!one) continue
     total.considered += one.considered
@@ -523,11 +556,37 @@ export async function projectLoadStream(event: StreamEvent, deps: ProjectorDeps)
   return total
 }
 
+/** The sample's own tables, or undefined when this stack does not grant them (the projector then samples nothing). */
+function laneSampleDepsFromEnv(): LaneSampleDeps | undefined {
+  const env = process.env
+  if (!env.LANE_RATE_SAMPLE_TABLE_NAME) return undefined
+  // The sample reads the shipment's documents for the POD arrival; the projector's own store has no
+  // document table (see backend.ts), so the sample gets its own variable.
+  const store = { tables: { shipmentDocument: env.SAMPLE_SHIPMENT_DOCUMENT_TABLE_NAME ?? '' } }
+  return {
+    db: dynamo,
+    store,
+    tables: {
+      laneSample: env.LANE_RATE_SAMPLE_TABLE_NAME,
+      load: env.LOAD_TABLE_NAME ?? '',
+      loadFinancials: env.LOAD_FINANCIALS_TABLE_NAME ?? '',
+      shipment: env.SHIPMENT_TABLE_NAME ?? '',
+      order: env.ORDER_TABLE_NAME ?? '',
+      customer: env.CUSTOMER_TABLE_NAME ?? '',
+      loadCarrier: env.LOAD_CARRIER_TABLE_NAME ?? '',
+    },
+    getById: (table, id) => getById(dynamo, table, id),
+    queryIndex: (table, index, key, value) => queryIndex(dynamo, table, index, key, value),
+    getSettings: async () => (env.TMS_SETTINGS_TABLE_NAME ? getById(dynamo, env.TMS_SETTINGS_TABLE_NAME, 'default') : null),
+  }
+}
+
 export const handler = async (event: StreamEvent): Promise<ProjectorSummary> => {
   const deps: ProjectorDeps = {
     store: shipmentStoreFromEnv(dynamo),
     checkCallTable: process.env.LOAD_CHECK_CALL_TABLE_NAME ?? '',
     drivers: () => driverRoster(dynamo, process.env.DRIVER_TABLE_NAME ?? ''),
+    laneSample: laneSampleDepsFromEnv(),
   }
   const summary = await projectLoadStream(event, deps)
   console.log('[load-tracking-projector]', summary)

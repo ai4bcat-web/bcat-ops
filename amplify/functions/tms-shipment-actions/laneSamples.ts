@@ -23,10 +23,20 @@ import {
   readStops,
   type Row,
 } from '../_shared/shipmentStore'
-import { deliveredDayOfLoad, laneSampleFor } from '../../../src/lib/laneKey'
+import { deliveredDayOfLoad, laneSampleFor, laneSampleRefreshReason, type LaneSampleRefresh } from '../../../src/lib/laneKey'
 import { MOVEMENT_RANK } from '../../../src/lib/shipmentStatus'
 import type { LoadWorkflowStatus } from '../../../src/types/tms'
 import type { QuoteDeps } from './quotes'
+
+/**
+ * What writing a sample reads and writes: the narrow slice of `QuoteDeps` the tracking projector can also
+ * provide (it has no SES, quotes or audit writer), so a load delivered by a driver's stop times or a tracking
+ * automation is sampled by the same code that a dispatcher's status change is.
+ */
+export type LaneSampleDeps = Pick<QuoteDeps, 'db' | 'getById' | 'queryIndex' | 'getSettings'> & {
+  tables: Pick<QuoteDeps['tables'], 'laneSample' | 'load' | 'loadFinancials' | 'shipment' | 'order' | 'customer' | 'loadCarrier'>
+  store: { tables: { shipmentDocument?: string } }
+}
 
 /** Amplify's derived index name for the load's tracking log, oldest row first. */
 const IDX_CHECK_CALLS_BY_LOAD = 'loadCheckCallsByLoadIdAndAt'
@@ -141,7 +151,7 @@ function compact(item: Record<string, unknown>): Record<string, unknown> {
  * carrier's bill is recorded and revenue until the invoice freezes, so this is
  * called again from every path that can still move either.
  */
-export async function writeLaneSample(deps: QuoteDeps, loadId: string): Promise<void> {
+export async function writeLaneSample(deps: LaneSampleDeps, loadId: string): Promise<void> {
   if (!deps.tables.laneSample || !loadId) return
   try {
     const load = await deps.getById(deps.tables.load, loadId)
@@ -237,27 +247,82 @@ export async function writeLaneSample(deps: QuoteDeps, loadId: string): Promise<
 }
 
 /**
+ * The one reason, if any, this delivered load's sample must be written again (`laneSampleRefreshReason`).
+ * `financials` and `shipment` are passed when the caller already holds them (a bundle does); otherwise they
+ * are read here. The shipment is where the tag and rep come from when the load carries none of its own.
+ */
+export async function laneSampleRefreshFor(
+  deps: LaneSampleDeps,
+  load: Row,
+  held: { financials?: Row | null; shipment?: Row | null } = {},
+): Promise<LaneSampleRefresh | null> {
+  const loadId = String(load.id ?? '')
+  const existing = await deps.getById(deps.tables.laneSample, `lrs:${loadId}`)
+  const day = deliveredDayOfLoad(readStops(load) as never, typeof load.deliveredAt === 'string' ? load.deliveredAt : null)
+  const shipmentId = String(load.shipmentId ?? '')
+  const financials = held.financials !== undefined ? held.financials : await deps.getById(deps.tables.loadFinancials, loadId)
+  const shipment = held.shipment !== undefined ? held.shipment : (shipmentId ? await deps.getById(deps.tables.shipment, shipmentId) : null)
+  return laneSampleRefreshReason({
+    sample: existing as never,
+    day,
+    financials: financials as never,
+    revDivision: (load.revDivision ?? shipment?.revDivision ?? null) as string | null,
+    revSubdivision: (load.revSubdivision ?? shipment?.revSubdivision ?? null) as string | null,
+    salesRepId: (load.salesRepId ?? shipment?.salesRepId ?? null) as string | null,
+  })
+}
+
+/**
  * Make sure every delivered load of a shipment has a current sample.
  *
  * `writeLaneSample` is only called by the actions that move money, so a load that was delivered by
  * its stops (UPDATE_STOP), by a check call or by the driver app never got a row and the Brokerage
  * dashboard left it out (20002, 20016, 20027 … in November 2026). The shipment re-derive every one of
- * those actions ends with calls this: a sample that is missing, or dated on a different day than
- * the load's delivered day now says, is written again; a current one is left alone.
+ * those actions ends with calls this: a sample that is missing, dated on a different day than the load's
+ * delivered day now says, or no longer carrying the load's money, revenue division or rep is written again;
+ * a current one is left alone. A voided or deleted shipment is never sampled.
  */
-export async function ensureDeliveredLaneSamples(deps: QuoteDeps, bundle: { loads?: Row[] } | null | undefined): Promise<void> {
+export async function ensureDeliveredLaneSamples(
+  deps: LaneSampleDeps,
+  bundle: { loads?: Row[]; shipment?: Row | null; financials?: Row[] } | null | undefined,
+): Promise<void> {
   if (!deps.tables.laneSample) return
   try {
+    if (bundle?.shipment && (bundle.shipment.voidedAt || bundle.shipment.deletedAt)) return
+    const financialsByLoad = bundle?.financials ? new Map(bundle.financials.map((row) => [String(row.loadId ?? row.id ?? ''), row])) : null
     for (const load of bundle?.loads ?? []) {
       const loadId = String(load.id ?? '')
       if (!loadId || load.voidedAt || !isDeliveredOrLater(load.status)) continue
-      const existing = await deps.getById(deps.tables.laneSample, `lrs:${loadId}`)
-      const day = deliveredDayOfLoad(readStops(load) as never, typeof load.deliveredAt === 'string' ? load.deliveredAt : null)
-      if (existing && day && existing.date === day) continue
-      await writeLaneSample(deps, loadId)
+      const reason = await laneSampleRefreshFor(deps, load, {
+        ...(financialsByLoad ? { financials: financialsByLoad.get(loadId) ?? null } : {}),
+        ...(bundle?.shipment ? { shipment: bundle.shipment } : {}),
+      })
+      if (reason) await writeLaneSample(deps, loadId)
     }
   } catch (err) {
     console.warn('[tms-shipment-actions] lane sample ensure failed:', String(err))
+  }
+}
+
+/**
+ * The same check for one load row, for a Lambda that has just seen it change (the tracking projector). Reads
+ * the shipment first so a voided or deleted one is never sampled. Returns whether a sample was written.
+ */
+export async function ensureLaneSampleForLoad(deps: LaneSampleDeps, load: Row): Promise<boolean> {
+  if (!deps.tables.laneSample) return false
+  try {
+    const loadId = String(load.id ?? '')
+    const shipmentId = String(load.shipmentId ?? '')
+    if (!loadId || !shipmentId || load.voidedAt || !isDeliveredOrLater(load.status)) return false
+    const shipment = await deps.getById(deps.tables.shipment, shipmentId)
+    if (!shipment || shipment.voidedAt || shipment.deletedAt) return false
+    const reason = await laneSampleRefreshFor(deps, load, { shipment })
+    if (!reason) return false
+    await writeLaneSample(deps, loadId)
+    return true
+  } catch (err) {
+    console.warn('[lane-sample] ensure failed:', String(err))
+    return false
   }
 }
 
