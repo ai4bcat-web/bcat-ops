@@ -8500,14 +8500,15 @@ export async function sendRemittance(input: {
   return financeAction<RemittanceEmailResult>('SEND_REMITTANCE', input)
 }
 
-/** Save the e-mail a payee's remittance goes to, on the payment method the bill is paid under. */
-export async function setPayeeRemitEmail(input: { billId?: string; carrierId?: string; email: string }): Promise<{ paymentMethodId: string; carrierId: string; email: string; factorName?: string }> {
-  return financeAction<{ paymentMethodId: string; carrierId: string; email: string; factorName?: string }>('SET_REMIT_EMAIL', input)
+/** Save the e-mail a payee's remittance goes to, filed under the pay-to name the bill is paid to (a factor or the payee). */
+export async function setPayeeRemitEmail(input: { billId?: string; carrierId?: string; email: string }): Promise<{ paymentMethodId: string; carrierId: string; email: string; factorName?: string; payeeName?: string }> {
+  return financeAction<{ paymentMethodId: string; carrierId: string; email: string; factorName?: string; payeeName?: string }>('SET_REMIT_EMAIL', input)
 }
 
 /**
- * Every factoring company's one remittance e-mail, keyed by normalized name. A deploy that predates the
- * field answers with an empty map, so the columns simply fall back to each carrier's own copy.
+ * Every pay-to's one remittance e-mail (a factoring company's or a direct payee's), keyed by normalized name.
+ * A deploy that predates the field answers with an empty map, so the columns simply fall back to each
+ * carrier's own copy.
  */
 export async function getFactorRemitEmails(): Promise<FactorRemitMap> {
   try {
@@ -8521,8 +8522,8 @@ export async function getFactorRemitEmails(): Promise<FactorRemitMap> {
   }
 }
 
-/** Set (or clear, with '') a factoring company's remittance e-mail. One address serves every carrier it funds. */
-export async function setFactorRemitEmail(input: { factorName: string; email: string }): Promise<{ factorKey: string; factorName: string; email: string | null }> {
+/** Set (or clear, with '') a pay-to's remittance e-mail (a factor's or a direct payee's). One address serves every carrier paid to that name. */
+export async function setFactorRemitEmail(input: { factorName?: string; payeeName?: string; email: string }): Promise<{ factorKey: string; factorName: string; email: string | null }> {
   return financeAction<{ factorKey: string; factorName: string; email: string | null }>('SET_FACTOR_REMIT_EMAIL', input)
 }
 

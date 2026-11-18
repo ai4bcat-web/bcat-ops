@@ -15,7 +15,7 @@ import { getFactorRemitEmails, graphqlErrorText, listCarrierPaymentInfo, selectB
 import { chicagoDateStr } from '@/lib/date'
 import { applyFactorRemit, factorNameIndex, summarizeFactors } from '@/lib/factorRemit'
 import { formatCents } from '@/lib/invoiceBuild'
-import { payeeNameFor, setFactorNamesForLabels } from '@/features/ap/apViews'
+import { payeeNameFor, setFactorNamesForLabels, setPayeeRemitForLabels } from '@/features/ap/apViews'
 import {
   buildCashPlan, cents, DEFAULT_PLANNER_INPUTS, PLANNER_FIELD_KEYS, readAmount, readInputs,
   type PlanBillRow, type PlannerBill, type PlannerFields, type PlannerInputs,
@@ -103,6 +103,7 @@ export function CashPlannerPage() {
       .then(([rows, emails]) => {
         if (!alive) return
         setFactorNamesForLabels(factorNameIndex(summarizeFactors(rows, emails)))
+        setPayeeRemitForLabels(emails)
         setInfos(applyFactorRemit(rows, emails))
         setNamesVersion((n) => n + 1)
       })

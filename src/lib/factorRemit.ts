@@ -1,11 +1,13 @@
 /**
- * One remittance e-mail per factoring company.
+ * One remittance e-mail per PAY TO.
  *
- * A factor is not a record of its own: it is the `factorName` written on each carrier's payment method.
- * The address a factor wants remittances at is the same for every carrier it funds, so it is kept once, in
- * `TmsSettings.factorRemitEmails`, keyed by the factor's normalized name. Whenever a carrier is paid through
- * a factor, that one address wins over whatever copy sits on the carrier's own payment method or on a bill.
- * A factor with no address of its own falls back to the carriers' copies, so nothing needs backfilling.
+ * A remittance goes to whoever is paid, and the Pay to column names that: the factoring company for a carrier
+ * paid through one, otherwise the payee itself. The address is kept once per pay-to, in
+ * `TmsSettings.factorRemitEmails`, keyed by the normalized pay-to name (the field keeps its old name; since
+ * 2026-11-19 it holds direct payees as well as factors, and a factor's key is the same as before). Whenever a
+ * bill is paid to that name, that one address wins over whatever copy sits on a carrier's own payment method
+ * or on a bill, so two carriers paid through the same factor, or the same payee, can never disagree.
+ * A pay-to with no address of its own falls back to the carriers' copies, so nothing needs backfilling.
  *
  * Pure, and shared by the web app and the finance Lambda so the Payable column and the e-mail it sends can
  * never disagree about who gets the remittance.
@@ -37,6 +39,9 @@ export function factorKeyOf(name: string | null | undefined): string {
     .replace(/\s+/g, ' ')
     .trim()
 }
+
+/** The key a pay-to name is filed under. Factors and direct payees share the one registry. */
+export const payeeKeyOf = factorKeyOf
 
 const EMAIL_SHAPE = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/
 
@@ -77,6 +82,17 @@ interface PayeeLike {
   recipientType?: string | null
   factorName?: string | null
   payeeEmail?: string | null
+}
+
+/** The address filed for this pay-to name (a factor's name or a direct payee's), or ''. */
+export function payeeEmailFor(map: FactorRemitMap | null | undefined, payTo: string | null | undefined): string {
+  return factorEmailFor(map, payTo)
+}
+
+/** The pay-to a payment method sends money to: its factor, else the carrier (or the name frozen on the bill). */
+export function payToNameFor(info: PayeeLike | null | undefined, directName: string | null | undefined): string {
+  if (paysThroughFactor(info)) return String(info?.factorName ?? '').trim()
+  return String(directName ?? '').trim()
 }
 
 /** True when this payment method pays a factor that has a name to file the address under. */
@@ -193,4 +209,92 @@ export function canonicalFactorName(index: FactorNameIndex | null | undefined, n
   if (!typed) return ''
   const key = factorKeyOf(typed)
   return index?.get(key) ?? index?.get(compactKey(key)) ?? typed
+}
+
+export type PayeeKind = 'FACTOR' | 'DIRECT'
+
+export interface PayeeSummary extends FactorSummary {
+  kind: PayeeKind
+  /** The carriers paid to this name (a few, for display; the count is `carrierCount`). */
+  carrierNames: string[]
+}
+
+/** The method a carrier is paid under: the preferred active one, else any active one. */
+function effectiveMethod<T extends PayeeLike & { carrierId?: string | null; status?: string | null; isPreferred?: boolean | null }>(
+  methods: readonly T[],
+): T | null {
+  const live = methods.filter((m) => m.status !== 'INACTIVE')
+  return live.find((m) => m.isPreferred) ?? live[0] ?? null
+}
+
+/**
+ * One row per pay-to: every factoring company, and every payee a carrier is paid directly. `carriers` give the
+ * names of the direct payees (a carrier paid directly is its own pay-to). A carrier with no payment method has
+ * no pay-to yet and is not a row: the Pay-to needed worklist is where those are fixed.
+ */
+export function summarizePayees(
+  carriers: ReadonlyArray<{ id: string; name: string }>,
+  infos: ReadonlyArray<PayeeLike & { carrierId?: string | null; status?: string | null; isPreferred?: boolean | null }>,
+  map: FactorRemitMap | null | undefined,
+): PayeeSummary[] {
+  const factors = summarizeFactors(infos, map)
+  const rows: PayeeSummary[] = factors.map((f) => ({ ...f, kind: 'FACTOR' as const, carrierNames: [] }))
+  const taken = new Set(factors.map((f) => f.key))
+
+  const byCarrier = new Map<string, Array<(typeof infos)[number]>>()
+  for (const info of infos) {
+    const id = String(info.carrierId ?? '')
+    if (!id) continue
+    const list = byCarrier.get(id)
+    if (list) list.push(info)
+    else byCarrier.set(id, [info])
+  }
+  interface Acc { names: Map<string, number>; carriers: Set<string>; carrierNames: Set<string>; emails: Map<string, number> }
+  const direct = new Map<string, Acc>()
+  for (const carrier of carriers) {
+    const method = effectiveMethod(byCarrier.get(carrier.id) ?? [])
+    if (!method || paysThroughFactor(method)) continue
+    const key = payeeKeyOf(carrier.name)
+    if (!key || taken.has(key)) continue
+    const acc = direct.get(key) ?? { names: new Map(), carriers: new Set(), carrierNames: new Set(), emails: new Map() }
+    const name = carrier.name.trim()
+    acc.names.set(name, (acc.names.get(name) ?? 0) + 1)
+    acc.carriers.add(carrier.id)
+    acc.carrierNames.add(name)
+    const email = (method.payeeEmail ?? '').trim().toLowerCase()
+    if (email) acc.emails.set(email, (acc.emails.get(email) ?? 0) + 1)
+    direct.set(key, acc)
+  }
+  // A direct payee that was given an address but is no longer on any carrier still deserves its row.
+  for (const [key, entry] of Object.entries(map ?? {})) {
+    if (!taken.has(key) && !direct.has(key)) {
+      direct.set(key, { names: new Map([[entry.name, 0]]), carriers: new Set(), carrierNames: new Set(), emails: new Map() })
+    }
+  }
+  for (const [key, acc] of direct) {
+    const names = [...acc.names.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([n]) => n)
+    const set = map?.[key]?.email?.trim() ?? ''
+    const carrierEmails = [...acc.emails.keys()]
+    let email = set
+    let source: FactorEmailSource = 'SET'
+    if (!set) {
+      if (carrierEmails.length === 1) { email = carrierEmails[0]!; source = 'CARRIERS' }
+      else if (carrierEmails.length > 1) { email = ''; source = 'CONFLICT' }
+      else { email = ''; source = 'NONE' }
+    }
+    const setName = map?.[key]?.name?.trim() ?? ''
+    const ordered = setName ? [setName, ...names.filter((n) => n !== setName)] : names
+    rows.push({
+      key,
+      name: ordered[0] ?? key,
+      otherNames: ordered.slice(1),
+      carrierCount: acc.carriers.size,
+      email,
+      source,
+      conflicting: source === 'CONFLICT' ? carrierEmails : [],
+      kind: 'DIRECT',
+      carrierNames: [...acc.carrierNames].slice(0, 5),
+    })
+  }
+  return rows.sort((a, b) => b.carrierCount - a.carrierCount || a.name.localeCompare(b.name))
 }

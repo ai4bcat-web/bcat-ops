@@ -48,7 +48,7 @@ import {
   EMPTY_TO_BE_PAID_FILTERS, applyToBePaidFilters, avgDaysToPayBills, awaitingInvoiceTotals, billCarrierOptions,
   billGates, type BillGates, billsAging, billsExpected, billsSelected, canSelectForPayment, invoiceAgeBuckets, isOwnFleet, paidBills,
   paidInMonth, paidMonthOptions,
-  paymentInfoFor, payeeNameFor, isFactorPaid, payToStatusFor, payToWorklist, PAY_TO_STATUS_LABEL, PAY_TO_STATUS_TITLE, quickPayLabel, setFactorNamesForLabels, remitEmailOf, remitEmailOfPayment, remittanceStatusOf, selectionBalanceCents,
+  paymentInfoFor, payeeNameFor, isFactorPaid, payToStatusFor, payToWorklist, PAY_TO_STATUS_LABEL, PAY_TO_STATUS_TITLE, quickPayLabel, setFactorNamesForLabels, setPayeeRemitForLabels, payeeCopies, remitEmailOf, remitEmailOfPayment, remittanceStatusOf, selectionBalanceCents,
   selectionCarrierId, sharedProLabel, sharedProIndex, type ApTabKey, type SharedProIndex, type ToBePaidFilters,
 } from './apViews'
 import { ApCreditDialog } from './components/ApCreditDialog'
@@ -232,6 +232,8 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         if (!alive) return
         // Pay to / Remit to name each factor exactly as the Factoring companies table does.
         setFactorNamesForLabels(factorNameIndex(summarizeFactors(rows, factorEmails)))
+        // One address per pay-to (a factor or a direct payee): every Remit to cell reads it before any carrier's copy.
+        setPayeeRemitForLabels(factorEmails)
         setPayInfos(applyFactorRemit(rows, factorEmails))
       })
       .catch(() => {})
@@ -866,6 +868,8 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           payee={dialog.payee}
           billId={dialog.billId}
           carrierId={dialog.carrierId}
+          carriersUsing={payeeCopies(dialog.payee, open.bills, payInfos).carriers}
+          copies={payeeCopies(dialog.payee, open.bills, payInfos).emails}
           onOpenChange={(o) => { if (!o) setDialog(null) }}
           onDone={() => { setDialog(null); setInfosKey((n) => n + 1); setPayRefresh((n) => n + 1) }}
         />
@@ -2004,9 +2008,9 @@ function paymentsView({
     moneyCol<ApPaymentRecord>('amount', 'AMOUNT', (p) => p.amountCents),
     moneyCol<ApPaymentRecord>('applied', 'APPLIED', (p) => p.appliedCents),
     moneyCol<ApPaymentRecord>('unapplied', 'UNAPPLIED', (p) => p.unappliedCents),
-    facetCol<ApPaymentRecord>('remitTo', 'REMIT TO', (p) => remitEmailOfPayment(p, infos) || 'No remit e-mail', (p) => (
+    facetCol<ApPaymentRecord>('remitTo', 'REMIT TO', (p) => remitEmailOfPayment(p, infos, carrier?.name) || 'No remit e-mail', (p) => (
       p.kind === 'PAYMENT'
-        ? <RemitToCell email={remitEmailOfPayment(p, infos)} label={carrier?.name ?? 'this payee'} onAdd={() => onAddRemit(p)} />
+        ? <RemitToCell email={remitEmailOfPayment(p, infos, carrier?.name)} label={carrier?.name ?? 'this payee'} onAdd={() => onAddRemit(p)} />
         : <span className="tms-muted">—</span>
     ), { extraPx: 60 }),
     facetCol('remittance', 'REMITTANCE', remittanceText, (p) => (

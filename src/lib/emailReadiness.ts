@@ -1,5 +1,5 @@
 import { isValidEmail } from './billingMethod'
-import { canonicalFactorName, type FactorNameIndex } from './factorRemit'
+import { canonicalFactorName, payeeEmailFor, payToNameFor, type FactorNameIndex, type FactorRemitMap } from './factorRemit'
 
 export type EmailState = 'OK' | 'MISSING' | 'INVALID'
 export type InvoiceEmailState = EmailState | 'FACTORED_QUEUE_ONLY'
@@ -31,8 +31,21 @@ export function customerInvoiceEmailState(customer: InvoiceEmailFields): Invoice
   return state !== 'OK' && customer.billingMethod === 'FACTOR' ? 'FACTORED_QUEUE_ONLY' : state
 }
 
-/** Directory completeness, not payment routing: any stored payee address counts, regardless of method status. */
-export function carrierRemitEmailState(carrier: { id: string }, paymentMethods: readonly RemitEmailFields[]): EmailState {
+/**
+ * Directory completeness, not payment routing: any stored payee address counts, regardless of method status.
+ * An address filed for the carrier's pay to (`payeeEmails`: a factor's name, or the carrier's own when it is paid
+ * directly) counts too, since remittance goes to the pay to.
+ */
+export function carrierRemitEmailState(
+  carrier: { id: string; name?: string },
+  paymentMethods: readonly RemitEmailFields[],
+  payeeEmails?: FactorRemitMap | null,
+): EmailState {
+  if (payeeEmails) {
+    const live = paymentMethods.filter((m) => m.carrierId === carrier.id && m.status !== 'INACTIVE')
+    const method = live.find((m) => m.isPreferred) ?? live[0]
+    if (method && payeeEmailFor(payeeEmails, payToNameFor(method, carrier.name))) return 'OK'
+  }
   let state: EmailState = 'MISSING'
   for (const method of paymentMethods) {
     if (method.carrierId !== carrier.id) continue

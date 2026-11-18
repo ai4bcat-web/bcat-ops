@@ -44,9 +44,11 @@ interface CarrierPaymentEditorProps {
   onSave: (draft: CarrierPaymentDraft) => Promise<void>
   onArchive: (method: CarrierPaymentMethodRecord) => Promise<void>
   disabled?: boolean
+  /** The carrier's own name: it is the pay-to of a direct method, whose one remit address is filed under that name. */
+  carrierName?: string
 }
 
-export function CarrierPaymentEditor({ methods, awaitingPayment, onSave, onArchive, disabled }: CarrierPaymentEditorProps) {
+export function CarrierPaymentEditor({ methods, awaitingPayment, onSave, onArchive, disabled, carrierName }: CarrierPaymentEditorProps) {
   const [adding, setAdding] = useState(false)
   // A factoring company has one remittance address, set on Carriers › Remit e-mails; carriers paid through it inherit it.
   const [factorEmails, setFactorEmails] = useState<FactorRemitMap>({})
@@ -77,6 +79,7 @@ export function CarrierPaymentEditor({ methods, awaitingPayment, onSave, onArchi
           key={method.id}
           method={method}
           factorEmails={factorEmails}
+          carrierName={carrierName}
           disabled={disabled}
           onSave={onSave}
           onArchive={() => onArchive(method)}
@@ -87,6 +90,7 @@ export function CarrierPaymentEditor({ methods, awaitingPayment, onSave, onArchi
         <PaymentRow
           method={null}
           factorEmails={factorEmails}
+          carrierName={carrierName}
           disabled={disabled}
           onSave={async (draft) => { await onSave(draft); setAdding(false) }}
           onCancel={() => setAdding(false)}
@@ -109,9 +113,10 @@ function addressField(method: CarrierPaymentMethodRecord | null, key: string): s
   return typeof value === 'string' ? value : ''
 }
 
-function PaymentRow({ method, factorEmails, disabled, onSave, onArchive, onCancel }: {
+function PaymentRow({ method, factorEmails, carrierName, disabled, onSave, onArchive, onCancel }: {
   method: CarrierPaymentMethodRecord | null
   factorEmails: FactorRemitMap
+  carrierName?: string
   disabled?: boolean
   onSave: (draft: CarrierPaymentDraft) => Promise<void>
   onArchive?: () => Promise<void>
@@ -133,7 +138,9 @@ function PaymentRow({ method, factorEmails, disabled, onSave, onArchive, onCance
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const inheritedEmail = recipientType === 'FACTOR' ? factorEmailFor(factorEmails, factorName) : ''
+  // The address belongs to the pay-to: a factor's, or this carrier's own name when it is paid directly.
+  const payToName = recipientType === 'FACTOR' ? factorName.trim() : (carrierName ?? '').trim()
+  const inheritedEmail = factorEmailFor(factorEmails, payToName)
   const factorNames = useMemo(() => new Map(Object.entries(factorEmails).map(([key, entry]) => [key, entry.name])), [factorEmails])
 
   const { hint: addressHint, pickCity } = useAddressAutofill({
@@ -231,7 +238,7 @@ function PaymentRow({ method, factorEmails, disabled, onSave, onArchive, onCance
             <span data-testid="factor-remit-inherited">
               <TmsInput aria-label="Payee email" value={inheritedEmail} disabled readOnly />
               <span className="tms-muted" style={{ fontSize: 12 }}>
-                Remittance to {factorName.trim()} goes here for every carrier it funds. Change it on{' '}
+                Remittance to {payToName} goes here for every carrier paid to that name. Change it on{' '}
                 <Link className="tms-link" to="/tms/carriers/remit">Carriers › Remit e-mails</Link>.
               </span>
             </span>

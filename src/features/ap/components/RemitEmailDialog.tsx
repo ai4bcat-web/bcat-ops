@@ -1,7 +1,8 @@
 /**
- * The e-mail a carrier's (or their factor's) remittance goes to. Opened from the Remit to column when
- * nothing is on file. A carrier paid directly saves onto its own payment method; one paid through a factor
- * saves the factoring company's one address, which every carrier it funds and the automatic remittance read.
+ * The e-mail remittance goes to, saved against the PAY TO: the factoring company for a carrier paid through
+ * one, otherwise the payee itself. Opened from the Remit to column when nothing is on file. The address is kept
+ * once for that name, so every carrier paid to it and the automatic remittance read the same one. When the
+ * carriers paid to this name carry different addresses of their own, they are listed to pick between.
  */
 import { useState } from 'react'
 import { toast } from 'sonner'
@@ -10,9 +11,13 @@ import { graphqlErrorText, setPayeeRemitEmail } from '@/lib/apiClient'
 
 const EMAIL_SHAPE = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/
 
-export function RemitEmailDialog({ payee, billId, carrierId, initial, open, onOpenChange, onDone }: {
+export function RemitEmailDialog({ payee, billId, carrierId, initial, carriersUsing, copies, open, onOpenChange, onDone }: {
   /** Who is paid: the carrier or its factor, as the Pay to column names them. */
   payee: string
+  /** How many carriers are paid to this name, so the dialog can say who a change reaches. */
+  carriersUsing?: number
+  /** The different addresses those carriers carry on their own payment methods today. */
+  copies?: string[]
   billId?: string
   carrierId?: string
   initial?: string
@@ -48,8 +53,19 @@ export function RemitEmailDialog({ payee, billId, carrierId, initial, open, onOp
       )}
     >
       <p className="tms-muted">
-        Remittance advice is e-mailed here each time {payee} is paid. A factoring company has one address, used for every carrier it funds; a carrier paid directly keeps its own.
+        Remittance advice is e-mailed here each time {payee} is paid. The address belongs to the Pay to name, so it is used for every carrier paid to {payee}
+        {carriersUsing && carriersUsing > 1 ? ` (${carriersUsing} carriers use this address)` : ''}.
       </p>
+      {copies && copies.length > 1 && (
+        <div className="mb-2">
+          <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>The carriers paid to {payee} carry different addresses. Pick the right one, or type another.</p>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {copies.map((copy) => (
+              <TmsButton key={copy} variant="ghost" onClick={() => setEmail(copy)}>{copy}</TmsButton>
+            ))}
+          </div>
+        </div>
+      )}
       <TmsField label="Remit e-mail">
         <TmsInput
           aria-label="Remit e-mail address"

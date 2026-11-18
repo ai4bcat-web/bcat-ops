@@ -65,7 +65,7 @@ export function PayToDialog({ carrierId, carrierName, awaiting, open, onOpenChan
       {loading ? (
         <p className="tms-muted">Loading payment methods…</p>
       ) : (
-        <CarrierPaymentEditor methods={methods} awaitingPayment={awaiting} onSave={save} onArchive={archive} />
+        <CarrierPaymentEditor methods={methods} awaitingPayment={awaiting} carrierName={carrierName} onSave={save} onArchive={archive} />
       )}
     </TmsDialog>
   )
