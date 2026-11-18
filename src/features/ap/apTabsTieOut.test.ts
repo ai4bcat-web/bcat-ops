@@ -14,7 +14,7 @@ function bill(patch: Partial<CarrierBillRecord> = {}): CarrierBillRecord {
   }
 }
 const aljex = { createdBy: 'aljex-import', recordedBy: 'aljex-import' }
-const facts = new Map<string, BillShipmentFacts>([['s1', { shipmentNumber: '20027', po: null, deliveredAt: '2026-11-12T00:00:00Z', delivered: true }]])
+const facts = new Map<string, BillShipmentFacts>([['s1', { shipmentNumber: '20027', customerRef: null, deliveredAt: '2026-11-12T00:00:00Z', delivered: true }]])
 const bills = [
   bill({ id: 'e-new', datesPending: true }),
   bill({ id: 'e-aljex', datesPending: true, balanceCents: 20_000, ...aljex }),

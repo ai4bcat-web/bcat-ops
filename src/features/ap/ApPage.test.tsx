@@ -41,7 +41,7 @@ vi.mock('@/features/finance/MarkReviewedDialog', () => ({
 // Every bill in these tests is on a delivered load (the Payables rule); PO and delivery are fixed.
 vi.mock('./useBillFacts', () => ({
   useBillFacts: () => ({
-    facts: { get: () => ({ shipmentNumber: 'S-1001', po: 'PO-77', deliveredAt: '2026-10-20T12:00:00.000Z', delivered: true, customerName: 'Acme Foods' }) },
+    facts: { get: () => ({ shipmentNumber: 'S-1001', customerRef: 'PO-77', deliveredAt: '2026-10-20T12:00:00.000Z', delivered: true, customerName: 'Acme Foods' }) },
     loading: false,
   }),
 }))
@@ -391,6 +391,20 @@ describe('the AP board', () => {
       expect(hs.some((h) => /DAYS PAST DUE/.test(h))).toBe(true)
       expect(hs.some((h) => /^AGE$/.test(h.trim()))).toBe(false)
       expect(within(screen.getByRole('table', { name: /^AP selected/ })).getAllByText('61 days late')).toHaveLength(1) // one pill per bill
+    })
+
+    it('names the PO column CUST REF # and fills it with the shipment\'s customer reference', async () => {
+      await setup({ bills: [bill({ billNumber: 'BL-1', dueAt: daysAgo(61), selectedForPayment: true })] })
+      fireEvent.click(screen.getByRole('tab', { name: /^Selected/ }))
+      const hs = headers(/^AP selected/)
+      expect(hs.some((h) => /CUST REF #/.test(h))).toBe(true)
+      expect(hs.some((h) => /^PO #$/.test(h.trim()))).toBe(false)
+      expect(within(screen.getByRole('table', { name: /^AP selected/ })).getByText('PO-77')).toBeTruthy()
+      // The search box finds a bill by it.
+      fireEvent.change(screen.getByTestId('ap-search'), { target: { value: 'po-77' } })
+      expect(within(screen.getByRole('table', { name: /^AP selected/ })).getByText('PO-77')).toBeTruthy()
+      fireEvent.change(screen.getByTestId('ap-search'), { target: { value: 'no-such-ref' } })
+      expect(within(screen.getByRole('table', { name: /^AP selected/ })).queryByText('PO-77')).toBeNull()
     })
 
     it('sorts Days past due descending with the most overdue first', async () => {

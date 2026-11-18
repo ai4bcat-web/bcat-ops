@@ -24,8 +24,8 @@ function bill(patch: Partial<CarrierBillRecord> = {}): CarrierBillRecord {
 }
 
 const facts: BillFactsIndex = new Map([
-  ['s1', { shipmentNumber: '20001', po: 'PO-1', deliveredAt: '2026-10-30T03:30:00.000Z', delivered: true, customerName: 'Acme Foods' }],
-  ['s2', { shipmentNumber: '20002', po: null, deliveredAt: '2026-11-10T18:00:00.000Z', delivered: true, customerName: 'Beta, "Inc"' }],
+  ['s1', { shipmentNumber: '20001', customerRef: 'PO-1', deliveredAt: '2026-10-30T03:30:00.000Z', delivered: true, customerName: 'Acme Foods' }],
+  ['s2', { shipmentNumber: '20002', customerRef: null, deliveredAt: '2026-11-10T18:00:00.000Z', delivered: true, customerName: 'Beta, "Inc"' }],
 ]) as unknown as BillFactsIndex
 
 const run = (bills: CarrierBillRecord[], extra: Partial<Parameters<typeof selectedExportRows>[0]> = {}) => ({
@@ -46,7 +46,7 @@ describe('selectedExportRows', () => {
   it('carries the payee, customer, dates, days past due, money and the ticked flag for each bill', () => {
     const [row] = selectedExportRows(run([bill()], { ticked: new Set(['b1']) }))
     expect(row).toMatchObject({
-      payee: 'Blue Line Trucking', carrier: 'Blue Line Trucking', pro: '20001', po: 'PO-1', customer: 'Acme Foods',
+      payee: 'Blue Line Trucking', carrier: 'Blue Line Trucking', pro: '20001', customerRef: 'PO-1', customer: 'Acme Foods',
       delivered: '10/29/2026', invoiceDate: '10/01/2026', dueDate: '11/08/2026', daysPastDue: 10,
       netCents: 150_000, paidCents: 0, balanceCents: 150_000, payMethod: 'ACH', remitEmail: 'ap@blueline.test',
       factorName: '', status: 'To be paid', quickPay: false, ticked: true,

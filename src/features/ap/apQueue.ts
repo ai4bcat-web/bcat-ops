@@ -13,12 +13,15 @@ import { billDueDate } from '@/lib/carrierBill'
 import { payToLabelFor, remitEmailOf } from './apViews'
 import type { CarrierPaymentInfo } from '@/lib/apiClient'
 import type { CarrierBillRecord, OrderRecord, ShipmentRecord } from '@/types/tms'
+import type { Load } from '@/types'
 import { deliveredTimeOf } from '@/lib/deliveredAt'
+import { customerRefOf } from '@/lib/customerRef'
 
 /** The load facts a bill row shows, read once per shipment. */
 export interface BillShipmentFacts {
   shipmentNumber: string | null
-  po: string | null
+  /** The shipment's customer reference number (the PO it is invoiced under, else the Aljex customer ref, else the load's tmsId): `customerRefOf`. */
+  customerRef: string | null
   /** YYYY-MM-DD or ISO; null when the load has not delivered. */
   deliveredAt: string | null
   delivered: boolean
@@ -31,21 +34,23 @@ export interface BillShipmentFacts {
 
 export type BillFactsIndex = ReadonlyMap<string, BillShipmentFacts>
 
-function referenceValue(order: OrderRecord | undefined, code: string): string | null {
-  const ref = order?.references?.find((r) => r.code === code && (r.value ?? '').trim() !== '')
-  return ref ? ref.value.trim() : null
-}
-
 /** `shipmentId` -> what the row needs from the shipment and its order. */
-export function billFactsIndex(shipments: readonly ShipmentRecord[], orders: readonly OrderRecord[]): Map<string, BillShipmentFacts> {
+export function billFactsIndex(
+  shipments: readonly ShipmentRecord[],
+  orders: readonly OrderRecord[],
+  loads: readonly Pick<Load, 'shipmentId' | 'tmsId'>[] = [],
+): Map<string, BillShipmentFacts> {
   const orderByShipment = new Map<string, OrderRecord>()
   for (const order of orders) if (order.shipmentId && !orderByShipment.has(order.shipmentId)) orderByShipment.set(order.shipmentId, order)
+  // The load's `tmsId` is the Customer Ref's last resort (loads wrapped by the backfill carry it nowhere else).
+  const tmsIdByShipment = new Map<string, string>()
+  for (const load of loads) if (load.shipmentId && load.tmsId && !tmsIdByShipment.has(load.shipmentId)) tmsIdByShipment.set(load.shipmentId, load.tmsId)
   const out = new Map<string, BillShipmentFacts>()
   for (const shipment of shipments) {
     const deliveredAt = deliveredTimeOf(shipment)
     out.set(shipment.id, {
       shipmentNumber: shipment.number ?? null,
-      po: referenceValue(orderByShipment.get(shipment.id), 'PO'),
+      customerRef: customerRefOf(orderByShipment.get(shipment.id)?.references, tmsIdByShipment.get(shipment.id)),
       deliveredAt,
       delivered: Boolean(deliveredAt) || shipment.status === 'DELIVERED',
       revDivision: shipment.revDivision ?? null,
@@ -141,7 +146,8 @@ export const AP_REPORT_TITLE: Record<ApReportKind, string> = {
 export interface ApReportRow {
   billId: string
   pro: string
-  po: string
+  /** The shipment's customer reference number; '' when it has none. */
+  customerRef: string
   carrier: string
   payTo: string
   remitEmail: string
@@ -181,7 +187,7 @@ export function apReportRows(
     return {
       billId: bill.id,
       pro: proOf(bill, facts),
-      po: facts.get(bill.shipmentId)?.po ?? '',
+      customerRef: facts.get(bill.shipmentId)?.customerRef ?? '',
       carrier: bill.carrierName ?? '',
       payTo: payToLabelFor(bill, infos),
       remitEmail: remitEmailOf(bill, infos),
@@ -229,9 +235,9 @@ const csvCell = (value: string | number | null): string => {
 const dollars = (cents: number): string => (cents / 100).toFixed(2)
 
 export function apReportCsv(rows: readonly ApReportRow[]): string {
-  const header = ['PRO', 'PO', 'Carrier', 'Pay to', 'Remit e-mail', 'Delivered', 'Carrier invoice #', 'Invoice date', 'Due date', 'Due estimated', 'Terms', 'Carrier pay', 'Quick pay fee', 'Net', 'Balance', 'Days aging']
+  const header = ['PRO', 'Customer ref #', 'Carrier', 'Pay to', 'Remit e-mail', 'Delivered', 'Carrier invoice #', 'Invoice date', 'Due date', 'Due estimated', 'Terms', 'Carrier pay', 'Quick pay fee', 'Net', 'Balance', 'Days aging']
   const lines = rows.map((r) => [
-    r.pro, r.po, r.carrier, r.payTo, r.remitEmail, r.deliveredAt?.slice(0, 10) ?? '', r.invoiceNumber, r.invoiceDate ?? 'Pending',
+    r.pro, r.customerRef, r.carrier, r.payTo, r.remitEmail, r.deliveredAt?.slice(0, 10) ?? '', r.invoiceNumber, r.invoiceDate ?? 'Pending',
     r.dueAt ?? '', r.dueEstimated ? 'Yes' : '', r.terms, dollars(r.grossCents), dollars(r.feeCents), dollars(r.netCents), dollars(r.balanceCents),
     r.daysAging ?? '',
   ].map(csvCell).join(','))

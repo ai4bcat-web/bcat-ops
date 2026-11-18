@@ -19,7 +19,7 @@ function bill(patch: Partial<CarrierBillRecord> = {}): CarrierBillRecord {
   }
 }
 
-const facts = new Map([['s1', { shipmentNumber: '20027', po: 'FR-113188-3', deliveredAt: '2026-11-12T07:11:00Z', delivered: true }]])
+const facts = new Map([['s1', { shipmentNumber: '20027', customerRef: 'FR-113188-3', deliveredAt: '2026-11-12T07:11:00Z', delivered: true }]])
 
 function draw(
   b: CarrierBillRecord,
@@ -42,6 +42,7 @@ describe('BillDrawer', () => {
     const onSetDates = vi.fn()
     const onAdjustPay = vi.fn()
     draw(bill(), { onSetDates, onAdjustPay })
+    expect(screen.getByText('Customer ref #')).toBeTruthy()
     expect(screen.getByText('FR-113188-3')).toBeTruthy()
     expect(screen.getByText('Needs invoice date')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Add invoice date' }))

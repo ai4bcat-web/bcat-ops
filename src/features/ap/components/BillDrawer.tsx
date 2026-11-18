@@ -125,7 +125,7 @@ export function BillDrawer({ bill, facts, infos, onClose, onChanged, onAdjustPay
           <h3 className={heading}>Bill details</h3>
           <dl className="m-0">
             {row('PRO', <Link to={shipmentEditorPath(bill.shipmentId)}>{pro}</Link>)}
-            {fact?.po ? row('PO #', fact.po) : null}
+            {fact?.customerRef ? row('Customer ref #', fact.customerRef) : null}
             {fact?.deliveredAt ? row('Delivered', formatDay(fact.deliveredAt)) : null}
             {row('Carrier invoice #', bill.billNumber ?? '—')}
             {!pending ? row('Invoice date', formatDay(bill.billDate)) : null}

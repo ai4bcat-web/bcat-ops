@@ -1121,7 +1121,7 @@ function payeeColumns(
 }
 
 /**
- * PRO, PO # and delivery date: the load a payable pays for, read off its shipment and order. The PRO
+ * PRO, customer ref # and delivery date: the load a payable pays for, read off its shipment and order. The PRO
  * opens the bill's drawer; the shipment is one click further in.
  */
 function loadColumns(facts: BillFactsIndex, onOpen: (bill: CarrierBillRecord) => void): ApColumn<CarrierBillRecord>[] {
@@ -1136,7 +1136,11 @@ function loadColumns(facts: BillFactsIndex, onOpen: (bill: CarrierBillRecord) =>
         </button>
       ),
     },
-    facetCol<CarrierBillRecord>('po', 'PO #', (bill) => facts.get(bill.shipmentId)?.po ?? '—', undefined, { filter: 'text' }),
+    // The key stays 'po' so saved column layouts keep this column where it was; the column now reads the customer ref (Ryne 2026-11-19).
+    facetCol<CarrierBillRecord>('po', 'CUST REF #', (bill) => facts.get(bill.shipmentId)?.customerRef || '—', undefined, {
+      filter: 'text',
+      renderHeader: () => <span title="Customer reference number">CUST REF #</span>,
+    }),
     dayCol<CarrierBillRecord>('delivered', 'DELIVERED', (bill) => facts.get(bill.shipmentId)?.deliveredAt ?? null),
   ]
 }

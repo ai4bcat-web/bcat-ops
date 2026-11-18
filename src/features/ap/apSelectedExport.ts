@@ -27,7 +27,7 @@ export interface SelectedExportRow {
   payee: string
   carrier: string
   pro: string
-  po: string
+  customerRef: string
   customer: string
   delivered: string
   invoiceDate: string
@@ -96,7 +96,7 @@ export function selectedExportRows(input: SelectedExportInput): SelectedExportRo
       payee,
       carrier: bill.carrierName?.trim() || '',
       pro: proOf(bill, facts),
-      po: facts.get(bill.shipmentId)?.po ?? '',
+      customerRef: facts.get(bill.shipmentId)?.customerRef ?? '',
       customer: billCustomerName(bill, facts) ?? '',
       delivered: exportDay(facts.get(bill.shipmentId)?.deliveredAt ?? null),
       invoiceDate: exportDay(bill.billDate),
@@ -161,7 +161,7 @@ function cell(value: string | number | null | undefined): string {
 const line = (cells: readonly (string | number | null | undefined)[]) => cells.map(cell).join(',')
 
 export const SELECTED_EXPORT_HEADERS = [
-  'Payee (remit to)', 'Carrier', 'PRO', 'PO #', 'Customer', 'Delivered', 'Invoice date', 'Due date',
+  'Payee (remit to)', 'Carrier', 'PRO', 'Customer ref #', 'Customer', 'Delivered', 'Invoice date', 'Due date',
   'Days past due (negative = not due yet)', 'Terms', 'Amount (net)', 'Paid so far', 'Balance to pay',
   'Pay method', 'Remit e-mail', 'Factor', 'Pay-to status', 'Bill status', 'Needs review', 'Quick pay', 'Ticked', 'Bill',
 ] as const
@@ -177,7 +177,7 @@ export function selectedPayablesCsv(input: SelectedExportInput): string {
   const out: string[] = [line(SELECTED_EXPORT_HEADERS)]
   for (const r of rows) {
     out.push(line([
-      r.payee, r.carrier, r.pro, r.po, r.customer, r.delivered, r.invoiceDate, r.dueDate,
+      r.payee, r.carrier, r.pro, r.customerRef, r.customer, r.delivered, r.invoiceDate, r.dueDate,
       r.daysPastDue == null ? '' : r.daysPastDue, r.terms,
       dollars(r.netCents), dollars(r.paidCents), dollars(r.balanceCents),
       r.payMethod, r.remitEmail, r.factorName, r.payToStatus, r.status, r.needsReview, r.quickPay ? 'Yes' : 'No', r.ticked ? 'Yes' : 'No', r.bill,
