@@ -39,6 +39,7 @@ import { isManualStepId, manualProgress, withManualStep } from '../../../src/lib
 import type { ManualInvoiceSteps } from '../../../src/types'
 import { localStatusFor } from '../../../src/lib/otrInvoiceStatus'
 import { decideResubmit, sameInvoiceBack, withPriorInvoice } from '../../../src/lib/factoringResubmit'
+import { checkOtrInvoiceUnshared } from '../../../src/lib/otrSharedInvoice'
 import { accountingAccessMessage, hasAccountingPage } from '../../../src/lib/accountingAccess'
 import { customerLookupFrom, type CustomerLookupResult } from './customerLookup'
 import { normalizePro } from '../../../src/lib/proNumber'
@@ -134,6 +135,46 @@ const trim = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
 async function getFactoringItem(id: string): Promise<Row | null> {
   const r = await ddb.send(new GetCommand({ TableName: FACTORING_TABLE, Key: { id } }))
   return (r.Item as Row) ?? null
+}
+
+/**
+ * Every OTHER factoring row that holds this OTR invoice id right now. OTR can answer a create
+ * with an invoice that belongs to another PRO; a row must never take an id someone else holds.
+ * The table is a few hundred rows and this runs once per submit, so it scans.
+ */
+async function findOtherHoldersOfOtrInvoice(itemId: string, invoiceId: string | number): Promise<Row[]> {
+  const found: Row[] = []
+  let ExclusiveStartKey: Record<string, unknown> | undefined
+  do {
+    const r = await ddb.send(
+      new ScanCommand({
+        TableName: FACTORING_TABLE,
+        FilterExpression: 'otrInvoiceId = :i AND id <> :me',
+        ExpressionAttributeValues: { ':i': String(invoiceId), ':me': itemId },
+        ProjectionExpression: 'id, proNumber, otrInvoiceId',
+        ExclusiveStartKey,
+      }),
+    )
+    found.push(...((r.Items ?? []) as Row[]))
+    ExclusiveStartKey = r.LastEvaluatedKey
+  } while (ExclusiveStartKey)
+  return found
+}
+
+/**
+ * Is the invoice OTR just returned safe to put on this row? A message when it is not, null when
+ * it is. A refusal writes nothing but the row's error, and nothing is uploaded to that invoice.
+ */
+async function refuseUnsafeOtrInvoice(item: Row, invoiceId: string | number): Promise<string | null> {
+  const holders = await findOtherHoldersOfOtrInvoice(String(item.id), invoiceId)
+  const verdict = checkOtrInvoiceUnshared(
+    String(item.id),
+    typeof item.proNumber === 'string' ? item.proNumber : null,
+    invoiceId,
+    item.otrPriorInvoices,
+    holders as never,
+  )
+  return verdict.ok ? null : verdict.message
 }
 
 /**
@@ -1431,6 +1472,17 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: Re
         }
 
         const created = await client.createInvoice(payload as unknown as OtrInvoicePayload)
+        /*
+         * OTR can hand back an invoice that is another PRO's, or one this row already used.
+         * Nothing is written to the row and no document goes to it: the row stays in Need to
+         * factor with the reason on it.
+         */
+        const unsafe = await refuseUnsafeOtrInvoice(item, created.invoiceId)
+        if (unsafe) {
+          console.warn('[otr-actions] OTR returned an invoice this row must not use', { pro: item.proNumber, invoiceId: String(created.invoiceId), actor })
+          await updateItem(String(item.id), { otrError: unsafe })
+          return fail(unsafe)
+        }
         // What left here, for the record: the ZIPs and the document keys OTR was given.
         console.log('[otr-actions] invoice created', {
           pro: item.proNumber, invoiceId: String(created.invoiceId), actor,
@@ -1748,6 +1800,14 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: Re
           return fail(`not ready to send again: missing ${gaps.join(', ')}`)
         }
         const created = await client.createInvoice(payload as unknown as OtrInvoicePayload)
+        if (!sameInvoiceBack(oldId, created.invoiceId)) {
+          const unsafe = await refuseUnsafeOtrInvoice(item, created.invoiceId)
+          if (unsafe) {
+            console.warn('[otr-actions] OTR returned an invoice this row must not use', { pro: item.proNumber, invoiceId: String(created.invoiceId), actor })
+            await updateItem(String(item.id), { otrError: unsafe })
+            return fail(unsafe)
+          }
+        }
         if (sameInvoiceBack(oldId, created.invoiceId)) {
           await updateItem(String(item.id), { otrStatus: live.status, otrStatusSyncedAt: nowIso() })
           await moveStore.audit('FactoringItem', String(item.id), 'RESEND_TO_OTR', actor, {
