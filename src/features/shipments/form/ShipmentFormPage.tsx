@@ -29,6 +29,7 @@ import { CARD_ORDER, CARD_TITLE, type CardKey, type CardProps, type MoreTabKey }
 import { CARD_COMPONENTS, MORE_TAB_COMPONENTS, RAIL_RATE_HISTORY, RAIL_ROLES } from './defaultSections'
 import { notDeliveredBlock } from './loadReviewDelivered'
 import { ActionBar } from './ActionBar'
+import { VoidedBanner } from './VoidedBanner'
 import { DuplicateDialog } from './DuplicateDialog'
 import { EditCustomerBillingDialog } from './EditCustomerBillingDialog'
 import { FormHeader } from './FormHeader'
@@ -430,7 +431,14 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
       />
 
       <div className="tms-ship-form-scroll" data-locked={heldBy ? 'true' : undefined}>
-        {voided ? <TmsAlert tone="red" className="tms-ship-banner">{locked.fields.all}</TmsAlert> : null}
+        {voided && bundle ? (
+          <VoidedBanner
+            shipment={bundle.shipment}
+            message={locked.fields.all ?? 'This shipment is voided.'}
+            canRestore={Boolean(isAdmin || isOwner)}
+            onRestored={() => refreshBundle()}
+          />
+        ) : voided ? <TmsAlert tone="red" className="tms-ship-banner">{locked.fields.all}</TmsAlert> : null}
 
         {bundle ? <div className="tms-ship-banner"><DetentionSection shipment={bundle.shipment} onChanged={() => { void refreshBundle() }} canEdit={!voided} /><TonuSection shipment={bundle.shipment} onChanged={() => { void refreshBundle() }} canEdit={!voided} /></div> : null}
 
