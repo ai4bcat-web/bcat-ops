@@ -30,7 +30,6 @@ import { AssistantChat } from '@/features/dashboards/assistant/AssistantChat'
 
 const cents = dashCents
 
-const sinceLabel = (rangeKey: DateRangeKey) => `vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}`
 const signed = (n: number, fmt: (v: number) => string) => `${n >= 0 ? '+' : '−'}${fmt(Math.abs(n))}`
 const dirOf = (n: number): 'up' | 'down' | 'neutral' => (n > 0 ? 'up' : n < 0 ? 'down' : 'neutral')
 
@@ -285,7 +284,7 @@ export function DashboardPage() {
                       split={metrics.loadsSplit}
                       delta={metrics.totalLoadsDelta > 0 ? `+${metrics.totalLoadsDelta}` : String(metrics.totalLoadsDelta)}
                       deltaDir={metrics.totalLoadsDelta > 0 ? 'up' : metrics.totalLoadsDelta < 0 ? 'down' : 'neutral'}
-                      sublabel={sinceLabel(rangeKey)}
+                      sublabel={kpi.compareLabel}
                       trend={trend?.loads}
                     />
                   ) : <KpiSkeleton label="Total Loads" />}
@@ -297,7 +296,7 @@ export function DashboardPage() {
                       connected={metrics.revenueConnected}
                       delta={metrics.revenueConnected ? `${metrics.revenueDelta >= 0 ? '+' : '−'}${cents(Math.abs(metrics.revenueDelta))}` : undefined}
                       deltaDir={metrics.revenueDelta > 0 ? 'up' : metrics.revenueDelta < 0 ? 'down' : 'neutral'}
-                      sublabel={metrics.revenueConnected ? sinceLabel(rangeKey) : 'Connect rates to loads'}
+                      sublabel={metrics.revenueConnected ? kpi.compareLabel : 'Connect rates to loads'}
                       trend={trend?.revenue}
                     />
                   ) : <KpiSkeleton label="Revenue" />}
@@ -309,7 +308,7 @@ export function DashboardPage() {
                       countDelta={metrics.brokerLoadsDelta}
                       revenue={metrics.brokerRevenue}
                       revenueDelta={metrics.brokerRevenueDelta}
-                      sublabel={sinceLabel(rangeKey)}
+                      sublabel={kpi.compareLabel}
                       trend={trend?.broker}
                     />
                   ) : <KpiSkeleton label="Broker Covered" />}

@@ -47,7 +47,9 @@ describe('Brokerage cards under the Dashboard', () => {
   })
 
   it('draws the headline figures, the takeaways and a bar per rep, with the full table one click away', async () => {
-    fetchRollup.mockResolvedValue(window(['2026-10', '2026-11'].map((m) => row(m))))
+    // October's brokerage figures arrive on two days: $1,000 by the 5th and $2,000 on the 20th ($3,000 in all). Today is Nov 9.
+    const october = row('2026-10', { fin: { '2026-10-05': { 'BROKERAGE|': fin(1, 100_000, 80_000) }, '2026-10-20': { 'BROKERAGE|': fin(1, 200_000, 160_000), 'ASSETS|': fin(9, 9_000_000, 1) } } })
+    fetchRollup.mockResolvedValue(window([october, row('2026-11')]))
     fetchRep.mockResolvedValue({ scope: 'ALL', repKey: null, months: ['2026-10', '2026-11'].map(repMonth) })
     render(<BrokerageSection />)
 
@@ -57,13 +59,17 @@ describe('Brokerage cards under the Dashboard', () => {
     expect(screen.getByTestId('brokerage-total-profit')).toHaveTextContent('$600')
     expect(screen.getByTestId('brokerage-total-profit-pct')).toHaveTextContent('20.0%')
     expect(screen.getByTestId('brokerage-total-loads')).toHaveTextContent('2')
-    // Each card names the month and sets last month in full beside it.
+    // Each card names the month and sets the same days of last month beside it: Nov 1-9 against Oct 1-9 (not October in full).
     const revenueCard = screen.getByTestId('brokerage-total-revenue').parentElement as HTMLElement
     expect(revenueCard).toHaveTextContent('Revenue · Nov to date')
-    expect(revenueCard).toHaveTextContent('Oct in full: $3.0k')
+    expect(revenueCard).toHaveTextContent('Oct 1–9: $1.0k')
+    expect(revenueCard).not.toHaveTextContent('in full')
+    expect(screen.getByTestId('brokerage-total-expenses').parentElement).toHaveTextContent('Oct 1–9: $800')
+    expect(screen.getByTestId('brokerage-total-loads').parentElement).toHaveTextContent('Oct 1–9: 1')
     expect(screen.getByTestId('brokerage-data-start')).toHaveTextContent('Data starts October 2026')
     expect(screen.getByTestId('brokerage-month-chart')).toBeInTheDocument()
     expect(screen.getByTestId('brokerage-insights')).toHaveTextContent('Nov so far')
+    expect(screen.getByTestId('brokerage-insights')).toHaveTextContent('Oct 1–9 was $200')
 
     // One bar per Brokerage rep, biggest profit first; Assets loads are not in it.
     await waitFor(() => expect(screen.getAllByTestId('brokerage-rep-bar')).toHaveLength(2))
@@ -110,6 +116,8 @@ describe('Brokerage cards under the Dashboard', () => {
     expect(fetchRollup).not.toHaveBeenCalled()
     expect(screen.getByTestId('brokerage-total-profit')).toHaveTextContent('$400')
     expect(screen.getByTestId('brokerage-total-profit-pct')).toHaveTextContent('40.0%')
+    // A rep has month totals and no day rows, so last month stays "in full" for them and says so.
+    expect(screen.getByTestId('brokerage-total-revenue').parentElement).toHaveTextContent('Oct in full: $1.0k')
     await waitFor(() => expect(screen.getAllByTestId('brokerage-rep-bar')).toHaveLength(1))
     expect(screen.queryByText('Ivan Cartage')).not.toBeInTheDocument()
   })

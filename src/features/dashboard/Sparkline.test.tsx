@@ -38,4 +38,14 @@ describe('legacyTrendFrom', () => {
     expect(t.loads.map((p) => [p.month, p.value, !!p.partial])).toEqual([['2026-10', 8, false], ['2026-11', 2, true]])
     expect(t.revenue.map((p) => p.value)).toEqual([800_000, 150_000])
   })
+
+  it('draws the month in progress to date: days after today are left out, a finished month stays whole', () => {
+    const later = {
+      id: 'LG:2026-11', schemaVersion: ROLLUP_SCHEMA_VERSION, computedAt: '2026-11-17T12:00:00Z',
+      payload: { v: 1, days: { '2026-11-05': { 'd1|d1': { n: 2, rev: 150_000, rated: 2 } }, '2026-11-25': { 'd1|d1': { n: 9, rev: 900_000, rated: 9 } } } },
+    } as never
+    const drivers = [{ id: 'd1', type: 'owner_op' }] as never
+    const t = legacyTrendFrom([row('2026-10', 8, 800_000), later], ['2026-10', '2026-11'], '2026-11', drivers, '2026-11-18')
+    expect(t.loads.map((p) => p.value)).toEqual([8, 2])
+  })
 })

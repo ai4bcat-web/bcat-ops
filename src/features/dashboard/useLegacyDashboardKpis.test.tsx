@@ -153,11 +153,11 @@ describe('useLegacyDashboardKpis', () => {
     expect(b.result.current.kpis).toEqual(legacyKpisFromLoads(rows.loads, drivers, win))
   })
 
-  it('a missing or other-schema month falls back; months after the current one need no row', async () => {
+  it('a missing or other-schema month falls back; a quarter read to date reaches no later than the current month', async () => {
     const rows = fixture()
     const win = legacyWindow('this-quarter', new Date(NOW))
     const months = monthsCovering(win.prevFrom, win.to, 0)
-    expect(months.at(-1)).toBe('2026-12')
+    expect(months.at(-1)).toBe('2026-11')
     const data = (await legacyRows(rows, months.filter((m) => m <= '2026-11'), NOW))
     readRollupRows.mockReturnValue({ fresh: Promise.resolve(data) })
     seedStore()
@@ -170,6 +170,15 @@ describe('useLegacyDashboardKpis', () => {
     const ensure = useAppStore.getState().ensureLoadRange as ReturnType<typeof vi.fn>
     renderHook(() => useLegacyDashboardKpis('this-quarter'))
     await waitFor(() => expect(ensure).toHaveBeenCalled())
+  })
+
+  it('names what the badges are read against: the same days of the previous period', async () => {
+    readRollupRows.mockReturnValue({ fresh: new Promise<RawRollupRow[]>(() => undefined) })
+    seedStore()
+    // NOW is Nov 4: the month so far is Nov 1-4, read against Oct 1-4.
+    expect(renderHook(() => useLegacyDashboardKpis('this-month')).result.current.compareLabel).toBe('vs. Oct 1–4')
+    expect(renderHook(() => useLegacyDashboardKpis('today')).result.current.compareLabel).toBe('vs. yesterday')
+    expect(renderHook(() => useLegacyDashboardKpis('this-quarter')).result.current.compareLabel).toBe('vs. Jul 1 – Aug 4')
   })
 
   it('a cached paint that the fresh read confirms never flips', async () => {

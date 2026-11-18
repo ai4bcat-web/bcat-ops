@@ -132,6 +132,28 @@ export function monthRows(
   })
 }
 
+/**
+ * The month rows cut off at `throughDay` (a day of the month, 1-31): only the day rows on or before it are summed, so the
+ * first 18 days of last month can be read against the first 18 days of this one. A month with no row is a zero row.
+ */
+export function monthRowsThroughDay(
+  rows: readonly RollupRow<MonthPayload>[],
+  months: readonly string[],
+  divisions: readonly DivisionShape[],
+  throughDay: number,
+): MonthMeasures[] {
+  const byMonth = new Map(rows.map((r) => [r.payload.month, r.payload]))
+  return months.map((month) => {
+    const sum = zero()
+    const payload = byMonth.get(month)
+    for (const [day, perScope] of Object.entries(payload?.fin ?? {})) {
+      if (day.slice(0, 7) !== month || Number(day.slice(8, 10)) > throughDay) continue
+      for (const [scope, f] of Object.entries(perScope)) if (isBrokerageScope(scope, divisions)) add(sum, f)
+    }
+    return { month, ...measures(sum) }
+  })
+}
+
 /** One month of the per-rep split as the Brokerage action returns it (a rep caller's map holds only their own rep). */
 export interface RepMonth { month: string; rep: RepSplit }
 
