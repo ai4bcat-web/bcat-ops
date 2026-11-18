@@ -81,6 +81,7 @@ import {
 } from '../../../src/lib/timeClock'
 import { isOvernightLoad } from '../../../src/lib/overnightLoads'
 import { getStops } from '../../../src/lib/stops'
+import { flagAccessorialsFromMisc } from './accessorialFlag'
 import { parseDriverNotes, ownNoteIndex, withNoteText, withoutNote } from './locationNotes'
 import { matchLocation, newLocationItem, type LocationLike } from './locationFromStop'
 import { chicagoDateStr } from '../../../src/lib/date'
@@ -1890,6 +1891,43 @@ async function fileDriverPodPages(loadId: string | null, docIds: string[]): Prom
   } catch (err) {
     console.error('[driver-app-api] could not file the driver POD on the shipment', { loadId, error: err instanceof Error ? err.message : String(err) })
   }
+}
+
+/** The real hand-off for `flagAccessorialsFromMisc` (see accessorialFlag.ts for what it does and why). */
+async function flagAccessorialsFromDriverNote(driverName: string, driverId: string, submissionId: string): Promise<void> {
+  await flagAccessorialsFromMisc(
+    {
+      functionName: SHIPMENT_ACTIONS_FUNCTION,
+      getSubmission: async (id) => (await ddb.send(new GetCommand({ TableName: DRIVER_SUBMISSION_TABLE, Key: { id } }))).Item as DriverSubmissionRow | undefined ?? null,
+      linkToLoad: (sub) => linkSubmissionToLoad(sub as DriverSubmissionRow, driverId),
+      getLoad: (loadId) => getItem<{ shipmentId?: string | null }>(LOAD_TABLE_NAME, { id: loadId }),
+      claim: async (id, kinds) => {
+        try {
+          await ddb.send(new UpdateCommand({
+            TableName: DRIVER_SUBMISSION_TABLE,
+            Key: { id },
+            UpdateExpression: 'SET autoFlaggedAt = :t, autoFlagKinds = :k',
+            ConditionExpression: 'attribute_not_exists(autoFlaggedAt)',
+            ExpressionAttributeValues: { ':t': nowIso(), ':k': kinds },
+          }))
+          return true
+        } catch (err) {
+          if ((err as { name?: string }).name === 'ConditionalCheckFailedException') return false
+          throw err
+        }
+      },
+      invoke: async (payload) => {
+        await new LambdaClient({}).send(new InvokeCommand({
+          FunctionName: SHIPMENT_ACTIONS_FUNCTION,
+          InvocationType: 'Event',
+          Payload: Buffer.from(JSON.stringify(payload)),
+        }))
+      },
+      log: (level, message, detail) => (level === 'error' ? console.error : console.log)(`[driver-app-api] ${message}`, detail),
+    },
+    driverName,
+    submissionId,
+  )
 }
 
 async function completeSubmission(
@@ -4000,6 +4038,7 @@ export const handler = async (event: FnUrlEvent) => {
         return reply(400, { error: "kind must be 'RATECON', 'POD' or 'MISC'" })
       }
       const result = await completeSubmission(driverId, id, kind)
+      if (kind === 'MISC' && !result.error) await flagAccessorialsFromDriverNote(driver.name, driverId, id)
       if (kind === 'POD' && !result.error) {
         const sub = (await ddb.send(new GetCommand({ TableName: DRIVER_SUBMISSION_TABLE, Key: { id } }))).Item as DriverSubmissionRow | undefined
         // Not matched when it was started (the load may have been built since): try again now, and keep the link.
