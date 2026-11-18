@@ -630,3 +630,60 @@ export function sharedProLabel(index: SharedProIndex, loadId: string): string | 
   const n = index.get(loadId) ?? 0
   return n > 1 ? `Shared PRO · ${n} carriers` : null
 }
+
+/* ── Leg numbers: 14598-1, 14598-2 ───────────────────────────────────────── */
+
+/** `loadCarrierId` -> which carrier leg of the load it is (1-based) and how many legs the load has. */
+export type LegIndex = ReadonlyMap<string, { leg: number; of: number }>
+
+/** The loads the page has seen with more than one carrier leg: the only ones whose legs are worth reading. */
+export function multiCarrierLoadIds(
+  rows: readonly Pick<ApWorklistRow, 'loadId' | 'loadCarrierId'>[],
+  bills: readonly Pick<CarrierBillRecord, 'loadId' | 'loadCarrierId' | 'status'>[],
+): string[] {
+  return [...sharedProIndex(rows, bills)].filter(([, n]) => n > 1).map(([loadId]) => loadId)
+}
+
+/**
+ * Number the outside-carrier legs of each load: 1 for the first carrier added, 2 for the next. The order is
+ * the assignment `sequence` (then the row id, so two rows never tie), which never changes once a carrier is
+ * added, so paying, approving, voiding or deleting a bill never renumbers its siblings. A leg someone dropped
+ * (BOUNCED or TONU) with no live bill is not a leg, since nobody is owed anything on it. A load with a single
+ * leg gets no entry: its PRO prints plain.
+ */
+export function legIndex(
+  legsByLoad: ReadonlyMap<string, readonly Pick<LoadCarrierRecord, 'id' | 'loadId' | 'kind' | 'status' | 'sequence'>[]>,
+  billedLegIds: ReadonlySet<string> = new Set(),
+): LegIndex {
+  const out = new Map<string, { leg: number; of: number }>()
+  for (const legs of legsByLoad.values()) {
+    const payable = legs
+      .filter((lc) => lc.kind === 'CARRIER' && (lc.status === 'ACTIVE' || billedLegIds.has(lc.id)))
+      .slice()
+      .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0) || a.id.localeCompare(b.id))
+    if (payable.length < 2) continue
+    payable.forEach((lc, i) => out.set(lc.id, { leg: i + 1, of: payable.length }))
+  }
+  return out
+}
+
+/** `-2` for the second carrier's bill on a multi-carrier load; '' for any other bill. */
+export function legSuffixOf(index: LegIndex | undefined, loadCarrierId: string | null | undefined): string {
+  const entry = loadCarrierId ? index?.get(loadCarrierId) : undefined
+  return entry ? `-${entry.leg}` : ''
+}
+
+/** The bills with their leg suffix set (a new object only where a suffix applies), so every list prints 14598-2. */
+export function withLegSuffix<T extends { loadCarrierId: string; legSuffix?: string | null }>(items: readonly T[], index: LegIndex | undefined): T[] {
+  if (!index || index.size === 0) return items as T[]
+  return items.map((item) => {
+    const suffix = legSuffixOf(index, item.loadCarrierId)
+    return suffix && item.legSuffix !== suffix ? { ...item, legSuffix: suffix } : item
+  })
+}
+
+/** `Leg 2 of 2` for a bill's tooltip; null when its load pays one carrier. */
+export function legLabel(index: LegIndex | undefined, loadCarrierId: string | null | undefined): string | null {
+  const entry = loadCarrierId ? index?.get(loadCarrierId) : undefined
+  return entry ? `Leg ${entry.leg} of ${entry.of}` : null
+}

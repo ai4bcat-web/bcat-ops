@@ -26,6 +26,7 @@ import {
   recordApPayment,
 } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
+import { withLegSuffix, type LegIndex } from '../apViews'
 import {
   planPayment, suggestAllocation, type PlanCredit, type PlanDocument,
 } from '@/lib/paymentApply'
@@ -56,11 +57,17 @@ function appliedRows(drafts: AmountDrafts): { id: string; amountCents: number }[
 
 /** What the carrier will match the money against: their own invoice number first. */
 function billName(bill: CarrierBillRecord): string {
-  return bill.billNumber?.trim() || bill.loadNumber?.trim() || bill.shipmentNumber?.trim() || bill.id
+  const number = bill.billNumber?.trim()
+  if (number) return number
+  // A load that pays several carriers names each bill 14598-1, 14598-2.
+  const pro = bill.loadNumber?.trim() || bill.shipmentNumber?.trim()
+  return pro ? `${pro}${bill.legSuffix ?? ''}` : bill.id
 }
 
-export function PayCarrierDialog({ carrierId, payeeName, payToNeeded, preselectBillIds, open, onOpenChange, onDone }: {
+export function PayCarrierDialog({ carrierId, payeeName, payToNeeded, preselectBillIds, legs, open, onOpenChange, onDone }: {
   carrierId: string
+  /** Which carrier leg each bill is, for loads that pay several carriers (14598-1, 14598-2). Display only. */
+  legs?: LegIndex
   /** Who is paid when it is not the carrier itself (its factor, in the Factoring companies table's spelling). Display only. */
   payeeName?: string | null
   /** This carrier has no usable pay-to (see `payToStatusFor`): say so, and offer the editor. Display only; it blocks nothing. */
@@ -81,7 +88,8 @@ export function PayCarrierDialog({ carrierId, payeeName, payToNeeded, preselectB
   const [note, setNote] = useState('')
   const [allocations, setAllocations] = useState<AmountDrafts>({})
   const [creditUses, setCreditUses] = useState<AmountDrafts>({})
-  const [bills, setBills] = useState<CarrierBillRecord[]>([])
+  const [rawBills, setBills] = useState<CarrierBillRecord[]>([])
+  const bills = useMemo(() => withLegSuffix(rawBills, legs), [rawBills, legs])
   const [payments, setPayments] = useState<ApPaymentRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [posting, setPosting] = useState(false)

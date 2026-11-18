@@ -38,6 +38,7 @@ vi.mock('@/lib/apiClient', () => ({
   graphqlErrorText: (e: unknown) => String(e),
   getTmsSettings: vi.fn().mockResolvedValue({ apRequireSignedRateCon: true }),
   listBillsByMonth: vi.fn().mockResolvedValue([]),
+  listLoadCarriersByLoads: vi.fn().mockResolvedValue(new Map()),
   listOwnershipDivisions: vi.fn().mockResolvedValue([]),
   listCarrierPaymentInfo: vi.fn().mockResolvedValue([]),
   getFactorRemitEmails: vi.fn().mockResolvedValue({}),

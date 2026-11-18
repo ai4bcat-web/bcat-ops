@@ -49,7 +49,7 @@ import {
   billGates, type BillGates, billsAging, billsExpected, billsSelected, canSelectForPayment, invoiceAgeBuckets, isOwnFleet, paidBills,
   paidInMonth, paidMonthOptions,
   paymentInfoFor, payeeNameFor, isFactorPaid, payToStatusFor, payToWorklist, PAY_TO_STATUS_LABEL, PAY_TO_STATUS_TITLE, quickPayLabel, setFactorNamesForLabels, remitEmailOf, remitEmailOfPayment, remittanceStatusOf, selectionBalanceCents,
-  selectionCarrierId, sharedProLabel, sharedProIndex, type ApTabKey, type SharedProIndex, type ToBePaidFilters,
+  selectionCarrierId, sharedProLabel, sharedProIndex, multiCarrierLoadIds, withLegSuffix, type ApTabKey, type SharedProIndex, type ToBePaidFilters,
 } from './apViews'
 import { ApCreditDialog } from './components/ApCreditDialog'
 import { VerifyPaymentBadge } from './components/VerifyPaymentBadge'
@@ -83,6 +83,7 @@ import { apCompactItems } from './apCompactItems'
 import { AccountingReportsDialog } from '@/features/finance/AccountingReportsDialog'
 import { useApPaymentLines } from '@/features/finance/useApPaymentLines'
 import { useAllPaidBills } from './useAllPaidBills'
+import { useLegIndex } from './useLegIndex'
 import type { BillPaymentLine } from '@/features/finance/accountingStats'
 import type { AccountingReportKind } from '@/features/finance/accountingReports'
 import { ApAgingCard, ApExpectedCard, ApPaidCard, ProfitCheckCard } from '@/features/finance/AccountingCards'
@@ -260,7 +261,23 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   // Ryne 2026-11-12: Payables is the bills Move to billing created, for delivered loads. The Aljex
   // bills are still owed and stay one toggle away.
   // The open bills, paid history, facts and the summary are shared with the Operations Dashboard's Accounting cards.
-  const { open, paidRecent, facts, divisionName, totalsAll } = useApSummaryModel(asOf)
+  const { open: openRaw, paidRecent, facts, divisionName, totalsAll: totalsAllRaw } = useApSummaryModel(asOf)
+  // The Paid tab lists every payment ever, by the month it was PAID in ('' is all time), not by the month the bill was dated.
+  const allPaid = useAllPaidBills(asOf, tab === 'paid', payRefresh)
+  // A load that pays several carriers prints its bills as 14598-1, 14598-2 (display only; the shipment's PRO never changes).
+  const billedLegIds = useMemo(
+    () => new Set([...openRaw.bills, ...monthBills, ...allPaid.bills].filter((b) => b.status !== 'VOID').map((b) => b.loadCarrierId)),
+    [openRaw.bills, monthBills, allPaid.bills],
+  )
+  const legLoadIds = useMemo(
+    () => multiCarrierLoadIds([...awaiting.rows, ...inReview.rows], [...openRaw.bills, ...monthBills, ...allPaid.bills]),
+    [awaiting.rows, inReview.rows, openRaw.bills, monthBills, allPaid.bills],
+  )
+  const legs = useLegIndex(legLoadIds, billedLegIds)
+  const open = useMemo(() => ({ ...openRaw, bills: withLegSuffix(openRaw.bills, legs) }), [openRaw, legs])
+  const totalsAll = useMemo(() => withLegSuffix(totalsAllRaw, legs), [totalsAllRaw, legs])
+  const awaitingRows = useMemo(() => withLegSuffix(awaiting.rows, legs), [awaiting.rows, legs])
+  const allPaidBills = useMemo(() => withLegSuffix(allPaid.bills, legs), [allPaid.bills, legs])
   // Carrier / rev division / due filters live in the URL (`?carrier=…&div=…&due=…`) so a filtered
   // view can be shared; the division card writes the same state.
   const [searchParams, setSearchParams] = useSearchParams()
@@ -321,22 +338,20 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const drawerBill = drawerId ? open.bills.find((b) => b.id === drawerId) ?? null : null
   const agingRows = useMemo(() => applyToBePaidFilters(agingBills, filters, asOf, payInfos), [agingBills, filters, asOf, payInfos])
   const selectedRows = useMemo(() => applyToBePaidFilters(selectedBills, filters, asOf, payInfos), [selectedBills, filters, asOf, payInfos])
-  // The Paid tab lists every payment ever, by the month it was PAID in ('' is all time), not by the month the bill was dated.
-  const allPaid = useAllPaidBills(asOf, tab === 'paid', payRefresh)
   const [paidMonth, setPaidMonth] = useState('')
-  const paidMonthChoices = useMemo(() => paidMonthOptions(paidBills(allPaid.bills)), [allPaid.bills])
+  const paidMonthChoices = useMemo(() => paidMonthOptions(paidBills(allPaidBills)), [allPaidBills])
   const settled = useMemo(
-    () => paidInMonth(paidBills(allPaid.bills), paidMonth).filter((b) => byParty(b) && byDivision(b)),
-    [allPaid.bills, paidMonth, byParty, byDivision],
+    () => paidInMonth(paidBills(allPaidBills), paidMonth).filter((b) => byParty(b) && byDivision(b)),
+    [allPaidBills, paidMonth, byParty, byDivision],
   )
   const [verifyOnlyPaid, setVerifyOnlyPaid] = useState(false)
   const settledShown = useMemo(() => (verifyOnlyPaid ? settled.filter(isVerifyPaymentBill) : settled), [settled, verifyOnlyPaid])
-  const awaitingTotals = useMemo(() => awaitingInvoiceTotals(awaiting.rows), [awaiting.rows])
+  const awaitingTotals = useMemo(() => awaitingInvoiceTotals(awaitingRows), [awaitingRows])
   // One bill per carrier per load: a load with several carriers shows up as several rows on
   // one PRO, and each row says so.
   const shared = useMemo(
-    () => sharedProIndex([...awaiting.rows, ...inReview.rows], [...open.bills, ...monthBills]),
-    [awaiting.rows, inReview.rows, open.bills, monthBills],
+    () => sharedProIndex([...awaiting.rows, ...inReview.rows], [...openRaw.bills, ...monthBills]),
+    [awaiting.rows, inReview.rows, openRaw.bills, monthBills],
   )
 
   const refreshAll = () =>
@@ -542,7 +557,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const current =
     tab === 'awaiting' ? awaitingView({
       banner: errorBanner,
-      rows: awaiting.rows,
+      rows: awaitingRows,
       shared,
       busy,
       onRecord: (row) => setDialog({ kind: 'record', loadCarrierId: row.loadCarrierId }),
@@ -747,7 +762,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         <LinkBillDialog
           item={dialog.item}
           bills={open.bills}
-          assignments={awaiting.rows}
+          assignments={awaitingRows}
           onOpenChange={(o) => { if (!o) setDialog(null) }}
           onDone={closeAndRefresh}
         />
@@ -755,7 +770,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       {dialog?.kind === 'inbox-create' && (
         <CreateBillDialog
           item={dialog.item}
-          assignments={awaiting.rows}
+          assignments={awaitingRows}
           onOpenChange={(o) => { if (!o) setDialog(null) }}
           onRecord={(loadCarrierId) => setDialog({
             kind: 'record',
@@ -820,6 +835,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         <PayCarrierDialog
           open
           carrierId={dialog.carrierId}
+          legs={legs}
           payeeName={payeeOfPayDialog(open.bills, payInfos, dialog.carrierId, dialog.billIds)}
           payToNeeded={(() => {
             const lead = open.bills.find((b) => b.carrierId === dialog.carrierId)
@@ -837,6 +853,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         <ApCreditDialog
           open
           carrierId={dialog.carrierId}
+          legs={legs}
           onOpenChange={(o) => { if (!o) setDialog(null) }}
           onDone={closeAndRefresh}
         />
@@ -1216,8 +1233,8 @@ function awaitingView({ banner, rows, shared, busy, onRecord }: {
     {
       key: 'shipment',
       header: 'SHIPMENT',
-      text: (row) => row.shipmentNumber ?? row.shipmentId,
-      render: (row) => <Link to={shipmentEditorPath(row.shipmentId)}>{row.shipmentNumber ?? row.shipmentId}</Link>,
+      text: (row) => `${row.shipmentNumber ?? row.shipmentId}${row.legSuffix ?? ''}`,
+      render: (row) => <Link to={shipmentEditorPath(row.shipmentId)}>{row.shipmentNumber ?? row.shipmentId}{row.legSuffix ?? ''}</Link>,
     },
     // The assignment carries the load's id, not its number; the shipment link is the readable handle.
     { key: 'load', header: 'LOAD', text: (row) => row.loadId, render: (row) => <span className="text-xs tms-muted">{row.loadId}</span> },
@@ -1272,7 +1289,7 @@ function awaitingView({ banner, rows, shared, busy, onRecord }: {
         ) : (
           <TmsButton
             size="sm"
-            aria-label={`Record bill for ${row.shipmentNumber ?? row.loadCarrierId}${sharedProLabel(shared, row.loadId) ? ` — ${row.carrierName}` : ''}`}
+            aria-label={`Record bill for ${row.shipmentNumber ?? row.loadCarrierId}${row.legSuffix ?? ''}${sharedProLabel(shared, row.loadId) ? ` — ${row.carrierName}` : ''}`}
             disabled={busy}
             onClick={() => onRecord(row)}
           >
@@ -1883,7 +1900,13 @@ function payableView({
 /** The bill's own number, else the PRO it belongs to: imported bills carry no carrier invoice number, and the id is not something to read. */
 function paidBillLabel(bill: CarrierBillRecord): string {
   const pro = bill.shipmentNumber ?? bill.loadNumber
-  return bill.billNumber || (pro ? `PRO ${pro}` : bill.id)
+  return bill.billNumber || (pro ? `PRO ${pro}${bill.legSuffix ?? ''}` : bill.id)
+}
+
+/** The PRO the Paid tab prints: 14598-2 for the second carrier's bill, '—' when the bill names none. */
+function paidProText(bill: CarrierBillRecord): string {
+  const pro = bill.shipmentNumber ?? bill.loadNumber
+  return pro ? `${pro}${bill.legSuffix ?? ''}` : '—'
 }
 
 function paidView({ banner, bills, shared, months, month, loading, onMonth, verifyOnly, verifyCount, onVerifyOnly, infos, lines, onAddRemit }: {
@@ -1914,8 +1937,8 @@ function paidView({ banner, bills, shared, months, month, loading, onMonth, veri
     {
       key: 'pro',
       header: 'PRO',
-      text: (bill) => bill.shipmentNumber ?? bill.loadNumber ?? '—',
-      render: (bill) => <>{bill.shipmentNumber ?? bill.loadNumber ?? '—'}</>,
+      text: (bill) => paidProText(bill),
+      render: (bill) => <>{paidProText(bill)}</>,
     },
     facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
     dayCol<CarrierBillRecord>('billDate', 'BILL DATE', (bill) => bill.billDate),

@@ -25,6 +25,7 @@ const carrierApMock = vi.hoisted(() => vi.fn())
 const needsReviewRows = vi.hoisted(() => ({ rows: [] as unknown[] }))
 const needsReviewRefresh = vi.hoisted(() => vi.fn())
 const downloadCsvMock = vi.hoisted(() => vi.fn())
+const legsMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/hooks/useApWorklist', () => ({ useApWorklist: worklistMock }))
 vi.mock('@/hooks/useOpenBills', () => ({ useOpenBills: openBillsMock }))
@@ -62,6 +63,7 @@ vi.mock('@/lib/apiClient', () => ({
   graphqlErrorText: (e: unknown) => String(e),
   getTmsSettings: vi.fn().mockResolvedValue({ apRequireSignedRateCon: true }),
   listBillsByMonth: vi.fn().mockResolvedValue([]),
+  listLoadCarriersByLoads: legsMock,
   listOwnershipDivisions: vi.fn().mockResolvedValue([]),
   voidBill: vi.fn(),
   unapproveBill: vi.fn(),
@@ -223,6 +225,7 @@ async function setup(options: { rowsByTab?: Partial<Record<string, ApWorklistRow
 
 beforeEach(() => {
   vi.clearAllMocks()
+  legsMock.mockResolvedValue(new Map())
   // These tests read the cards; a viewer starts with them folded away (TmsHeadBand.test covers that).
   localStorage.setItem('ap.payables.cards', 'open')
 })
@@ -433,6 +436,32 @@ describe('the AP board', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Expand Blue Line Trucking' }))
     expect(screen.getAllByTestId('ap-aging-bill-row')).toHaveLength(1)
     expect(screen.getByTestId('ap-aging-total-row').textContent).toContain('$1,500.00')
+  })
+
+  it('numbers the bills of a load that pays two carriers 14598-1 and 14598-2, and leaves a one-carrier load plain', async () => {
+    const a = bill({ id: 'cb:lc1:1', billNumber: 'BL-1', dueAt: daysAgo(10) })
+    const b = bill({
+      id: 'cb:lc2:1', loadCarrierId: 'lc2', carrierId: 'car2', carrierName: 'Red Line Freight',
+      billNumber: 'RL-1', dueAt: daysAgo(45), balanceCents: 80_000, grossCents: 80_000, netCents: 80_000, billedCents: 80_000,
+    })
+    const alone = bill({ id: 'cb:lc9:1', loadCarrierId: 'lc9', loadId: 'l9', shipmentId: 's9', carrierId: 'car9', carrierName: 'Solo Haul', billNumber: 'SH-1' })
+    // The second carrier was added second, whatever order the rows arrive in.
+    legsMock.mockImplementation(async () => new Map([[
+      'l1',
+      [assignment({ id: 'lc2', sequence: 2, carrierId: 'car2' }), assignment({ id: 'lc1', sequence: 1 })],
+    ]]))
+    await setup({ bills: [a, b, alone] })
+    fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Open PRO S-1001-1' })).toBeTruthy())
+    expect(screen.getByRole('link', { name: 'Open PRO S-1001-2' })).toBeTruthy()
+    // The load with one carrier keeps its plain PRO.
+    expect(screen.getByRole('link', { name: 'Open PRO S-1001' })).toBeTruthy()
+    // Only the loads already seen with two carriers are read.
+    expect(legsMock).toHaveBeenCalledWith(['l1'])
+    // Search finds the leg: the base PRO matches both bills of the load, -2 only the second.
+    fireEvent.change(screen.getByTestId('ap-search'), { target: { value: 'S-1001-2' } })
+    expect(screen.queryByRole('link', { name: 'Open PRO S-1001-1' })).toBeNull()
+    expect(screen.getByRole('link', { name: 'Open PRO S-1001-2' })).toBeTruthy()
   })
 
   it('pays, ages and shows each carrier bill of one load on its own row', async () => {

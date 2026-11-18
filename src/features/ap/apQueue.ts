@@ -111,17 +111,20 @@ export function payablesQueue(
  * The name a bill row prints. The carrier's own invoice number when there is one; the import's
  * internal ids ("cb:lcr-…:1") are not names, so those rows read "PRO 20027 · SHERIFAJ" instead.
  */
-export function billLabel(bill: Pick<CarrierBillRecord, 'id' | 'billNumber' | 'shipmentNumber' | 'loadNumber' | 'carrierName'>): string {
+export function billLabel(bill: Pick<CarrierBillRecord, 'id' | 'billNumber' | 'shipmentNumber' | 'loadNumber' | 'carrierName'> & { legSuffix?: string | null }): string {
   const number = bill.billNumber?.trim()
   if (number && number !== bill.id && !/^cb:/i.test(number) && !/^lcr-/i.test(number)) return number
-  const pro = bill.shipmentNumber ?? bill.loadNumber
+  const base = bill.shipmentNumber ?? bill.loadNumber
+  const pro = base ? `${base}${bill.legSuffix ?? ''}` : base
   const carrier = bill.carrierName?.trim()
   return [pro ? `PRO ${pro}` : null, carrier || null].filter(Boolean).join(' · ') || bill.id
 }
 
 /** The PRO a row prints: the shipment number, else the number snapshotted on the bill. */
-export function proOf(bill: Pick<CarrierBillRecord, 'shipmentId' | 'shipmentNumber' | 'loadNumber'>, facts: BillFactsIndex): string {
-  return facts.get(bill.shipmentId)?.shipmentNumber ?? bill.shipmentNumber ?? bill.loadNumber ?? bill.shipmentId
+export function proOf(bill: Pick<CarrierBillRecord, 'shipmentId' | 'shipmentNumber' | 'loadNumber'> & { legSuffix?: string | null }, facts: BillFactsIndex): string {
+  // A load that pays several carriers prints each bill as <PRO>-<leg> (14598-1, 14598-2); the shipment keeps its plain PRO.
+  const base = facts.get(bill.shipmentId)?.shipmentNumber ?? bill.shipmentNumber ?? bill.loadNumber
+  return base ? `${base}${bill.legSuffix ?? ''}` : bill.shipmentId
 }
 
 /** `2 days · 6%` or `Standard (21 days)`. */

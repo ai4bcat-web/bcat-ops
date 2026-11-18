@@ -195,3 +195,13 @@ describe('Pay-to status on the pay run sheet (Ryne 2026-11-18)', () => {
     expect(SELECTED_EXPORT_HEADERS).toContain('Pay-to status')
   })
 })
+
+describe('the Selected export on a load that pays two carriers', () => {
+  it('prints each bill with its own leg PRO', () => {
+    const rows = selectedExportRows(run([
+      bill({ id: 'b1', legSuffix: '-1' }),
+      bill({ id: 'b2', loadCarrierId: 'lc2', carrierId: 'car2', carrierName: 'Red Line Freight', legSuffix: '-2' }),
+    ]))
+    expect(rows.map((r) => r.pro)).toEqual(['20001-1', '20001-2'])
+  })
+})

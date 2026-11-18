@@ -8,6 +8,7 @@ import {
   billGates, applyToBePaidFilters, EMPTY_TO_BE_PAID_FILTERS, factorNameFor, isFactorPaid, payeeNameFor, payToLabelFor, setFactorNamesForLabels,
   payToStatusFor, payToWorklist, PAY_TO_STATUS_LABEL,
   paidBills, paidInMonth, paidMonthOf, paidMonthOptions,
+  legIndex, legLabel, legSuffixOf, multiCarrierLoadIds, withLegSuffix,
 } from './apViews'
 import { billMonthsSince } from './useAllPaidBills'
 
@@ -333,5 +334,70 @@ describe('Pay-to needed: a payee whose carrier has nowhere to send money (Ryne 2
     const only = applyToBePaidFilters(bills, { ...EMPTY_TO_BE_PAID_FILTERS, payTo: true }, '2026-11-18', infos)
     expect(only.map((b) => b.carrierName)).toEqual(['LANDSTAR', 'ECHO'])
     expect(applyToBePaidFilters(bills, EMPTY_TO_BE_PAID_FILTERS, '2026-11-18', infos)).toHaveLength(3)
+  })
+})
+
+describe('leg numbers on a load that pays several carriers (14598-1, 14598-2)', () => {
+  const legs = (rows: ReturnType<typeof lc>[]) => new Map([['l1', rows]])
+
+  it('numbers the carrier legs in the order they were added, whatever order the rows arrive in', () => {
+    const index = legIndex(legs([lc('lc2', { sequence: 2 }), lc('lc1', { sequence: 1 }), lc('lc3', { sequence: 3 })]))
+    expect(legSuffixOf(index, 'lc1')).toBe('-1')
+    expect(legSuffixOf(index, 'lc2')).toBe('-2')
+    expect(legSuffixOf(index, 'lc3')).toBe('-3')
+    expect(legLabel(index, 'lc2')).toBe('Leg 2 of 3')
+  })
+
+  it('leaves a one-carrier load plain, and does not count own-fleet or dropped legs with no bill', () => {
+    const plain = legIndex(legs([lc('lc1'), lc('own', { kind: 'OWN_ASSET', sequence: 2 }), lc('gone', { status: 'BOUNCED', sequence: 3 })]))
+    expect(plain.size).toBe(0)
+    expect(legSuffixOf(plain, 'lc1')).toBe('')
+    expect(legLabel(plain, 'lc1')).toBeNull()
+  })
+
+  it('keeps a dropped leg that still has a live bill, so its number does not shift', () => {
+    const index = legIndex(
+      legs([lc('lc1', { sequence: 1, status: 'BOUNCED' }), lc('lc2', { sequence: 2 })]),
+      new Set(['lc1']),
+    )
+    expect(legSuffixOf(index, 'lc1')).toBe('-1')
+    expect(legSuffixOf(index, 'lc2')).toBe('-2')
+  })
+
+  it('does not renumber when a sibling bill is paid, approved, voided or deleted: the legs, not the bills, are numbered', () => {
+    const rows = [lc('lc1', { sequence: 1 }), lc('lc2', { sequence: 2 })]
+    const before = legIndex(legs(rows))
+    // A voided or deleted bill leaves its LoadCarrier ACTIVE, so the same two legs come back with the same numbers.
+    const after = legIndex(legs(rows), new Set(['lc2']))
+    expect([...after]).toEqual([...before])
+    // A third carrier added later takes -3 and leaves -1 and -2 alone.
+    const grown = legIndex(legs([...rows, lc('lc3', { sequence: 3 })]))
+    expect(legSuffixOf(grown, 'lc1')).toBe('-1')
+    expect(legSuffixOf(grown, 'lc2')).toBe('-2')
+  })
+
+  it('breaks a sequence tie by id so two legs never share a number', () => {
+    const index = legIndex(legs([lc('lcb', { sequence: 1 }), lc('lca', { sequence: 1 })]))
+    expect([legSuffixOf(index, 'lca'), legSuffixOf(index, 'lcb')]).toEqual(['-1', '-2'])
+  })
+
+  it('sets the suffix on the bills and rows of a multi-carrier load only', () => {
+    const index = legIndex(legs([lc('lc1', { sequence: 1 }), lc('lc2', { sequence: 2 })]))
+    const bills = [{ loadCarrierId: 'lc1' }, { loadCarrierId: 'lc2' }, { loadCarrierId: 'lc9' }]
+    expect(withLegSuffix(bills, index).map((b) => (b as { legSuffix?: string }).legSuffix ?? '')).toEqual(['-1', '-2', ''])
+    // No index (or an empty one) returns the same list untouched.
+    expect(withLegSuffix(bills, undefined)).toBe(bills)
+    expect(withLegSuffix(bills, new Map())).toBe(bills)
+  })
+
+  it('reads only the loads already seen with two carriers', () => {
+    const rows = [{ loadId: 'l1', loadCarrierId: 'lc1' }, { loadId: 'l9', loadCarrierId: 'lc9' }]
+    const bills = [{ loadId: 'l1', loadCarrierId: 'lc2', status: 'TO_BE_PAID' as const }]
+    expect(multiCarrierLoadIds(rows, bills)).toEqual(['l1'])
+  })
+
+  it('sorts 14598-1 and 14598-2 between 14598 and 14600 under the grid\'s numeric collation', () => {
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+    expect(['14600', '14598-2', '9999', '14598-1', '14598'].sort(collator.compare)).toEqual(['9999', '14598', '14598-1', '14598-2', '14600'])
   })
 })

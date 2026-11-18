@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  apReportCsv, apReportRows, apReportTotals, apSummary, billCustomerName, billDaysPastDue, billFactsIndex, daysLateLabel, inDivision, cashRequirements, estimatedDueAt, isAljexBill, payablesQueue,
+  apReportCsv, apReportRows, billLabel, proOf, apReportTotals, apSummary, billCustomerName, billDaysPastDue, billFactsIndex, daysLateLabel, inDivision, cashRequirements, estimatedDueAt, isAljexBill, payablesQueue,
   termsLabel, type BillShipmentFacts,
 } from './apQueue'
 import type { CarrierBillRecord, OrderRecord, ShipmentRecord } from '@/types/tms'
@@ -196,5 +196,24 @@ describe('apSummary', () => {
     expect(s.fromAljex).toEqual({ count: 1, cents: 25_000 })
     expect(s.pastDue).toEqual({ count: 1, cents: 25_000 })
     expect(payablesQueue(all, facts, { includeAljex: false }).map((b) => b.id)).toEqual(['n'])
+  })
+})
+
+describe('the PRO a bill prints when its load pays several carriers', () => {
+  const facts = new Map([['s1', delivered]]) as unknown as Parameters<typeof proOf>[1]
+
+  it('adds the leg suffix to the PRO, and prints a plain PRO without one', () => {
+    expect(proOf(bill(), facts)).toBe('20027')
+    expect(proOf(bill({ legSuffix: '-2' }), facts)).toBe('20027-2')
+  })
+
+  it('names an imported bill by its leg PRO, not its internal id', () => {
+    expect(billLabel(bill({ id: 'cb:lcr-aljex25-14598:1', billNumber: 'cb:lcr-aljex25-14598:1', shipmentNumber: '14598', legSuffix: '-2', carrierName: 'N VISION INC' })))
+      .toBe('PRO 14598-2 · N VISION INC')
+    expect(billLabel(bill({ id: 'cb:lcr-x:1', billNumber: null, shipmentNumber: '14598', carrierName: 'N VISION INC' }))).toBe('PRO 14598 · N VISION INC')
+  })
+
+  it('keeps the carrier invoice number as the bill name when there is one', () => {
+    expect(billLabel(bill({ billNumber: 'RL-1', legSuffix: '-2' }))).toBe('RL-1')
   })
 })
