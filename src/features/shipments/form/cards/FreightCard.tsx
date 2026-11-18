@@ -128,7 +128,7 @@ export function FreightCard({ values, update, ctx, form }: CardProps) {
             ))}
           </TmsSelect>
         </LField>
-        <LField span={12} def={LABEL.shipping.shipmentType} error={err(LABEL.shipping.shipmentType.testId)}>
+        <LField span={12} def={LABEL.shipping.shipmentType} error={err(LABEL.shipping.shipmentType.testId)} hint={typeLocked ? lockReason(ctx.locked, 'mode') : undefined}>
           <TmsSelect
             {...ctl(LABEL.shipping.shipmentType)} aria-label={LABEL.shipping.shipmentType.text} value={values.shipmentType}
             disabled={base.disabled || typeLocked} title={typeLocked ? lockReason(ctx.locked, 'mode') : undefined}

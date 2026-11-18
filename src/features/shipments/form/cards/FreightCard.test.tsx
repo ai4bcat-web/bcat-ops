@@ -36,6 +36,23 @@ describe('FreightCard shipment type', () => {
   })
 })
 
+describe('FreightCard shipment type lock', () => {
+  it('can be changed from Rail carload to a truckload type when nothing locks it', () => {
+    const host = renderCard(FreightCard, { seed: (v) => ({ ...v, shipmentType: 'RAIL_CARLOAD', mode: 'RAIL' }) })
+    const select = screen.getByTestId('f-shipping-shipmentType') as HTMLSelectElement
+    expect(select.disabled).toBe(false)
+    expect(select.value).toBe('RAIL_CARLOAD')
+    fireEvent.change(select, { target: { value: 'REEFER' } })
+    expect(host.current!.getValues()).toMatchObject({ shipmentType: 'REEFER', mode: 'FTL' })
+  })
+
+  it('shows the reason on the page, not only as a tooltip, when the type is locked', () => {
+    renderCard(FreightCard, { ctx: () => ({ locked: { fields: { mode: 'The load is in transit; the shipment type can only be changed while it is Sourcing or Booked.' }, stops: {}, voided: false } }) })
+    expect((screen.getByTestId('f-shipping-shipmentType') as HTMLSelectElement).disabled).toBe(true)
+    expect(screen.getByText(/can only be changed while it is Sourcing or Booked/)).toBeTruthy()
+  })
+})
+
 describe('FreightCard', () => {
   it('toggles the same flag keys the checkbox grid did, and only the clicked one', () => {
     const host = renderCard(FreightCard)

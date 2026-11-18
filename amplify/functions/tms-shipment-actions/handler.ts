@@ -240,6 +240,8 @@ import {
 import { liveCarriersOf, type CarrierLike } from '../../../src/lib/carrierTotals'
 import { validateCarrierAdd, validateLegs, type LegStop } from '../../../src/lib/carrierLegs'
 import { billLinesFor, billMoneyLockReason, rateConLinesFor, rebilledMoney } from '../../../src/lib/carrierBill'
+import { isShipmentTypeKey, legacyModeOf } from '../../../src/lib/shipmentTypes'
+import { typeCarrierBlock, typeLockReason } from '../../../src/lib/shipmentTypeChange'
 import {
   canTransitionLoadStatus,
   canTransitionShipmentStatus,
@@ -627,6 +629,8 @@ type Action =
   | 'SET_LOAD_PRO'
   // The TMS # and PU # a leg carries: read-only to client tokens (they fall back to the PRO), so this is how the calendar edits them.
   | 'SET_LOAD_REFS'
+  // Correct the shipment type (and the stored mode) of an open, uninvoiced shipment that has left DRAFT.
+  | 'SET_SHIPMENT_TYPE'
   // Per-stop drivers (unassign, a relay, a split): the calendar's picker. The load's pickup/delivery driver mirrors are written here, not by the client.
   | 'SET_STOP_DRIVERS'
   // Staff void; the owner alone may perform an exported hard delete or restore. PRO claims remain reserved.
@@ -4900,6 +4904,64 @@ async function setLoadRefs(input: Row, caller: Caller): Promise<Row> {
     bundle: shipmentId ? await readBundle(shipmentId) : null,
     load: await getById(LOAD_TABLE_NAME, loadId),
   } as unknown as Row
+}
+
+// ── SET_SHIPMENT_TYPE ────────────────────────────────────────────────────────
+
+/**
+ * Correct the shipment type of a shipment that has left DRAFT (a draft takes it through the form's own
+ * save). The type picks the stored mode, and the mode picks the workflow ladder and whether Cover is
+ * offered, so a load imported or duplicated with the wrong one could not be covered or fixed. Allowed only
+ * while the load is Sourcing or Booked, nothing is invoiced or frozen, and no booked carrier would be
+ * stranded between truckload and non-truckload (see src/lib/shipmentTypeChange.ts). Writes the Shipment's
+ * and every Order's mode and the order's stored form type, and nothing else.
+ */
+async function setShipmentType(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const expectedUpdatedAt = assertExpectedUpdatedAt(input)
+  const typeKey = assertString(input.shipmentType, 'shipmentType')
+  if (!isShipmentTypeKey(typeKey)) throw new Error('That is not a known shipment type')
+
+  const bundle = await readBundle(shipmentId)
+  const { shipment } = bundle
+  assertNotVoided(shipment)
+  if (shipment.status === 'DRAFT') throw new Error('Use SAVE_ORDER_FORM on a draft')
+  const load = bundle.loads[0]
+  const fin = bundle.financials.find((f) => f.id === (load ? String(load.id) : '')) ?? bundle.financials[0]
+  const locked = typeLockReason({
+    shipmentStatus: String(shipment.status ?? ''),
+    loadStatus: load ? String(load.status ?? '') : null,
+    hasInvoice: bundle.orders.some((o) => Boolean(o.invoiceId)),
+    financialsFrozen: Boolean(fin?.frozenAt),
+  })
+  if (locked) throw new Error(locked)
+
+  const fromMode = shipment.mode as ShipmentMode
+  const toMode = legacyModeOf(typeKey)
+  const carrierBlock = typeCarrierBlock(fromMode, toMode, Boolean(load && optionalString(load.activeLoadCarrierId, 100)))
+  if (carrierBlock) throw new Error(carrierBlock)
+
+  const now = nowIso()
+  const stamp = { updatedBy: caller.email, updatedAt: now }
+  const writes = [
+    updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, { mode: toMode, ...stamp, version: (numberOrNull(shipment.version) ?? 1) + 1 }, expectedUpdatedAt),
+    ...bundle.orders.map((o) => {
+      const sr = (o.specialRequirements && typeof o.specialRequirements === 'object' ? o.specialRequirements : {}) as Row
+      const form = (sr.form && typeof sr.form === 'object' ? sr.form : { v: 1 }) as Row
+      return updateItemTx(ORDER_TABLE_NAME, String(o.id), {
+        mode: toMode,
+        specialRequirements: { ...sr, form: { ...form, shipmentType: typeKey } },
+        ...stamp,
+        version: (numberOrNull(o.version) ?? 1) + 1,
+      }, null)
+    }),
+  ]
+  await transact(writes, 'shipment type')
+  await writeAudit('SHIPMENT', shipmentId, 'SET_SHIPMENT_TYPE', caller, {
+    shipmentType: { from: bundle.orders[0] ? ((bundle.orders[0].specialRequirements as Row | null)?.form as Row | undefined)?.shipmentType ?? null : null, to: typeKey },
+    mode: { from: fromMode ?? null, to: toMode },
+  })
+  return readBundle(shipmentId) as unknown as Row
 }
 
 // ── SET_STOP_DRIVERS ─────────────────────────────────────────────────────────
@@ -9760,7 +9822,7 @@ async function unlockShipment(input: Row, caller: Caller): Promise<Row> {
  */
 const LOCK_GUARDED_ACTIONS: ReadonlySet<string> = new Set([
   'SAVE_ORDER_FORM', 'UPDATE_ORDER_DETAILS', 'UPDATE_STOP', 'UPDATE_CARRIER_CHARGES', 'UPDATE_LOAD_CARRIER_DETAILS',
-  'SET_SALES_REP', 'SET_REV_TAG', 'SET_SHIPMENT_CUSTOMER', 'SUBMIT_ORDER', 'SET_LOAD_PRO',
+  'SET_SALES_REP', 'SET_REV_TAG', 'SET_SHIPMENT_CUSTOMER', 'SUBMIT_ORDER', 'SET_LOAD_PRO', 'SET_SHIPMENT_TYPE',
 ])
 
 export function lockHeldAgainst(shipment: Row | null | undefined, caller: { email: string; isAdmin?: boolean }, nowMs: number): { by: string; until: string } | null {
@@ -9906,6 +9968,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return setLoadPro(input, caller)
     case 'SET_LOAD_REFS':
       return setLoadRefs(input, caller)
+    case 'SET_SHIPMENT_TYPE':
+      return setShipmentType(input, caller)
     case 'SET_STOP_DRIVERS':
       return setStopDrivers(input, caller)
     case 'ASSIGN_ASSET':

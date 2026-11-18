@@ -9914,6 +9914,11 @@ export async function updateOrderDetails(input: UpdateOrderDetailsInput): Promis
   return shipmentAction<ShipmentBundle>('UPDATE_ORDER_DETAILS', input)
 }
 
+/** Correct the shipment type (and stored mode) of an open, uninvoiced shipment that has left DRAFT. */
+export async function setShipmentType(input: { shipmentId: string; expectedUpdatedAt: string; shipmentType: string }): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SET_SHIPMENT_TYPE', input)
+}
+
 export interface UpdateLoadCarrierDetailsInput {
   loadCarrierId: string
   /** The LoadCarrier row's own `updatedAt`. */

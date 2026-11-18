@@ -78,6 +78,21 @@ describe('CarrierInformationSection', () => {
     expect(ctx.actions.cover).toHaveBeenCalledTimes(1)
   })
 
+  it('a Rail carload cannot be covered, and the reason names the type and the fix', () => {
+    const bundle = savedBundle()
+    ;(bundle.shipment as { mode?: string }).mode = 'RAIL'
+    setup({}, { mode: 'edit', bundle })
+    expect(cover().disabled).toBe(true)
+    expect(screen.getByTestId('carrier-cover-reason').textContent).toBe('This load is set to Rail carload. Change the shipment type to FTL (or another truckload type) to cover it.')
+  })
+
+  it('a load with no mode is an ordinary FTL and can be covered', () => {
+    const bundle = savedBundle()
+    ;(bundle.shipment as { mode?: string | null }).mode = null
+    setup({}, { mode: 'edit', bundle })
+    expect(cover().disabled).toBe(false)
+  })
+
   it('the Ivan Cartage division opens the card without a click on Assign', () => {
     setup({}, {}, emptyValues(), true)
     expect(screen.getByTestId('carrier-own-fleet')).toBeTruthy()
