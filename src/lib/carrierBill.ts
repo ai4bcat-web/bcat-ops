@@ -230,6 +230,29 @@ export function billPayee(
   }
 }
 
+/**
+ * The payee a bill is judged under when somebody approves it.
+ *
+ * A bill freezes its payee when it is recorded, and that stays true: a bill that already names where the
+ * money goes keeps it. But the bills the Aljex and AR-sheet imports wrote carry no payee at all, even when
+ * the carrier has had a payment method on file since before the bill existed, and approval refused them with
+ * "this bill has no payee" until somebody re-recorded the bill. Such a bill is judged against the carrier's
+ * payment method as it stands now (the same `billPayee` choice, never a guess), and approval writes what it
+ * found onto the bill. A carrier with no method, or several with none chosen, still comes back empty and the
+ * block stands.
+ */
+export function effectiveBillPayee(
+  bill: Pick<CarrierBillRecord, 'payeeKind' | 'paymentMethodId' | 'remitTo'>,
+  carrier: Parameters<typeof billPayee>[0],
+  methods: Parameters<typeof billPayee>[1],
+): { payee: BillPayee; adopted: boolean } {
+  if (bill.remitTo) {
+    return { payee: { kind: bill.payeeKind, paymentMethodId: bill.paymentMethodId ?? null, remitTo: bill.remitTo }, adopted: false }
+  }
+  const live = billPayee(carrier, methods)
+  return { payee: live, adopted: live.remitTo != null }
+}
+
 export interface BillTotalsInput {
   grossCents: number
   loadCarrier: Pick<LoadCarrierRecord, 'quickPay' | 'quickPayFeeCents'> | null | undefined

@@ -543,6 +543,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         carrier: carriersById.get(bill.carrierId) ?? null,
         settings,
         isAdmin,
+        infos: payInfos,
       }),
       filters,
       showFilters,

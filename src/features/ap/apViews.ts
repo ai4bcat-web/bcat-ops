@@ -9,7 +9,7 @@
  * an invoice 31 days late have to read the same.
  */
 import { isVerifyPaymentBill } from '@/lib/verifyPayment'
-import { approvalReadiness, PENDING_DATES_BLOCK, type ApprovalWarning } from '@/lib/carrierBill'
+import { approvalReadiness, billPayee, PENDING_DATES_BLOCK, type ApprovalWarning, type BillPayee } from '@/lib/carrierBill'
 import { daysLate } from '@/lib/arAging'
 import { canonicalFactorName, paysThroughFactor, type FactorNameIndex } from '@/lib/factorRemit'
 import type { ApWorklistRow } from '@/hooks/useApWorklist'
@@ -394,11 +394,16 @@ const NO_GATES: BillGates = { blocks: [], warnings: [] }
 export function billGates(input: {
   bill: CarrierBillRecord
   row: ApWorklistRow | null | undefined
-  carrier?: Pick<CarrierRecord, 'name' | 'status'> | null
+  carrier?: Pick<CarrierRecord, 'name' | 'status'> | Partial<CarrierRecord> | null
   settings: Pick<ApSettings, 'apRequireSignedRateCon'> | null
   isAdmin: boolean
+  /**
+   * The carriers' payment methods, so a bill the imports wrote without a payee is judged the way approving it will
+   * judge it: under the method the carrier has on file now. Without them such a bill reads "no payee".
+   */
+  infos?: readonly CarrierPaymentInfo[]
 }): BillGates {
-  const { bill, row, carrier, settings, isAdmin } = input
+  const { bill, row, carrier, settings, isAdmin, infos } = input
   if (!row) return bill.datesPending === true ? { blocks: [PENDING_DATES_BLOCK], warnings: [] } : NO_GATES
   return approvalReadiness({
     bill,
@@ -412,11 +417,29 @@ export function billGates(input: {
     },
     // `docsMissing` is the cached carrier-scope gate: document types, stored as strings.
     gate: { missing: (row.assignment.docsMissing ?? []) as ShipmentDocumentType[] },
-    payee: bill.remitTo ? { kind: bill.payeeKind, remitTo: bill.remitTo, paymentMethodId: bill.paymentMethodId ?? null } : null,
-    carrier,
+    payee: bill.remitTo
+      ? { kind: bill.payeeKind, remitTo: bill.remitTo, paymentMethodId: bill.paymentMethodId ?? null }
+      : boardPayee(bill, carrier, infos),
+    carrier: carrier as Pick<CarrierRecord, 'name' | 'status'> | null | undefined,
     settings,
     isAdmin,
   })
+}
+
+/** The payee `billPayee` would choose for a bill that names none, from the payment methods the board already holds. */
+function boardPayee(
+  bill: Pick<CarrierBillRecord, 'carrierId'>,
+  carrier: Partial<CarrierRecord> | null | undefined,
+  infos: readonly CarrierPaymentInfo[] | undefined,
+): BillPayee | null {
+  if (!infos || infos.length === 0) return null
+  const mine = infos.filter((info) => info.carrierId === bill.carrierId)
+  // `CarrierPaymentInfo` carries the fields `billPayee` reads to choose; the address it also reads is not shown here.
+  const chosen = billPayee(
+    { name: carrier?.name ?? '', address: null, email: carrier?.email ?? null, factorPaymentMethodId: carrier?.factorPaymentMethodId ?? null },
+    mine as never,
+  )
+  return chosen.remitTo ? chosen : null
 }
 
 /** One live outside carrier on a shipment's load, as the AP surfaces name its siblings. */

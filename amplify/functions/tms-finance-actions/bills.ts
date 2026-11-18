@@ -34,6 +34,7 @@ import {
   billMoneyLockReason,
   billTermsDays,
   billTotals,
+  effectiveBillPayee,
   rebilledMoney,
 } from '../../../src/lib/carrierBill'
 import { apQuickPayOption } from '../../../src/lib/quickPay'
@@ -437,6 +438,28 @@ async function readBill(billId: string): Promise<CarrierBillRecord> {
   return row as unknown as CarrierBillRecord
 }
 
+/**
+ * What approving writes onto a bill that had no payee. A factor is never discounted, so a payee that turns
+ * out to be a factor takes the quick-pay fee off again and the net, balance and amounts follow.
+ */
+function adoptedPayeeFields(
+  bill: CarrierBillRecord,
+  payee: { kind: CarrierBillRecord['payeeKind']; paymentMethodId: string | null; remitTo: CarrierBillRecord['remitTo'] | null },
+): Row {
+  const fields: Row = {
+    payeeKind: payee.kind,
+    paymentMethodId: payee.paymentMethodId,
+    remitTo: payee.remitTo as unknown as Row,
+  }
+  if (payee.kind !== bill.payeeKind) {
+    const money = rebilledMoney({ ...bill, payeeKind: payee.kind }, bill.grossCents)
+    fields.quickPayFeeCents = money.quickPayFeeCents
+    fields.netCents = money.netCents
+    fields.balanceCents = money.balanceCents
+  }
+  return fields
+}
+
 export async function approveBill(input: Row, caller: Caller): Promise<Row> {
   const billId = assertString(input.billId, 'billId')
   const acknowledged = input.acknowledgeWarnings == null
@@ -459,13 +482,17 @@ export async function approveBill(input: Row, caller: Caller): Promise<Row> {
   const overriding = Boolean(docsOverrideNote) && gate.missing.length > 0
   const judged: CarrierBillRecord = overriding ? { ...bill, docsOverrideAt: now } : bill
 
+  // An imported bill carries no payee; it is judged against the carrier's payment method as it stands, and
+  // approving writes that payee onto the bill (a bill that already names one keeps it).
+  const { payee, adopted } = effectiveBillPayee(bill, context.carrier, context.methods)
+
   const check = approvalReadiness({
     bill: judged,
     loadCarrier: context.loadCarrier,
     load: context.load,
     carrier: context.carrier,
     gate,
-    payee: { kind: bill.payeeKind, paymentMethodId: bill.paymentMethodId ?? null, remitTo: bill.remitTo ?? null },
+    payee,
     settings: context.settings,
     // The router admitted this caller to Accounts payable, which is every action on it.
     isAdmin: true,
@@ -489,6 +516,7 @@ export async function approveBill(input: Row, caller: Caller): Promise<Row> {
           ...(overriding
             ? { docsOverrideAt: now, docsOverrideBy: caller.email, docsOverrideNote }
             : {}),
+          ...(adopted ? { ...adoptedPayeeFields(bill, payee) } : {}),
           updatedAt: now,
           updatedBy: caller.email,
           version: (bill.version ?? 1) + 1,
@@ -516,6 +544,9 @@ export async function approveBill(input: Row, caller: Caller): Promise<Row> {
     acknowledged,
     docsOverrideNote,
     netCents: bill.netCents,
+    ...(adopted
+      ? { payeeAdopted: { paymentMethodId: payee.paymentMethodId, kind: payee.kind, name: payee.remitTo?.name ?? null, method: payee.remitTo?.method ?? null } }
+      : {}),
   })
   // Step I. Approving the bill is the last word on this leg's cost.
   await runCommissionsForOrder(context.load?.orderId ?? null, caller, 'RERUN')
