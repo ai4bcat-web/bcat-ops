@@ -11,7 +11,7 @@
 import { isVerifyPaymentBill } from '@/lib/verifyPayment'
 import { approvalReadiness, PENDING_DATES_BLOCK, type ApprovalWarning } from '@/lib/carrierBill'
 import { daysLate } from '@/lib/arAging'
-import { paysThroughFactor } from '@/lib/factorRemit'
+import { canonicalFactorName, paysThroughFactor, type FactorNameIndex } from '@/lib/factorRemit'
 import type { ApWorklistRow } from '@/hooks/useApWorklist'
 import type { CarrierPaymentInfo } from '@/lib/apiClient'
 import type {
@@ -85,8 +85,19 @@ export const AP_PAYEE_KIND_LABEL: Record<ApPayeeKind, string> = {
 export function payeeLabel(bill: Pick<CarrierBillRecord, 'payeeKind' | 'carrierName' | 'remitTo'>): string {
   const carrier = bill.carrierName?.trim() || 'Carrier'
   if (bill.payeeKind !== 'FACTOR') return bill.remitTo?.name?.trim() || carrier
-  const factor = bill.remitTo?.factorName?.trim() || bill.remitTo?.name?.trim()
-  return factor ? `Factor — ${factor}` : 'Factor'
+  return factorLabelOf(bill) || 'Factor'
+}
+
+/**
+ * The factor names as the Factoring companies table spells them. The Payable page sets it once its payment
+ * infos load, so every Pay to / Remit to label here uses the table's spelling and not the copy on each bill.
+ */
+let factorNames: FactorNameIndex | null = null
+export function setFactorNamesForLabels(index: FactorNameIndex | null): void { factorNames = index }
+
+/** A factor-paid bill's factor, in the table's spelling; just the name, nothing around it. */
+function factorLabelOf(bill: Pick<CarrierBillRecord, 'remitTo'>): string {
+  return canonicalFactorName(factorNames, bill.remitTo?.factorName?.trim() || bill.remitTo?.name?.trim())
 }
 
 /** `Quick pay 2d` when the assignment is on quick pay, otherwise nothing to say. */
@@ -169,11 +180,10 @@ export function invoiceAgeBuckets(bills: readonly CarrierBillRecord[], asOf: str
   return out
 }
 
-/** `Factor — Triumph` or `Direct`: who the money is paid to. */
+/** The factor's name, or `Direct`: who the money is paid to. */
 export function payToLabel(bill: Pick<CarrierBillRecord, 'payeeKind' | 'remitTo'>): string {
   if (bill.payeeKind !== 'FACTOR') return 'Direct'
-  const factor = bill.remitTo?.factorName?.trim() || bill.remitTo?.name?.trim()
-  return factor ? `Factor — ${factor}` : 'Factor'
+  return factorLabelOf(bill) || 'Factor'
 }
 
 /**

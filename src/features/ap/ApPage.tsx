@@ -45,7 +45,7 @@ import {
   AP_PAYMENT_KIND_LABEL, AP_PAYMENT_METHOD_LABEL, AP_PAYEE_KIND_LABEL, AP_TABS, BILL_STATUS_LABEL,
   EMPTY_TO_BE_PAID_FILTERS, applyToBePaidFilters, avgDaysToPayBills, awaitingInvoiceTotals, billCarrierOptions,
   billGates, type BillGates, billsAging, billsExpected, billsSelected, canSelectForPayment, invoiceAgeBuckets, isOwnFleet, paidBills,
-  paymentInfoFor, payeeLabel, quickPayLabel, remitEmailOf, remitEmailOfPayment, remittanceStatusOf, selectionBalanceCents,
+  paymentInfoFor, payeeLabel, quickPayLabel, setFactorNamesForLabels, remitEmailOf, remitEmailOfPayment, remittanceStatusOf, selectionBalanceCents,
   selectionCarrierId, sharedProLabel, sharedProIndex, type ApTabKey, type SharedProIndex, type ToBePaidFilters,
 } from './apViews'
 import { ApCreditDialog } from './components/ApCreditDialog'
@@ -55,7 +55,7 @@ import { ApproveBillDialog } from './components/ApproveBillDialog'
 import { PayCarrierDialog } from './components/PayCarrierDialog'
 import { RemitEmailDialog } from './components/RemitEmailDialog'
 import { RemitToCell } from './components/RemitToCell'
-import { applyFactorRemit } from '@/lib/factorRemit'
+import { applyFactorRemit, factorNameIndex, summarizeFactors } from '@/lib/factorRemit'
 import { PaymentInfoDialog } from './components/PaymentInfoDialog'
 import { RecordBillDialog, type RecordBillPrefill } from './components/RecordBillDialog'
 import { SendRemittanceDialog } from './components/SendRemittanceDialog'
@@ -215,7 +215,12 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     let alive = true
     // A factoring company has one remittance address; it is laid over every carrier paid through it.
     Promise.all([listCarrierPaymentInfo(), getFactorRemitEmails()])
-      .then(([rows, factorEmails]) => { if (alive) setPayInfos(applyFactorRemit(rows, factorEmails)) })
+      .then(([rows, factorEmails]) => {
+        if (!alive) return
+        // Pay to / Remit to name each factor exactly as the Factoring companies table does.
+        setFactorNamesForLabels(factorNameIndex(summarizeFactors(rows, factorEmails)))
+        setPayInfos(applyFactorRemit(rows, factorEmails))
+      })
       .catch(() => {})
     return () => { alive = false }
   }, [infosKey])

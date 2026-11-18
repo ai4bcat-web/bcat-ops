@@ -37,7 +37,11 @@ import { carrierPayToText } from './emailReadiness'
 describe('carrierPayToText', () => {
   const carrier = { name: 'Blue Star Express' }
   it('names the factor when the preferred method pays a factor', () => {
-    expect(carrierPayToText(carrier, [{ carrierId: 'c', recipientType: 'FACTOR', factorName: 'OTR Solutions', isPreferred: true }])).toBe('Factor: OTR Solutions')
+    expect(carrierPayToText(carrier, [{ carrierId: 'c', recipientType: 'FACTOR', factorName: 'OTR Solutions', isPreferred: true }])).toBe('OTR Solutions')
+  })
+  it('spells the factor as the Factoring companies table does', () => {
+    const names = new Map([['OTR SOLUTIONS', 'OTR SOLUTIONS LLC']])
+    expect(carrierPayToText(carrier, [{ carrierId: 'c', recipientType: 'FACTOR', factorName: 'otr solutions', isPreferred: true }], names)).toBe('OTR SOLUTIONS LLC')
   })
   it('is Manual with the payee and method otherwise, skipping inactive methods', () => {
     expect(carrierPayToText(carrier, [

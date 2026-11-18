@@ -51,7 +51,8 @@ describe('RemitDirectoryPage', () => {
     renderPage()
     expect(await screen.findByText('ap@direct.test')).toBeTruthy()
     expect(screen.getByText('cash@rts.test')).toBeTruthy()
-    expect(screen.getByText('via RTS Financial')).toBeTruthy()
+    expect(screen.getAllByText('RTS Financial').length).toBeGreaterThan(0)
+    expect(screen.queryByText(/via RTS/)).toBeNull()
     expect(screen.getByRole('tab', { name: /Carriers · 1 missing/ })).toBeTruthy()
   })
 
@@ -87,6 +88,25 @@ describe('RemitDirectoryPage', () => {
     fireEvent.change(screen.getByLabelText('Remit e-mail for RTS Financial'), { target: { value: 'new@rts.test' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(api.setFactorRemitEmail).toHaveBeenCalledWith({ factorName: 'RTS Financial', email: 'new@rts.test' }))
+  })
+
+  it('sorts the factoring table from its headers and filters by status', async () => {
+    api.listCarrierRemitEmails.mockResolvedValue([
+      ...methods,
+      { carrierId: 'c9', recipientType: 'FACTOR', factorName: 'Zed Funding', payeeEmail: null, isPreferred: true },
+    ])
+    renderPage()
+    await screen.findByText('ap@direct.test')
+    fireEvent.click(screen.getByRole('tab', { name: /Factoring companies/ }))
+    await screen.findByText('Zed Funding')
+    const order = () => screen.getAllByRole('row').map((r) => r.textContent ?? '').filter((t) => /Zed Funding|RTS Financial/.test(t))
+    expect(order()[0]).toMatch(/RTS Financial/) // default: same carrier count, A to Z
+    fireEvent.click(screen.getByTitle('Sort by Factoring company'))
+    fireEvent.click(screen.getByTitle('Sort by Factoring company'))
+    await waitFor(() => expect(order()[0]).toMatch(/Zed Funding/))
+    fireEvent.change(screen.getByLabelText('Filter by status'), { target: { value: 'NONE' } })
+    expect(screen.queryByText('RTS Financial')).toBeNull()
+    expect(screen.getByText('Zed Funding')).toBeTruthy()
   })
 
   it('offers no edit links to someone who cannot pay carriers', async () => {

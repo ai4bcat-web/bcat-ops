@@ -429,7 +429,7 @@ describe('the AP board', () => {
     it('shows a payment info link, the pay-to and the remittance e-mail on every row', async () => {
       await setup({ bills: [bill({ billNumber: 'BL-1', selectedForPayment: true, payeeKind: 'FACTOR', remitTo: { name: 'Blue Line', factorName: 'Triumph', payeeEmail: 'ap@triumph.test' } })] })
       fireEvent.click(screen.getByRole('tab', { name: /^Selected/ }))
-      expect(screen.getByText('Factor — Triumph')).toBeTruthy()
+      expect(screen.getByText('Triumph')).toBeTruthy()
       expect(screen.getByText('ap@triumph.test')).toBeTruthy()
       expect(screen.getByRole('button', { name: 'Payment info for bill BL-1' })).toBeTruthy()
     })

@@ -1,4 +1,5 @@
 import { isValidEmail } from './billingMethod'
+import { canonicalFactorName, type FactorNameIndex } from './factorRemit'
 
 export type EmailState = 'OK' | 'MISSING' | 'INVALID'
 export type InvoiceEmailState = EmailState | 'FACTORED_QUEUE_ONLY'
@@ -6,14 +7,15 @@ export interface InvoiceEmailFields { billingMethod?: string | null; apEmail?: s
 export interface RemitEmailFields { carrierId: string; payeeEmail?: string | null; recipientType?: string | null; factorName?: string | null; accountName?: string | null; method?: string | null; isPreferred?: boolean | null; status?: string | null }
 
 /**
- * How a carrier is paid and to whom (Ryne 2026-11-10): "Factor: <factor name>" when the preferred (else first active) payment method pays a
+ * How a carrier is paid and to whom (Ryne 2026-11-10; 2026-11-17: no "Factor:" prefix): "<factor name>" when the preferred (else first active) payment method pays a
  * factor, else "Manual: <payee>" with the method (ACH, check ...). Falls back to the carrier's own factor link; blank when nothing is on file.
  */
-export function carrierPayToText(carrier: { name: string; factorPaymentMethodId?: string | null }, methods: readonly RemitEmailFields[]): string {
+export function carrierPayToText(carrier: { name: string; factorPaymentMethodId?: string | null }, methods: readonly RemitEmailFields[], factorNames?: FactorNameIndex): string {
   const live = methods.filter((m) => m.status !== 'INACTIVE')
   const m = live.find((x) => x.isPreferred) ?? live[0]
   if (!m) return carrier.factorPaymentMethodId ? 'Factor' : ''
-  if (m.recipientType === 'FACTOR') return `Factor: ${m.factorName?.trim() || 'factoring company'}`
+  // Just the factor's name, spelled as the Factoring companies table spells it.
+  if (m.recipientType === 'FACTOR') return canonicalFactorName(factorNames, m.factorName) || 'Factoring company'
   const payee = m.accountName?.trim() || carrier.name
   return `Manual: ${payee}${m.method ? ` (${m.method})` : ''}`
 }
