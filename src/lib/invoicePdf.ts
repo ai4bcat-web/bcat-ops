@@ -513,13 +513,51 @@ function drawTotal(d: Doc, input: InvoiceInput, last: boolean): void {
   textRight(d, money(input.totalCents), 580.8, 660, MONO_SIZE, d.fonts.mono)
 }
 
-/** The factor's assignment notice must be on the face of the invoice, not a cover note. */
+/**
+ * What a factored invoice calls the factor in its stamp. OTR Solutions is BCAT's factor (Ryne 2026-11-18), so a blank
+ * remit-to or any OTR entity reads "OTR SOLUTIONS"; another factor's remit name prints as it is.
+ */
+function factorStampName(remit: InvoiceInput['remitTo'] | null | undefined): string {
+  const name = caps(remit?.name)
+  return !name || /\bOTR\b/.test(name) ? 'OTR SOLUTIONS' : name
+}
+
+/** Where the factor wants the money: name, street, city line and e-mail, as one line for the bottom stamp. */
+function factorRemitLine(remit: InvoiceInput['remitTo'] | null | undefined): string {
+  const address = remit?.address
+  const street = [address?.street, address?.street2].map(caps).filter(Boolean).join(' ')
+  const parts = [caps(remit?.name), street, cityLine(address?.city, address?.state, address?.zip, true), (remit?.email ?? '').trim().toLowerCase()]
+  return parts.filter(Boolean).join(', ')
+}
+
+/**
+ * A factored invoice says so on its face, twice: a stamp at the top, beside the title, and a band at the bottom under the
+ * total, so the customer pays the factor and not BCAT (Ryne 2026-11-18). Every page carries both. An invoice that is not
+ * factored draws nothing here.
+ */
+function drawFactorStamp(d: Doc, input: InvoiceInput): void {
+  if (!input.factored) return
+  const name = factorStampName(input.remitTo)
+  // Top: a boxed stamp in the free strip left of the title, clear of the small invoice number and the logo.
+  const top = { x0: 124, x1: 296, y0: 3, y1: 27 }
+  d.page.drawRectangle({ x: top.x0, y: flip(top.y1), width: top.x1 - top.x0, height: top.y1 - top.y0, borderColor: BLACK, borderWidth: 1 })
+  textCentered(d, 'PAYABLE TO OUR FACTORING COMPANY', top.x0, top.x1, 13, 7.5, d.fonts.sans)
+  textCentered(d, fit(d.fonts.sans, name, 10, top.x1 - top.x0 - 8), top.x0, top.x1, 23.5, 10, d.fonts.sans)
+  // Bottom: a band across the page between the total and the envelope window.
+  const band = { x0: GRID.left, x1: GRID.right, y0: 676, y1: 706 }
+  d.page.drawRectangle({ x: band.x0, y: flip(band.y1), width: band.x1 - band.x0, height: band.y1 - band.y0, borderColor: BLACK, borderWidth: 1 })
+  const headline = `THIS INVOICE IS PAYABLE TO OUR FACTORING COMPANY, ${name}`
+  textCentered(d, fit(d.fonts.sans, headline, 9, band.x1 - band.x0 - 12), band.x0, band.x1, 689, 9, d.fonts.sans)
+  const remit = factorRemitLine(input.remitTo)
+  if (remit) textCentered(d, fit(d.fonts.sans, `REMIT PAYMENT TO: ${remit}`, 7, band.x1 - band.x0 - 12), band.x0, band.x1, 700, 7, d.fonts.sans)
+}
+
+/** The factor's assignment notice must be on the face of the invoice, not a cover note. It sits under the stamp band. */
 function drawFactorNotice(d: Doc, input: InvoiceInput): void {
   const notice = input.factorNoticeText
   if (!notice) return
-  text(d, 'NOTICE OF ASSIGNMENT', 24, 684, 8, d.fonts.sans)
-  clampLines(d.fonts.sans, wrapText(d.fonts.sans, notice, 8, 564), 8, 564, 3)
-    .forEach((line, i) => text(d, line, 24, 695 + i * 10, 8, d.fonts.sans))
+  clampLines(d.fonts.sans, wrapText(d.fonts.sans, `NOTICE OF ASSIGNMENT: ${notice}`, 7, 564), 7, 564, 2)
+    .forEach((line, i) => text(d, line, 24, 716 + i * 9, 7, d.fonts.sans))
 }
 
 /** The customer's mailing address, where the window of a #10 envelope shows it. */
@@ -588,6 +626,7 @@ export async function buildInvoicePdf(input: InvoiceInput): Promise<Uint8Array> 
     drawTable(d, rows)
     drawTotal(d, input, last)
     drawOutline(d)
+    drawFactorStamp(d, input)
     drawFactorNotice(d, input)
     if (index === 0) drawWindowAddress(d, input)
     if (pages.length > 1) text(d, `PAGE ${index + 1} OF ${pages.length}`, 120, 14, 7, fonts.sans)

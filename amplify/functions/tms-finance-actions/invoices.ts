@@ -123,6 +123,7 @@ import {
   SETTINGS_TABLE_NAME,
   SHIPMENT_DOCUMENT_TABLE_NAME,
   fileInvoiceDocument,
+  fileSentInvoiceDocument,
   SHIPMENT_NOTICE_TABLE_NAME,
   SHIPMENT_TABLE_NAME,
   dynamo,
@@ -625,9 +626,11 @@ export async function generateInvoice(input: Row, caller: Caller): Promise<Row> 
  * re-renders when this no longer matches the invoice, so a renumbered invoice (20027 still
  * carried the INV-000001 PDF) or one whose lines changed never goes out with the old document.
  */
-export function invoicePdfFingerprint(invoice: Pick<InvoiceRecord, 'number' | 'totalCents' | 'lines'> & { revision?: number | null }): string {
+export function invoicePdfFingerprint(invoice: Pick<InvoiceRecord, 'number' | 'totalCents' | 'lines'> & { revision?: number | null; factored?: boolean | null }): string {
   const lines = (invoice.lines ?? []).map((l) => `${l.code}:${l.amountCents}`).join(',')
-  return `${invoice.number}|${invoice.totalCents ?? 0}|${invoice.revision ?? 1}|${lines}`
+  // A factored invoice prints the factor's stamp (Ryne 2026-11-18): switching an invoice to or from FACTOR makes its stored PDF stale.
+  // The suffix only exists for a factored invoice, so every other invoice keeps the fingerprint it was rendered with.
+  return `${invoice.number}|${invoice.totalCents ?? 0}|${invoice.revision ?? 1}|${lines}${invoice.factored === true ? '|factored' : ''}`
 }
 
 /**
@@ -1122,6 +1125,9 @@ export async function emailInvoice(input: Row, caller: Caller): Promise<Row> {
       })],
       'invoice send',
     )
+    // The invoice that went out is listed on its shipment's Documents (Ryne 2026-11-18). It was filed when the PDF was made; filing
+    // it again here puts back a row that never landed. The same file already listed is left alone, so a resend adds nothing.
+    await fileSentInvoiceDocument(invoice)
   }
 
   // SES is denied on dev and the customer still needs their bill, so a refused send
@@ -1197,6 +1203,8 @@ export async function markInvoiceSent(input: Row, caller: Caller): Promise<Row> 
     'invoice mark sent',
   )
   await writeAudit('Invoice', invoiceId, 'MARK_SENT', caller, { note })
+  // An invoice sent by hand still shows on its shipment's Documents when it has a PDF (the row heals if it never landed).
+  await fileSentInvoiceDocument({ id: invoiceId, shipmentId: optionalString(row.shipmentId, 100), orderId: optionalString(row.orderId, 100), number: optionalString(row.number, 60), pdfKey: optionalString(row.pdfKey, 1024), pdfSizeBytes: numberOrNull(row.pdfSizeBytes), status: optionalString(row.status, 20) })
   return { invoice: (await getById(INVOICE_TABLE_NAME, invoiceId)) ?? {} }
 }
 
