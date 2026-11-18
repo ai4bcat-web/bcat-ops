@@ -3870,13 +3870,23 @@ describe('MOVE_TO_MANUAL_INVOICE (OTR rejected)', () => {
     return { invoiceId: String(out.invoice.id), itemId }
   }
 
-  it('voids the factored bill, puts the order back in Ready to invoice, makes the customer manual and keeps the reason', async () => {
+  it('keeps the invoice owed (not voided), makes it manual, makes the customer manual and keeps the reason', async () => {
     const { invoiceId, itemId } = await rejectedRow()
+    const before = table(TABLES.invoice).get(invoiceId)!
+    expect(before.arOpen).toBe('OPEN')
     const out = (await call('MOVE_TO_MANUAL_INVOICE', { factoringItemId: itemId }, ADMIN)) as Row
-    expect(out.voidedInvoice).toBeTruthy()
-    expect(table(TABLES.invoice).get(invoiceId)!.status).toBe('VOID')
-    expect(table(TABLES.order).get(ORDER_ID)).toMatchObject({ arStatus: 'UNBILLED' })
-    expect(table(TABLES.order).get(ORDER_ID)!.invoiceId).toBeUndefined()
+    // The invoice was sent to OTR and OTR turned it down; it is still owed.
+    expect(out.voidedInvoice).toBeNull()
+    expect(out.keptInvoiceId).toBe(invoiceId)
+    const invoice = table(TABLES.invoice).get(invoiceId)!
+    expect(invoice.status).toBe('ISSUED')
+    expect(invoice.arOpen).toBe('OPEN')
+    expect(invoice.balanceCents).toBe(before.balanceCents)
+    expect(invoice.factored).toBe(false)
+    expect(invoice.factoringItemId).toBeUndefined()
+    expect(table(TABLES.order).get(ORDER_ID)).toMatchObject({ invoiceId })
+    expect(table(TABLES.order).get(ORDER_ID)!.arStatus).not.toBe('UNBILLED')
+    expect(table(TABLES.order).get(ORDER_ID)!.factoringItemId).toBeUndefined()
     const customer = table(TABLES.customer).get(CUSTOMER_ID)!
     expect(customer).toMatchObject({ billingMethod: 'MANUAL', factored: false })
     expect(String(customer.notes)).toMatch(/^Changed to manual invoice on \d\d\/\d\d\/\d{4} by admin@bcatcorp\.com: OTR rejected PRO .+ — OTR will not buy from MC 123456\nShips Mondays\.$/)
@@ -3890,6 +3900,26 @@ describe('MOVE_TO_MANUAL_INVOICE (OTR rejected)', () => {
     expect(auditRows('MOVE_TO_MANUAL_INVOICE')).toHaveLength(1)
   })
 
+  it('an invoice that went to OTR keeps that on the invoice itself, so it stays sent after the queue row is archived', async () => {
+    const { invoiceId, itemId } = await rejectedRow({ otrInvoiceId: '26165385', otrSubmittedAt: '2026-11-17T10:00:00.000Z' })
+    await call('MOVE_TO_MANUAL_INVOICE', { factoringItemId: itemId }, ADMIN)
+    expect(table(TABLES.invoice).get(invoiceId)).toMatchObject({ status: 'ISSUED', factorSubmittedAt: '2026-11-17T10:00:00.000Z' })
+  })
+
+  it('an invoice already e-mailed with the factor on it becomes the next revision, still owed', async () => {
+    const { invoiceId, itemId } = await rejectedRow()
+    table(TABLES.invoice).set(invoiceId, { ...table(TABLES.invoice).get(invoiceId)!, sentAt: '2026-11-16T10:00:00.000Z', sentCount: 1, revision: 1 })
+    await call('MOVE_TO_MANUAL_INVOICE', { factoringItemId: itemId }, ADMIN)
+    expect(table(TABLES.invoice).get(invoiceId)).toMatchObject({ status: 'ISSUED', arOpen: 'OPEN', revision: 2, factored: false })
+  })
+
+  it('refuses an invoice that is already paid, and changes nothing', async () => {
+    const { invoiceId, itemId } = await rejectedRow()
+    table(TABLES.invoice).set(invoiceId, { ...table(TABLES.invoice).get(invoiceId)!, status: 'PAID', balanceCents: 0, paidCents: 250_000 })
+    await call('MOVE_TO_MANUAL_INVOICE', { factoringItemId: itemId }, ADMIN).catch(() => undefined)
+    expect(table(TABLES.invoice).get(invoiceId)!.status).toBe('PAID')
+  })
+
   it('refuses a row OTR did not reject, and changes nothing', async () => {
     const { itemId } = await rejectedRow({ status: 'NEED_TO_FACTOR', manualReason: null, brokerCheckResult: 'APPROVED', otrError: null })
     await expect(call('MOVE_TO_MANUAL_INVOICE', { factoringItemId: itemId }, ADMIN)).rejects.toThrow(/not rejected by OTR/)
@@ -3901,10 +3931,10 @@ describe('MOVE_TO_MANUAL_INVOICE (OTR rejected)', () => {
     await expect(call('MOVE_TO_MANUAL_INVOICE', { factoringItemId: itemId }, ADMIN)).rejects.toThrow(/not rejected by OTR/)
   })
 
-  it('voiding the live invoice stays an admin act', async () => {
+  it('changing a live invoice stays an admin act', async () => {
     const { invoiceId, itemId } = await rejectedRow()
-    await expect(call('MOVE_TO_MANUAL_INVOICE', { factoringItemId: itemId }, JENNY)).rejects.toThrow(/only an admin can void/)
-    expect(table(TABLES.invoice).get(invoiceId)!.status).not.toBe('VOID')
+    await expect(call('MOVE_TO_MANUAL_INVOICE', { factoringItemId: itemId }, JENNY)).rejects.toThrow(/only an admin/)
+    expect(table(TABLES.invoice).get(invoiceId)).toMatchObject({ status: 'ISSUED', factored: true })
     expect(table(TABLES.customer).get(CUSTOMER_ID)!.billingMethod).toBe('FACTOR')
   })
 })

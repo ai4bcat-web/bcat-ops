@@ -5,6 +5,7 @@
  */
 import { daysLate, isImportedInvoice } from '@/lib/arAging'
 import { emptyFactoredBuckets, factoredBucketOf, type FactoredBuckets } from '@/lib/factoredOpen'
+import { isOutstandingInvoice } from '@/lib/invoiceOutstanding'
 import type { FactoringItem } from '@/types'
 import type { InvoiceRecord, ShipmentRecord } from '@/types/tms'
 
@@ -81,7 +82,7 @@ export function computeArSummary(input: {
   let lateCount = 0
   const slices = new Map<string, ArDivisionSlice>()
   for (const inv of open) {
-    if (inv.status !== 'ISSUED' && inv.status !== 'PARTIAL') continue
+    if (!isOutstandingInvoice(inv)) continue
     if (isFactored(inv)) {
       pendingOtrCents += inv.balanceCents
       pendingOtrCount += 1

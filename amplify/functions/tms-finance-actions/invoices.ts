@@ -1123,7 +1123,9 @@ export async function emailInvoice(input: Row, caller: Caller): Promise<Row> {
 
   const now = nowIso()
   if (delivered.status === 'SENT') {
-    await transact(
+    // The message is already with the customer, so recording the send is retried once: an invoice that went out but was
+    // never stamped would read as an unsent draft and drop out of Open AR (Ryne 2026-11-19).
+    const record = () => transact(
       [updateTx(INVOICE_TABLE_NAME, invoiceId, {
         sentAt: now,
         sentTo: to.join(', '),
@@ -1135,6 +1137,21 @@ export async function emailInvoice(input: Row, caller: Caller): Promise<Row> {
       })],
       'invoice send',
     )
+    let recorded = false
+    let lastError: unknown = null
+    for (let attempt = 0; attempt < 2 && !recorded; attempt += 1) {
+      try {
+        await record()
+        recorded = true
+      } catch (err) {
+        lastError = err
+        console.error('[finance] could not record an invoice send', invoiceId, `attempt ${attempt + 1}`, String(err))
+      }
+    }
+    if (!recorded) {
+      await writeAudit('Invoice', invoiceId, 'EMAIL_INVOICE_RECORD_FAILED', caller, { noticeId, to, error: String(lastError) }).catch(() => undefined)
+      throw new Error('The invoice was e-mailed, but BCAT Ops could not record it as sent. Use Mark sent so it stays on Invoiced, and do not send it again.')
+    }
     // The invoice that went out is listed on its shipment's Documents (Ryne 2026-11-18). It was filed when the PDF was made; filing
     // it again here puts back a row that never landed. The same file already listed is left alone, so a resend adds nothing.
     await fileSentInvoiceDocument(invoice)

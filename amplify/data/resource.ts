@@ -2494,6 +2494,7 @@ const schema = a.schema(stageTypes({
       markedSentAt:    a.datetime(),
       markedSentBy:    a.string(),
       markedSentNote:  a.string(),
+      factorSubmittedAt: a.datetime(),     // first hand-off to OTR; keeps a sent invoice sent when its queue row is reset
       lastNoticeId:    a.string(),
       voidedAt:        a.datetime(),
       voidedBy:        a.string(),

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { ArWorklistRow } from '@/hooks/useArWorklist'
 import type { InvoiceRecord, ShipmentRecord } from '@/types/tms'
-import { arStatusText, buildInvoicedRows, buildPaidRows, buildReadyRows, factorQueueRows, groupTotals, orderByGroup, type ArQueueLookups } from './arQueue'
+import { arStatusText, buildInvoicedRows, buildPaidRows, buildReadyRows, factorQueueRows, groupTotals, isInvoiceSent, orderByGroup, splitOpenInvoices, type ArQueueLookups } from './arQueue'
 
 const lookups: ArQueueLookups = {
   shipmentsById: new Map(),
@@ -173,5 +173,30 @@ describe('arStatusText (the words the Status column sorts and filters by)', () =
     expect(az).toEqual(['Draft — not sent', 'Draft — not sent', 'Factor next', 'Factor next'])
     const za = [...rows].sort((x, y) => y.text.localeCompare(x.text)).map((r) => r.text)
     expect(za).toEqual(['Factor next', 'Factor next', 'Draft — not sent', 'Draft — not sent'])
+  })
+})
+
+describe('a sent invoice stays outstanding whatever OTR does to its queue row (Ryne 2026-11-19)', () => {
+  const sentToOtr = inv({ id: 'otr1', factored: true, factoringItemId: 'f1' })
+  const reset = { status: 'NEED_TO_FACTOR', otrInvoiceId: null, otrSubmittedAt: null, otrPriorInvoices: [{ otrInvoiceId: '26165385', replacedAt: 'x', replacedBy: 'y' }] } as const
+
+  it('a row put back to Need to factor after the send does not turn the invoice back into a draft', () => {
+    expect(isInvoiceSent(sentToOtr, reset as never)).toBe(true)
+    const { drafts, invoiced } = splitOpenInvoices([sentToOtr], lookups, undefined, (i) => isInvoiceSent(i, reset as never))
+    expect(drafts).toEqual([])
+    expect(invoiced.map((r) => r.invoiceId)).toEqual(['otr1'])
+  })
+
+  it('an archived row, a Dead one and a missing one all leave it counted', () => {
+    for (const item of [{ status: 'ARCHIVED', otrInvoiceId: '1' }, { status: 'PENDING_WITH_OTR', otrInvoiceId: '1', otrStatus: '4' }, null]) {
+      const marked = { ...sentToOtr, factorSubmittedAt: '2026-11-17T00:00:00Z' }
+      expect(isInvoiceSent(marked, item as never)).toBe(true)
+    }
+  })
+
+  it('an invoice nobody has sent is a draft, not a receivable', () => {
+    const { drafts, invoiced } = splitOpenInvoices([inv({ id: 'd' })], lookups, undefined, (i) => isInvoiceSent(i, null))
+    expect(drafts.map((r) => r.invoiceId)).toEqual(['d'])
+    expect(invoiced).toEqual([])
   })
 })

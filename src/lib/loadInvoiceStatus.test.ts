@@ -24,6 +24,17 @@ describe('loadInvoiceStatusOf', () => {
     expect(loadInvoiceStatusText(paid, () => 'Nov 12, 2026')).toBe('Paid Nov 12, 2026')
   })
 
+  it('an invoice that went to OTR stays Outstanding after its queue row is reset, archived or loses its OTR fields', () => {
+    const order = { arStatus: 'UNPAID', invoiceId: 'i1' }
+    // Reset to Need to factor with the OTR history kept, and archived: never back to Ready to invoice.
+    expect(loadInvoiceStatusOf(order, inv(), { status: 'NEED_TO_FACTOR', otrPriorInvoices: [{ otrInvoiceId: '1', replacedAt: 'x', replacedBy: 'y' }] }).key).toBe('OUTSTANDING')
+    expect(loadInvoiceStatusOf(order, inv(), { status: 'ARCHIVED', otrInvoiceId: '1' }).key).toBe('OUTSTANDING')
+    // The invoice remembers it on its own once the queue row is gone.
+    expect(loadInvoiceStatusOf(order, inv({ factorSubmittedAt: '2026-11-17T00:00:00Z' }), null).key).toBe('OUTSTANDING')
+    // A draft nobody sent and OTR never saw is still a draft.
+    expect(loadInvoiceStatusOf(order, inv(), { status: 'NEED_TO_FACTOR' }).key).toBe('READY')
+  })
+
   it('falls back to the order cache without the invoice row', () => {
     expect(loadInvoiceStatusOf({ arStatus: 'UNPAID', invoiceId: 'i1' }).key).toBe('OUTSTANDING')
     expect(loadInvoiceStatusOf({ arStatus: 'PAID', paidAt: '2026-11-01' }).paidAt).toBe('2026-11-01')
