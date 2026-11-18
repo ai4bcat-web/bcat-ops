@@ -48,7 +48,7 @@ import {
   EMPTY_TO_BE_PAID_FILTERS, applyToBePaidFilters, avgDaysToPayBills, awaitingInvoiceTotals, billCarrierOptions,
   billGates, type BillGates, billsAging, billsExpected, billsSelected, canSelectForPayment, invoiceAgeBuckets, isOwnFleet, paidBills,
   paidInMonth, paidMonthOptions,
-  paymentInfoFor, payeeNameFor, isFactorPaid, quickPayLabel, setFactorNamesForLabels, remitEmailOf, remitEmailOfPayment, remittanceStatusOf, selectionBalanceCents,
+  paymentInfoFor, payeeNameFor, isFactorPaid, payToStatusFor, payToWorklist, PAY_TO_STATUS_LABEL, PAY_TO_STATUS_TITLE, quickPayLabel, setFactorNamesForLabels, remitEmailOf, remitEmailOfPayment, remittanceStatusOf, selectionBalanceCents,
   selectionCarrierId, sharedProLabel, sharedProIndex, type ApTabKey, type SharedProIndex, type ToBePaidFilters,
 } from './apViews'
 import { ApCreditDialog } from './components/ApCreditDialog'
@@ -57,6 +57,8 @@ import { isVerifyPaymentBill } from '@/lib/verifyPayment'
 import { ApproveBillDialog } from './components/ApproveBillDialog'
 import { PayCarrierDialog } from './components/PayCarrierDialog'
 import { RemitEmailDialog } from './components/RemitEmailDialog'
+import { PayToDialog } from './components/PayToDialog'
+import { PayToWorklistDialog } from './components/PayToWorklistDialog'
 import { RemitToCell } from './components/RemitToCell'
 import { applyFactorRemit, factorNameIndex, summarizeFactors } from '@/lib/factorRemit'
 import { PaymentInfoDialog } from './components/PaymentInfoDialog'
@@ -136,6 +138,9 @@ type ApDialog =
   | { kind: 'payinfo'; bill: CarrierBillRecord }
   /** The payee's remit e-mail; a bill names the exact payment method, a carrier takes the preferred one. */
   | { kind: 'remit-email'; payee: string; billId?: string; carrierId?: string }
+  /** A carrier with no usable pay-to: the payment-method editor, and the list of every carrier in that state. */
+  | { kind: 'payto'; carrierId: string; carrierName: string }
+  | { kind: 'payto-list' }
   | { kind: 'report'; report: ApReportKind }
 
 const RIGHT = 'block text-right tabular-nums'
@@ -185,7 +190,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const [showFilters, setShowFilters] = useState(false)
   const [selected, setSelected] = useState<string[]>([])
   // Masked payment details (bank name, last four digits, payee) for the Pay to / Payment info columns.
-  const [payInfos, setPayInfos] = useState<CarrierPaymentInfo[]>([])
+  const [infoRows, setPayInfos] = useState<CarrierPaymentInfo[]>([])
 
   const months = useMemo(() => lastThreeMonths(asOf), [asOf])
   // This month's bills feed the aging view's days-to-pay and the shared-PRO chips; the Paid tab reads every month itself.
@@ -238,6 +243,13 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     for (const c of carriers) map.set(c.id, c)
     return map
   }, [carriers])
+
+  // The factor method each carrier names lives on the carrier, not on its payment methods; the Pay-to needed flag
+  // reads it (see `payToStatusFor`) the way approval chooses a payee. Left unset until the carriers have loaded.
+  const payInfos = useMemo(() => (carriersById.size === 0
+    ? infoRows
+    : infoRows.map((info) => ({ ...info, carrierFactorMethodId: carriersById.get(info.carrierId)?.factorPaymentMethodId ?? null }))),
+  [infoRows, carriersById])
 
   const reviewRows = useMemo(() => {
     const map = new Map<string, ApWorklistRow>()
@@ -294,6 +306,8 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const carrierLabel = (id: string) => carrierOptions.find((o) => o.key === id)?.label ?? id
   const divisionLabel = (key: string) => divisionOptions.find((o) => o.key === key)?.label ?? key
   const expectedBills = useMemo(() => billsExpected(queueBills), [queueBills])
+  // Open bills whose carrier has no usable pay-to (Ryne 2026-11-18), by carrier, biggest balance first.
+  const payToRows = useMemo(() => payToWorklist(open.bills, payInfos), [open.bills, payInfos])
   // Aging by carrier: the same open bills `useOpenBills` ages, grouped by carrier with the bills under each.
   const agingReport = useMemo(() => buildApAgingReport(open.bills, new Date().toISOString(), {
     proOf: (bill) => proOf(bill, facts),
@@ -495,6 +509,17 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         <span className="tms-muted">Delivered loads only.</span>
         <TmsButton variant="ghost" size="sm" onClick={() => setDialog({ kind: 'report', report: tab === 'aging' ? 'aging' : tab === 'selected' ? 'selected' : 'expected' })}>Report</TmsButton>
         <TmsButton variant="ghost" size="sm" onClick={() => setTab('cash')}>Cash requirements</TmsButton>
+        {payToRows.length > 0 && (
+          <button
+            type="button"
+            className="tms-badge tms-badge-orange whitespace-nowrap"
+            data-testid="payto-banner"
+            title="Open bills whose carrier has no payment method (or none chosen) cannot be approved or paid. Click to add each one's pay-to."
+            onClick={() => setDialog({ kind: 'payto-list' })}
+          >
+            {payToRows.length} {payToRows.length === 1 ? 'payee needs' : 'payees need'} a pay-to · {formatCents(payToRows.reduce((sum, row) => sum + row.cents, 0))} waiting
+          </button>
+        )}
       </div>
     </>
   )
@@ -506,6 +531,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     : tab === 'paid' ? <ApPaidCard stats={apPaidStats(settled, facts, apPaymentLines)} monthLabel={monthLabel(month)} />
     : null
   const addRemitFor = (bill: CarrierBillRecord) => setDialog({ kind: 'remit-email', payee: payeeNameFor(bill, payInfos), billId: bill.id })
+  const payToFor = (bill: CarrierBillRecord) => setDialog({ kind: 'payto', carrierId: bill.carrierId, carrierName: bill.carrierName || 'this carrier' })
   const openDrawer = (bill: CarrierBillRecord) => setDrawerId(bill.id)
   const chargesFor = (bill: CarrierBillRecord) => setDialog({ kind: 'charges', loadCarrierId: bill.loadCarrierId, shipmentId: bill.shipmentId, bill })
 
@@ -533,6 +559,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onDates: (bill) => setDialog({ kind: 'dates', bill }),
       infos: payInfos,
       onAddRemit: addRemitFor,
+      onPayTo: payToFor,
       onClearReview: (bill) => setDialog({ kind: 'clear-review', shipmentId: bill.shipmentId }),
     })
     : tab === 'aging' || tab === 'selected' ? payableView({
@@ -577,6 +604,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         ? setDialog({ kind: 'approve', bill, thenSelect: true })
         : runSelect([bill.id])),
       onAddRemit: addRemitFor,
+      onPayTo: payToFor,
     })
     : tab === 'paid' ? paidView({
       banner: errorBanner,
@@ -793,6 +821,13 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           open
           carrierId={dialog.carrierId}
           payeeName={payeeOfPayDialog(open.bills, payInfos, dialog.carrierId, dialog.billIds)}
+          payToNeeded={(() => {
+            const lead = open.bills.find((b) => b.carrierId === dialog.carrierId)
+            const status = lead ? payToStatusFor(lead, payInfos) : 'OK'
+            return lead && status !== 'OK'
+              ? { label: PAY_TO_STATUS_LABEL[status], title: PAY_TO_STATUS_TITLE[status], onFix: () => payToFor(lead) }
+              : null
+          })()}
           preselectBillIds={dialog.billIds}
           onOpenChange={(o) => { if (!o) setDialog(null) }}
           onDone={closeAndRefresh}
@@ -833,6 +868,27 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           carrierId={dialog.carrierId}
           onOpenChange={(o) => { if (!o) setDialog(null) }}
           onDone={() => { setDialog(null); setInfosKey((n) => n + 1); setPayRefresh((n) => n + 1) }}
+        />
+      )}
+      {dialog?.kind === 'payto-list' && (
+        <PayToWorklistDialog
+          rows={payToRows}
+          open
+          onOpenChange={(o) => { if (!o) setDialog(null) }}
+          onAdd={(row) => setDialog({ kind: 'payto', carrierId: row.carrierId, carrierName: row.carrierName })}
+        />
+      )}
+      {dialog?.kind === 'payto' && (
+        <PayToDialog
+          carrierId={dialog.carrierId}
+          carrierName={dialog.carrierName}
+          awaiting={(() => {
+            const mine = payToRows.find((row) => row.carrierId === dialog.carrierId)
+            return mine ? { count: mine.bills, cents: mine.cents } : undefined
+          })()}
+          open
+          onOpenChange={(o) => { if (!o) setDialog(null) }}
+          onChanged={() => { setInfosKey((n) => n + 1); setPayRefresh((n) => n + 1) }}
         />
       )}
       {dialog?.kind === 'payinfo' && (
@@ -975,6 +1031,43 @@ function payeeOfPayDialog(
 
 const ACTIONS = { filter: false, sortable: false, fixed: true } as const
 
+/**
+ * PAY TO: the factor's name when the carrier has one, else the carrier. A bill whose carrier has no usable pay-to
+ * says so here instead (Ryne 2026-11-18), and the flag opens the payment-method editor for that carrier. The
+ * column's text is the flag too, so the header filter groups every flagged bill under one entry.
+ */
+function payToColumn(
+  infos: readonly CarrierPaymentInfo[],
+  onPayTo: (bill: CarrierBillRecord) => void,
+): ApColumn<CarrierBillRecord> {
+  return facetCol<CarrierBillRecord>(
+    'payTo',
+    'PAY TO',
+    (bill) => {
+      const status = payToStatusFor(bill, infos)
+      return status === 'OK' ? payeeNameFor(bill, infos) : PAY_TO_STATUS_LABEL[status]
+    },
+    (bill) => {
+      const status = payToStatusFor(bill, infos)
+      if (status !== 'OK') {
+        return (
+          <button
+            type="button"
+            className="tms-badge tms-badge-orange whitespace-nowrap"
+            title={PAY_TO_STATUS_TITLE[status]}
+            aria-label={`${PAY_TO_STATUS_LABEL[status]} for ${bill.carrierName || 'this carrier'}`}
+            onClick={(event) => { event.stopPropagation(); onPayTo(bill) }}
+          >
+            {PAY_TO_STATUS_LABEL[status]}
+          </button>
+        )
+      }
+      return isFactorPaid(bill, infos) ? <TmsBadge tone="blue">{payeeNameFor(bill, infos)}</TmsBadge> : payeeNameFor(bill, infos)
+    },
+    { extraPx: 60 },
+  )
+}
+
 /** Remit to: the e-mail the payee's remittance goes to, or an Add remit e-mail link when none is on file. */
 function remitToColumn(
   infos: readonly CarrierPaymentInfo[],
@@ -998,12 +1091,11 @@ function payeeColumns(
   infos: readonly CarrierPaymentInfo[],
   onInfo: (bill: CarrierBillRecord) => void,
   onAddRemit: (bill: CarrierBillRecord) => void,
+  onPayTo: (bill: CarrierBillRecord) => void,
 ): ApColumn<CarrierBillRecord>[] {
   return [
     remitToColumn(infos, onAddRemit),
-    facetCol<CarrierBillRecord>('payTo', 'PAY TO', (bill) => payeeNameFor(bill, infos), (bill) => (
-      isFactorPaid(bill, infos) ? <TmsBadge tone="blue">{payeeNameFor(bill, infos)}</TmsBadge> : payeeNameFor(bill, infos)
-    ), { extraPx: 60 }),
+    payToColumn(infos, onPayTo),
     {
       key: 'paymentInfo',
       header: 'PAYMENT INFO',
@@ -1208,7 +1300,7 @@ function awaitingView({ banner, rows, shared, busy, onRecord }: {
 /* ── In review ───────────────────────────────────────────────────────────── */
 
 function reviewView({
-  banner, bills, review, facts, onOpen, shared, busy, onDates, infos, onAddRemit, onClearReview, asOf,
+  banner, bills, review, facts, onOpen, shared, busy, onDates, infos, onAddRemit, onPayTo, onClearReview, asOf,
 }: {
   banner: ReactNode
   asOf: string
@@ -1222,6 +1314,7 @@ function reviewView({
   onDates: (bill: CarrierBillRecord) => void
   infos: readonly CarrierPaymentInfo[]
   onAddRemit: (bill: CarrierBillRecord) => void
+  onPayTo: (bill: CarrierBillRecord) => void
   onClearReview: (bill: CarrierBillRecord) => void
 }): ListView {
   const pendingDates = (bill: CarrierBillRecord) => bill.datesPending === true
@@ -1247,9 +1340,7 @@ function reviewView({
     },
     customerColumn(facts),
     facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
-    facetCol<CarrierBillRecord>('payTo', 'PAY TO', (bill) => payeeNameFor(bill, infos), (bill) => (
-      isFactorPaid(bill, infos) ? <TmsBadge tone="blue">{payeeNameFor(bill, infos)}</TmsBadge> : payeeNameFor(bill, infos)
-    ), { extraPx: 60 }),
+    payToColumn(infos, onPayTo),
     remitToColumn(infos, onAddRemit),
     moneyCol<CarrierBillRecord>('amount', 'AMOUNT', (bill) => bill.grossCents, (bill) => (
       <span className={RIGHT}>
@@ -1314,6 +1405,7 @@ function reviewView({
       { label: 'Expected', value: bills.length },
       { label: 'Need invoice date', value: bills.filter(pendingDates).length, tone: 'warn' as const },
       { label: 'Needs review', value: bills.filter((bill) => !!flagOf(bill)).length, tone: 'bad' as const },
+      { label: 'Pay-to needed', value: bills.filter((bill) => payToStatusFor(bill, infos) !== 'OK').length, tone: 'warn' as const },
       { label: 'Carrier pay', value: formatCents(sumCents(bills, (bill) => bill.grossCents)) },
       { label: 'Net', value: formatCents(sumCents(bills, (bill) => bill.netCents)) },
       { label: 'With variance', value: bills.filter((bill) => bill.varianceCents !== 0).length, tone: 'bad' },
@@ -1332,7 +1424,7 @@ function reviewView({
 function payableView({
   mode, errorBanner, facts, onOpen, bills, allBills, shared, infos, review, gatesOf, filters, showFilters, selected, asOf, busy,
   onToggleFilters, onFilters, onSelect, onInfo, onPay, onPaySelected, onApprove, onDates, onCharges, onVoid, onUnapprove,
-  onSelectForPayment, onUnselect, onReturnToExpected, onMoveToSelected, onAddRemit,
+  onSelectForPayment, onUnselect, onReturnToExpected, onMoveToSelected, onAddRemit, onPayTo,
 }: {
   mode: 'aging' | 'selected'
   errorBanner: ReactNode
@@ -1366,6 +1458,7 @@ function payableView({
   onReturnToExpected: (bill: CarrierBillRecord) => void
   onMoveToSelected: (bill: CarrierBillRecord) => void
   onAddRemit: (bill: CarrierBillRecord) => void
+  onPayTo: (bill: CarrierBillRecord) => void
 }): ListView {
   // One payment is one carrier's: a selection spanning two of them cannot be posted as
   // one row, and the button says so instead of failing in the dialog.
@@ -1453,7 +1546,7 @@ function payableView({
     moneyCol<CarrierBillRecord>('balance', 'BALANCE', (bill) => bill.balanceCents, (bill) => (
       <span className={`${RIGHT} font-medium`}>{formatCents(bill.balanceCents)}</span>
     )),
-    ...payeeColumns(infos, onInfo, onAddRemit),
+    ...payeeColumns(infos, onInfo, onAddRemit, onPayTo),
     {
       key: 'gates',
       header: GATES_HEADER,
@@ -1529,9 +1622,7 @@ function payableView({
     },
     customerColumn(facts),
     facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
-    facetCol<CarrierBillRecord>('payTo', 'PAY TO', (bill) => payeeNameFor(bill, infos), (bill) => (
-      isFactorPaid(bill, infos) ? <TmsBadge tone="blue">{payeeNameFor(bill, infos)}</TmsBadge> : payeeNameFor(bill, infos)
-    ), { extraPx: 60 }),
+    payToColumn(infos, onPayTo),
     dayCol<CarrierBillRecord>('billDate', 'INVOICE DATE', (bill) => bill.billDate),
     dayCol<CarrierBillRecord>('agingDate', 'AGING DATE', (bill) => bill.billDate),
     dayCol<CarrierBillRecord>('due', 'DUE DATE', (bill) => bill.dueAt),
@@ -1701,6 +1792,12 @@ function payableView({
         value: filters.verifyPayment ? 'only' : null,
         onClick: () => onFilters({ ...filters, verifyPayment: !filters.verifyPayment }),
       },
+      {
+        key: 'payTo',
+        label: `Pay-to needed (${allBills.filter((bill) => payToStatusFor(bill, infos) !== 'OK').length})`,
+        value: filters.payTo ? 'only' : null,
+        onClick: () => onFilters({ ...filters, payTo: !filters.payTo }),
+      },
     ],
     onAddFilter: onToggleFilters,
     banner: (
@@ -1740,6 +1837,16 @@ function payableView({
                   <option value="">All</option>
                   <option value="CARRIER">{AP_PAYEE_KIND_LABEL.CARRIER}</option>
                   <option value="FACTOR">{AP_PAYEE_KIND_LABEL.FACTOR}</option>
+                </TmsSelect>
+              </TmsField>
+              <TmsField label="Pay-to">
+                <TmsSelect
+                  aria-label="Filter pay-to needed"
+                  value={filters.payTo ? 'only' : ''}
+                  onChange={(e) => onFilters({ ...filters, payTo: e.target.value === 'only' })}
+                >
+                  <option value="">All bills</option>
+                  <option value="only">Pay-to needed only ({allBills.filter((bill) => payToStatusFor(bill, infos) !== 'OK').length})</option>
                 </TmsSelect>
               </TmsField>
               <TmsField label="Verify payment">

@@ -138,6 +138,77 @@ export function payeeNameFor(
   return factorNameFor(bill, infos) || payeeLabel(bill)
 }
 
+/**
+ * Whether an open bill's money has anywhere to go (Ryne 2026-11-18: a payee with no pay-to "needs its pay to
+ * updated"). `OK` when the bill froze a payee, or the carrier's methods name one the way approval chooses
+ * (`billPayee`: the preferred method, else the factor method the carrier names, else the only one).
+ * `NEEDED`: the carrier has no payment method at all. `CHOOSE`: it has several and none is the choice.
+ *
+ * Reads only what the board already holds. Until the payment methods have loaded (`infos` empty) nothing is
+ * flagged, and a carrier whose factor method is not known yet (`carrierFactorMethodId` unset) is never
+ * called `CHOOSE`, so the flag does not flash while the carrier list is still coming in.
+ */
+export type PayToStatus = 'OK' | 'NEEDED' | 'CHOOSE'
+
+export const PAY_TO_STATUS_LABEL: Record<PayToStatus, string> = {
+  OK: 'Pay-to set',
+  NEEDED: 'Pay-to needed',
+  CHOOSE: 'Choose pay-to',
+}
+
+export const PAY_TO_STATUS_TITLE: Record<Exclude<PayToStatus, 'OK'>, string> = {
+  NEEDED: 'This carrier has no payment method on file, so the bill has no payee. Add the carrier\u2019s pay-to to approve or pay it.',
+  CHOOSE: 'This carrier has more than one payment method and none is the preferred one, so the bill has no payee. Mark one as preferred to approve or pay it.',
+}
+
+export function payToStatusFor(
+  bill: Pick<CarrierBillRecord, 'carrierId' | 'remitTo'>,
+  infos: readonly CarrierPaymentInfo[] | null | undefined,
+): PayToStatus {
+  if (bill.remitTo) return 'OK'
+  if (!infos || infos.length === 0) return 'OK'
+  const mine = infos.filter((info) => info.carrierId === bill.carrierId && info.status !== 'INACTIVE')
+  if (mine.length === 0) return 'NEEDED'
+  const factorId = mine[0]!.carrierFactorMethodId
+  const chosen =
+    mine.find((info) => info.isPreferred === true) ??
+    (factorId ? mine.find((info) => info.id === factorId) : undefined) ??
+    (mine.length === 1 ? mine[0] : undefined)
+  if (chosen) return 'OK'
+  return factorId === undefined ? 'OK' : 'CHOOSE'
+}
+
+export interface PayToWorkRow {
+  carrierId: string
+  carrierName: string
+  status: Exclude<PayToStatus, 'OK'>
+  bills: number
+  cents: number
+}
+
+/** The carriers whose open bills cannot be approved or paid yet for want of a pay-to, biggest balance first. */
+export function payToWorklist(
+  bills: readonly CarrierBillRecord[],
+  infos: readonly CarrierPaymentInfo[] | null | undefined,
+): PayToWorkRow[] {
+  const byCarrier = new Map<string, PayToWorkRow>()
+  for (const bill of bills) {
+    const status = payToStatusFor(bill, infos)
+    if (status === 'OK') continue
+    const row = byCarrier.get(bill.carrierId) ?? {
+      carrierId: bill.carrierId,
+      carrierName: bill.carrierName || bill.carrierId,
+      status,
+      bills: 0,
+      cents: 0,
+    }
+    row.bills += 1
+    row.cents += bill.balanceCents
+    byCarrier.set(bill.carrierId, row)
+  }
+  return [...byCarrier.values()].sort((a, b) => b.cents - a.cents || a.carrierName.localeCompare(b.carrierName))
+}
+
 /** `Quick pay 2d` when the assignment is on quick pay, otherwise nothing to say. */
 export function quickPayLabel(
   assignment: { quickPay?: boolean | null; quickPayDays?: number | null } | null | undefined,
@@ -350,9 +421,11 @@ export interface ToBePaidFilters {
   payeeKind: '' | ApPayeeKind
   /** Only the bills Ryne has not paid although Aljex says paid (static PRO list). */
   verifyPayment: boolean
+  /** Only the bills whose carrier has no usable pay-to (see `payToStatusFor`). */
+  payTo: boolean
 }
 
-export const EMPTY_TO_BE_PAID_FILTERS: ToBePaidFilters = { carrierId: '', due: '', payeeKind: '', verifyPayment: false }
+export const EMPTY_TO_BE_PAID_FILTERS: ToBePaidFilters = { carrierId: '', due: '', payeeKind: '', verifyPayment: false, payTo: false }
 
 export function applyToBePaidFilters(
   bills: readonly CarrierBillRecord[],
@@ -365,6 +438,7 @@ export function applyToBePaidFilters(
     if (filters.carrierId && bill.carrierId !== filters.carrierId) return false
     if (filters.payeeKind && (isFactorPaid(bill, infos) ? 'FACTOR' : 'CARRIER') !== filters.payeeKind) return false
     if (filters.verifyPayment && !isVerifyPaymentBill(bill)) return false
+    if (filters.payTo && payToStatusFor(bill, infos) === 'OK') return false
     if (filters.due) {
       const late = daysLate(bill.dueAt, asOf)
       if (filters.due === 'OVERDUE' && late <= 0) return false

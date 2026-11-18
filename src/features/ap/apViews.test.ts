@@ -6,6 +6,7 @@ import {
   billsInReview, sharedProIndex, sharedProLabel, siblingCarriers, awaitingInvoiceTotals,
   billsExpected, billsAging, billsSelected, canSelectForPayment, invoiceAgeBuckets, payToLabel, paymentInfoFor, remitEmailOf, remittanceStatusOf, AP_TABS,
   billGates, applyToBePaidFilters, EMPTY_TO_BE_PAID_FILTERS, factorNameFor, isFactorPaid, payeeNameFor, payToLabelFor, setFactorNamesForLabels,
+  payToStatusFor, payToWorklist, PAY_TO_STATUS_LABEL,
   paidBills, paidInMonth, paidMonthOf, paidMonthOptions,
 } from './apViews'
 import { billMonthsSince } from './useAllPaidBills'
@@ -266,5 +267,71 @@ describe('the Paid tab lists payments by the month they were paid in', () => {
     expect(billMonthsSince('2026-11-18')[0]).toBe('2026-11')
     expect(billMonthsSince('2026-11-18').at(-1)).toBe('2024-01')
     expect(billMonthsSince('2023-01-01')).toEqual([])
+  })
+})
+
+
+describe('Pay-to needed: a payee whose carrier has nowhere to send money (Ryne 2026-11-18)', () => {
+  const bill = (carrierId: string, carrierName: string, over: Record<string, unknown> = {}) =>
+    ({ id: `b-${carrierId}-${over.n ?? 1}`, carrierId, carrierName, balanceCents: 100_00, status: 'TO_BE_PAID', payeeKind: 'CARRIER', paymentMethodId: null, remitTo: null, ...over }) as unknown as CarrierBillRecord
+  const method = (id: string, carrierId: string, over: Record<string, unknown> = {}) =>
+    ({ id, carrierId, recipientType: 'CARRIER', status: 'ACTIVE', isPreferred: false, ...over })
+  // Another carrier's method so the board counts as loaded; carrierFactorMethodId stamped (null = the carrier names none).
+  const loaded = (carrierId: string, extra: Record<string, unknown> = {}) => method(`pm-${carrierId}`, carrierId, { carrierFactorMethodId: null, ...extra })
+
+  it('flags a bill with no stored payee when its carrier has no payment method at all', () => {
+    const infos = [loaded('somebody-else')] as never
+    expect(payToStatusFor(bill('landstar', 'LANDSTAR RANGER'), infos)).toBe('NEEDED')
+    expect(PAY_TO_STATUS_LABEL.NEEDED).toBe('Pay-to needed')
+  })
+
+  it('does not flag a bill that froze a payee, or one whose carrier has a method to choose', () => {
+    const infos = [loaded('somebody-else'), method('pm-biska', 'biska', { carrierFactorMethodId: null })] as never
+    expect(payToStatusFor(bill('landstar', 'L', { remitTo: { name: 'Landstar' } }), infos)).toBe('OK')
+    expect(payToStatusFor(bill('biska', 'BISKA'), infos)).toBe('OK')
+  })
+
+  it('does not flag an inactive method, and flags the carrier whose only methods were retired', () => {
+    const infos = [loaded('somebody-else'), method('pm-old', 'echo', { status: 'INACTIVE', carrierFactorMethodId: null })] as never
+    expect(payToStatusFor(bill('echo', 'ECHO'), infos)).toBe('NEEDED')
+  })
+
+  it('says Choose pay-to for several methods with none preferred, and clears for a preferred one or the carrier\'s factor method', () => {
+    const two = [method('a', 'lama', { carrierFactorMethodId: null }), method('b', 'lama', { carrierFactorMethodId: null })] as never
+    expect(payToStatusFor(bill('lama', 'LAMA'), two)).toBe('CHOOSE')
+    const preferred = [method('a', 'lama', { carrierFactorMethodId: null, isPreferred: true }), method('b', 'lama', { carrierFactorMethodId: null })] as never
+    expect(payToStatusFor(bill('lama', 'LAMA'), preferred)).toBe('OK')
+    const factored = [method('a', 'lama', { carrierFactorMethodId: 'b' }), method('b', 'lama', { carrierFactorMethodId: 'b', recipientType: 'FACTOR' })] as never
+    expect(payToStatusFor(bill('lama', 'LAMA'), factored)).toBe('OK')
+  })
+
+  it('never flags before the payment methods have loaded, and never calls a carrier ambiguous before its factor method is known', () => {
+    expect(payToStatusFor(bill('landstar', 'L'), [])).toBe('OK')
+    expect(payToStatusFor(bill('landstar', 'L'), undefined)).toBe('OK')
+    // carrierFactorMethodId unset: the carrier list has not come in, so two methods is not yet "ambiguous".
+    const unknown = [method('a', 'lama'), method('b', 'lama')] as never
+    expect(payToStatusFor(bill('lama', 'LAMA'), unknown)).toBe('OK')
+  })
+
+  it('lists the carriers that need a pay-to, biggest balance first, with their open bills', () => {
+    const infos = [loaded('somebody-else')] as never
+    const rows = payToWorklist([
+      bill('landstar', 'LANDSTAR RANGER', { n: 1, balanceCents: 130_000 }),
+      bill('landstar', 'LANDSTAR RANGER', { n: 2, balanceCents: 92_500 }),
+      bill('echo', 'ECHO GLOBAL', { balanceCents: 240_000 }),
+      bill('somebody-else', 'PAID OK', { balanceCents: 999_900 }),
+    ], infos)
+    expect(rows.map((r) => [r.carrierName, r.bills, r.cents, r.status])).toEqual([
+      ['ECHO GLOBAL', 1, 240_000, 'NEEDED'],
+      ['LANDSTAR RANGER', 2, 222_500, 'NEEDED'],
+    ])
+  })
+
+  it('filters a list down to the bills that need a pay-to', () => {
+    const infos = [loaded('somebody-else'), method('pm-biska', 'biska', { carrierFactorMethodId: null })] as never
+    const bills = [bill('landstar', 'LANDSTAR'), bill('biska', 'BISKA'), bill('echo', 'ECHO')]
+    const only = applyToBePaidFilters(bills, { ...EMPTY_TO_BE_PAID_FILTERS, payTo: true }, '2026-11-18', infos)
+    expect(only.map((b) => b.carrierName)).toEqual(['LANDSTAR', 'ECHO'])
+    expect(applyToBePaidFilters(bills, EMPTY_TO_BE_PAID_FILTERS, '2026-11-18', infos)).toHaveLength(3)
   })
 })

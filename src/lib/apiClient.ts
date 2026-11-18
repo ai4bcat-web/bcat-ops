@@ -4276,6 +4276,11 @@ export interface CarrierPaymentInfo {
   payeeEmail?: string | null
   isPreferred?: boolean | null
   status?: string | null
+  /**
+   * The carrier's own `factorPaymentMethodId`, stamped on by the board once the carriers have loaded (it lives on the
+   * carrier, not on the method). Unset means "not known yet"; null means the carrier names none.
+   */
+  carrierFactorMethodId?: string | null
 }
 export async function listCarrierPaymentInfo(): Promise<CarrierPaymentInfo[]> {
   if (!modelAvailable('CarrierPaymentMethod')) throw new Error('Carrier payment methods are unavailable')
