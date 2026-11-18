@@ -493,6 +493,54 @@ describe('the AP board', () => {
       expect((screen.getByRole('button', { name: 'Select for payment' }) as HTMLButtonElement).disabled).toBe(false)
     })
 
+    describe('select all', () => {
+      const header = () => screen.getByLabelText(/^Select all \d+ bills shown$/) as HTMLInputElement
+
+      it('ticks every bill that can be selected, skips one still in review, and clears them again', async () => {
+        await setup({ bills: [...two(), bill({ id: 'cb:lc3:1', loadCarrierId: 'lc3', status: 'IN_REVIEW', billNumber: 'IR-1' })] })
+        fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
+        expect(header().getAttribute('aria-label')).toBe('Select all 2 bills shown')
+        fireEvent.click(header())
+        expect(screen.getByText('2 selected ($2,300.00)')).toBeTruthy()
+        expect((screen.getByLabelText('Select bill BL-1') as HTMLInputElement).checked).toBe(true)
+        expect(header().checked).toBe(true)
+        fireEvent.click(header())
+        expect(screen.getByText('0 selected ($0.00)')).toBeTruthy()
+        expect((screen.getByLabelText('Select bill BL-1') as HTMLInputElement).checked).toBe(false)
+      })
+
+      it('shows a partly ticked list as indeterminate and completes it on click', async () => {
+        await setup({ bills: two() })
+        fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
+        fireEvent.click(screen.getByLabelText('Select bill BL-1'))
+        expect(header().indeterminate).toBe(true)
+        expect(header().checked).toBe(false)
+        fireEvent.click(header())
+        expect(screen.getByText('2 selected ($2,300.00)')).toBeTruthy()
+        expect(header().indeterminate).toBe(false)
+      })
+
+      it('ticks only the bills the search leaves on screen', async () => {
+        await setup({ bills: two() })
+        fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
+        fireEvent.change(screen.getByTestId('ap-search'), { target: { value: 'Red Line' } })
+        expect(header().getAttribute('aria-label')).toBe('Select all 1 bills shown')
+        fireEvent.click(header())
+        expect(screen.getByText('1 selected ($800.00)')).toBeTruthy()
+        fireEvent.change(screen.getByTestId('ap-search'), { target: { value: '' } })
+        expect((screen.getByLabelText('Select bill BL-1') as HTMLInputElement).checked).toBe(false)
+        expect((screen.getByLabelText('Select bill RL-1') as HTMLInputElement).checked).toBe(true)
+      })
+
+      it('keeps the one-carrier warning and the disabled Pay selected when the selection spans two carriers', async () => {
+        await setup({ bills: two().map((b) => ({ ...b, selectedForPayment: true })) })
+        fireEvent.click(screen.getByRole('tab', { name: /^Selected/ }))
+        fireEvent.click(header())
+        expect(screen.getByText(/One payment covers one carrier/)).toBeTruthy()
+        expect((screen.getByRole('button', { name: 'Pay selected bills' }) as HTMLButtonElement).disabled).toBe(true)
+      })
+    })
+
     it('does not let a bill still in review be ticked for payment', async () => {
       await setup({ bills: [bill({ status: 'IN_REVIEW', billNumber: 'IR-1' })] })
       fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))

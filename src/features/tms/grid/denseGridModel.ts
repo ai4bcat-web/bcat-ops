@@ -4,6 +4,7 @@
  * No React, no I/O, so the rules are testable and the Shipments lists, Load Tracking and
  * Intake all narrow and order rows the same way.
  */
+import type { ReactNode } from 'react'
 import { chicagoDateStr } from '@/lib/date'
 import { headerDefaultWidth, headerFont } from './columnMeasure'
 
@@ -23,6 +24,8 @@ export interface DenseSort {
 export interface DenseColumn<T> {
   key: string
   header: string
+  /** Drawn in the header cell in place of the `header` text (a select-all checkbox). Sorting and filtering still read `header`. */
+  headerContent?: ReactNode
   /** The plain text of the cell: type-ahead filter, tooltip, auto-fit and the default sort value. */
   text: (row: T) => string
   /** Sort value; defaults to `numberOf`, then `dateOf`, then `text`. Null/'' always sort last. */
