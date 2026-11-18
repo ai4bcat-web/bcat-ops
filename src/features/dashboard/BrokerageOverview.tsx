@@ -19,7 +19,7 @@ function Kpi({ label, value, caption, color, testId }: { label: string; value: s
 }
 
 /**
- * The Brokerage headline: four figures for the chosen range, one revenue-and-profit chart by month, and a few
+ * The Brokerage headline: five figures for the chosen range (revenue, expenses, profit, margin, loads), one revenue-expenses-profit chart by month, and a few
  * plain-English takeaways. Everything finer (rep by month, every figure) sits behind the table at the bottom.
  */
 export function BrokerageOverview({ rows, current, loading, insights, rangeLabel }: {
@@ -35,6 +35,7 @@ export function BrokerageOverview({ rows, current, loading, insights, rangeLabel
   const data = useMemo(() => rows.map((r) => ({
     month: monthShort(r.month) + (r.month === current ? ' · to date' : ''),
     revenue: r.revenueCents / 100,
+    expenses: r.expenseCents / 100,
     profit: r.profitCents / 100,
   })), [rows, current])
   const dash = loading ? '…' : undefined
@@ -42,8 +43,9 @@ export function BrokerageOverview({ rows, current, loading, insights, rangeLabel
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(4, minmax(0, 1fr))', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(5, minmax(0, 1fr))', gap: 14 }}>
         <Kpi testId="brokerage-total-revenue" label="Revenue" value={dash ?? money0(totals.revenueCents)} caption={thisMonth(now?.revenueCents)} />
+        <Kpi testId="brokerage-total-expenses" label="Expenses" value={dash ?? money0(totals.expenseCents)} caption={thisMonth(now?.expenseCents)} />
         <Kpi testId="brokerage-total-profit" label="Profit" value={dash ?? money0(totals.profitCents)} color={netColor(totals.profitCents)} caption={thisMonth(now?.profitCents)} />
         <Kpi testId="brokerage-total-profit-pct" label="Profit margin" value={dash ?? pct(totals.marginBps)} color={netColor(totals.profitCents)} caption="Profit ÷ revenue" />
         <Kpi testId="brokerage-total-loads" label="Loads delivered" value={dash ?? String(totals.loads)} caption={now ? `${now.loads} so far this month` : rangeLabel} />
@@ -51,7 +53,7 @@ export function BrokerageOverview({ rows, current, loading, insights, rangeLabel
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 2fr) minmax(0, 1fr)', gap: 14, alignItems: 'stretch' }}>
         <div className="tms-card dash-card" data-testid="brokerage-month-chart" style={{ padding: '14px 12px 6px', minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--tms-text)', padding: '0 8px 6px' }}>Revenue and profit by month</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--tms-text)', padding: '0 8px 6px' }}>Revenue, expenses and profit by month</div>
           <ResponsiveContainer width="100%" height={isMobile ? 210 : 230}>
             <BarChart data={data} margin={{ top: 6, right: 8, bottom: 0, left: 0 }} barGap={3} barCategoryGap="30%">
               <CartesianGrid stroke="var(--tms-chart-grid)" strokeDasharray="3 4" vertical={false} />
@@ -65,6 +67,7 @@ export function BrokerageOverview({ rows, current, loading, insights, rangeLabel
               />
               <Legend wrapperStyle={{ fontSize: 11.5 }} iconType="square" iconSize={8} />
               <Bar dataKey="revenue" name="Revenue" fill="var(--tms-chart-1)" radius={[4, 4, 0, 0]} maxBarSize={44} />
+              <Bar dataKey="expenses" name="Expenses" fill="var(--tms-chart-4)" radius={[4, 4, 0, 0]} maxBarSize={44} />
               <Bar dataKey="profit" name="Profit" fill="var(--tms-chart-5)" radius={[4, 4, 0, 0]} maxBarSize={44} />
             </BarChart>
           </ResponsiveContainer>

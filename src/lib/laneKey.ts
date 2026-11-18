@@ -29,6 +29,8 @@ import type {
   ShipmentLoad,
   ShipmentRecord,
 } from '../types/tms'
+import { chicagoDateStr } from './date'
+import { lastDeliveryActual } from './deliveredAt'
 import { splitCityState } from './locationAutoSave'
 import { MOVEMENT_RANK } from './shipmentStatus'
 
@@ -178,6 +180,33 @@ function dayOf(value: string | null | undefined): string | null {
 }
 
 /**
+ * The Chicago calendar day the freight was delivered, which is the day the dashboards count a load in
+ * (Ryne 2026-11-17: "based on delivered date"): the actual time at the last delivery stop, else the load's
+ * own delivered stamp, else the delivery appointment. A time is read in Chicago, not as the UTC date, so a
+ * delivery at 8 pm on the last day of a month stays in that month. The shipment's `deliveredAt` is not read:
+ * the Aljex import stamped it with the import day on hundreds of old shipments.
+ */
+export function deliveredDayOf(
+  stops: Stop[] | null | undefined,
+  loadDeliveredAt: string | null | undefined,
+  deliveryAppt: string | null | undefined,
+): string | null {
+  for (const at of [lastDeliveryActual(stops), loadDeliveredAt, deliveryAppt]) {
+    const raw = (at ?? '').trim()
+    if (!raw) continue
+    // A bare date is already a day; a timestamp is read in Chicago.
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : chicagoDateStr(raw)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day)) return day
+  }
+  return null
+}
+
+/** `deliveredDayOf` for a load: its stops and its own delivered stamp. */
+export function deliveredDayOfLoad(stops: Stop[] | null | undefined, loadDeliveredAt: string | null | undefined): string | null {
+  return deliveredDayOf(stops, loadDeliveredAt, endpointsOf(stops)?.delivery.appt)
+}
+
+/**
  * One delivered, priced load as a lane rate sample — or null when it is not one yet.
  *
  * Null when: there is no financials row (nothing to learn from an unpriced load), the
@@ -201,8 +230,7 @@ export function laneSampleFor(
   const rank = status ? MOVEMENT_RANK[status] : (load.deliveredAt ? MOVEMENT_RANK.DELIVERED : -1)
   if (rank < MOVEMENT_RANK.DELIVERED) return null
 
-  const ends = endpointsOf(stops)
-  const date = dayOf(ends?.delivery.appt) ?? dayOf(load.deliveredAt) ?? dayOf(nowIso) ?? nowIso.slice(0, 10)
+  const date = deliveredDayOfLoad(stops, load.deliveredAt) ?? dayOf(nowIso) ?? nowIso.slice(0, 10)
   const miles = typeof load.miles === 'number' && Number.isFinite(load.miles) ? Math.round(load.miles) : null
   const kind = loadCarrier?.kind
   const invoicedOn = dayOf(order?.invoicedAt)

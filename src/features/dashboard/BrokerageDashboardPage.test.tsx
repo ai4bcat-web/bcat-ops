@@ -53,6 +53,7 @@ describe('Brokerage cards under the Dashboard', () => {
 
     // Two months of 2 loads each: revenue $3,000 a month, expense $2,400, so $1,200 profit overall (20%).
     await waitFor(() => expect(screen.getByTestId('brokerage-total-revenue')).toHaveTextContent('$6,000'))
+    expect(screen.getByTestId('brokerage-total-expenses')).toHaveTextContent('$4,800')
     expect(screen.getByTestId('brokerage-total-profit')).toHaveTextContent('$1,200')
     expect(screen.getByTestId('brokerage-total-profit-pct')).toHaveTextContent('20.0%')
     expect(screen.getByTestId('brokerage-total-loads')).toHaveTextContent('4')

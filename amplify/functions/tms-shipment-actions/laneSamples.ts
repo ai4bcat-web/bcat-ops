@@ -23,7 +23,7 @@ import {
   readStops,
   type Row,
 } from '../_shared/shipmentStore'
-import { laneSampleFor } from '../../../src/lib/laneKey'
+import { deliveredDayOfLoad, laneSampleFor } from '../../../src/lib/laneKey'
 import { MOVEMENT_RANK } from '../../../src/lib/shipmentStatus'
 import type { LoadWorkflowStatus } from '../../../src/types/tms'
 import type { QuoteDeps } from './quotes'
@@ -233,6 +233,31 @@ export async function writeLaneSample(deps: QuoteDeps, loadId: string): Promise<
     )
   } catch (err) {
     console.warn('[tms-shipment-actions] lane sample write failed:', String(err))
+  }
+}
+
+/**
+ * Make sure every delivered load of a shipment has a current sample.
+ *
+ * `writeLaneSample` is only called by the actions that move money, so a load that was delivered by
+ * its stops (UPDATE_STOP), by a check call or by the driver app never got a row and the Brokerage
+ * dashboard left it out (20002, 20016, 20027 … in November 2026). The shipment re-derive every one of
+ * those actions ends with calls this: a sample that is missing, or dated on a different day than
+ * the load's delivered day now says, is written again; a current one is left alone.
+ */
+export async function ensureDeliveredLaneSamples(deps: QuoteDeps, bundle: { loads?: Row[] } | null | undefined): Promise<void> {
+  if (!deps.tables.laneSample) return
+  try {
+    for (const load of bundle?.loads ?? []) {
+      const loadId = String(load.id ?? '')
+      if (!loadId || load.voidedAt || !isDeliveredOrLater(load.status)) continue
+      const existing = await deps.getById(deps.tables.laneSample, `lrs:${loadId}`)
+      const day = deliveredDayOfLoad(readStops(load) as never, typeof load.deliveredAt === 'string' ? load.deliveredAt : null)
+      if (existing && day && existing.date === day) continue
+      await writeLaneSample(deps, loadId)
+    }
+  } catch (err) {
+    console.warn('[tms-shipment-actions] lane sample ensure failed:', String(err))
   }
 }
 
