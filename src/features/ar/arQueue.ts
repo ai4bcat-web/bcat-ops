@@ -25,6 +25,18 @@ export const AR_QUEUE_STATUS_LABEL: Record<ArQueueStatus, string> = {
   PAID: 'Paid',
 }
 
+/**
+ * The words the Status cell shows for a row, so the column sorts and filters by what is on screen. Ready rows
+ * all share the status READY, so without this every row on the Ready tab tied and sorting Status did nothing.
+ * `throughOtr` is whether the invoice bills through the factor ("Factor next") or by hand ("Draft — not sent").
+ */
+export function arStatusText(row: Pick<ArQueueRow, 'status' | 'shortPaid' | 'balanceCents' | 'reasons' | 'invoiceId'>, throughOtr: boolean, money: (cents: number) => string): string {
+  if (row.shortPaid) return `Partially paid ${money(row.balanceCents)} open`
+  if (row.status === 'READY' && row.reasons.length > 0) return 'Blocked'
+  if (row.status === 'READY' && row.invoiceId) return throughOtr ? 'Factor next' : 'Draft — not sent'
+  return AR_QUEUE_STATUS_LABEL[row.status]
+}
+
 export interface ArQueueRow {
   key: string
   status: ArQueueStatus

@@ -73,7 +73,7 @@ import {
   agingChipFor, formatDay, lastThreeMonths, monthLabel,
 } from './arViews'
 import {
-  AR_BILLED_BY_LABEL, AR_GROUP_BY_LABEL, AR_QUEUE_STATUS_LABEL, billedByMatches, buildPaidRows, groupKeyOf, groupTotals,
+  AR_BILLED_BY_LABEL, AR_GROUP_BY_LABEL, AR_QUEUE_STATUS_LABEL, arStatusText, billedByMatches, buildPaidRows, groupKeyOf, groupTotals,
   orderByGroup, type ArBilledBy, type ArGroupBy, type ArQueueRow, type ArQueueStatus,
 } from './arQueue'
 import { CreditMemoDialog } from './components/CreditMemoDialog'
@@ -1070,7 +1070,7 @@ function queueView({
     dateCol<ArQueueRow>('due', 'Due', (row) => row.dueAt),
     moneyCol<ArQueueRow>('amount', 'Amount', (row) => row.amountCents),
     moneyCol<ArQueueRow>('balance', 'Balance', (row) => row.balanceCents),
-    { key: 'status', header: 'Status', group: 'Invoice', text: (row) => (row.shortPaid ? `Partially paid ${formatCents(row.balanceCents)} open` : AR_QUEUE_STATUS_LABEL[row.status]), filter: 'multi', optionsOf: (row) => opt(AR_QUEUE_STATUS_LABEL[row.status]) },
+    { key: 'status', header: 'Status', group: 'Invoice', text: (row) => arStatusText(row, throughOtr(row), formatCents), filter: 'multi', optionsOf: (row) => opt(arStatusText({ ...row, shortPaid: false }, throughOtr(row), formatCents)) },
     { key: 'sent', header: 'Sent', group: 'Invoice', text: sentText, sortValue: (row) => row.sentAt ?? '' },
     {
       key: 'age', header: 'Days since invoice', group: 'Invoice', align: 'right',

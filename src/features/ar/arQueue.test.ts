@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { ArWorklistRow } from '@/hooks/useArWorklist'
 import type { InvoiceRecord, ShipmentRecord } from '@/types/tms'
-import { buildInvoicedRows, buildPaidRows, buildReadyRows, factorQueueRows, groupTotals, orderByGroup, type ArQueueLookups } from './arQueue'
+import { arStatusText, buildInvoicedRows, buildPaidRows, buildReadyRows, factorQueueRows, groupTotals, orderByGroup, type ArQueueLookups } from './arQueue'
 
 const lookups: ArQueueLookups = {
   shipmentsById: new Map(),
@@ -142,5 +142,36 @@ describe('factorQueueRows (the folded-in To factor tab)', () => {
   it('reads otrAmount as cents (14629: 26650 is $266.50, not $26,650)', () => {
     const rows = factorQueueRows([item({ id: '14629', proNumber: '14629', otrAmount: 26_650 })], [], new Map(), l)
     expect(rows[0].amountCents).toBe(26_650)
+  })
+})
+
+describe('arStatusText (the words the Status column sorts and filters by)', () => {
+  const money = (cents: number) => `$${(cents / 100).toFixed(2)}`
+  const base = { status: 'READY' as const, shortPaid: false, balanceCents: 0, reasons: [] as string[], invoiceId: 'inv-1' as string | null }
+
+  it('tells a factored draft from a hand-billed draft, so the two no longer tie', () => {
+    expect(arStatusText(base, true, money)).toBe('Factor next')
+    expect(arStatusText(base, false, money)).toBe('Draft — not sent')
+  })
+
+  it('names a blocked row, a ready row with no invoice yet, and the other tabs', () => {
+    expect(arStatusText({ ...base, reasons: ['No POD'] }, true, money)).toBe('Blocked')
+    expect(arStatusText({ ...base, invoiceId: null }, false, money)).toBe('Ready to invoice')
+    expect(arStatusText({ ...base, status: 'INVOICED' }, false, money)).toBe('Invoiced')
+    expect(arStatusText({ ...base, status: 'PAID' }, false, money)).toBe('Paid')
+    expect(arStatusText({ ...base, status: 'INVOICED', shortPaid: true, balanceCents: 50_000 }, false, money)).toBe('Partially paid $500.00 open')
+  })
+
+  it('sorts A to Z and Z to A across rows that all share the READY status', () => {
+    const rows = [
+      { id: 'a', through: false },
+      { id: 'b', through: true },
+      { id: 'c', through: false },
+      { id: 'd', through: true },
+    ].map((r) => ({ ...r, text: arStatusText(base, r.through, money) }))
+    const az = [...rows].sort((x, y) => x.text.localeCompare(y.text)).map((r) => r.text)
+    expect(az).toEqual(['Draft — not sent', 'Draft — not sent', 'Factor next', 'Factor next'])
+    const za = [...rows].sort((x, y) => y.text.localeCompare(x.text)).map((r) => r.text)
+    expect(za).toEqual(['Factor next', 'Factor next', 'Draft — not sent', 'Draft — not sent'])
   })
 })
