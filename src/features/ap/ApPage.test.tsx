@@ -487,12 +487,12 @@ describe('the AP board', () => {
     it('puts ticked approved bills on the pay run from the Aging tab, any number of carriers', async () => {
       await setup({ bills: two() })
       fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
-      expect((screen.getByRole('button', { name: 'Select for payment' }) as HTMLButtonElement).disabled).toBe(true)
+      expect((screen.getByRole('button', { name: 'Move to Selected' }) as HTMLButtonElement).disabled).toBe(true)
       fireEvent.click(screen.getByLabelText('Select bill BL-1'))
       expect(screen.getByText('1 selected ($1,500.00)')).toBeTruthy()
       fireEvent.click(screen.getByLabelText('Select bill RL-1'))
       expect(screen.getByText('2 selected ($2,300.00)')).toBeTruthy()
-      expect((screen.getByRole('button', { name: 'Select for payment' }) as HTMLButtonElement).disabled).toBe(false)
+      expect((screen.getByRole('button', { name: 'Move to Selected' }) as HTMLButtonElement).disabled).toBe(false)
     })
 
     describe('select all', () => {
@@ -539,7 +539,7 @@ describe('the AP board', () => {
         fireEvent.click(screen.getByRole('tab', { name: /^Selected/ }))
         fireEvent.click(header())
         expect(screen.getByText(/One payment covers one carrier/)).toBeTruthy()
-        expect((screen.getByRole('button', { name: 'Pay selected bills' }) as HTMLButtonElement).disabled).toBe(true)
+        expect((screen.getByRole('button', { name: 'Record payment for selected bills' }) as HTMLButtonElement).disabled).toBe(true)
       })
     })
 
@@ -552,12 +552,12 @@ describe('the AP board', () => {
     it('pays a selection of one carrier from the Selected tab, and says when it spans two', async () => {
       await setup({ bills: two().map((b) => ({ ...b, selectedForPayment: true })) })
       fireEvent.click(screen.getByRole('tab', { name: /^Selected/ }))
-      expect((screen.getByRole('button', { name: 'Pay selected bills' }) as HTMLButtonElement).disabled).toBe(true)
+      expect((screen.getByRole('button', { name: 'Record payment for selected bills' }) as HTMLButtonElement).disabled).toBe(true)
       fireEvent.click(screen.getByLabelText('Select bill BL-1'))
-      expect((screen.getByRole('button', { name: 'Pay selected bills' }) as HTMLButtonElement).disabled).toBe(false)
+      expect((screen.getByRole('button', { name: 'Record payment for selected bills' }) as HTMLButtonElement).disabled).toBe(false)
       fireEvent.click(screen.getByLabelText('Select bill RL-1'))
       expect(screen.getByText(/One payment covers one carrier/)).toBeTruthy()
-      expect((screen.getByRole('button', { name: 'Pay selected bills' }) as HTMLButtonElement).disabled).toBe(true)
+      expect((screen.getByRole('button', { name: 'Record payment for selected bills' }) as HTMLButtonElement).disabled).toBe(true)
     })
 
     it('shows a payment info link, the pay-to and the remittance e-mail on every row', async () => {

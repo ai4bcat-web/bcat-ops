@@ -80,6 +80,8 @@ import { useApPaymentLines } from '@/features/finance/useApPaymentLines'
 import type { BillPaymentLine } from '@/features/finance/accountingStats'
 import type { AccountingReportKind } from '@/features/finance/accountingReports'
 import { ApAgingCard, ApExpectedCard, ApPaidCard, ProfitCheckCard } from '@/features/finance/AccountingCards'
+import { AP_ACTION_COPY, GATES_HEADER, GATES_HELP } from './apActionCopy'
+import { ApActionHelp } from './components/ApActionHelp'
 import { apAgingStats, apExpectedStats, apPaidStats } from '@/features/finance/accountingStats'
 import { OwedFilterBar } from '@/features/ar/components/OwedFilterBar'
 import { OwedSummary } from '@/features/ar/components/OwedSummary'
@@ -832,9 +834,9 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       {dialog?.kind === 'unapprove' && (
         <ReasonDialog
           title={`Send bill ${dialog.bill.billNumber ?? dialog.bill.id} back to review`}
-          description="The bill drops off the pay run and returns to review. Money already paid against it stays applied."
+          description="The bill leaves the pay run and goes back to In review. It has to be approved again before it can be paid. A bill that already has a payment applied cannot be sent back."
           label="Why it is going back"
-          confirmLabel="Unapprove bill"
+          confirmLabel="Send back to review"
           tone="default"
           busy={busy}
           onClose={() => setDialog(null)}
@@ -1427,7 +1429,8 @@ function payableView({
     ...payeeColumns(infos, onInfo, onAddRemit),
     {
       key: 'gates',
-      header: 'STANDING IN THE WAY',
+      header: GATES_HEADER,
+      renderHeader: () => <span title={GATES_HELP}>{GATES_HEADER}</span>,
       text: (bill) => {
         if (bill.status !== 'IN_REVIEW') return '—'
         const gates = gatesOf(bill)
@@ -1457,7 +1460,7 @@ function payableView({
       key: 'actions',
       header: '',
       text: () => '',
-      width: mode === 'aging' ? 330 : 190,
+      width: mode === 'aging' ? 340 : 400,
       ...ACTIONS,
       render: (bill) => (
         <span className="flex justify-end gap-1 whitespace-nowrap">
@@ -1470,11 +1473,11 @@ function payableView({
             </>
           ) : (
             <>
-              <TmsButton variant="ghost" size="sm" aria-label={`Pay bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onPay(bill)}>Pay</TmsButton>
+              <TmsButton variant="ghost" size="sm" aria-label={`Record payment for bill ${bill.billNumber ?? bill.id}`} title={AP_ACTION_COPY.recordPayment.hint} disabled={busy} onClick={() => onPay(bill)}>{AP_ACTION_COPY.recordPayment.label}</TmsButton>
               {mode === 'selected' && (
-                <TmsButton variant="ghost" size="sm" aria-label={`Remove bill ${bill.billNumber ?? bill.id} from selected`} disabled={busy} onClick={() => onUnselect([bill.id])}>Remove</TmsButton>
+                <TmsButton variant="ghost" size="sm" aria-label={`Move bill ${bill.billNumber ?? bill.id} back to Aging`} title={AP_ACTION_COPY.backToAging.hint} disabled={busy} onClick={() => onUnselect([bill.id])}>{AP_ACTION_COPY.backToAging.label}</TmsButton>
               )}
-              <TmsButton variant="ghost" size="sm" aria-label={`Unapprove bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onUnapprove(bill)}>Unapprove</TmsButton>
+              <TmsButton variant="ghost" size="sm" aria-label={`Send bill ${bill.billNumber ?? bill.id} back to review`} title={AP_ACTION_COPY.sendBackToReview.hint} disabled={busy} onClick={() => onUnapprove(bill)}>{AP_ACTION_COPY.sendBackToReview.label}</TmsButton>
             </>
           )}
         </span>
@@ -1586,11 +1589,12 @@ function payableView({
           <TmsButton
             size="sm"
             variant="primary"
-            aria-label="Select for payment"
+            aria-label="Move to Selected"
+            title={AP_ACTION_COPY.moveToSelected.hint}
             disabled={busy || ticked.length === 0}
             onClick={() => onSelectForPayment(ticked.map((b) => b.id))}
           >
-            Select for payment
+            {AP_ACTION_COPY.moveToSelected.label}
           </TmsButton>
         ) : (
           <>
@@ -1600,23 +1604,26 @@ function payableView({
             <TmsButton
               size="sm"
               variant="ghost"
-              aria-label="Remove selected from the pay run"
+              aria-label="Move selected bills back to Aging"
+              title={AP_ACTION_COPY.backToAging.hint}
               disabled={busy || ticked.length === 0}
               onClick={() => onUnselect(ticked.map((b) => b.id))}
             >
-              Remove from selected
+              {AP_ACTION_COPY.backToAging.label}
             </TmsButton>
             <TmsButton
               size="sm"
               variant="primary"
-              aria-label="Pay selected bills"
+              aria-label="Record payment for selected bills"
+              title={AP_ACTION_COPY.recordPayment.hint}
               disabled={busy || selected.length === 0 || !payCarrierId}
               onClick={() => { if (payCarrierId) onPaySelected(payCarrierId) }}
             >
-              Pay selected
+              {AP_ACTION_COPY.recordPayment.label}
             </TmsButton>
           </>
         )}
+        <ApActionHelp mode={mode === 'aging' ? 'aging' : 'selected'} />
       </>
     ),
     filterChips: [
@@ -1878,7 +1885,7 @@ function paymentsView({
           <>
             <TmsBadge tone="gray">{formatCents(openCents)} open</TmsBadge>
             <TmsBadge tone="gray">{formatCents(unappliedCents)} credit held</TmsBadge>
-            <TmsButton size="sm" variant="primary" aria-label="Pay carrier" disabled={busy} onClick={() => onPay(carrier.id)}>Pay carrier</TmsButton>
+            <TmsButton size="sm" variant="primary" aria-label="Record payment for carrier" title={AP_ACTION_COPY.recordPayment.hint} disabled={busy} onClick={() => onPay(carrier.id)}>{AP_ACTION_COPY.recordPayment.label}</TmsButton>
             <TmsButton size="sm" aria-label="New credit" disabled={busy} onClick={() => onCredit(carrier.id)}>New credit</TmsButton>
           </>
         )}
