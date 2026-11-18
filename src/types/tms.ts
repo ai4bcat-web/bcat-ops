@@ -20,6 +20,7 @@ export type {
 import type { DriverSmsTarget, TrackingMethod, TrackingMode, TrackingPrefsOverride } from '../lib/trackingPrefs'
 import type { DetentionFlag } from '../lib/detentionFlag'
 import type { TonuFlag } from '../lib/tonuFlag'
+import type { ToVoidFlag } from '../lib/toVoidFlag'
 export type { DriverSmsTarget, TrackingMethod, TrackingMode, TrackingPrefsOverride } from '../lib/trackingPrefs'
 export type { RateViewAnswer } from '../lib/integrations/rateView'
 // Step AL: the Carrier Sales inbox shapes ride ShipmentMessage.offer and SpotSettings. Type-only cycle.
@@ -2003,6 +2004,8 @@ export interface ShipmentRecord {
   detentionFlag?: DetentionFlag | null
   /** TONU flag (Ryne 2026-11-16); null = not flagged. Parse with `parseTonuFlag`. */
   tonuFlag?: TonuFlag | null
+  /** To-void review flag (Ryne 2026-11-18); null = not flagged. Parse with `parseToVoidFlag`. */
+  toVoidFlag?: ToVoidFlag | null
   /** Step AJ. Per-shipment tracking override; absent/null = inherit the customer (`effectiveTrackingPrefs`). */
   trackingPrefs?: TrackingPrefsOverride | null
   createdBy: string

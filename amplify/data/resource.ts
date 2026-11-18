@@ -2141,6 +2141,8 @@ const schema = a.schema(stageTypes({
       detentionFlag:   a.json(),
       // TONU flag (Ryne 2026-11-16): { note?, amount?, flaggedAt, flaggedBy } (src/lib/tonuFlag.ts). Written only by tms-shipment-actions SET_TONU_FLAG.
       tonuFlag:        a.json(),
+      // To-void flag (Ryne 2026-11-18): { reason, note?, flaggedAt, flaggedBy } (src/lib/toVoidFlag.ts). A review marker only: the shipment stays live until it is voided. Written by tms-shipment-actions SET_TO_VOID_FLAG; VOID_SHIPMENT clears it.
+      toVoidFlag:      a.json(),
       // Step AJ. Per-shipment override { mode?, method?, driverSms? }; null/absent = inherit the customer.
       trackingPrefs:   a.json(),
       createdBy:       a.string().required(),

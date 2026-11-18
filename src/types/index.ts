@@ -7,6 +7,7 @@ import type {
 } from './tms'
 import type { DetentionFlag } from '../lib/detentionFlag'
 import type { TonuFlag } from '../lib/tonuFlag'
+import type { ToVoidFlag } from '../lib/toVoidFlag'
 
 export type ColorKey =
   | 'driver-1' | 'driver-2' | 'driver-3' | 'driver-4' | 'driver-5' | 'driver-6'
@@ -372,6 +373,7 @@ export interface Load extends ShipmentLoadFields {
   /** Waiting-for-detention / waiting-for-TONU flags, copied from the load's shipment by the calendar (Ryne 2026-11-16). */
   detentionFlag?: DetentionFlag | null
   tonuFlag?: TonuFlag | null
+  toVoidFlag?: ToVoidFlag | null
   rateConfirmUrl?: string   // presigned URL of the uploaded rate confirmation
   rateConfirmKey?: string   // S3 key of the rate confirmation (rate-confirms/{loadId}/…)
   // Extended fields (nullable — populated as data becomes available)

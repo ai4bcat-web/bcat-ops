@@ -7,6 +7,7 @@
 import { checkCallState } from '@/lib/checkCalls'
 import { parseDetentionFlag } from '@/lib/detentionFlag'
 import { parseTonuFlag } from '@/lib/tonuFlag'
+import { parseToVoidFlag } from '@/lib/toVoidFlag'
 import { chicagoDateStr, formatBoardDate } from '@/lib/date'
 import { boardStatusOf } from '@/lib/shipmentViewDefs'
 import { hasLeftOperations, type ListRow } from '@/lib/shipmentLists'
@@ -14,7 +15,7 @@ import { needsBillingReview, REVIEW_BILLING_LABEL } from '@/lib/reviewBilling'
 import { reviewFactsOfRow } from './batchReview'
 import { docsMissingOf, registerRowText, type ShipmentRow } from './shipmentViews'
 
-export type BoardFlag = 'missingReference' | 'missingSalesRep' | 'missingRevDivision' | 'docsMissing' | 'reviewBilling' | 'checkCallOverdue' | 'pastDeliveryDate' | 'detention' | 'tonu' | 'readyForReview'
+export type BoardFlag = 'missingReference' | 'missingSalesRep' | 'missingRevDivision' | 'docsMissing' | 'reviewBilling' | 'checkCallOverdue' | 'pastDeliveryDate' | 'detention' | 'tonu' | 'toVoid' | 'readyForReview'
 
 export const BOARD_FLAGS: readonly BoardFlag[] = [
   'missingReference',
@@ -24,7 +25,7 @@ export const BOARD_FLAGS: readonly BoardFlag[] = [
   'reviewBilling',
   'checkCallOverdue',
 ]
-// pastDeliveryDate, detention, tonu and readyForReview are BoardFlags too, but they are toggled from the stats strip, not the chip row.
+// pastDeliveryDate, detention, tonu, toVoid and readyForReview are BoardFlags too, but they are toggled from the stats strip, not the chip row.
 
 export const BOARD_FLAG_LABELS: Record<BoardFlag, string> = {
   missingReference: 'Missing reference #',
@@ -36,6 +37,7 @@ export const BOARD_FLAG_LABELS: Record<BoardFlag, string> = {
   pastDeliveryDate: 'Past delivery date',
   detention: 'Detention',
   tonu: 'TONU',
+  toVoid: 'To void',
   readyForReview: 'Ready for review',
 }
 
@@ -70,6 +72,7 @@ export function matchesFlag(row: ShipmentRow, flag: BoardFlag, nowMs: number): b
     case 'pastDeliveryDate': return pastDeliveryOf(row, nowMs) != null
     case 'detention': return parseDetentionFlag(row.detentionFlag) != null
     case 'tonu': return parseTonuFlag(row.tonuFlag) != null
+    case 'toVoid': return parseToVoidFlag(row.toVoidFlag) != null
     case 'readyForReview': return readyForReviewTest?.(row) ?? false
   }
 }
