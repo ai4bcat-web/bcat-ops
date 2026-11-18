@@ -122,7 +122,8 @@ export const DEFAULT_ALJEX_PROFILE: AljexProfile = {
     LTL: ft('LTL'),
     AIR: ft('AIR'),
     OCN: ft('OCEAN'),
-    R: ft('RAIL'),
+    // R is the reefer van-type letter (98 of the 103 loads imported as RAIL were Reefer), not rail; a RAIL mode blocked Cover (Ryne 2026-11-18).
+    R: ft('FTL'),
     // V* are van-type codes, not vehicle transport: the type letter never picks a division (Ryne 2026-11-16, 239 loads were mis-tagged CAR_SHIPPING).
     V: ft('FTL'),
     VA: ft('FTL'),

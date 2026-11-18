@@ -245,13 +245,24 @@ describe('SAVE_ORDER_FORM / UPDATE_ORDER_DETAILS inputs', () => {
 })
 
 describe('locks', () => {
-  it('a non-draft shipment locks mode and customer; a voided one locks everything', () => {
+  it('a non-draft shipment locks the customer; a voided one locks everything', () => {
     const open = lockedFields(storedBundle(filledValues(), { status: 'OPEN' }))
-    expect(open.fields.mode).toBeTruthy()
     expect(open.fields.customer).toBeTruthy()
     expect(open.fields.rates).toBeUndefined()
     const bundle = storedBundle(filledValues())
     ;(bundle.shipment as { voidedAt?: string }).voidedAt = 'x'
     expect(lockedFields(bundle).fields.all).toBeTruthy()
+  })
+  it('the shipment type stays changeable while the load is Sourcing or Booked, and says why when it is not', () => {
+    const sourcing = storedBundle(filledValues(), { status: 'OPEN' }) as ShipmentBundle
+    ;(sourcing.loads[0] as { status?: string }).status = 'SOURCING'
+    expect(lockedFields(sourcing).fields.mode).toBeUndefined()
+    ;(sourcing.loads[0] as { status?: string }).status = 'BOOKED'
+    expect(lockedFields(sourcing).fields.mode).toBeUndefined()
+    ;(sourcing.loads[0] as { status?: string }).status = 'IN_TRANSIT'
+    expect(lockedFields(sourcing).fields.mode).toMatch(/Sourcing or Booked/)
+    ;(sourcing.loads[0] as { status?: string }).status = 'SOURCING'
+    ;(sourcing.orders[0] as { invoiceId?: string }).invoiceId = 'inv-1'
+    expect(lockedFields(sourcing).fields.mode).toMatch(/invoiced/)
   })
 })

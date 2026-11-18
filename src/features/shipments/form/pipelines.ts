@@ -8,7 +8,7 @@
 import {
   addCarrier, assignAsset, assignCarrierRep, clearRevTag, commitDocument, createLocation, createShipment,
   prepareDocumentUpload, putPresignedFile, recalcCharges, saveOrderForm, setEta, setRevTag, setSalesRep, setShipmentCustomer,
-  getShipmentBundle, setStopDrivers, submitOrder, updateCarrierCharges, updateLoadCarrierDetails, updateOrderDetails, updateStop, updateStopDetails,
+  getShipmentBundle, setShipmentType, setStopDrivers, submitOrder, updateCarrierCharges, updateLoadCarrierDetails, updateOrderDetails, updateStop, updateStopDetails,
   type UpdateStopChange,
   type UpdateLoadCarrierDetailsInput,
 } from '@/lib/apiClient'
@@ -445,8 +445,14 @@ export async function runEditSave(values: ShipmentFormValues, ctx: PipelineCtx, 
   const seed = { customer: ctx.customer }
   const before = valuesFromBundle(bundle, seed)
   const locks = lockedFields(bundle)
-  const r = new Runner(bundle, new Set(), ['order', 'stops', 'charges', 'revTag', 'salesRep', 'dispatcher', 'carrier', 'assignDriver', 'deliveryDriver', 'eta'])
+  const r = new Runner(bundle, new Set(), ['shipmentType', 'order', 'stops', 'charges', 'revTag', 'salesRep', 'dispatcher', 'carrier', 'assignDriver', 'deliveryDriver', 'eta'])
 
+  // The type picks the stored mode (and whether Cover is offered), so it is saved first and the rest of the save reads the new bundle.
+  await r.run('shipmentType', async () => {
+    if (values.shipmentType === before.shipmentType || locks.fields.mode || locks.fields.all) return
+    const b = r.bundle!
+    return setShipmentType({ shipmentId: b.shipment.id, expectedUpdatedAt: b.shipment.updatedAt, shipmentType: values.shipmentType })
+  })
   await r.run('order', async () => {
     const next = toUpdateOrderDetailsInput(values, r.bundle!)
     const prev = toUpdateOrderDetailsInput(before, r.bundle!)

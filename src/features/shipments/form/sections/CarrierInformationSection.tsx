@@ -18,6 +18,7 @@ import { CARRIER_STATUS_LABELS, effectiveCarrierStatus } from '@/lib/carrierStat
 import { isIvanCartageName, ownFleetDriverByName, ownFleetFill } from '@/lib/ownFleetDrivers'
 import { mcpPacketStanding } from '@/lib/mcpPacket'
 import { isTruckloadMode } from '@/lib/shipmentStatus'
+import { shipmentTypeLabel, typeOfLegacyMode } from '@/lib/shipmentTypes'
 import { formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/tmsDirectory'
 import type { CarrierRecord, InsurancePolicyType, LoadCarrierRecord, OwnershipDivisionRecord, OwnershipRuleRecord } from '@/types/tms'
@@ -167,18 +168,21 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
       { kind: 'CARRIER', carrierId: value.carrierId, legStopIds },
     )
   }
+  // A load with no mode is an ordinary FTL, the same reading the status ladder takes.
+  const shipmentMode = bundle?.shipment.mode ?? 'FTL'
+  const modeBlock = isTruckloadMode(shipmentMode)
+    ? null
+    : `This load is set to ${shipmentTypeLabel(typeOfLegacyMode(shipmentMode))}. Change the shipment type to FTL (or another truckload type) to cover it.`
   const coverBlock = !saved
     ? own && value.driver1.name.trim() ? 'Driver will be assigned when you create or save the shipment' : 'Save the draft first'
     : isLocked(ctx.locked, 'cover') ? lockReason(ctx.locked, 'cover') ?? 'Cover is locked'
     : extra
       ? active ? 'This carrier is already added'
         : loadStatus !== 'SOURCING' && loadStatus !== 'BOOKED' && loadStatus !== 'DISPATCHED' ? 'The load must be open to add a carrier'
-        : !isTruckloadMode(bundle?.shipment.mode) ? 'Only truckload modes can be covered'
-        : addBlock()
+        : modeBlock ?? addBlock()
       : active ? 'A carrier is already covering this load'
       : loadStatus !== 'SOURCING' ? 'The load must be SOURCING to cover'
-      : !isTruckloadMode(bundle?.shipment.mode) ? 'Only truckload modes can be covered'
-      : null
+      : modeBlock
   // Why this block cannot be own fleet: Ivan Cartage never shares a load with outside carriers.
   const ownFleetBlock = extra ? validateCarrierAdd([], { kind: 'OWN_ASSET' }) : null
 

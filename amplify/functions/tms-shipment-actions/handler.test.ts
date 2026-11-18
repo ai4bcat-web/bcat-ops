@@ -6292,6 +6292,50 @@ describe('SET_SHIPMENT_CUSTOMER', () => {
   })
 })
 
+// ── SET_SHIPMENT_TYPE ────────────────────────────────────────────────────────
+
+describe('SET_SHIPMENT_TYPE', () => {
+  /** An open, uncovered shipment saved with the wrong (Rail) mode, the way a mis-mapped import leaves it. */
+  async function railLoad(): Promise<{ shipmentId: string; orderId: string; loadId: string; updatedAt: string }> {
+    const bundle = (await call('CREATE_SHIPMENT', { customerId: 'cus-1' })) as { shipment: Row; orders: Row[]; loads: Row[] }
+    const shipmentId = String(bundle.shipment.id)
+    const orderId = String(bundle.orders[0].id)
+    const loadId = String(bundle.loads[0].id)
+    const updatedAt = '2026-11-18T12:00:00.000Z'
+    table(TABLES.shipment).set(shipmentId, { ...table(TABLES.shipment).get(shipmentId)!, status: 'OPEN', mode: 'RAIL', updatedAt })
+    table(TABLES.order).set(orderId, { ...table(TABLES.order).get(orderId)!, mode: 'RAIL', specialRequirements: { form: { v: 1, shipmentType: 'RAIL_CARLOAD' } } })
+    table(TABLES.load).set(loadId, { ...table(TABLES.load).get(loadId)!, status: 'SOURCING' })
+    return { shipmentId, orderId, loadId, updatedAt }
+  }
+
+  it('moves an open load from Rail carload to Reefer: the shipment, the order and the stored type, nothing else', async () => {
+    const ids = await railLoad()
+    await call('SET_SHIPMENT_TYPE', { shipmentId: ids.shipmentId, expectedUpdatedAt: ids.updatedAt, shipmentType: 'REEFER' })
+    expect(table(TABLES.shipment).get(ids.shipmentId)).toMatchObject({ mode: 'FTL' })
+    const order = table(TABLES.order).get(ids.orderId)!
+    expect(order.mode).toBe('FTL')
+    expect((order.specialRequirements as Row).form).toMatchObject({ v: 1, shipmentType: 'REEFER' })
+    const audit = [...table(TABLES.audit).values()].find((a) => a.action === 'SET_SHIPMENT_TYPE')
+    expect(audit).toBeTruthy()
+  })
+
+  it('refuses an unknown type, a draft, an invoiced order and a load past booking, with the reason', async () => {
+    const ids = await railLoad()
+    await expect(call('SET_SHIPMENT_TYPE', { shipmentId: ids.shipmentId, expectedUpdatedAt: ids.updatedAt, shipmentType: 'NOPE' })).rejects.toThrow(/not a known shipment type/)
+    table(TABLES.load).set(ids.loadId, { ...table(TABLES.load).get(ids.loadId)!, status: 'IN_TRANSIT' })
+    await expect(call('SET_SHIPMENT_TYPE', { shipmentId: ids.shipmentId, expectedUpdatedAt: ids.updatedAt, shipmentType: 'FTL' })).rejects.toThrow(/Sourcing or Booked/)
+    table(TABLES.load).set(ids.loadId, { ...table(TABLES.load).get(ids.loadId)!, status: 'SOURCING' })
+    table(TABLES.order).set(ids.orderId, { ...table(TABLES.order).get(ids.orderId)!, invoiceId: 'inv-1' })
+    await expect(call('SET_SHIPMENT_TYPE', { shipmentId: ids.shipmentId, expectedUpdatedAt: ids.updatedAt, shipmentType: 'FTL' })).rejects.toThrow(/invoiced/)
+  })
+
+  it('refuses a move between truckload and non-truckload while a carrier is booked', async () => {
+    const ids = await railLoad()
+    table(TABLES.load).set(ids.loadId, { ...table(TABLES.load).get(ids.loadId)!, activeLoadCarrierId: 'lc-1' })
+    await expect(call('SET_SHIPMENT_TYPE', { shipmentId: ids.shipmentId, expectedUpdatedAt: ids.updatedAt, shipmentType: 'FTL' })).rejects.toThrow(/carrier is booked/i)
+  })
+})
+
 // ── ATTACH_INVOICE_DOC ───────────────────────────────────────────────────────
 
 describe('ATTACH_INVOICE_DOC', () => {

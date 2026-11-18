@@ -11,6 +11,7 @@ import { stopPlace } from '@/lib/stopPlace'
 import { defaultBillToIdOf, customerDefaultsOf } from '@/lib/intakeLoad'
 import { formatDateTimeInput } from '@/lib/date'
 import { effectiveShipmentType, typeOfLegacyMode } from '@/lib/shipmentTypes'
+import { typeLockReason } from '@/lib/shipmentTypeChange'
 import { typeForDivisionChange } from './shipmentType'
 import type { Load, Stop } from '@/types'
 import type {
@@ -354,7 +355,10 @@ export function lockedFields(bundle: ShipmentBundle | null): LockSet {
     return { fields, stops: {}, voided: true }
   }
   if (shipment.status !== 'DRAFT') {
-    fields.mode = 'Mode is fixed once the order is submitted.'
+    const typeLock = typeLockReason({
+      shipmentStatus: shipment.status, loadStatus: load?.status, hasInvoice: Boolean(order?.invoiceId), financialsFrozen: Boolean(fin?.frozenAt),
+    })
+    if (typeLock) fields.mode = typeLock
     fields.customer = 'Change the customer from the shipment page.'
     fields.pro = 'The PRO is permanent.'
   }
