@@ -120,7 +120,8 @@ export const DEFAULT_ALJEX_PROFILE: AljexProfile = {
     TL: ft('FTL'),
     FT: ft('FTL'),
     LTL: ft('LTL'),
-    AIR: ft('AIR'),
+    // AIR is an ordinary truckload to BCAT, not air freight (Ryne 2026-11-18); 443 loads imported as AIR all had equipment FTL.
+    AIR: ft('FTL'),
     OCN: ft('OCEAN'),
     // R is the reefer van-type letter (98 of the 103 loads imported as RAIL were Reefer), not rail; a RAIL mode blocked Cover (Ryne 2026-11-18).
     R: ft('FTL'),

@@ -6,4 +6,10 @@ describe('Aljex type map', () => {
     expect(DEFAULT_ALJEX_PROFILE.typeMap.R.mode).toBe('FTL')
     expect(Object.values(DEFAULT_ALJEX_PROFILE.typeMap).some((t) => t.mode === 'RAIL')).toBe(false)
   })
+
+  it('reads the AIR type as a truckload too, and leaves OCN as ocean', () => {
+    expect(DEFAULT_ALJEX_PROFILE.typeMap.AIR.mode).toBe('FTL')
+    expect(DEFAULT_ALJEX_PROFILE.typeMap.R.mode).toBe('FTL')
+    expect(DEFAULT_ALJEX_PROFILE.typeMap.OCN.mode).toBe('OCEAN')
+  })
 })
