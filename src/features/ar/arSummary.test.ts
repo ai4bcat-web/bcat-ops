@@ -37,3 +37,37 @@ describe('computeArSummary', () => {
     ])
   })
 })
+
+describe('Open AR is every outstanding balance, factored or not, whatever OTR said', () => {
+  it('adds up ISSUED and PARTIAL balances and ignores paid, void and empty ones', () => {
+    const open = [
+      inv({ id: 'manual', balanceCents: 10_000 }),
+      inv({ id: 'partial', status: 'PARTIAL', paidCents: 2_000, balanceCents: 8_000 }),
+      // OTR Dead / Duplicate / rejected / archived: still owed.
+      inv({ id: 'dead', factored: true, factoringItemId: 'f-dead', balanceCents: 7_000 }),
+      inv({ id: 'dup', factored: true, factoringItemId: 'f-dup', balanceCents: 6_000 }),
+      inv({ id: 'reset', factored: true, factoringItemId: 'f-reset', balanceCents: 5_000 }),
+      inv({ id: 'gone', factored: true, factoringItemId: 'f-missing', balanceCents: 4_000 }),
+      inv({ id: 'void', status: 'VOID', balanceCents: 0 }),
+      inv({ id: 'paid', status: 'PAID', balanceCents: 0 }),
+      inv({ id: 'zero', balanceCents: 0 }),
+    ]
+    const s = computeArSummary({
+      open,
+      paid: [],
+      factorByItemId: new Map([
+        ['f-dead', { id: 'f-dead', status: 'PENDING_WITH_OTR', otrStatus: '4' } as unknown as FactoringItem],
+        ['f-dup', { id: 'f-dup', status: 'PENDING_WITH_OTR', otrStatus: '7' } as unknown as FactoringItem],
+        ['f-reset', { id: 'f-reset', status: 'NEED_TO_FACTOR' } as unknown as FactoringItem],
+      ]),
+      shipmentsById: new Map([['s1', { revDivision: 'BROKERAGE' } as ShipmentRecord]]),
+      divisionName: () => 'BCAT Logistics',
+      asOf: '2026-11-12',
+    })
+    const expected = 10_000 + 8_000 + 7_000 + 6_000 + 5_000 + 4_000
+    expect(s.openCents).toBe(expected)
+    expect(s.openCount).toBe(6)
+    // Open AR = Factored + Pending with shippers, so nothing can fall between the two.
+    expect(s.pendingOtrCents + s.pendingShippersCents).toBe(expected)
+  })
+})

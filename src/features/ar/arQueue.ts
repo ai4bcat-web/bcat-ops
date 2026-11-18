@@ -16,6 +16,7 @@ import type { ArWorklistRow } from '@/hooks/useArWorklist'
 import type { InvoiceRecord, ShipmentRecord } from '@/types/tms'
 import type { FactoringItem } from '@/types'
 import { invoiceAmountOf } from '@/features/factoring/factoringTotals'
+import { isInvoiceSentToCustomerOrFactor, isOutstandingInvoice, type SentFactorItemFields } from '@/lib/invoiceOutstanding'
 
 export type ArQueueStatus = 'READY' | 'INVOICED' | 'PAID'
 
@@ -274,10 +275,9 @@ export function isUnsent(row: Pick<ArQueueRow, 'sentAt' | 'sentCount'>): boolean
  * Sent: e-mailed to the customer (sentAt / sentCount / marked sent), or — factored — submitted to
  * OTR. Until then an auto-generated invoice is a draft for review in Ready to invoice (Ryne 2026-11-12).
  */
-export function isInvoiceSent(inv: InvoiceRecord, factorItem?: { otrInvoiceId?: string | null; otrSubmittedAt?: string | null; status?: string | null } | null): boolean {
-  if (inv.sentAt || inv.markedSentAt || (inv.sentCount ?? 0) > 0) return true
-  if (factorItem && (factorItem.otrInvoiceId || factorItem.otrSubmittedAt || factorItem.status === 'PENDING_WITH_OTR' || factorItem.status === 'FACTORED')) return true
-  return false
+export function isInvoiceSent(inv: InvoiceRecord, factorItem?: SentFactorItemFields | null): boolean {
+  // One rule for the AR page, the dashboard and the load status: what OTR does to the queue row later never un-sends it.
+  return isInvoiceSentToCustomerOrFactor(inv, factorItem)
 }
 
 /** Open invoices split by sent: drafts go to Ready to invoice (newest release first), sent ones to Invoiced. */
@@ -287,7 +287,7 @@ export function splitOpenInvoices(
   releasedByOrder: Map<string, string | null> | undefined,
   sent: (inv: InvoiceRecord) => boolean,
 ): { drafts: ArQueueRow[]; invoiced: ArQueueRow[] } {
-  const live = open.filter((inv) => inv.status === 'ISSUED' || inv.status === 'PARTIAL')
+  const live = open.filter((inv) => isOutstandingInvoice(inv))
   const drafts = live
     .filter((inv) => !sent(inv) && inv.paidCents === 0)
     .map((inv) => ({ ...invoiceRow(inv, l, releasedByOrder?.get(inv.orderId)), status: 'READY' as const, daysSinceInvoice: null, daysPastDue: null }))
@@ -299,7 +299,7 @@ export function splitOpenInvoices(
 
 export function buildInvoicedRows(open: InvoiceRecord[], l: ArQueueLookups, releasedByOrder?: Map<string, string | null>): ArQueueRow[] {
   const rows = open
-    .filter((inv) => inv.status === 'ISSUED' || inv.status === 'PARTIAL')
+    .filter((inv) => isOutstandingInvoice(inv))
     .map((inv) => invoiceRow(inv, l, releasedByOrder?.get(inv.orderId)))
   const unsent = rows.filter(isUnsent).sort((a, b) => String(b.releasedAt ?? b.invoiceDate ?? '').localeCompare(String(a.releasedAt ?? a.invoiceDate ?? '')))
   return [...unsent, ...rows.filter((r) => !isUnsent(r))]

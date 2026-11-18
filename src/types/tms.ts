@@ -3230,6 +3230,8 @@ export interface InvoiceRecord {
   markedSentAt?: string | null
   markedSentBy?: string | null
   markedSentNote?: string | null
+  /** First time this invoice was handed to OTR. Kept for good: what OTR does afterwards never makes the invoice unsent. */
+  factorSubmittedAt?: string | null
   lastNoticeId?: string | null
   voidedAt?: string | null
   voidedBy?: string | null

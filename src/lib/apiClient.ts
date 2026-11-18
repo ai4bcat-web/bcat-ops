@@ -1087,6 +1087,8 @@ export async function getFactoringItem(id: string): Promise<FactoringItem | null
 /** MOVE_TO_MANUAL_INVOICE: an OTR-rejected load back to Ready to invoice, and its customer to manual invoice. */
 export async function moveToManualInvoice(input: { factoringItemId: string }): Promise<{
   proNumber: string; orderId: string; customerId: string; voidedInvoice: string | null; note: string
+  /** The invoice that stays on the books, now manual (it is owed until paid, credited, written off or voided). Null when the load had no live invoice. */
+  keptInvoiceId?: string | null
 }> {
   return financeAction('MOVE_TO_MANUAL_INVOICE', input)
 }
@@ -7551,7 +7553,7 @@ const INVOICE_FIELDS = `
   lines references subtotalCents totalCents paidCents writtenOffCents balanceCents
   arOpen paidAt remitTo factored factoringItemId
   pdfKey pdfSizeBytes pdfVersion attachDocumentIds
-  sentAt sentTo sentCount markedSentAt markedSentBy lastNoticeId aljexDueDate aljexTerms
+  sentAt sentTo sentCount markedSentAt markedSentBy factorSubmittedAt lastNoticeId aljexDueDate aljexTerms
   voidedAt voidedBy voidReason note
   createdBy updatedBy version createdAt updatedAt
 `

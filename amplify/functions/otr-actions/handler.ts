@@ -748,6 +748,28 @@ function noBuyFlag(item: Row, decision: string | null, mc?: string, message?: st
   return { status: 'MANUAL_INVOICE', manualReason: 'NO_BUY', otrError: `OTR will not buy${mc ? ` from MC ${mc}` : ''} (No Buy)${message ? `: ${message}` : ''}` }
 }
 
+/**
+ * Remember on the INVOICE that it was handed to OTR (Ryne 2026-11-19). "Sent" used to be read from the queue row's
+ * current status alone, so a row reset to Need to factor, archived or given a new OTR invoice made a sent invoice look
+ * like an unsent draft and dropped it from Open AR. Written once (if_not_exists), best effort: the queue row stays
+ * the record of the submission, and the AR page also reads the row's OTR history.
+ */
+async function stampInvoiceFactorSubmitted(item: Record<string, unknown>, at: string): Promise<void> {
+  const invoiceId = trim(item.invoiceId)
+  if (!INVOICE_TABLE || !invoiceId) return
+  try {
+    await ddb.send(new UpdateCommand({
+      TableName: INVOICE_TABLE,
+      Key: { id: invoiceId },
+      ConditionExpression: 'attribute_exists(id)',
+      UpdateExpression: 'SET factorSubmittedAt = if_not_exists(factorSubmittedAt, :at)',
+      ExpressionAttributeValues: { ':at': at },
+    }))
+  } catch (err) {
+    console.error('[otr-actions] could not stamp factorSubmittedAt on the invoice', { invoiceId, error: err instanceof Error ? err.message : String(err) })
+  }
+}
+
 async function updateItem(id: string, fields: Record<string, unknown>) {
   const entries = Object.entries(fields).filter(([, v]) => v !== undefined)
   if (!entries.length) return
@@ -1520,6 +1542,7 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: Re
           status: outcome.status,
           otrError: outcome.otrError,
         })
+        await stampInvoiceFactorSubmitted(item as Record<string, unknown>, nowIso())
 
         return ok({
           invoiceId: created.invoiceId,
@@ -1845,6 +1868,7 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: Re
           }
           throw e
         }
+        await stampInvoiceFactorSubmitted(item as Record<string, unknown>, now)
         await moveStore.audit('FactoringItem', String(item.id), 'RESEND_TO_OTR', actor, {
           by: actor, at: now, proNumber: item.proNumber ?? null, outcome: 'REPLACED',
           oldOtrInvoiceId: oldId, newOtrInvoiceId: String(created.invoiceId), documentErrors: errors,

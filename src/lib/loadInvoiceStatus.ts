@@ -19,6 +19,7 @@ import type { FactoringItem } from '@/types'
 import type { ArStatus, InvoiceRecord } from '@/types/tms'
 import type { TmsTone } from '@/features/tms/kit/statusTone'
 import { otrRejection } from './otrRejection'
+import { isInvoiceSentToCustomerOrFactor } from './invoiceOutstanding'
 
 export type LoadInvoiceStatusKey =
   | 'NOT_INVOICED'
@@ -83,10 +84,10 @@ export interface LoadInvoiceOrder {
 }
 
 export type LoadInvoiceRow = Pick<InvoiceRecord, 'status' | 'paidCents' | 'balanceCents'>
-  & Partial<Pick<InvoiceRecord, 'paidAt' | 'sentAt' | 'markedSentAt' | 'sentCount'>>
+  & Partial<Pick<InvoiceRecord, 'paidAt' | 'sentAt' | 'markedSentAt' | 'sentCount' | 'factorSubmittedAt'>>
 
 export type LoadInvoiceFactorItem = Pick<FactoringItem, 'status'>
-  & Partial<Pick<FactoringItem, 'brokerCheckResult' | 'manualReason' | 'otrError' | 'otrStatus' | 'brokerMcChecked' | 'otrInvoiceId' | 'otrSubmittedAt'>>
+  & Partial<Pick<FactoringItem, 'brokerCheckResult' | 'manualReason' | 'otrError' | 'otrStatus' | 'brokerMcChecked' | 'otrInvoiceId' | 'otrSubmittedAt' | 'otrPriorInvoices'>>
 
 function status(key: LoadInvoiceStatusKey, extra: { paidAt?: string | null; reason?: string | null } = {}): LoadInvoiceStatus {
   return { key, label: LOAD_INVOICE_STATUS_LABEL[key], tone: TONE[key], paidAt: extra.paidAt ?? null, reason: extra.reason ?? null }
@@ -94,8 +95,7 @@ function status(key: LoadInvoiceStatusKey, extra: { paidAt?: string | null; reas
 
 /** The AR page's `isInvoiceSent` rule: e-mailed, marked sent, or submitted to OTR. */
 function isSent(inv: LoadInvoiceRow, item: LoadInvoiceFactorItem | null): boolean {
-  if (inv.sentAt || inv.markedSentAt || (inv.sentCount ?? 0) > 0) return true
-  return Boolean(item && (item.otrInvoiceId || item.otrSubmittedAt || item.status === 'PENDING_WITH_OTR' || item.status === 'FACTORED'))
+  return isInvoiceSentToCustomerOrFactor(inv, item)
 }
 
 export function loadInvoiceStatusOf(

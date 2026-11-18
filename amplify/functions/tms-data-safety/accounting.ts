@@ -4,6 +4,7 @@
  * change is a new file-name suffix (`-v2`), never a silent edit.
  */
 import { UTF8_BOM, csvLine, dateOnly, moneyFromCents, sheetText } from './csv'
+import { OUTSTANDING_INVOICE_STATUSES } from '../../../src/lib/invoiceOutstanding'
 
 type Row = Record<string, unknown>
 
@@ -56,7 +57,7 @@ export interface AccountingFile {
   rows: number
 }
 
-export const OPEN_INVOICE_STATUSES = ['ISSUED', 'PARTIAL']
+export const OPEN_INVOICE_STATUSES = [...OUTSTANDING_INVOICE_STATUSES]
 
 const str = (v: unknown): string => (v === null || v === undefined ? '' : String(v))
 const sourceOf = (row: Row): string => (row.createdBy === 'aljex-import' ? 'ALJEX_IMPORT' : 'BCAT')

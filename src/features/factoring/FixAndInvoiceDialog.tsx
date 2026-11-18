@@ -13,7 +13,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Check, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsButton, TmsDialog, TmsInput } from '@/features/tms/kit'
-import { generateInvoice, getLoads, getShipment, graphqlErrorText, moveToManualInvoice, patchCustomer, plainSaveError } from '@/lib/apiClient'
+import { generateInvoice, getInvoice, getLoads, getShipment, graphqlErrorText, moveToManualInvoice, patchCustomer, plainSaveError } from '@/lib/apiClient'
 import { isValidEmail } from '@/lib/billingMethod'
 import { apEmailStorage, apEmailTokens } from '@/lib/apEmails'
 import { EmailChipsInput } from '@/features/directory/components/EmailChipsInput'
@@ -88,7 +88,18 @@ export function FixAndInvoiceDialog({ item, customers, isAdmin, onClose, onChang
       // The server switched the customer to Manual invoice; keep the local copy in step so the send review prints our remit-to.
       if (customer) setSaved({ ...customer, billingMethod: 'MANUAL', factored: false })
       setStep2('done')
-      toast.success(`PRO ${r.proNumber} moved to manual invoice${r.voidedInvoice ? ` (factored invoice ${r.voidedInvoice} voided)` : ''}`)
+      toast.success(`PRO ${r.proNumber} moved to manual invoice`)
+      // The invoice stays on the books (it is still owed); only the way it is billed changed. Open it for sending: no new invoice.
+      if (r.keptInvoiceId) {
+        try {
+          const kept = await getInvoice(r.keptInvoiceId)
+          if (kept) {
+            setInvoice(kept)
+            setShipment(kept.shipmentId ? await getShipment(kept.shipmentId).catch(() => null) : null)
+            setStep3('done')
+          }
+        } catch { /* step 3 says what to do: open the invoice from Invoiced */ }
+      }
       onChanged()
     } catch (e) {
       setStep2('todo')
@@ -172,7 +183,7 @@ export function FixAndInvoiceDialog({ item, customers, isAdmin, onClose, onChang
         <section className="flex flex-col gap-2">
           <StepHead n={2} title="Move to manual invoice" state={step2} />
           <p className="tms-muted">
-            {customer?.name ?? 'The customer'} becomes <strong>Manual invoice</strong> for every load from now on. A factored invoice on this load is voided and the load goes back to Ready to invoice. The reason is written on the customer&rsquo;s History.
+            {customer?.name ?? 'The customer'} becomes <strong>Manual invoice</strong> for every load from now on. A factored invoice on this load stays on the books, still owed, and is re-addressed to BCAT: it is not voided, so it never drops out of Open AR. The reason is written on the customer&rsquo;s History.
           </p>
           {step2 !== 'done' && (
             <div>
@@ -185,7 +196,7 @@ export function FixAndInvoiceDialog({ item, customers, isAdmin, onClose, onChang
 
         <section className="flex flex-col gap-2">
           <StepHead n={3} title="Send the invoice" state={step3} />
-          <p className="tms-muted">Creates the invoice with BCAT&rsquo;s remit-to and opens the send review: you see the PDF and the whole e-mail, and nothing goes until you press Send there.</p>
+          <p className="tms-muted">{invoice ? 'The same invoice, now with BCAT’s remit-to. Open the send review: you see the PDF and the whole e-mail, and nothing goes until you press Send there.' : 'Creates the invoice with BCAT’s remit-to and opens the send review: you see the PDF and the whole e-mail, and nothing goes until you press Send there.'}</p>
           <div className="flex flex-wrap gap-2">
             {step3 !== 'done' && (
               <TmsButton variant="primary" size="sm" onClick={createInvoice} disabled={step2 !== 'done' || step3 === 'busy'} data-testid="fix-create-invoice">
