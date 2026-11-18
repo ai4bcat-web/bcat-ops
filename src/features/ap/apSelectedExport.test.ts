@@ -174,3 +174,24 @@ describe('selectedPayablesCsv', () => {
     expect(all[all.length - 1].startsWith('GRAND TOTAL,0,0.00,0,0.00')).toBe(true)
   })
 })
+
+
+describe('Pay-to status on the pay run sheet (Ryne 2026-11-18)', () => {
+  const others = [{ id: 'pmX', carrierId: 'someone-else', recipientType: 'CARRIER', method: 'ACH', isPreferred: true, status: 'ACTIVE', carrierFactorMethodId: null }] as unknown as CarrierPaymentInfo[]
+
+  it('says Pay-to needed for a bill whose carrier has no payment method, and Pay-to set otherwise', () => {
+    const [needed] = selectedExportRows(run([bill({ remitTo: null })], { infos: others }))
+    expect(needed.payToStatus).toBe('Pay-to needed')
+    const [set] = selectedExportRows(run([bill()], { infos: others }))
+    expect(set.payToStatus).toBe('Pay-to set')
+  })
+
+  it('puts a Pay-to status column in the CSV and flags the payee', () => {
+    const csv = selectedPayablesCsv(run([bill({ remitTo: null })], { infos: others }))
+    const [header, first] = csv.split('\r\n')
+    expect(header.split(',')).toContain('Pay-to status')
+    expect(first).toContain('Pay-to needed')
+    expect(csv).toContain('Pay-to needed')
+    expect(SELECTED_EXPORT_HEADERS).toContain('Pay-to status')
+  })
+})

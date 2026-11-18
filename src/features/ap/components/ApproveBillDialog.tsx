@@ -17,7 +17,6 @@
  * could never clear the block it exists for.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { AlertTriangle, Loader2, ShieldAlert } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsButton, TmsDialog, TmsField, TmsTextarea } from '@/features/tms/kit'
@@ -26,6 +25,7 @@ import { approveBill, getCarrier, getShipmentBundle, getTmsSettings, graphqlErro
 import { approvalReadiness } from '@/lib/carrierBill'
 import type { ApRemitTo } from '@/types/tms'
 import { formatCents } from '@/lib/invoiceBuild'
+import { PayToDialog } from './PayToDialog'
 import type {
   CarrierBillRecord, CarrierRecord, DocGateResult, ShipmentBundle, TmsSettings,
 } from '@/types/tms'
@@ -48,6 +48,8 @@ export function ApproveBillDialog({ bill, open, onOpenChange, onDone }: {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The pay-to editor, opened from the red box when the carrier has nowhere to send money.
+  const [payToOpen, setPayToOpen] = useState(false)
 
   const { shipmentId, loadCarrierId, carrierId } = bill
 
@@ -130,6 +132,7 @@ export function ApproveBillDialog({ bill, open, onOpenChange, onDone }: {
   }
 
   return (
+    <>
     <TmsDialog
       open={open}
       onOpenChange={onOpenChange}
@@ -185,9 +188,9 @@ export function ApproveBillDialog({ bill, open, onOpenChange, onDone }: {
               </ul>
               {payee.remitTo == null && (
                 <p className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                  <Link to={`/tms/carriers/${carrierId}`} target="_blank" rel="noreferrer" className="underline">
-                    Add the payment method on the carrier profile
-                  </Link>
+                  <TmsButton size="sm" disabled={disabled} onClick={() => setPayToOpen(true)}>
+                    Add pay-to for {bill.carrierName || 'this carrier'}
+                  </TmsButton>
                   <TmsButton variant="ghost" size="sm" disabled={disabled} onClick={() => { setLoading(true); load() }}>
                     Check again
                   </TmsButton>
@@ -250,5 +253,15 @@ export function ApproveBillDialog({ bill, open, onOpenChange, onDone }: {
         </div>
       )}
     </TmsDialog>
+    {payToOpen && (
+      <PayToDialog
+        carrierId={carrierId}
+        carrierName={bill.carrierName || 'this carrier'}
+        open
+        onOpenChange={setPayToOpen}
+        onChanged={() => { setLoading(true); load() }}
+      />
+    )}
+    </>
   )
 }

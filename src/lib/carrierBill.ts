@@ -492,7 +492,7 @@ export function approvalReadiness(input: ApprovalReadinessInput): ApprovalReadin
   }
 
   if (!payee || !payee.remitTo) {
-    blocks.push('This bill has no payee; set the carrier’s payment method before approving.')
+    blocks.push('Pay-to needed: this bill has no payee. Add the carrier’s pay-to (a payment method, with one marked preferred if there are several) before approving.')
   }
 
   // The signed rate con is a status, not a document: it is the contract that says

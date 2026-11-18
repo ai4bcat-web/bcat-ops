@@ -59,10 +59,12 @@ function billName(bill: CarrierBillRecord): string {
   return bill.billNumber?.trim() || bill.loadNumber?.trim() || bill.shipmentNumber?.trim() || bill.id
 }
 
-export function PayCarrierDialog({ carrierId, payeeName, preselectBillIds, open, onOpenChange, onDone }: {
+export function PayCarrierDialog({ carrierId, payeeName, payToNeeded, preselectBillIds, open, onOpenChange, onDone }: {
   carrierId: string
   /** Who is paid when it is not the carrier itself (its factor, in the Factoring companies table's spelling). Display only. */
   payeeName?: string | null
+  /** This carrier has no usable pay-to (see `payToStatusFor`): say so, and offer the editor. Display only; it blocks nothing. */
+  payToNeeded?: { label: string; title: string; onFix: () => void } | null
   /** Bills the board was looking at when Pay was pressed; filled in at their balance. */
   preselectBillIds?: string[]
   open: boolean
@@ -251,6 +253,12 @@ export function PayCarrierDialog({ carrierId, payeeName, preselectBillIds, open,
 
       {!loading && (
         <div className="flex flex-col gap-4">
+          {payToNeeded && (
+            <div className="p-2 tms-tint tms-tint-orange text-xs" data-testid="pay-dialog-payto-needed">
+              <strong>{payToNeeded.label}.</strong> {payToNeeded.title}{' '}
+              <button type="button" className="tms-link" onClick={payToNeeded.onFix}>Add pay-to</button>
+            </div>
+          )}
           <p className="m-0 text-sm tms-muted" data-testid="pay-dialog-explainer">
             Pay the carrier first (ACH, check, etc.), then post it here. BCAT Ops does not send any money. Posting
             marks the bills you apply it to as Paid

@@ -147,4 +147,26 @@ describe('PayCarrierDialog', () => {
     await waitFor(() => expect(postButton().disabled).toBe(true))
     expect(screen.getByText('Bill BLT-1001 has $1,000.00 outstanding; $1,500.00 was applied')).toBeTruthy()
   })
+
+  it('says Pay-to needed when the carrier has nowhere to send money, and offers to add it; it blocks nothing', async () => {
+    const onFix = vi.fn()
+    render(
+      <PayCarrierDialog
+        carrierId="car-1"
+        payToNeeded={{ label: 'Pay-to needed', title: 'This carrier has no payment method on file.', onFix }}
+        open
+        onOpenChange={vi.fn()}
+        onDone={vi.fn()}
+      />,
+    )
+    await screen.findByLabelText('Payment amount')
+    expect(screen.getByTestId('pay-dialog-payto-needed').textContent).toMatch(/Pay-to needed\./)
+    fireEvent.click(screen.getByRole('button', { name: 'Add pay-to' }))
+    expect(onFix).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows no pay-to notice when the carrier has one', async () => {
+    await openForm()
+    expect(screen.queryByTestId('pay-dialog-payto-needed')).toBeNull()
+  })
 })

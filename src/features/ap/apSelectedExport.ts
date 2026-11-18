@@ -10,7 +10,7 @@ import type { CarrierBillRecord } from '@/types/tms'
 import type { CarrierPaymentInfo, FinanceReviewShipment } from '@/lib/apiClient'
 import { chicagoDateStr } from '@/lib/date'
 import { billCustomerName, billDaysPastDue, billLabel, proOf, termsLabel, type BillFactsIndex } from './apQueue'
-import { AP_PAYMENT_METHOD_LABEL, paymentInfoFor, payeeNameFor, factorNameFor, remitEmailOf } from './apViews'
+import { AP_PAYMENT_METHOD_LABEL, PAY_TO_STATUS_LABEL, paymentInfoFor, payeeNameFor, payToStatusFor, factorNameFor, remitEmailOf } from './apViews'
 
 export interface SelectedExportInput {
   bills: readonly CarrierBillRecord[]
@@ -42,6 +42,8 @@ export interface SelectedExportRow {
   payMethod: string
   remitEmail: string
   factorName: string
+  /** 'Pay-to set', or what is missing (see `payToStatusFor`). */
+  payToStatus: string
   status: string
   needsReview: string
   quickPay: boolean
@@ -108,6 +110,7 @@ export function selectedExportRows(input: SelectedExportInput): SelectedExportRo
       payMethod: methodOf(bill, infos),
       remitEmail: remitEmailOf(bill, infos),
       factorName: factorNameFor(bill, infos),
+      payToStatus: PAY_TO_STATUS_LABEL[payToStatusFor(bill, infos)],
       status: STATUS_LABEL[bill.status] ?? bill.status,
       needsReview: flag ? [flag.financeReviewReason, flag.financeReviewApNote].map((t) => t?.trim()).filter(Boolean).join(' · ') || 'Needs review' : '',
       quickPay: bill.quickPay === true,
@@ -135,6 +138,7 @@ export function selectedPayeeTotals(rows: readonly SelectedExportRow[]): PayeeTo
     const flags: string[] = []
     if (emails.length === 0) flags.push('No remit e-mail')
     if (methods.length === 0) flags.push('No payment method')
+    if (group.some((r) => r.payToStatus !== PAY_TO_STATUS_LABEL.OK)) flags.push('Pay-to needed')
     totals.push({
       payee: group[0].payee,
       bills: group.length,
@@ -159,7 +163,7 @@ const line = (cells: readonly (string | number | null | undefined)[]) => cells.m
 export const SELECTED_EXPORT_HEADERS = [
   'Payee (remit to)', 'Carrier', 'PRO', 'PO #', 'Customer', 'Delivered', 'Invoice date', 'Due date',
   'Days past due (negative = not due yet)', 'Terms', 'Amount (net)', 'Paid so far', 'Balance to pay',
-  'Pay method', 'Remit e-mail', 'Factor', 'Bill status', 'Needs review', 'Quick pay', 'Ticked', 'Bill',
+  'Pay method', 'Remit e-mail', 'Factor', 'Pay-to status', 'Bill status', 'Needs review', 'Quick pay', 'Ticked', 'Bill',
 ] as const
 
 export const PAYEE_TOTAL_HEADERS = [
@@ -176,7 +180,7 @@ export function selectedPayablesCsv(input: SelectedExportInput): string {
       r.payee, r.carrier, r.pro, r.po, r.customer, r.delivered, r.invoiceDate, r.dueDate,
       r.daysPastDue == null ? '' : r.daysPastDue, r.terms,
       dollars(r.netCents), dollars(r.paidCents), dollars(r.balanceCents),
-      r.payMethod, r.remitEmail, r.factorName, r.status, r.needsReview, r.quickPay ? 'Yes' : 'No', r.ticked ? 'Yes' : 'No', r.bill,
+      r.payMethod, r.remitEmail, r.factorName, r.payToStatus, r.status, r.needsReview, r.quickPay ? 'Yes' : 'No', r.ticked ? 'Yes' : 'No', r.bill,
     ]))
   }
   out.push('', line(['PAY RUN TOTALS BY PAYEE']), line(PAYEE_TOTAL_HEADERS))

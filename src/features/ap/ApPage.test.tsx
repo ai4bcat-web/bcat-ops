@@ -77,6 +77,7 @@ vi.mock('./components/RecordBillDialog', () => ({ RecordBillDialog: () => null }
 vi.mock('./components/ApproveBillDialog', () => ({ ApproveBillDialog: ({ bill }: { bill: { id: string } }) => <p>approve dialog for {bill.id}</p> }))
 vi.mock('./components/UpdateCarrierChargesDialog', () => ({ UpdateCarrierChargesDialog: () => null }))
 vi.mock('./components/PayCarrierDialog', () => ({ PayCarrierDialog: () => null }))
+vi.mock('./components/PayToDialog', () => ({ PayToDialog: ({ carrierName }: { carrierName: string }) => <p>pay-to editor for {carrierName}</p> }))
 vi.mock('./components/ApCreditDialog', () => ({ ApCreditDialog: () => null }))
 vi.mock('./components/SendRemittanceDialog', () => ({ SendRemittanceDialog: () => null }))
 vi.mock('./components/SetBillDatesDialog', () => ({ SetBillDatesDialog: ({ bill }: { bill: { id: string } }) => <p>dates dialog for {bill.id}</p> }))
@@ -683,3 +684,58 @@ describe('the Paid tab', () => {
   })
 })
 
+
+
+describe('Pay-to needed: bills whose carrier has nowhere to send money (Ryne 2026-11-18)', () => {
+  // Carrier car1 has a method on file; car9 (Landstar) has none, so its bills have no payee to resolve.
+  const methods = [{ id: 'pm1', carrierId: 'car1', recipientType: 'CARRIER', bankName: 'Chase Bank', accountLast4: '9545', isPreferred: true, status: 'ACTIVE' }]
+  const mixed = () => [
+    bill({ id: 'ok', billNumber: 'OK-1', selectedForPayment: true, remitTo: null }),
+    bill({ id: 'bad', billNumber: 'LS-1', selectedForPayment: true, carrierId: 'car9', carrierName: 'Landstar Ranger', remitTo: null, balanceCents: 130_000 }),
+  ]
+
+  it('flags the bill in the PAY TO column, banners the count and the money waiting, and filters to it', async () => {
+    vi.mocked(listCarrierPaymentInfo).mockResolvedValue(methods as never)
+    try {
+      await setup({ bills: mixed() })
+      expect((await screen.findByTestId('payto-banner')).textContent).toBe('1 payee needs a pay-to · $1,300.00 waiting')
+      fireEvent.click(screen.getByRole('tab', { name: /^Selected/ }))
+      const bad = screen.getByLabelText('Select bill LS-1').closest('tr') as HTMLElement
+      expect(within(bad).getByRole('button', { name: /Pay-to needed for Landstar Ranger/ })).toBeTruthy()
+      const ok = screen.getByLabelText('Select bill OK-1').closest('tr') as HTMLElement
+      expect(within(ok).queryByText('Pay-to needed')).toBeNull()
+
+      fireEvent.click(screen.getByRole('button', { name: /Pay-to needed \(1\)/ }))
+      expect(screen.queryByLabelText('Select bill OK-1')).toBeNull()
+      expect(screen.getByLabelText('Select bill LS-1')).toBeTruthy()
+    } finally {
+      vi.mocked(listCarrierPaymentInfo).mockResolvedValue([])
+    }
+  })
+
+  it('opens the pay-to editor for that carrier from the flag, and the worklist from the banner', async () => {
+    vi.mocked(listCarrierPaymentInfo).mockResolvedValue(methods as never)
+    try {
+      await setup({ bills: mixed() })
+      fireEvent.click(await screen.findByTestId('payto-banner'))
+      expect(await screen.findByRole('table', { name: 'Payees that need a pay-to' })).toBeTruthy()
+      expect(screen.getByText('Landstar Ranger')).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: 'Add pay-to for Landstar Ranger' }))
+      expect(await screen.findByText('pay-to editor for Landstar Ranger')).toBeTruthy()
+    } finally {
+      vi.mocked(listCarrierPaymentInfo).mockResolvedValue([])
+    }
+  })
+
+  it('shows no flag and no banner while the payment methods have not loaded, or when every payee resolves', async () => {
+    await setup({ bills: mixed() })
+    expect(screen.queryByTestId('payto-banner')).toBeNull()
+    vi.mocked(listCarrierPaymentInfo).mockResolvedValue([...methods, { ...methods[0], id: 'pm9', carrierId: 'car9' }] as never)
+    try {
+      await setup({ bills: mixed() })
+      expect(screen.queryByTestId('payto-banner')).toBeNull()
+    } finally {
+      vi.mocked(listCarrierPaymentInfo).mockResolvedValue([])
+    }
+  })
+})

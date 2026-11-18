@@ -13,6 +13,10 @@ import '@testing-library/jest-dom/vitest'
 const api = vi.hoisted(() => ({
   approveBill: vi.fn(),
   getCarrier: vi.fn(),
+  getCarrierBundle: vi.fn(),
+  upsertCarrierPaymentMethod: vi.fn(),
+  archiveCarrierPaymentMethod: vi.fn(),
+  getFactorRemitEmails: vi.fn().mockResolvedValue({}),
   getShipmentBundle: vi.fn(),
   getTmsSettings: vi.fn(),
   previewBill: vi.fn(),
@@ -61,12 +65,17 @@ describe('ApproveBillDialog on a bill with no payee of its own', () => {
     await waitFor(() => expect(api.approveBill).toHaveBeenCalledWith(expect.objectContaining({ billId: 'cb:lcr-1:1' })))
   })
 
-  it('still blocks when the carrier has no payment method, and offers the profile and a re-check', async () => {
+  it('still blocks when the carrier has no payment method, and offers Add pay-to and a re-check', async () => {
     api.previewBill.mockResolvedValue({ gate: { missing: [] }, payee: { kind: 'CARRIER', paymentMethodId: null, remitTo: null } })
+    api.getCarrierBundle.mockResolvedValue({ paymentMethods: [] })
     draw()
-    expect(await screen.findByText(/This bill has no payee/)).toBeInTheDocument()
+    expect(await screen.findByText(/Pay-to needed: this bill has no payee/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled()
-    expect(screen.getByRole('link', { name: /Add the payment method on the carrier profile/ })).toHaveAttribute('href', '/tms/carriers/car-1')
+    // Add pay-to opens the payment-method editor right here: no trip to the carrier profile.
+    fireEvent.click(screen.getByRole('button', { name: /Add pay-to for W GUZY TRUCKING INC/ }))
+    expect(await screen.findByText('Pay-to — W GUZY TRUCKING INC')).toBeInTheDocument()
+    await waitFor(() => expect(api.getCarrierBundle).toHaveBeenCalledWith('car-1'))
+    fireEvent.click(screen.getAllByRole('button', { name: 'Close' }).find((b) => b.textContent === 'Close')!)
 
     // The method is added on the profile; Check again reads it and the block goes.
     api.previewBill.mockResolvedValue({ gate: { missing: [] }, payee: { kind: 'CARRIER', paymentMethodId: 'pm-1', remitTo: ACH } })
