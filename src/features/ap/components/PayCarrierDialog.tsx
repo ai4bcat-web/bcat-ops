@@ -59,8 +59,10 @@ function billName(bill: CarrierBillRecord): string {
   return bill.billNumber?.trim() || bill.loadNumber?.trim() || bill.shipmentNumber?.trim() || bill.id
 }
 
-export function PayCarrierDialog({ carrierId, preselectBillIds, open, onOpenChange, onDone }: {
+export function PayCarrierDialog({ carrierId, payeeName, preselectBillIds, open, onOpenChange, onDone }: {
   carrierId: string
+  /** Who is paid when it is not the carrier itself (its factor, in the Factoring companies table's spelling). Display only. */
+  payeeName?: string | null
   /** Bills the board was looking at when Pay was pressed; filled in at their balance. */
   preselectBillIds?: string[]
   open: boolean
@@ -228,7 +230,9 @@ export function PayCarrierDialog({ carrierId, preselectBillIds, open, onOpenChan
     <TmsDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={`Record payment${bills[0]?.carrierName ? ` — ${bills[0].carrierName}` : ''}`}
+      title={`Record payment${bills[0]?.carrierName ? ` — ${bills[0].carrierName}` : ''}${
+        payeeName && payeeName !== bills[0]?.carrierName ? ` (pay ${payeeName})` : ''
+      }`}
       className="tms-dialog-wide"
       footer={
         <>

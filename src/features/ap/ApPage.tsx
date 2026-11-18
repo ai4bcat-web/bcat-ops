@@ -47,7 +47,7 @@ import {
   AP_PAYMENT_KIND_LABEL, AP_PAYMENT_METHOD_LABEL, AP_PAYEE_KIND_LABEL, AP_TABS, BILL_STATUS_LABEL,
   EMPTY_TO_BE_PAID_FILTERS, applyToBePaidFilters, avgDaysToPayBills, awaitingInvoiceTotals, billCarrierOptions,
   billGates, type BillGates, billsAging, billsExpected, billsSelected, canSelectForPayment, invoiceAgeBuckets, isOwnFleet, paidBills,
-  paymentInfoFor, payeeLabel, quickPayLabel, setFactorNamesForLabels, remitEmailOf, remitEmailOfPayment, remittanceStatusOf, selectionBalanceCents,
+  paymentInfoFor, payeeNameFor, isFactorPaid, quickPayLabel, setFactorNamesForLabels, remitEmailOf, remitEmailOfPayment, remittanceStatusOf, selectionBalanceCents,
   selectionCarrierId, sharedProLabel, sharedProIndex, type ApTabKey, type SharedProIndex, type ToBePaidFilters,
 } from './apViews'
 import { ApCreditDialog } from './components/ApCreditDialog'
@@ -296,7 +296,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   // Aging by carrier: the same open bills `useOpenBills` ages, grouped by carrier with the bills under each.
   const agingReport = useMemo(() => buildApAgingReport(open.bills, new Date().toISOString(), {
     proOf: (bill) => proOf(bill, facts),
-    payToOf: payeeLabel,
+    payToOf: (bill) => payeeNameFor(bill, payInfos),
     remitEmailOf: (bill) => remitEmailOf(bill, payInfos),
   }), [open.bills, facts, payInfos])
   const agingBills = useMemo(() => billsAging(queueBills), [queueBills])
@@ -304,8 +304,8 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   // The drawer stays open under the dialogs it opens (dates, carrier pay, payment info).
   const [drawerId, setDrawerId] = useState<string | null>(null)
   const drawerBill = drawerId ? open.bills.find((b) => b.id === drawerId) ?? null : null
-  const agingRows = useMemo(() => applyToBePaidFilters(agingBills, filters, asOf), [agingBills, filters, asOf])
-  const selectedRows = useMemo(() => applyToBePaidFilters(selectedBills, filters, asOf), [selectedBills, filters, asOf])
+  const agingRows = useMemo(() => applyToBePaidFilters(agingBills, filters, asOf, payInfos), [agingBills, filters, asOf, payInfos])
+  const selectedRows = useMemo(() => applyToBePaidFilters(selectedBills, filters, asOf, payInfos), [selectedBills, filters, asOf, payInfos])
   const settled = useMemo(() => paidBills(monthBills).filter((b) => byParty(b) && byDivision(b)), [monthBills, byParty, byDivision])
   const [verifyOnlyPaid, setVerifyOnlyPaid] = useState(false)
   const settledShown = useMemo(() => (verifyOnlyPaid ? settled.filter(isVerifyPaymentBill) : settled), [settled, verifyOnlyPaid])
@@ -334,7 +334,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   // against a row nobody on this screen can see.
   const applyFilters = (next: ToBePaidFilters) => {
     setFilters(next)
-    const visible = [...applyToBePaidFilters(agingBills, next, asOf), ...applyToBePaidFilters(selectedBills, next, asOf)].map((b) => b.id)
+    const visible = [...applyToBePaidFilters(agingBills, next, asOf, payInfos), ...applyToBePaidFilters(selectedBills, next, asOf, payInfos)].map((b) => b.id)
     setSelected((prev) => prev.filter((id) => visible.includes(id)))
   }
 
@@ -497,7 +497,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     )
     : tab === 'paid' ? <ApPaidCard stats={apPaidStats(settled, facts, apPaymentLines)} monthLabel={monthLabel(month)} />
     : null
-  const addRemitFor = (bill: CarrierBillRecord) => setDialog({ kind: 'remit-email', payee: payeeLabel(bill), billId: bill.id })
+  const addRemitFor = (bill: CarrierBillRecord) => setDialog({ kind: 'remit-email', payee: payeeNameFor(bill, payInfos), billId: bill.id })
   const openDrawer = (bill: CarrierBillRecord) => setDrawerId(bill.id)
   const chargesFor = (bill: CarrierBillRecord) => setDialog({ kind: 'charges', loadCarrierId: bill.loadCarrierId, shipmentId: bill.shipmentId, bill })
 
@@ -784,6 +784,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         <PayCarrierDialog
           open
           carrierId={dialog.carrierId}
+          payeeName={payeeOfPayDialog(open.bills, payInfos, dialog.carrierId, dialog.billIds)}
           preselectBillIds={dialog.billIds}
           onOpenChange={(o) => { if (!o) setDialog(null) }}
           onDone={closeAndRefresh}
@@ -952,6 +953,18 @@ function facetCol<T>(
 
 const sumCents = <T,>(rows: T[], pick: (row: T) => number) => rows.reduce((sum, row) => sum + pick(row), 0)
 
+/** Who the Record payment dialog says is paid: the factor when the carrier has one (the first ticked bill's, else any open bill's). */
+function payeeOfPayDialog(
+  bills: readonly CarrierBillRecord[],
+  infos: readonly CarrierPaymentInfo[],
+  carrierId: string,
+  billIds?: readonly string[],
+): string | null {
+  const mine = bills.filter((b) => b.carrierId === carrierId)
+  const lead = mine.find((b) => billIds?.includes(b.id)) ?? mine[0]
+  return lead ? payeeNameFor(lead, infos) : null
+}
+
 const ACTIONS = { filter: false, sortable: false, fixed: true } as const
 
 /** Remit to: the e-mail the payee's remittance goes to, or an Add remit e-mail link when none is on file. */
@@ -963,7 +976,7 @@ function remitToColumn(
     'remitEmail',
     'REMIT TO',
     (bill) => remitEmailOf(bill, infos) || 'No remit e-mail',
-    (bill) => <RemitToCell email={remitEmailOf(bill, infos)} label={payeeLabel(bill)} onAdd={() => onAddRemit(bill)} />,
+    (bill) => <RemitToCell email={remitEmailOf(bill, infos)} label={payeeNameFor(bill, infos)} onAdd={() => onAddRemit(bill)} />,
     { extraPx: 60 },
   )
 }
@@ -980,8 +993,8 @@ function payeeColumns(
 ): ApColumn<CarrierBillRecord>[] {
   return [
     remitToColumn(infos, onAddRemit),
-    facetCol<CarrierBillRecord>('payTo', 'PAY TO', payeeLabel, (bill) => (
-      bill.payeeKind === 'FACTOR' ? <TmsBadge tone="blue">{payeeLabel(bill)}</TmsBadge> : payeeLabel(bill)
+    facetCol<CarrierBillRecord>('payTo', 'PAY TO', (bill) => payeeNameFor(bill, infos), (bill) => (
+      isFactorPaid(bill, infos) ? <TmsBadge tone="blue">{payeeNameFor(bill, infos)}</TmsBadge> : payeeNameFor(bill, infos)
     ), { extraPx: 60 }),
     {
       key: 'paymentInfo',
@@ -1226,8 +1239,8 @@ function reviewView({
     },
     customerColumn(facts),
     facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
-    facetCol<CarrierBillRecord>('payTo', 'PAY TO', payeeLabel, (bill) => (
-      bill.payeeKind === 'FACTOR' ? <TmsBadge tone="blue">{payeeLabel(bill)}</TmsBadge> : payeeLabel(bill)
+    facetCol<CarrierBillRecord>('payTo', 'PAY TO', (bill) => payeeNameFor(bill, infos), (bill) => (
+      isFactorPaid(bill, infos) ? <TmsBadge tone="blue">{payeeNameFor(bill, infos)}</TmsBadge> : payeeNameFor(bill, infos)
     ), { extraPx: 60 }),
     remitToColumn(infos, onAddRemit),
     moneyCol<CarrierBillRecord>('amount', 'AMOUNT', (bill) => bill.grossCents, (bill) => (
@@ -1508,8 +1521,8 @@ function payableView({
     },
     customerColumn(facts),
     facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
-    facetCol<CarrierBillRecord>('payTo', 'PAY TO', payeeLabel, (bill) => (
-      bill.payeeKind === 'FACTOR' ? <TmsBadge tone="blue">{payeeLabel(bill)}</TmsBadge> : payeeLabel(bill)
+    facetCol<CarrierBillRecord>('payTo', 'PAY TO', (bill) => payeeNameFor(bill, infos), (bill) => (
+      isFactorPaid(bill, infos) ? <TmsBadge tone="blue">{payeeNameFor(bill, infos)}</TmsBadge> : payeeNameFor(bill, infos)
     ), { extraPx: 60 }),
     dayCol<CarrierBillRecord>('billDate', 'INVOICE DATE', (bill) => bill.billDate),
     dayCol<CarrierBillRecord>('agingDate', 'AGING DATE', (bill) => bill.billDate),
@@ -1776,7 +1789,7 @@ function paidView({ banner, bills, shared, months, month, loading, onMonth, veri
     facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
     dayCol<CarrierBillRecord>('billDate', 'BILL DATE', (bill) => bill.billDate),
     dayCol<CarrierBillRecord>('paid', 'PAID', (bill) => bill.paidAt),
-    facetCol('payee', 'PAYEE', payeeLabel),
+    facetCol('payee', 'PAYEE', (bill) => payeeNameFor(bill, infos)),
     remitToColumn(infos, onAddRemit),
     facetCol<CarrierBillRecord>('remittance', 'REMITTANCE', (bill) => (lines.has(bill.id) ? statusOf(bill).label : '—'), (bill) => {
       if (!lines.has(bill.id)) return <span className="tms-muted">—</span>

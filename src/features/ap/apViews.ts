@@ -100,6 +100,43 @@ function factorLabelOf(bill: Pick<CarrierBillRecord, 'remitTo'>): string {
   return canonicalFactorName(factorNames, bill.remitTo?.factorName?.trim() || bill.remitTo?.name?.trim())
 }
 
+/**
+ * The factor a bill is paid through, in the table's spelling, or '' when the carrier is paid directly.
+ *
+ * Two things can say so: the payee the bill froze when it was recorded, and the carrier's payment method as it
+ * stands now. The bills the Aljex and AR-sheet imports wrote froze no payee at all, so for them only the live
+ * method knows, and the Pay to column used to print the carrier's own name beside a "Factor details" link. The
+ * live method wins on the name (it is the one the remit e-mail follows), and the frozen payee keeps the bill
+ * a factor bill when the method has since been retired.
+ */
+export function factorNameFor(
+  bill: Pick<CarrierBillRecord, 'carrierId' | 'paymentMethodId' | 'payeeKind' | 'remitTo'>,
+  infos: readonly CarrierPaymentInfo[] | null | undefined,
+): string {
+  const live = infos ? paymentInfoFor(bill, infos) : null
+  if (live && paysThroughFactor(live)) return canonicalFactorName(factorNames, live.factorName)
+  return bill.payeeKind === 'FACTOR' ? factorLabelOf(bill) || 'Factor' : ''
+}
+
+/** True when the bill's money goes to a factor: what the blue Pay to badge and the Payee is filter read. */
+export function isFactorPaid(
+  bill: Pick<CarrierBillRecord, 'carrierId' | 'paymentMethodId' | 'payeeKind' | 'remitTo'>,
+  infos: readonly CarrierPaymentInfo[] | null | undefined,
+): boolean {
+  return factorNameFor(bill, infos) !== ''
+}
+
+/**
+ * Who is paid, for the Pay to column: the factor's name (as the Factoring companies table spells it) when the
+ * carrier has one, otherwise the carrier or the name on its frozen payee. The Carrier column keeps the carrier.
+ */
+export function payeeNameFor(
+  bill: Pick<CarrierBillRecord, 'carrierId' | 'paymentMethodId' | 'payeeKind' | 'carrierName' | 'remitTo'>,
+  infos: readonly CarrierPaymentInfo[] | null | undefined,
+): string {
+  return factorNameFor(bill, infos) || payeeLabel(bill)
+}
+
 /** `Quick pay 2d` when the assignment is on quick pay, otherwise nothing to say. */
 export function quickPayLabel(
   assignment: { quickPay?: boolean | null; quickPayDays?: number | null } | null | undefined,
@@ -184,6 +221,14 @@ export function invoiceAgeBuckets(bills: readonly CarrierBillRecord[], asOf: str
 export function payToLabel(bill: Pick<CarrierBillRecord, 'payeeKind' | 'remitTo'>): string {
   if (bill.payeeKind !== 'FACTOR') return 'Direct'
   return factorLabelOf(bill) || 'Factor'
+}
+
+/** `payToLabel` with the carrier's live payment method behind it: the factor's name, or `Direct`. */
+export function payToLabelFor(
+  bill: Pick<CarrierBillRecord, 'carrierId' | 'paymentMethodId' | 'payeeKind' | 'remitTo'>,
+  infos: readonly CarrierPaymentInfo[] | null | undefined,
+): string {
+  return factorNameFor(bill, infos) || 'Direct'
 }
 
 /**
@@ -297,10 +342,12 @@ export function applyToBePaidFilters(
   bills: readonly CarrierBillRecord[],
   filters: ToBePaidFilters,
   asOf: string,
+  /** The payment methods behind the bills: the Payee is filter reads who is paid as the Pay to column shows it. */
+  infos?: readonly CarrierPaymentInfo[],
 ): CarrierBillRecord[] {
   return bills.filter((bill) => {
     if (filters.carrierId && bill.carrierId !== filters.carrierId) return false
-    if (filters.payeeKind && bill.payeeKind !== filters.payeeKind) return false
+    if (filters.payeeKind && (isFactorPaid(bill, infos) ? 'FACTOR' : 'CARRIER') !== filters.payeeKind) return false
     if (filters.verifyPayment && !isVerifyPaymentBill(bill)) return false
     if (filters.due) {
       const late = daysLate(bill.dueAt, asOf)

@@ -10,7 +10,7 @@ import type { CarrierBillRecord } from '@/types/tms'
 import type { CarrierPaymentInfo, FinanceReviewShipment } from '@/lib/apiClient'
 import { chicagoDateStr } from '@/lib/date'
 import { billCustomerName, billDaysPastDue, billLabel, proOf, termsLabel, type BillFactsIndex } from './apQueue'
-import { AP_PAYMENT_METHOD_LABEL, paymentInfoFor, payeeLabel, remitEmailOf } from './apViews'
+import { AP_PAYMENT_METHOD_LABEL, paymentInfoFor, payeeNameFor, factorNameFor, remitEmailOf } from './apViews'
 
 export interface SelectedExportInput {
   bills: readonly CarrierBillRecord[]
@@ -89,7 +89,7 @@ export function selectedExportRows(input: SelectedExportInput): SelectedExportRo
   const { facts, infos, review, asOf, ticked } = input
   const rows = input.bills.map((bill): SelectedExportRow => {
     const flag = review.get(bill.shipmentId)
-    const payee = payeeLabel(bill)
+    const payee = payeeNameFor(bill, infos)
     return {
       payee,
       carrier: bill.carrierName?.trim() || '',
@@ -107,7 +107,7 @@ export function selectedExportRows(input: SelectedExportInput): SelectedExportRo
       balanceCents: bill.balanceCents,
       payMethod: methodOf(bill, infos),
       remitEmail: remitEmailOf(bill, infos),
-      factorName: bill.payeeKind === 'FACTOR' ? payee : '',
+      factorName: factorNameFor(bill, infos),
       status: STATUS_LABEL[bill.status] ?? bill.status,
       needsReview: flag ? [flag.financeReviewReason, flag.financeReviewApNote].map((t) => t?.trim()).filter(Boolean).join(' · ') || 'Needs review' : '',
       quickPay: bill.quickPay === true,

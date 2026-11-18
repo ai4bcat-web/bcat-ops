@@ -17,7 +17,7 @@ import { AP_QUICK_PAY_OPTIONS } from '@/lib/quickPay'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDay } from '@/features/ar/arViews'
 import type { CarrierBillRecord } from '@/types/tms'
-import { BILL_STATUS_LABEL, payToLabel, paymentInfoFor, remitEmailOf } from '../apViews'
+import { BILL_STATUS_LABEL, payToLabelFor, paymentInfoFor, remitEmailOf } from '../apViews'
 import { estimatedDueAt, proOf, termsLabel, type BillFactsIndex } from '../apQueue'
 import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
@@ -137,7 +137,7 @@ export function BillDrawer({ bill, facts, infos, onClose, onChanged, onAdjustPay
           <h3 className={heading}>Payment</h3>
           <dl className="m-0">
             {row('Carrier', bill.carrierName ?? '—')}
-            {row('Pay to', payToLabel(bill))}
+            {row('Pay to', payToLabelFor(bill, infos))}
             {remit ? row('Remit e-mail', remit) : null}
             {row('Payment info', (
               <button type="button" className="tms-link" onClick={() => onPaymentInfo(bill)}>

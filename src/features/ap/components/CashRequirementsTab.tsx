@@ -14,7 +14,7 @@ import type { CarrierBillRecord } from '@/types/tms'
 import { cashRequirements, dayInZone, type CashLine } from '../cashFridays'
 import { BILL_STATUS_LABEL } from '../apViews'
 import { proOf, type BillFactsIndex } from '../apQueue'
-import { paymentInfoFor, payeeLabel, remitEmailOf } from '../apViews'
+import { paymentInfoFor, payeeNameFor, isFactorPaid, remitEmailOf } from '../apViews'
 import { RemitToCell } from './RemitToCell'
 import type { CarrierPaymentInfo } from '@/lib/apiClient'
 import '@/features/ar/components/agingReport.css'
@@ -23,7 +23,7 @@ const money = (cents: number) => (cents ? formatCents(cents) : '—')
 
 /** How the bill will be paid: through the factor, or by the method the carrier has on file (ACH, check…). */
 function payMethod(bill: CarrierBillRecord, infos: readonly CarrierPaymentInfo[]): string {
-  if (bill.payeeKind === 'FACTOR') return 'Factor'
+  if (isFactorPaid(bill, infos)) return 'Factor'
   const method = paymentInfoFor(bill, infos)?.method
   return method ? String(method) : '—'
 }
@@ -120,8 +120,8 @@ export function CashRequirementsTab({ bills, facts, infos, asOf, busy, onMoveToS
                               <tr key={b.id} data-testid="cash-bill-row">
                                 <td><Link className="tms-link" to={shipmentEditorPath(b.shipmentId)}>{proOf(b, facts)}</Link></td>
                                 <td>{b.carrierName ?? '—'}</td>
-                                <td>{payeeLabel(b)}</td>
-                                <td><RemitToCell email={remitEmailOf(b, infos)} label={payeeLabel(b)} onAdd={() => onAddRemit(b)} /></td>
+                                <td>{payeeNameFor(b, infos)}</td>
+                                <td><RemitToCell email={remitEmailOf(b, infos)} label={payeeNameFor(b, infos)} onAdd={() => onAddRemit(b)} /></td>
                                 <td>{b.datesPending === true ? '—' : formatDay(b.dueAt)}</td>
                                 <td className="tms-dg-right"><strong>{formatCents(b.balanceCents)}</strong>{b.quickPay === true ? <> <TmsBadge tone="blue">Quick pay</TmsBadge></> : null}</td>
                                 <td>{BILL_STATUS_LABEL[b.status]}</td>
