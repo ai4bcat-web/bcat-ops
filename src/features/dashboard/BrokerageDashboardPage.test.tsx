@@ -51,12 +51,16 @@ describe('Brokerage cards under the Dashboard', () => {
     fetchRep.mockResolvedValue({ scope: 'ALL', repKey: null, months: ['2026-10', '2026-11'].map(repMonth) })
     render(<BrokerageSection />)
 
-    // Two months of 2 loads each: revenue $3,000 a month, expense $2,400, so $1,200 profit overall (20%).
-    await waitFor(() => expect(screen.getByTestId('brokerage-total-revenue')).toHaveTextContent('$6,000'))
-    expect(screen.getByTestId('brokerage-total-expenses')).toHaveTextContent('$4,800')
-    expect(screen.getByTestId('brokerage-total-profit')).toHaveTextContent('$1,200')
+    // The cards are the month in progress, to date: Nov has 2 loads, revenue $3,000, expense $2,400, so $600 profit (20%). Not the two-month total.
+    await waitFor(() => expect(screen.getByTestId('brokerage-total-revenue')).toHaveTextContent('$3,000'))
+    expect(screen.getByTestId('brokerage-total-expenses')).toHaveTextContent('$2,400')
+    expect(screen.getByTestId('brokerage-total-profit')).toHaveTextContent('$600')
     expect(screen.getByTestId('brokerage-total-profit-pct')).toHaveTextContent('20.0%')
-    expect(screen.getByTestId('brokerage-total-loads')).toHaveTextContent('4')
+    expect(screen.getByTestId('brokerage-total-loads')).toHaveTextContent('2')
+    // Each card names the month and sets last month in full beside it.
+    const revenueCard = screen.getByTestId('brokerage-total-revenue').parentElement as HTMLElement
+    expect(revenueCard).toHaveTextContent('Revenue · Nov to date')
+    expect(revenueCard).toHaveTextContent('Oct in full: $3.0k')
     expect(screen.getByTestId('brokerage-data-start')).toHaveTextContent('Data starts October 2026')
     expect(screen.getByTestId('brokerage-month-chart')).toBeInTheDocument()
     expect(screen.getByTestId('brokerage-insights')).toHaveTextContent('Nov so far')
@@ -102,9 +106,9 @@ describe('Brokerage cards under the Dashboard', () => {
       months: ['2026-10', '2026-11'].map((month) => ({ month, computedAt: '2026-11-09T14:50:00Z', rep: { 'BROKERAGE|': { 'i:ryne@bcatcorp.com': fin(1, 100_000, 60_000) } } })),
     })
     render(<BrokerageSection />)
-    await waitFor(() => expect(screen.getByTestId('brokerage-total-revenue')).toHaveTextContent('$2,000'))
+    await waitFor(() => expect(screen.getByTestId('brokerage-total-revenue')).toHaveTextContent('$1,000'))
     expect(fetchRollup).not.toHaveBeenCalled()
-    expect(screen.getByTestId('brokerage-total-profit')).toHaveTextContent('$800')
+    expect(screen.getByTestId('brokerage-total-profit')).toHaveTextContent('$400')
     expect(screen.getByTestId('brokerage-total-profit-pct')).toHaveTextContent('40.0%')
     await waitFor(() => expect(screen.getAllByTestId('brokerage-rep-bar')).toHaveLength(1))
     expect(screen.queryByText('Ivan Cartage')).not.toBeInTheDocument()
@@ -115,6 +119,17 @@ describe('Brokerage cards under the Dashboard', () => {
     fetchRep.mockResolvedValue({ scope: 'ALL', repKey: null, months: [{ month: '2026-10', computedAt: '2026-11-09T14:50:00Z', rep: {} }] })
     render(<BrokerageSection />)
     await waitFor(() => expect(screen.getByTestId('brokerage-total-profit-pct')).toHaveTextContent('—'))
+  })
+
+  it('keeps the cards on the current month when the range picker changes', async () => {
+    fetchRollup.mockResolvedValue(window(['2026-10', '2026-11'].map((m) => row(m))))
+    fetchRep.mockResolvedValue({ scope: 'ALL', repKey: null, months: ['2026-10', '2026-11'].map(repMonth) })
+    render(<BrokerageSection />)
+    await waitFor(() => expect(screen.getByTestId('brokerage-total-revenue')).toHaveTextContent('$3,000'))
+    fireEvent.click(screen.getByRole('button', { name: '12 months' }))
+    await waitFor(() => expect(fetchRollup).toHaveBeenCalled())
+    expect(screen.getByTestId('brokerage-total-revenue')).toHaveTextContent('$3,000')
+    expect(screen.getByTestId('brokerage-total-loads')).toHaveTextContent('2')
   })
 
   it('says the rep split is not ready when a month has no per-rep object yet, and keeps the month view', async () => {
