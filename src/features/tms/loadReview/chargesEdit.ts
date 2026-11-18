@@ -111,6 +111,23 @@ function asLine(d: ChargeDraft) {
   return { side: d.side, code: d.code, calculatedBy: d.calculatedBy, rateCents: d.rateCents, count: d.count, isRate: isRateCode(d.code), loadCarrierId: d.loadCarrierId }
 }
 
+/** The charge lines as stored, boiled down to what a save would overwrite: when it changes, an edit made from the old lines could erase someone else's. */
+export function chargeSignature(bundle: ShipmentBundle): string {
+  return [...bundle.charges]
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+    .map((c) => [c.id, c.side, c.code, c.calculatedBy, c.rateCents, c.count ?? '', c.loadCarrierId ?? '', c.label ?? ''].join('|'))
+    .join(';')
+}
+
+/** The charges an office person adds most often: the code the invoice and the reports know, and the words the customer sees. */
+export const QUICK_CHARGES: readonly { code: string; label: string }[] = [
+  { code: 'FSC', label: 'Fuel surcharge' },
+  { code: 'DETENTION', label: 'Detention' },
+  { code: 'LAYOVER', label: 'Layover' },
+  { code: 'ACCESSORIAL', label: 'Lumper' },
+  { code: 'STOPOFF', label: 'Stop-off' },
+]
+
 /** A blank FLAT line for one group, tied to the order (customer) or the assignment (carrier). */
 export function newLine(bundle: ShipmentBundle, group: Pick<ChargeGroup, 'side' | 'loadCarrier'>, sortOrder: number): ChargeDraft {
   const load = bundle.loads[0]
