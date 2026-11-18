@@ -227,7 +227,7 @@ export function LoadReviewDrawer({ row, focus, onClose, onRefresh, onMoved, onFa
       actions={<TmsBadge tone={verdict.checks[key].ok ? 'green' : 'red'}>{verdict.checks[key].ok ? 'OK' : `${verdict.checks[key].reasons.length} ${verdict.checks[key].reasons.length === 1 ? 'issue' : 'issues'}`}</TmsBadge>}>
       {key !== 'charges' && <p className="lr-check-value">{values[key]}</p>}
       {verdict.checks[key].reasons.length > 0 && <ul className="lr-reasons">{verdict.checks[key].reasons.map((reason, index) => <li key={`${reason.code}-${index}`}><XCircle size={14} aria-hidden className="lr-icon-bad" />{reason.message}</li>)}</ul>}
-      {key === 'charges' && <LoadReviewCharges shipmentId={row.id} readOnly={released} disabled={busy} onChanged={changed} />}
+      {key === 'charges' && <LoadReviewCharges shipmentId={row.id} readOnly={released} disabled={busy} onChanged={changed} reloadSignal={reloadSignal} />}
       {key === 'salesRep' && !released && <SalesRepFix key={result?.salesRepId ?? row.salesRepId ?? ''} current={result?.salesRepId ?? row.salesRepId ?? ''} shipmentId={row.id} disabled={busy} />}
       {key === 'revDivision' && !released && <DivisionFix key={`${result?.revDivision ?? row.revDivision ?? ''}:${row.revSubdivision ?? ''}`} current={result?.revDivision ?? row.revDivision ?? ''} currentSub={row.revSubdivision ?? ''} shipmentId={row.id} disabled={busy} active={active} />}
       {verdict.checks[key].reasons.map((reason, index) => {

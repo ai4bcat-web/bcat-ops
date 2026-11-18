@@ -64,6 +64,7 @@
 .tms-portal .lr-charge-qty { width: 56px; text-align: right; }
 .tms-portal .lr-charges-warn { margin: 0; padding: 6px 8px; border-radius: 6px; background: var(--tms-badge-orange-tint, var(--tms-badge-red-tint)); }
 .tms-portal .lr-charges-actions { display: flex; gap: 8px; }
+.tms-portal .lr-charge-quick { display: flex; flex-wrap: wrap; gap: 4px; }
 .tms-portal .lr-charges-confirm { display: grid; gap: 8px; margin-top: 10px; padding: 10px; border-radius: 8px; background: var(--tms-badge-red-tint); }
 /* What to fix: every failing check in plain words, wrapped, never cut off. */
 .tms-shell .aa-what-to-fix { display: flex; flex-wrap: wrap; gap: 4px; white-space: normal; }

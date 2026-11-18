@@ -7,7 +7,7 @@
  * The rate confirmation is the shipment page's own `RateConPanel`: Preview and Download build the PDF in the browser
  * with no side effects; Send e-mails the carrier, so it asks first.
  */
-import { useContext, useEffect, useMemo, useState } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { FileText, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { RateConPanel } from '@/features/carriers/components/RateConPanel'
@@ -16,14 +16,16 @@ import { RailSaveContext, useRailPending } from './railSave'
 import { getCarrierBundle, getShipmentBundle, getTmsSettings, recalcCharges, sendRateCon, voidRateCon } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
 import type { CarrierBundle, ChargeCalc, ShipmentBundle, TmsSettings } from '@/types/tms'
-import { amountsOf, centsFromInput, draftsOf, groupsOf, newLine, toRecalc, totalsOf, type ChargeDraft, type ChargeGroup } from './chargesEdit'
+import { amountsOf, centsFromInput, chargeSignature, draftsOf, groupsOf, newLine, QUICK_CHARGES, toRecalc, totalsOf, type ChargeDraft, type ChargeGroup } from './chargesEdit'
 
 const CALC_LABEL: Record<ChargeCalc, string> = { FLAT: 'Flat', PER_MILE: 'Per mile', PER_CWT: 'Per cwt', PERCENT: '% of rate' }
 
 type SendInput = Parameters<typeof sendRateCon>[0]
 
-export function LoadReviewCharges({ shipmentId, readOnly = false, disabled = false, onChanged }: {
+export function LoadReviewCharges({ shipmentId, readOnly = false, disabled = false, onChanged, reloadSignal = 0 }: {
   shipmentId: string
+  /** The drawer saved something else on this shipment (its version moved): read the charges again. */
+  reloadSignal?: number
   /** Released or invoiced: the numbers are shown, nothing can change here. */
   readOnly?: boolean
   disabled?: boolean
@@ -39,18 +41,33 @@ export function LoadReviewCharges({ shipmentId, readOnly = false, disabled = fal
   const [rateConFor, setRateConFor] = useState<string | null>(null)
   /** Each carrier's pay when the drawer opened, to say when it moved past a signed rate con. */
   const [openedPay, setOpenedPay] = useState<Record<string, number> | null>(null)
+  /** Bumped by Try again after a load that failed or hung. */
+  const [tries, setTries] = useState(0)
+  const [slow, setSlow] = useState(false)
+  /** The line whose rate box takes focus (a line just added from a quick button). */
+  const [focusKey, setFocusKey] = useState<string | null>(null)
+  const editingRef = useRef(false)
+  useEffect(() => { editingRef.current = editing }, [editing])
 
   useEffect(() => {
     let live = true
+    const timer = window.setTimeout(() => { if (live) setSlow(true) }, 12_000)
     Promise.all([getShipmentBundle(shipmentId), getTmsSettings().catch(() => null)])
       .then(([next, tms]) => {
         if (!live) return
-        setBundle(next); setSettings(tms); setDrafts(draftsOf(next))
-        setOpenedPay(Object.fromEntries(groupsOf(next, draftsOf(next)).filter((g) => g.side === 'CARRIER').map((g) => [g.key, g.totalCents])))
+        setError(null); setSlow(false)
+        // While lines are being edited, a reload that moved the charge lines keeps the old read, so Save refuses instead of overwriting.
+        setBundle((prev) => (editingRef.current && prev && chargeSignature(prev) !== chargeSignature(next) ? prev : next))
+        setSettings(tms)
+        // Lines being edited stay as typed; a reload while editing only refreshes what the save is checked against.
+        if (!editingRef.current) {
+          setDrafts(draftsOf(next))
+          setOpenedPay(Object.fromEntries(groupsOf(next, draftsOf(next)).filter((g) => g.side === 'CARRIER').map((g) => [g.key, g.totalCents])))
+        }
       })
       .catch((err: unknown) => { if (live) setError(err instanceof Error ? err.message : 'The charges could not be loaded') })
-    return () => { live = false }
-  }, [shipmentId])
+    return () => { live = false; window.clearTimeout(timer) }
+  }, [shipmentId, reloadSignal, tries])
 
   const frozen = !!bundle?.financials?.find((f) => f.id === bundle.loads[0]?.id)?.frozenAt
   const locked = readOnly || frozen
@@ -59,25 +76,46 @@ export function LoadReviewCharges({ shipmentId, readOnly = false, disabled = fal
   const totals = bundle ? totalsOf(bundle, drafts) : null
   const codes = useMemo(() => [...new Set([...(settings?.chargeCodes ?? []).map((c) => c.code), 'LINEHAUL', 'FSC', ...drafts.map((d) => d.code)].filter(Boolean))], [settings, drafts])
 
+  /**
+   * The shipment's version right now. Other sections of the rail (the sales rep, the revenue division, the stops) save
+   * first and each moves the version, so the one read when the drawer opened would make this save refuse as "changed by
+   * someone else". Only a change to the charge lines themselves is a real conflict.
+   */
+  async function currentVersion(): Promise<number> {
+    const fresh = await getShipmentBundle(shipmentId)
+    if (chargeSignature(fresh) !== chargeSignature(bundle!)) {
+      throw new Error('These charges were changed somewhere else since you opened them. Reload the load and make the change again.')
+    }
+    return fresh.shipment.version ?? 0
+  }
+
   // In the Load Review rail, the rail's Save changes saves edited charges with everything else.
   const inRail = useContext(RailSaveContext) != null
   const railError = useRailPending('charges', editing && !readOnly && bundle ? { label: 'Charges', order: 60, run: async () => {
     const input = toRecalc(drafts)
     if (!input.ok) throw new Error(input.message)
-    const next = await recalcCharges({ shipmentId, expectedVersion: bundle.shipment.version ?? 0, charges: input.charges })
+    const next = await recalcCharges({ shipmentId, expectedVersion: await currentVersion(), charges: input.charges })
     setBundle(next)
     setDrafts(draftsOf(next))
     setEditing(false)
   } } : null)
 
-  if (error && !bundle) return <TmsAlert tone="red">{error}</TmsAlert>
-  if (!bundle || !totals) return <p className="tms-muted text-xs" role="status">Loading charges…</p>
+  if (error && !bundle) return <TmsAlert tone="red">{error}<TmsButton size="sm" variant="ghost" onClick={() => { setError(null); setSlow(false); setTries((n) => n + 1) }}>Try again</TmsButton></TmsAlert>
+  if (!bundle || !totals) return <p className="tms-muted text-xs" role="status">{slow ? 'The charges are taking too long to load. ' : 'Loading charges…'}
+    {slow && <TmsButton size="sm" variant="ghost" onClick={() => { setSlow(false); setTries((n) => n + 1) }}>Try again</TmsButton>}</p>
 
   function update(key: string, patch: Partial<ChargeDraft>) {
     setDrafts((prev) => prev.map((d) => (d.key === key ? { ...d, ...patch } : d)))
   }
   function remove(key: string) { setDrafts((prev) => prev.filter((d) => d.key !== key)) }
   function add(group: ChargeGroup) { setDrafts((prev) => [...prev, newLine(bundle!, group, prev.length)]) }
+  /** One tap from the card: opens editing with the customer line already named, its rate box ready for the amount. */
+  function quickAdd(group: ChargeGroup, preset: { code: string; label: string }) {
+    const base = newLine(bundle!, group, drafts.length)
+    setDrafts((prev) => [...prev, { ...base, code: preset.code, label: preset.label, sortOrder: prev.length }])
+    setFocusKey(base.key)
+    setEditing(true)
+  }
   function cancel() { setDrafts(draftsOf(bundle!)); setEditing(false); setError(null) }
 
   async function save() {
@@ -86,7 +124,7 @@ export function LoadReviewCharges({ shipmentId, readOnly = false, disabled = fal
     setSaving(true)
     setError(null)
     try {
-      const next = await recalcCharges({ shipmentId, expectedVersion: bundle!.shipment.version ?? 0, charges: input.charges })
+      const next = await recalcCharges({ shipmentId, expectedVersion: await currentVersion(), charges: input.charges })
       setBundle(next)
       setDrafts(draftsOf(next))
       setEditing(false)
@@ -125,7 +163,7 @@ export function LoadReviewCharges({ shipmentId, readOnly = false, disabled = fal
               <TmsSelect aria-label="Calculated by" value={line.calculatedBy} onChange={(e) => update(line.key, { calculatedBy: e.target.value as ChargeCalc })}>
                 {(Object.keys(CALC_LABEL) as ChargeCalc[]).map((c) => <option key={c} value={c}>{CALC_LABEL[c]}</option>)}
               </TmsSelect>
-              <TmsInput key={`${line.key}-${line.calculatedBy}`} aria-label={line.calculatedBy === 'PERCENT' ? 'Percent' : 'Rate'} inputMode="decimal" className="lr-charge-rate"
+              <TmsInput key={`${line.key}-${line.calculatedBy}`} aria-label={line.calculatedBy === 'PERCENT' ? 'Percent' : 'Rate'} inputMode="decimal" className="lr-charge-rate" autoFocus={line.key === focusKey}
                 defaultValue={line.calculatedBy === 'PERCENT' ? String(line.rateCents / 100) : (line.rateCents / 100).toFixed(2)}
                 onBlur={(e) => update(line.key, { rateCents: line.calculatedBy === 'PERCENT' ? Math.round(Number(e.target.value) * 100) || 0 : centsFromInput(e.target.value) })} />
               {line.calculatedBy === 'FLAT' && <TmsInput aria-label="Quantity" inputMode="numeric" className="lr-charge-qty" value={line.count ?? 1}
@@ -139,6 +177,9 @@ export function LoadReviewCharges({ shipmentId, readOnly = false, disabled = fal
           </li>)}
         </ul>
         {editing && !groupLocked && <TmsButton size="sm" variant="ghost" onClick={() => add(group)}><Plus size={14} />Add line</TmsButton>}
+        {group.side === 'CUSTOMER' && !editing && !groupLocked && !disabled && <div className="lr-charge-quick" data-testid="lr-charge-quick" role="group" aria-label="Add a charge to the customer">
+          {QUICK_CHARGES.map((preset) => <TmsButton key={preset.label} size="sm" variant="ghost" onClick={() => quickAdd(group, preset)}><Plus size={14} />{preset.label}</TmsButton>)}
+        </div>}
         {group.locked && <p className="tms-muted text-xs">{group.locked}</p>}
         {group.side === 'CARRIER' && !group.locked && !readOnly && <p className="tms-muted text-xs" data-testid="lr-ap-note">
           {group.totalCents > 0

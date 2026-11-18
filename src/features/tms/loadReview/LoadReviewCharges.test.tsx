@@ -107,10 +107,51 @@ describe('LoadReviewCharges', () => {
     expect(sent.find((c) => c.code === 'LUMPER')).toMatchObject({ side: 'CUSTOMER', rateCents: 7500, orderId: 'o-1' })
   })
 
+  it('adds a fuel surcharge from the quick button with the amount typed in', async () => {
+    render(<LoadReviewCharges shipmentId="shp-1" onChanged={vi.fn(async () => {})} />)
+    fireEvent.click(await screen.findByRole('button', { name: /Fuel surcharge/ }))
+    const customer = screen.getByRole('region', { name: 'Charge customer' })
+    const rates = within(customer).getAllByLabelText('Rate')
+    fireEvent.change(rates[rates.length - 1], { target: { value: '325.87' } })
+    fireEvent.blur(rates[rates.length - 1])
+    expect(within(customer).getAllByText('$325.87').length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Save charges' }))
+    await waitFor(() => expect(mocks.recalc).toHaveBeenCalledTimes(1))
+    const sent = mocks.recalc.mock.calls[0][0].charges as { code: string; label: string | null; rateCents: number; side: string; isRate: boolean }[]
+    expect(sent.find((c) => c.code === 'FSC')).toMatchObject({ side: 'CUSTOMER', label: 'Fuel surcharge', rateCents: 32587, isRate: true })
+  })
+
+  it('saves with the shipment version as it is now when only another section moved it', async () => {
+    mocks.bundle.mockResolvedValueOnce(bundle).mockResolvedValue({ ...bundle, shipment: { ...bundle.shipment, version: 9 } } as ShipmentBundle)
+    render(<LoadReviewCharges shipmentId="shp-1" onChanged={vi.fn(async () => {})} />)
+    fireEvent.click(await screen.findByRole('button', { name: /Detention/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save charges' }))
+    await waitFor(() => expect(mocks.recalc).toHaveBeenCalledWith(expect.objectContaining({ expectedVersion: 9 })))
+  })
+
+  it('refuses to save over charge lines that changed somewhere else', async () => {
+    const moved = { ...bundle, shipment: { ...bundle.shipment, version: 9 }, charges: bundle.charges.map((c) => (c.id === 'c1' ? { ...c, rateCents: 170000, amountCents: 170000 } : c)) } as ShipmentBundle
+    mocks.bundle.mockResolvedValueOnce(bundle).mockResolvedValue(moved)
+    render(<LoadReviewCharges shipmentId="shp-1" onChanged={vi.fn(async () => {})} />)
+    fireEvent.click(await screen.findByRole('button', { name: /Fuel surcharge/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save charges' }))
+    expect(await screen.findByText(/changed somewhere else/)).toBeTruthy()
+    expect(mocks.recalc).not.toHaveBeenCalled()
+  })
+
+  it('says so and offers Try again when the charges cannot be loaded', async () => {
+    mocks.bundle.mockRejectedValueOnce(new Error('Network error'))
+    render(<LoadReviewCharges shipmentId="shp-1" onChanged={vi.fn(async () => {})} />)
+    expect(await screen.findByText(/Network error/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText('Charge customer')).toBeTruthy()
+  })
+
   it('is read-only once released', async () => {
     render(<LoadReviewCharges shipmentId="shp-1" readOnly onChanged={vi.fn(async () => {})} />)
     expect(await screen.findByText('Charge customer')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Edit charges' })).toBeNull()
+    expect(screen.queryByTestId('lr-charge-quick')).toBeNull()
     expect(screen.queryByTestId('lr-ap-note')).toBeNull()
   })
 
