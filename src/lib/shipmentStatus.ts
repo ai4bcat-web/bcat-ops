@@ -251,7 +251,9 @@ const STICKY_SHIPMENT_STATUSES: readonly ShipmentStatus[] = [
  * reckoning, and a shipment whose every load is canceled is canceled. A load that
  * had carriers and has no ACTIVE one left — all bounced, all TONU'd, or a mix — has
  * nobody on it whatever its stored status says, so it counts as sourcing again;
- * that is what MVMNT shows as TONU when every carrier was a TONU.
+ * that is what MVMNT shows as TONU when every carrier was a TONU. The one exception: a load
+ * staff stamped Delivered whose only carrier rows are TONU keeps that Delivered, so the
+ * shipment follows it (the TONU is billed as a delivered load).
  */
 export function shipmentStatusFromLoads(
   loads: ShipmentLoadLike[],
@@ -291,7 +293,14 @@ function effectiveLoadStatus(load: ShipmentLoadLike): LoadWorkflowStatus {
   const status = load.status ?? 'SOURCING'
   if (status === 'CANCELED' || status === 'SOURCING') return status
   const carriers = load.carrierStatuses ?? []
-  if (carriers.length > 0 && !carriers.includes('ACTIVE')) return 'SOURCING'
+  if (carriers.length > 0 && !carriers.includes('ACTIVE')) {
+    // A TONU is a truck ordered and not used: the load never moved, but staff can still stamp it
+    // Delivered to bill the TONU (Ryne 2026-11-18, 20037). That stamp stands when TONU is the only
+    // carrier row; a load still open with a TONU on it is sourcing again, and a bounced carrier
+    // (never delivered anything) is too.
+    if ((status === 'DELIVERED' || status === 'INVOICING') && carriers.every((c) => c === 'TONU')) return status
+    return 'SOURCING'
+  }
   return status
 }
 
