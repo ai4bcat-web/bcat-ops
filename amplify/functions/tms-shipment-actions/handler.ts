@@ -175,7 +175,7 @@ import { deleteShipments, latestDeleteExport, restoreDeleted } from './shipmentD
 import { shipmentDeleteStore } from './shipmentDeleteStore'
 import { SHIPMENT_ACTIONS_TABLES } from './tableEnv'
 import { parseTrackingPrefs, validateTrackingPrefsOverride, type TrackingPrefsOverride } from '../../../src/lib/trackingPrefs'
-import { parseDetentionFlag, validateDetentionInput, type DetentionFlag } from '../../../src/lib/detentionFlag'
+import { DETENTION_LABEL_MAX, DETENTION_NOTE_MAX, parseDetentionFlag, validateDetentionInput, type DetentionFlag } from '../../../src/lib/detentionFlag'
 import { parseTonuFlag, validateTonuInput, type TonuFlag } from '../../../src/lib/tonuFlag'
 import {
   buildPostInvoiceEntry, cleanGuardedInput, diffSnapshots, isInvoicedOrder, isPostInvoiceGuarded, POST_INVOICE_ACTION,
@@ -657,6 +657,7 @@ type Action =
   | 'SET_TRACKING_PREFS'
   | 'SET_DETENTION_FLAG'
   | 'SET_TONU_FLAG'
+  | 'FLAG_ACCESSORIAL_FROM_DRIVER_DOC'
   | 'BATCH_SHIPMENT_TASK'
   | 'TEST_OWNERSHIP_RULES'
   | 'RETAG_SHIPMENTS'
@@ -943,7 +944,8 @@ function isActionAuthorized(action: Action, caller: Caller): boolean {
 export const SYSTEM_CALLERS: Record<string, readonly Action[]> = {
   'carrier-inbox': ['FILE_INBOUND_OFFER'],
   // A driver's finished POD upload files its pages on the shipment (waiting for review).
-  'driver-app-api': ['ATTACH_DRIVER_DOC'],
+  // ...and a driver's note on a photo or document that says "Detention pay" (or TONU) raises that flag on the shipment, once.
+  'driver-app-api': ['ATTACH_DRIVER_DOC', 'FLAG_ACCESSORIAL_FROM_DRIVER_DOC'],
   // A POD that reached the shipment through the carrier portal or an inbound e-mail delivers an own-fleet load too.
   'tracking-api': ['LOG_CHECK_CALL', 'DELIVER_ON_POD'],
   // A generated invoice's PDF is filed on its shipment as an INVOICE document.
@@ -962,6 +964,7 @@ export async function authorize(action: Action, identity?: AppSyncIdentity | nul
   }
   if (action === 'FILE_INBOUND_OFFER') throw new Error('Forbidden: FILE_INBOUND_OFFER is for the carrier inbox only')
   if (action === 'ATTACH_INVOICE_DOC') throw new Error('Forbidden: ATTACH_INVOICE_DOC is for the finance Lambda only')
+  if (action === 'FLAG_ACCESSORIAL_FROM_DRIVER_DOC') throw new Error('Forbidden: FLAG_ACCESSORIAL_FROM_DRIVER_DOC is for the driver app Lambda only')
   if (!identity) throw new Error('Unauthorized: missing identity')
   const email = await getCallerEmail(identity)
   if (!email) throw new Error('Unauthorized: could not resolve caller email')
@@ -4070,6 +4073,69 @@ async function setTonuFlag(input: Row, caller: Caller): Promise<Row> {
     to: flag,
   })
   return { shipment: await getById(SHIPMENT_TABLE_NAME, shipmentId) } as unknown as Row
+}
+
+/**
+ * FLAG_ACCESSORIAL_FROM_DRIVER_DOC (Ryne 2026-11-19) — the driver app calls this when a driver's photo or document carries a note that
+ * says "Detention pay" (or TONU). It raises the same flag staff raise by hand (SET_DETENTION_FLAG / SET_TONU_FLAG), once:
+ *   - a flag already standing is never overwritten or duplicated (staff set it, or an earlier upload did);
+ *   - a voided shipment is skipped;
+ *   - it charges nothing (billing adds the accessorial from Load Review) and the flag clears only by staff action.
+ * Idempotency per upload is the driver Lambda's job (it stamps the submission before calling). Who and when are stamped here;
+ * `flaggedBy` names the driver so the flag's hover reads "Flagged by Driver app · <name>". Logged in Activity as
+ * FLAG_DETENTION_AUTO / FLAG_TONU_AUTO with the submission, the stop and what the driver wrote.
+ */
+async function flagAccessorialFromDriverDoc(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const kind = assertString(input.kind, 'kind')
+  if (kind !== 'DETENTION' && kind !== 'TONU') throw new Error("kind must be 'DETENTION' or 'TONU'")
+  const driverName = optionalString(input.driverName, 120) ?? 'driver'
+  const note = optionalString(input.note, DETENTION_NOTE_MAX)
+  const submissionId = optionalString(input.submissionId, 100)
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  if (shipment.voidedAt || shipment.deletedAt) return { skipped: 'VOIDED' }
+  const prior = kind === 'DETENTION' ? parseDetentionFlag(shipment.detentionFlag) : parseTonuFlag(shipment.tonuFlag)
+  if (prior) return { skipped: 'ALREADY_FLAGGED' }
+
+  const now = nowIso()
+  const flaggedBy = `Driver app · ${driverName}`.slice(0, 160)
+  let flag: Row
+  if (kind === 'DETENTION') {
+    const stopType = input.stopType === 'pickup' ? 'pickup' : 'delivery'
+    flag = {
+      stopType,
+      stopId: optionalString(input.stopId, 100),
+      stopLabel: optionalString(input.stopLabel, DETENTION_LABEL_MAX),
+      arrivedAt: null,
+      departedAt: null,
+      hours: null,
+      note,
+      flaggedAt: now,
+      flaggedBy,
+      source: 'DRIVER_DOC',
+      ...(submissionId ? { submissionId } : {}),
+    }
+  } else {
+    flag = { note, amount: null, flaggedAt: now, flaggedBy, source: 'DRIVER_DOC', ...(submissionId ? { submissionId } : {}) }
+  }
+  await transact(
+    [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+      ...(kind === 'DETENTION' ? { detentionFlag: flag } : { tonuFlag: flag }),
+      updatedBy: caller.email,
+      updatedAt: now,
+      version: (numberOrNull(shipment.version) ?? 1) + 1,
+    }, null)],
+    'shipment',
+  )
+  await writeAudit('SHIPMENT', shipmentId, kind === 'DETENTION' ? 'FLAG_DETENTION_AUTO' : 'FLAG_TONU_AUTO', caller, {
+    from: null,
+    to: flag,
+    submissionId,
+    driverName,
+    stopLabel: optionalString(input.stopLabel, DETENTION_LABEL_MAX),
+  })
+  return { shipment: await getById(SHIPMENT_TABLE_NAME, shipmentId), flagged: kind } as unknown as Row
 }
 
 /**
@@ -9927,6 +9993,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return setDetentionFlag(input, caller)
     case 'SET_TONU_FLAG':
       return setTonuFlag(input, caller)
+    case 'FLAG_ACCESSORIAL_FROM_DRIVER_DOC':
+      return flagAccessorialFromDriverDoc(input, caller)
     case 'ASSIGN_CARRIER_REP':
       return assignCarrierRep(input, caller)
     case 'BATCH_SHIPMENT_TASK':

@@ -2326,6 +2326,74 @@ describe('tracker assignee', () => {
     expect(actions).toContain('CLEAR_TONU')
   })
 
+  describe('FLAG_ACCESSORIAL_FROM_DRIVER_DOC (a driver note that says "Detention pay")', () => {
+    const asDriverApp = (input: Row) =>
+      handler({ arguments: { action: 'FLAG_ACCESSORIAL_FROM_DRIVER_DOC', input: JSON.stringify(input) }, systemCaller: 'driver-app-api' } as never) as Promise<Row>
+
+    it('raises the detention flag the strip, list and calendar read, naming the driver, and logs it in Activity', async () => {
+      const a = await createDraft()
+      const other = await createDraft()
+      const res = (await asDriverApp({
+        shipmentId: a.shipmentId, kind: 'DETENTION', submissionId: 'sub-1', driverName: 'Joshua Kly',
+        stopId: 'stop-1', stopLabel: 'Pickup — INGREDION INC', stopType: 'pickup', note: 'Driver note: "Detention pay" — Joshua Kly, driver app',
+      })) as { flagged?: string }
+      expect(res.flagged).toBe('DETENTION')
+      const stored = table(TABLES.shipment).get(a.shipmentId)!.detentionFlag as Record<string, unknown>
+      expect(stored).toMatchObject({ stopType: 'pickup', stopLabel: 'Pickup — INGREDION INC', flaggedBy: 'Driver app · Joshua Kly', source: 'DRIVER_DOC', submissionId: 'sub-1' })
+      expect(typeof stored.flaggedAt).toBe('string')
+      // The same parser the UI uses reads it.
+      expect(table(TABLES.shipment).get(other.shipmentId)!.detentionFlag ?? null).toBeNull()
+      const audit = [...table(TABLES.audit).values()].filter((row) => row.entityId === a.shipmentId && row.action === 'FLAG_DETENTION_AUTO')
+      expect(audit).toHaveLength(1)
+      expect(JSON.parse(String(audit[0].changes))).toMatchObject({ submissionId: 'sub-1', driverName: 'Joshua Kly' })
+    })
+
+    it('never overwrites or duplicates a flag that is already standing, and staff can still clear it', async () => {
+      const a = await createDraft()
+      await call('SET_DETENTION_FLAG', { shipmentId: a.shipmentId, flag: { stopType: 'delivery', note: 'Set by dispatch' } }, TMS_USER)
+      const res = (await asDriverApp({ shipmentId: a.shipmentId, kind: 'DETENTION', submissionId: 'sub-2', driverName: 'Joshua Kly', stopType: 'pickup' })) as { skipped?: string }
+      expect(res.skipped).toBe('ALREADY_FLAGGED')
+      expect(table(TABLES.shipment).get(a.shipmentId)!.detentionFlag).toMatchObject({ stopType: 'delivery', note: 'Set by dispatch' })
+      expect([...table(TABLES.audit).values()].filter((row) => row.entityId === a.shipmentId && row.action === 'FLAG_DETENTION_AUTO')).toHaveLength(0)
+
+      await call('SET_DETENTION_FLAG', { shipmentId: a.shipmentId, flag: null }, TMS_USER)
+      expect(table(TABLES.shipment).get(a.shipmentId)!.detentionFlag ?? null).toBeNull()
+    })
+
+    it('raises the TONU flag the same way, beside a detention flag', async () => {
+      const a = await createDraft()
+      await asDriverApp({ shipmentId: a.shipmentId, kind: 'DETENTION', submissionId: 'sub-3', driverName: 'Joshua Kly', stopType: 'delivery' })
+      await asDriverApp({ shipmentId: a.shipmentId, kind: 'TONU', submissionId: 'sub-3', driverName: 'Joshua Kly', note: 'TONU' })
+      const shipment = table(TABLES.shipment).get(a.shipmentId)!
+      expect(shipment.detentionFlag).toMatchObject({ stopType: 'delivery' })
+      expect(shipment.tonuFlag).toMatchObject({ note: 'TONU', flaggedBy: 'Driver app · Joshua Kly', source: 'DRIVER_DOC' })
+      const actions = [...table(TABLES.audit).values()].filter((row) => row.entityId === a.shipmentId).map((row) => row.action)
+      expect(actions).toContain('FLAG_DETENTION_AUTO')
+      expect(actions).toContain('FLAG_TONU_AUTO')
+    })
+
+    it('skips a voided shipment and refuses an unknown kind or shipment', async () => {
+      const a = await createDraft()
+      table(TABLES.shipment).get(a.shipmentId)!.voidedAt = '2026-11-18T12:00:00.000Z'
+      const res = (await asDriverApp({ shipmentId: a.shipmentId, kind: 'DETENTION', submissionId: 'sub-4', driverName: 'Joshua Kly' })) as { skipped?: string }
+      expect(res.skipped).toBe('VOIDED')
+      expect(table(TABLES.shipment).get(a.shipmentId)!.detentionFlag ?? null).toBeNull()
+
+      const b = await createDraft()
+      await expect(asDriverApp({ shipmentId: b.shipmentId, kind: 'LUMPER', submissionId: 'sub-5', driverName: 'x' })).rejects.toThrow(/DETENTION.*TONU/)
+      await expect(asDriverApp({ shipmentId: 'nope', kind: 'DETENTION', submissionId: 'sub-6', driverName: 'x' })).rejects.toThrow(/Shipment not found/)
+    })
+
+    it('is for the driver app Lambda only: staff and other system callers are refused', async () => {
+      const a = await createDraft()
+      await expect(call('FLAG_ACCESSORIAL_FROM_DRIVER_DOC', { shipmentId: a.shipmentId, kind: 'DETENTION', submissionId: 's', driverName: 'x' }, TMS_USER)).rejects.toThrow(/driver app Lambda only/)
+      await expect(
+        handler({ arguments: { action: 'FLAG_ACCESSORIAL_FROM_DRIVER_DOC', input: JSON.stringify({ shipmentId: a.shipmentId, kind: 'DETENTION' }) }, systemCaller: 'tracking-api' } as never),
+      ).rejects.toThrow()
+      expect(table(TABLES.shipment).get(a.shipmentId)!.detentionFlag ?? null).toBeNull()
+    })
+  })
+
   it('confirms a load\'s tracking mode: the server stamps who and when, later edits keep it, clearing drops it, NONE is allowed', async () => {
     const a = await createDraft()
     const done = (await call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, prefs: { mode: 'NONE', confirmed: true } }, TMS_USER)) as { shipment: Row }
