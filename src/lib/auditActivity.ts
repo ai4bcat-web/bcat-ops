@@ -103,6 +103,9 @@ export const ACTION_SENTENCE: Record<string, string> = {
   EXTEND_CUSTOMER_LINK: 'extended the customer tracking link',
   POST_LOAD: 'posted the load to a board',
   UNPOST_LOAD: 'took the load off a board',
+  // Accounts payable (the shipment's own record of a bill leaving Payable)
+  CARRIER_BILL_DELETED: 'deleted a carrier bill',
+  CARRIER_BILL_VOIDED: 'voided a carrier bill',
   // Intake
   INTAKE_EXTRACTED: 'extracted the fields from the e-mail',
   INTAKE_SAVE_DRAFT: 'saved the intake draft',

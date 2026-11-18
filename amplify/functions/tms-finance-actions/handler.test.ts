@@ -2198,6 +2198,19 @@ describe('two carriers on one load (Step AT)', () => {
     expect((table(TABLES.carrierBill).get(`cb:${SECOND_LC}:1`) as Row).status).toBe('IN_REVIEW')
     expect((table(TABLES.loadCarrier).get(SECOND_LC) as Row).apStatus).toBe('IN_REVIEW')
   })
+
+  it('deletes only the chosen carrier\'s bill on a shared PRO, and a fresh bill can be recorded after', async () => {
+    seedAssignment()
+    seedSecondCarrier()
+    const a = await recordFor(LOAD_CARRIER_ID)
+    const b = await recordFor(SECOND_LC)
+    await call('DELETE_BILL', { billId: a.id, reasonCode: 'WRONG_CARRIER' })
+    expect((table(TABLES.carrierBill).get(String(a.id)) as Row).status).toBe('VOID')
+    expect((table(TABLES.carrierBill).get(String(b.id)) as Row).status).toBe('IN_REVIEW')
+    expect((table(TABLES.loadCarrier).get(SECOND_LC) as Row).apStatus).toBe('IN_REVIEW')
+    const again = await recordFor(LOAD_CARRIER_ID)
+    expect((table(TABLES.carrierBill).get(String(again.id)) as Row).status).toBe('IN_REVIEW')
+  })
 })
 
 describe('imported Aljex history (legacyImported shipment)', () => {
@@ -2726,6 +2739,75 @@ describe('VOID_BILL', () => {
       applications: [{ billId: bill.id, amountCents: 10_000 }],
     })
     await expect(call('VOID_BILL', { billId: bill.id, reason: 'oops' })).rejects.toThrow(/reverse the payment/i)
+  })
+})
+
+describe('DELETE_BILL', () => {
+  const shipmentAudit = () => [...table(TABLES.audit).values()].filter((row) => row.entityType === 'SHIPMENT' && row.action === 'CARRIER_BILL_DELETED')
+
+  it('keeps the bill as VOID, releases the assignment and writes who, what and why on the shipment', async () => {
+    seedAssignment()
+    const bill = await recordBill()
+    await call('DELETE_BILL', { billId: bill.id, reasonCode: 'DUPLICATE', reason: 'Same invoice sent twice' })
+
+    const gone = table(TABLES.carrierBill).get(String(bill.id)) as Row
+    expect(gone.status).toBe('VOID')
+    expect(gone.apOpen).toBeUndefined()
+    expect(gone.voidReason).toBe('Duplicate: Same invoice sent twice')
+    const assignment = table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row
+    expect(assignment.apStatus).toBe('AWAITING_INVOICE')
+
+    const entries = shipmentAudit()
+    expect(entries).toHaveLength(1)
+    expect(entries[0].entityId).toBe(SHIPMENT_ID)
+    const changes = JSON.parse(String(entries[0].changes)) as Row
+    expect(changes).toMatchObject({ billId: bill.id, why: 'Duplicate: Same invoice sent twice' })
+    expect(typeof entries[0].user).toBe('string')
+    // The bill's own entry is still written.
+    expect([...table(TABLES.audit).values()].some((row) => row.entityType === 'CarrierBill' && row.action === 'DELETE_BILL')).toBe(true)
+  })
+
+  it('needs a coded reason, and details when the reason is Other', async () => {
+    seedAssignment()
+    const bill = await recordBill()
+    await expect(call('DELETE_BILL', { billId: bill.id })).rejects.toThrow(/why the bill is being deleted/i)
+    await expect(call('DELETE_BILL', { billId: bill.id, reasonCode: 'NOPE' })).rejects.toThrow(/why the bill is being deleted/i)
+    await expect(call('DELETE_BILL', { billId: bill.id, reasonCode: 'OTHER' })).rejects.toThrow(/say why/i)
+    await call('DELETE_BILL', { billId: bill.id, reasonCode: 'OTHER', reason: 'Carrier never moved it' })
+    expect((table(TABLES.carrierBill).get(String(bill.id)) as Row).voidReason).toBe('Other: Carrier never moved it')
+  })
+
+  it('takes an approved bill out of the pay run it was selected into', async () => {
+    seedAssignment()
+    const bill = await recordBill({ approve: true })
+    await call('SELECT_BILLS_FOR_PAYMENT', { billIds: [bill.id] })
+    expect((table(TABLES.carrierBill).get(String(bill.id)) as Row).selectedForPayment).toBe(true)
+    await call('DELETE_BILL', { billId: bill.id, reasonCode: 'LOAD_CANCELLED' })
+    const gone = table(TABLES.carrierBill).get(String(bill.id)) as Row
+    expect(gone.status).toBe('VOID')
+    expect(gone.selectedForPayment).toBeUndefined()
+    expect(gone.selectedAt).toBeUndefined()
+  })
+
+  it('refuses a bill that has been paid, in part or in full, and writes nothing on the shipment', async () => {
+    seedAssignment()
+    const bill = await recordBill({ approve: true })
+    await call('RECORD_AP_PAYMENT', {
+      carrierId: CARRIER_ID,
+      paidAt: '2026-10-25',
+      method: 'ACH',
+      amountCents: 10_000,
+      applications: [{ billId: bill.id, amountCents: 10_000 }],
+    })
+    await expect(call('DELETE_BILL', { billId: bill.id, reasonCode: 'ENTERED_IN_ERROR' })).rejects.toThrow(/reverse the payment/i)
+    expect(shipmentAudit()).toHaveLength(0)
+  })
+
+  it('refuses a bill that is already deleted', async () => {
+    seedAssignment()
+    const bill = await recordBill()
+    await call('DELETE_BILL', { billId: bill.id, reasonCode: 'DUPLICATE' })
+    await expect(call('DELETE_BILL', { billId: bill.id, reasonCode: 'DUPLICATE' })).rejects.toThrow(/already deleted/i)
   })
 })
 

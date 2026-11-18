@@ -21,7 +21,7 @@ import { BILL_STATUS_LABEL, payToLabel, paymentInfoFor, remitEmailOf } from '../
 import { estimatedDueAt, proOf, termsLabel, type BillFactsIndex } from '../apQueue'
 import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
-export function BillDrawer({ bill, facts, infos, onClose, onChanged, onAdjustPay, onSetDates, onPaymentInfo, reviewFlag, onClearReview }: {
+export function BillDrawer({ bill, facts, infos, onClose, onChanged, onAdjustPay, onSetDates, onPaymentInfo, reviewFlag, onClearReview, onDelete }: {
   bill: CarrierBillRecord
   facts: BillFactsIndex
   infos: readonly CarrierPaymentInfo[]
@@ -34,6 +34,8 @@ export function BillDrawer({ bill, facts, infos, onClose, onChanged, onAdjustPay
   /** The shipment's Needs review flag, when it has one, and the way to mark it checked. */
   reviewFlag?: Pick<FinanceReviewShipment, 'financeReviewReason' | 'financeReviewApNote'>
   onClearReview?: (bill: CarrierBillRecord) => void
+  /** Opens the Delete bill dialog; the page owns it. */
+  onDelete?: (bill: CarrierBillRecord) => void
 }) {
   const [busy, setBusy] = useState(false)
   const fact = facts.get(bill.shipmentId)
@@ -81,6 +83,9 @@ export function BillDrawer({ bill, facts, infos, onClose, onChanged, onAdjustPay
       headerExtra={<TmsBadge tone={bill.status === 'IN_REVIEW' ? 'orange' : bill.status === 'PAID' ? 'green' : 'blue'}>{bill.selectedForPayment ? 'Selected' : BILL_STATUS_LABEL[bill.status]}</TmsBadge>}
       footer={(
         <>
+          {onDelete && (bill.status === 'IN_REVIEW' || bill.status === 'TO_BE_PAID') && (
+            <TmsButton variant="destructive" size="sm" aria-label="Delete bill" disabled={busy} onClick={() => onDelete(bill)}>Delete bill</TmsButton>
+          )}
           <Link className="tms-btn tms-btn-ghost tms-btn-sm" to={`/tms/invoicing/payable/bills/${bill.id}`}>Open full bill</Link>
           <TmsButton variant="ghost" onClick={onClose}>Close</TmsButton>
         </>

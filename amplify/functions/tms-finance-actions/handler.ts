@@ -40,6 +40,7 @@ import {
   saveApSettings,
   unapproveBill,
   voidBill,
+  deleteBill,
   returnBillToExpected,
   setBillDates,
   setBillQuickPay,
@@ -120,6 +121,7 @@ type Action =
   | 'APPROVE_BILL'
   | 'UNAPPROVE_BILL'
   | 'VOID_BILL'
+  | 'DELETE_BILL'
   | 'SET_BILL_DATES'
   | 'RETURN_BILL_TO_EXPECTED'
   | 'SET_BILL_QUICK_PAY'
@@ -172,6 +174,7 @@ const AP_ACTIONS: Record<string, true> = {
   APPROVE_BILL: true,
   UNAPPROVE_BILL: true,
   VOID_BILL: true,
+  DELETE_BILL: true,
   SET_BILL_DATES: true,
   RETURN_BILL_TO_EXPECTED: true,
   SET_BILL_QUICK_PAY: true,
@@ -354,6 +357,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return unapproveBill(input, caller)
     case 'VOID_BILL':
       return voidBill(input, caller)
+    case 'DELETE_BILL':
+      return deleteBill(input, caller)
     case 'SET_BILL_DATES':
       return setBillDates(input, caller)
     case 'RETURN_BILL_TO_EXPECTED':

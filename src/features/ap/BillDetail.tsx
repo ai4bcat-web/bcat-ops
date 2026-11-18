@@ -22,12 +22,13 @@ import { toast } from 'sonner'
 import { VERIFY_PAYMENT_LABEL, VERIFY_PAYMENT_NOTE, isVerifyPaymentBill } from '@/lib/verifyPayment'
 import { TmsAlert, TmsBadge, TmsButton, TmsCard, TmsMetaList, TmsPage, TmsTabs, TmsTimeline } from '@/features/tms/kit'
 import { useCarrierBill } from '@/hooks/useCarrierBill'
-import { graphqlErrorText, unapproveBill, voidBill } from '@/lib/apiClient'
+import { graphqlErrorText, unapproveBill, deleteBill, type BillDeleteReason } from '@/lib/apiClient'
 import { APPROVAL_WARNING_KEYS, billData } from '@/lib/carrierBill'
 import { chicagoDateStr, formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/invoiceBuild'
 import { agingChipFor, formatDay } from '@/features/ar/arViews'
 import { ReasonDialog } from '@/features/ar/components/ReasonDialog'
+import { DeleteBillDialog } from './components/DeleteBillDialog'
 import { AP_PAYEE_KIND_LABEL, AP_PAYMENT_KIND_LABEL, BILL_STATUS_LABEL, paymentsForBill, siblingCarriers } from './apViews'
 import { ApproveBillDialog } from './components/ApproveBillDialog'
 import { SetBillDatesDialog } from './components/SetBillDatesDialog'
@@ -36,7 +37,7 @@ import type { CarrierBillStatus } from '@/types/tms'
 import type { TmsTone } from '@/features/tms/kit'
 import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
-type DetailDialog = { kind: 'approve' } | { kind: 'unapprove' } | { kind: 'void' } | { kind: 'dates' }
+type DetailDialog = { kind: 'approve' } | { kind: 'unapprove' } | { kind: 'delete' } | { kind: 'dates' }
 
 const STATUS_TONE: Record<CarrierBillStatus, TmsTone> = {
   IN_REVIEW: 'purple',
@@ -113,15 +114,15 @@ export function BillDetail() {
       .finally(() => setBusy(false))
   }
 
-  const runVoid = (reason: string) => {
+  const runDelete = (reasonCode: BillDeleteReason, detail: string) => {
     setBusy(true)
-    voidBill({ billId: bill.id, reason })
+    deleteBill({ billId: bill.id, reasonCode, ...(detail ? { reason: detail } : {}) })
       .then(() => {
-        toast.success(`Bill ${label} voided`)
+        toast.success(`Bill ${label} deleted`)
         setDialog(null)
         return refresh()
       })
-      .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not void the bill'))
+      .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not delete the bill'))
       .finally(() => setBusy(false))
   }
 
@@ -175,13 +176,13 @@ export function BillDetail() {
           </TmsButton>
           <TmsButton
             variant="destructive"
-            aria-label="Void bill"
-            // The server refuses a void once any money has touched the bill —
+            aria-label="Delete bill"
+            // The server refuses a delete once any money has touched the bill —
             // cash or credit alike; that payment is reversed first.
             disabled={busy || view.status === 'VOID' || settledCents > 0}
-            onClick={() => setDialog({ kind: 'void' })}
+            onClick={() => setDialog({ kind: 'delete' })}
           >
-            Void
+            Delete bill
           </TmsButton>
         </>
       }
@@ -462,15 +463,12 @@ export function BillDetail() {
           onConfirm={runUnapprove}
         />
       )}
-      {dialog?.kind === 'void' && (
-        <ReasonDialog
-          title={`Void bill ${label}`}
-          description="Voiding releases the assignment for a fresh bill and leaves this one on the record. It cannot be undone."
-          label="Why it is being voided"
-          confirmLabel="Void bill"
+      {dialog?.kind === 'delete' && (
+        <DeleteBillDialog
+          title={`Delete bill ${label}`}
           busy={busy}
           onClose={() => setDialog(null)}
-          onConfirm={runVoid}
+          onConfirm={runDelete}
         />
       )}
     </TmsPage>
