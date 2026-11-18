@@ -10,7 +10,7 @@
  * route to five of them.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, within, act } from '@testing-library/react'
+import { render, screen, fireEvent, within, act, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { ApWorklistRow } from '@/hooks/useApWorklist'
 import type { CarrierBillRecord, LoadCarrierRecord, ShipmentRecord } from '@/types/tms'
@@ -651,3 +651,35 @@ describe('the AP board', () => {
     })
   })
 })
+
+describe('the Paid tab', () => {
+  it('lists every payment ever, files each under the month it was paid, and names an imported bill by its PRO', async () => {
+    const apiClient = await import('@/lib/apiClient')
+    const paidThisMonth = bill({
+      id: 'cb:lcr-abcc:1', status: 'PAID', billNumber: '14525', shipmentNumber: '14525', balanceCents: 0, paidCents: 95_000, netCents: 95_000,
+      billDate: '2026-10-02', billMonth: '2026-10', paidAt: `${TODAY}T21:40:14.191Z`, carrierName: 'Matt Hennings Trucki',
+    })
+    const importedOld = bill({
+      id: 'cb:lcr-aljex25-14375:1', status: 'PAID', billNumber: null, shipmentNumber: '14375', balanceCents: 0, paidCents: 12_500, netCents: 12_500,
+      billDate: '2025-06-01', billMonth: '2025-06', paidAt: '2025-06-05T12:00:00.000Z', carrierName: 'Mmbest Transportation Inc',
+    })
+    // The bills come back month by month, the way the billMonth index returns them.
+    vi.mocked(apiClient.listBillsByMonth).mockImplementation(async (month: string) => (
+      [paidThisMonth, importedOld].filter((b) => b.billMonth === month)
+    ))
+    await setup({ bills: [] })
+    await act(async () => { fireEvent.click(screen.getByRole('tab', { name: /^Paid/ })) })
+    // All time is the default: the October-dated bill paid today and the 2025 payment both show.
+    await waitFor(() => expect(screen.getByText('Matt Hennings Trucki')).toBeTruthy())
+    expect(screen.getByText('Mmbest Transportation Inc')).toBeTruthy()
+    expect(screen.getByText('PRO 14375')).toBeTruthy()
+    expect(screen.queryByText('cb:lcr-aljex25-14375:1')).toBeNull()
+    // Picking the month it was paid in keeps only that month's payments.
+    const picker = screen.getByLabelText('Paid month') as HTMLSelectElement
+    expect([...picker.options].map((o) => o.value)).toEqual(['', TODAY.slice(0, 7), '2025-06'])
+    await act(async () => { fireEvent.change(picker, { target: { value: TODAY.slice(0, 7) } }) })
+    expect(screen.getByText('Matt Hennings Trucki')).toBeTruthy()
+    expect(screen.queryByText('Mmbest Transportation Inc')).toBeNull()
+  })
+})
+
