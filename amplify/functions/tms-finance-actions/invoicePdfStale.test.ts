@@ -50,4 +50,15 @@ describe('invoicePdfIsStale', () => {
   it('judges a PDF rendered before fingerprints existed by its key alone', () => {
     expect(invoicePdfIsStale(invoice({ pdfFingerprint: undefined }))).toBe(false)
   })
+
+  it('judges the stamp by the factored state the PDF prints with: an invoice that never set the flag for a FACTOR customer is stale until it carries the stamp', () => {
+    const plain = invoicePdfFingerprint(invoice())
+    const stamped = invoicePdfFingerprint(invoice({ factored: true }))
+    // Rendered before the stamp existed (fingerprint without the factored suffix), flag never set, customer billed by FACTOR: it prints the stamp now.
+    expect(invoicePdfIsStale(invoice({ pdfFingerprint: plain }), true)).toBe(true)
+    expect(invoicePdfIsStale(invoice({ pdfFingerprint: stamped }), true)).toBe(false)
+    // Not factored (MANUAL customer, a draft pinned to manual, a brokered load): no stamp, nothing stale.
+    expect(invoicePdfIsStale(invoice({ pdfFingerprint: plain }), false)).toBe(false)
+    expect(invoicePdfIsStale(invoice({ pdfFingerprint: stamped, factored: false }), false)).toBe(true)
+  })
 })

@@ -621,15 +621,28 @@ function freightText(input: InvoiceDataInput, order: NonNullable<InvoiceDataInpu
 }
 
 /**
+ * Does this invoice print the factor's stamp and remit-to? Brokered loads are never factored (Ryne 2026-11-16): a generated
+ * invoice's own `factored` decides (so a draft pinned to MANUAL stays manual), and an invoice that never set the flag follows
+ * the customer's billing method (FACTOR) unless the load is brokered. The render and the stored-PDF fingerprint both ask this,
+ * so a PDF rendered before the customer was FACTOR, or before the stamp existed, is seen as stale.
+ */
+export function invoiceIsFactored(
+  invoice: { factored?: boolean | null },
+  customer: Parameters<typeof isFactoredLoad>[0],
+  revDivision: string | null | undefined,
+): boolean {
+  return invoice.factored === true || (invoice.factored !== false && isFactoredLoad(customer, revDivision))
+}
+
+/**
  * The render input for one issued invoice. Everything printable comes from the
  * invoice snapshot where there is one, so re-rendering a six-month-old PDF produces
  * the bill that was sent and not the order as it looks today.
  */
 export function invoiceData(input: InvoiceDataInput): InvoiceInput {
   const { invoice, customer, division, settings } = input
-  // Brokered loads are never factored (Ryne 2026-11-16): a generated invoice's own `factored` decides, then the load.
   const revDivision = (input.bundle.shipment as { revDivision?: string | null } | null | undefined)?.revDivision ?? null
-  const factored = invoice.factored === true || (invoice.factored !== false && isFactoredLoad(customer, revDivision))
+  const factored = invoiceIsFactored(invoice, customer, revDivision)
   const remitTo = invoice.remitTo ?? remitToFor(division, factored ? customer : (customer ? { ...customer, billingMethod: 'MANUAL', factored: false } : customer), settings)
   const billTo: InvoiceBillTo = invoice.billTo ?? {
     name: trimmed(customer?.name) ?? trimmed(invoice.customerName) ?? '',
