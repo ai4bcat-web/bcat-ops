@@ -22,6 +22,8 @@ import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 /** A dense column that also knows how to draw its cell. */
 export interface ApColumn<T> extends DenseColumn<T> {
   render: (row: T) => ReactNode
+  /** The header cell's content (a select-all checkbox), given the rows the list shows after search and filters. */
+  renderHeader?: (shown: T[]) => ReactNode
 }
 
 export interface ApListConfig<T> {
@@ -132,13 +134,17 @@ export function ApDenseList<T>({ config, email, onRefresh, pageFilters }: {
     validKeys: catalog.map((c) => c.key),
     defaultSort: null,
   })
+  const shown = useMemo(
+    () => sortDenseRows(filterRows(searchRows(rows, columns, search), columns, filters), columns, prefs.sort),
+    [rows, columns, filters, prefs.sort, search],
+  )
   const lead = useMemo(() => columns.filter((c) => c.fixed && isLead(c)), [columns])
   const trail = useMemo(() => columns.filter((c) => c.fixed && !isLead(c)), [columns])
   const gridColumns = useMemo(() => [
-    ...lead,
+    ...lead.map((c) => (c.renderHeader ? { ...c, headerContent: c.renderHeader(shown) } : c)),
     ...prefs.columns.map((k) => catalog.find((c) => c.key === k)).filter((c): c is ApColumn<T> => c != null),
     ...trail,
-  ], [lead, trail, catalog, prefs.columns])
+  ], [lead, trail, catalog, prefs.columns, shown])
 
   const setColumnFilter = useCallback((key: string, next: DenseColumnFilter | null) => {
     setFilters((prev) => {
@@ -149,10 +155,6 @@ export function ApDenseList<T>({ config, email, onRefresh, pageFilters }: {
     })
   }, [])
 
-  const shown = useMemo(
-    () => sortDenseRows(filterRows(searchRows(rows, columns, search), columns, filters), columns, prefs.sort),
-    [rows, columns, filters, prefs.sort, search],
-  )
   const renderCell = useCallback(
     (row: T, key: string) => columns.find((c) => c.key === key)?.render(row) ?? null,
     [columns],

@@ -467,7 +467,7 @@ export function DenseGrid<T>({
                           {direction === 'desc' && <ArrowDown size={11} aria-hidden="true" />}
                         </button>
                       ) : (
-                        <span className="tms-dg-th-label">{col.header}</span>
+                        <span className="tms-dg-th-label">{col.headerContent ?? col.header}</span>
                       )}
                       {kind && (
                         <button

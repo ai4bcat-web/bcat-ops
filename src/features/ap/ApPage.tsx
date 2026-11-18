@@ -1363,6 +1363,27 @@ function payableView({
       filter: false,
       sortable: false,
       fixed: true,
+      // Select all: the bills the list shows right now (after search and filters) that can be ticked.
+      // Only the ticks change: nothing is paid, selected for payment or sent from here.
+      renderHeader: (shown) => {
+        const ids = shown.filter(tickable).map((b) => b.id)
+        if (ids.length === 0) return null
+        const on = ids.filter((id) => selected.includes(id)).length
+        const all = on === ids.length
+        return (
+          <input
+            type="checkbox"
+            aria-label={`Select all ${ids.length} bills shown`}
+            title={all ? `Clear ${ids.length} selected` : `Select all ${ids.length}`}
+            checked={all}
+            ref={(el) => { if (el) el.indeterminate = on > 0 && !all }}
+            onClick={(event) => event.stopPropagation()}
+            onChange={() => onSelect(all
+              ? selected.filter((id) => !ids.includes(id))
+              : [...selected, ...ids.filter((id) => !selected.includes(id))])}
+          />
+        )
+      },
       render: (bill) => (tickable(bill) ? (
         <input
           type="checkbox"
