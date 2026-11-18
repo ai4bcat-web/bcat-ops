@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { buildAgingReport, sortAgingCustomers } from './agingReport'
+import {
+  buildAgingReport, daysSinceStatement, EMPTY_AGING_FILTERS, filterAgingCustomers, sortAgingCustomers, statementAgoLabel,
+} from './agingReport'
 import { ageInvoices } from '@/lib/arAging'
 import type { InvoiceRecord } from '@/types/tms'
 
@@ -62,5 +64,54 @@ describe('buildAgingReport', () => {
       for (const i of c.invoices) Object.keys(i).forEach((k) => keys.add(k))
     }
     for (const k of keys) expect(k).not.toMatch(/cost|carrier|margin|profit/i)
+  })
+})
+
+describe('last aging report sent', () => {
+  const NOW = '2026-11-17T18:00:00Z'
+  const sent: Record<string, { at: string | null; to: string | null }> = {
+    c1: { at: '2026-11-15T03:30:00Z', to: 'ap@acme.com' }, // Nov 14 in Chicago
+    c2: { at: '2026-11-10T20:00:00Z', to: 'bills@beta.com' },
+  }
+  const report = buildAgingReport([
+    inv({ id: 'a', number: 'A' }),
+    inv({ id: 'b', number: 'B', customerId: 'c2', customerName: 'Beta' }),
+    inv({ id: 'c', number: 'C', customerId: 'c3', customerName: 'Gamma' }),
+  ], '2026-11-15', { lastStatementOf: (id) => sent[id] ?? null })
+  const by = (id: string) => report.customers.find((c) => c.customerId === id)!
+
+  it('carries the last send and who it went to onto each customer; never is null', () => {
+    expect(by('c1').lastStatementAt).toBe('2026-11-15T03:30:00Z')
+    expect(by('c1').lastStatementTo).toBe('ap@acme.com')
+    expect(by('c3').lastStatementAt).toBeNull()
+    expect(by('c3').lastStatementTo).toBeNull()
+  })
+
+  it('counts whole Chicago days and words them', () => {
+    expect(daysSinceStatement('2026-11-15T03:30:00Z', NOW)).toBe(3)
+    expect(daysSinceStatement('2026-11-17T01:00:00Z', NOW)).toBe(1)
+    expect(daysSinceStatement(null, NOW)).toBeNull()
+    expect(statementAgoLabel(0)).toBe('today')
+    expect(statementAgoLabel(1)).toBe('yesterday')
+    expect(statementAgoLabel(3)).toBe('3d ago')
+    expect(statementAgoLabel(null)).toBe('')
+  })
+
+  it('sorts never first ascending and the most recent first descending', () => {
+    expect(sortAgingCustomers(report.customers, 'lastStatement', 'asc').map((c) => c.customerId)).toEqual(['c3', 'c2', 'c1'])
+    expect(sortAgingCustomers(report.customers, 'lastStatement', 'desc').map((c) => c.customerId)).toEqual(['c1', 'c2', 'c3'])
+  })
+
+  it('filters never sent, sent in the last 7 days and not sent in 14+ days', () => {
+    const ids = (statement: 'never' | 'recent' | 'stale') => filterAgingCustomers(report.customers, { ...EMPTY_AGING_FILTERS, statement }, NOW).map((c) => c.customerId).sort()
+    expect(ids('never')).toEqual(['c3'])
+    expect(ids('recent')).toEqual(['c1', 'c2'])
+    // c1 went out 3 days ago and c2 7 days ago; only the customer nobody e-mailed counts as 14+ days.
+    expect(ids('stale')).toEqual(['c3'])
+    const old = buildAgingReport([inv({ id: 'x', number: 'X', customerId: 'c9', customerName: 'Old' })], '2026-11-15', {
+      lastStatementOf: () => ({ at: '2026-10-20T15:00:00Z', to: null }),
+    })
+    expect(filterAgingCustomers(old.customers, { ...EMPTY_AGING_FILTERS, statement: 'stale' }, NOW)).toHaveLength(1)
+    expect(filterAgingCustomers(old.customers, { ...EMPTY_AGING_FILTERS, statement: 'recent' }, NOW)).toHaveLength(0)
   })
 })

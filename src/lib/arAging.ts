@@ -417,8 +417,9 @@ function agingCsvOf<Row extends Omit<AgingPartyRow, 'partyId' | 'partyName'>>(
   rows: Row[],
   nameOf: (row: Row) => string,
   buckets: readonly AgingBucket[] = AGING_BUCKETS,
+  extra?: { header: string; valueOf: (row: Row) => unknown },
 ): string {
-  const lines = [header.map(q).join(',')]
+  const lines = [(extra ? [...header, extra.header] : [...header]).map(q).join(',')]
   for (const r of rows) {
     lines.push(
       [
@@ -427,6 +428,7 @@ function agingCsvOf<Row extends Omit<AgingPartyRow, 'partyId' | 'partyName'>>(
         dollars(r.totalCents),
         r.lateCount,
         r.oldestDays,
+        ...(extra ? [extra.valueOf(r)] : []),
       ]
         .map(q)
         .join(','),
@@ -436,8 +438,18 @@ function agingCsvOf<Row extends Omit<AgingPartyRow, 'partyId' | 'partyName'>>(
 }
 
 /** The aging table as a CSV, in the order given (i.e. `ageInvoices` order). */
-export function agingCsv(rows: AgingCustomerRow[]): string {
-  return agingCsvOf(AGING_CSV_HEADER, rows, (r) => r.customerName, AR_AGING_BUCKETS)
+export function agingCsv(rows: AgingCustomerRow[], lastStatementOf?: (customerId: string) => string | null): string {
+  // One more column on the right: the Chicago day the aging report last went out ('' = never).
+  const extra = lastStatementOf
+    ? {
+        header: 'Last aging report',
+        valueOf: (r: AgingCustomerRow) => {
+          const at = lastStatementOf(r.customerId)
+          return at ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(new Date(at)) : ''
+        },
+      }
+    : undefined
+  return agingCsvOf(AGING_CSV_HEADER, rows, (r) => r.customerName, AR_AGING_BUCKETS, extra)
 }
 
 export const AP_AGING_CSV_HEADER = [

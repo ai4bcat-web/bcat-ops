@@ -472,7 +472,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   }
 
   const downloadAgingCsv = () => {
-    saveBlob(new Blob([agingCsv(aging.byCustomer)], { type: 'text/csv' }), `ar-aging-${asOf}.csv`)
+    saveBlob(new Blob([agingCsv(aging.byCustomer, (id) => customerById.get(id)?.agingStatementSentAt ?? null)], { type: 'text/csv' }), `ar-aging-${asOf}.csv`)
   }
 
   const queueTotal = (status: ArQueueStatus) => formatCents(queue[status].reduce((sum, r) => sum + (status === 'INVOICED' ? r.balanceCents : r.amountCents), 0))
@@ -500,6 +500,10 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     refOf: (inv) => customerRefOf(inv.references) ?? boardById.get(inv.shipmentId)?.customerReference ?? null,
     termsOf: (id) => customerById.get(id)?.paymentTermsDays ?? null,
     lastPaidOf: (id) => lastPaidByCustomer.get(id) ?? null,
+    lastStatementOf: (id) => {
+      const c = customerById.get(id)
+      return c ? { at: c.agingStatementSentAt ?? null, to: c.agingStatementSentTo ?? null } : null
+    },
     avgDaysToPayOf: (id) => paymentFacts.daysToPayByCustomer.get(id)?.averageDays ?? null,
   })
   const openInvoiceById = new Map(filteredOpen.map((inv) => [inv.id, inv]))
@@ -779,7 +783,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           customerId={dialog.customerId}
           customerName={dialog.customerName}
           onClose={() => setDialog(null)}
-          onSent={() => { setDialog(null); void refreshAll() }}
+          onSent={() => { setDialog(null); void refreshDirectory(); void refreshAll() }}
         />
       )}
       {dialog?.kind === 'statementPreview' && (
@@ -793,8 +797,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       {dialog?.kind === 'bulkStatement' && (
         <BulkAgingStatementDialog
           customers={dialog.customers}
-          onClose={() => { setDialog(null); void refreshAll() }}
-          onDone={() => { setDialog(null); setStatementSelected([]); void refreshAll() }}
+          onClose={() => { setDialog(null); void refreshDirectory(); void refreshAll() }}
+          onDone={() => { setDialog(null); setStatementSelected([]); void refreshDirectory(); void refreshAll() }}
         />
       )}
       {dialog?.kind === 'pastDue' && (
@@ -1544,8 +1548,11 @@ function agingView({
       filter: 'number', numberOf: (row) => row.oldestDays, numberUnit: 'days',
     },
     {
-      key: 'lastStatement', header: 'Last statement', group: 'Customer',
-      text: (row) => formatDay(customerById.get(row.customerId)?.agingStatementSentAt ?? null) || '—',
+      key: 'lastStatement', header: 'Last aging report', group: 'Customer',
+      text: (row) => {
+        const at = customerById.get(row.customerId)?.agingStatementSentAt
+        return at ? formatDay(chicagoDateStr(at)) : 'Never'
+      },
       sortValue: (row) => customerById.get(row.customerId)?.agingStatementSentAt ?? '',
     },
     { key: 'statement', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 150 },
