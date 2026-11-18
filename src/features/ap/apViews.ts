@@ -393,6 +393,14 @@ export function billsToPay(bills: readonly CarrierBillRecord[]): CarrierBillReco
     .sort((a, b) => a.dueAt.localeCompare(b.dueAt))
 }
 
+/**
+ * Bills paid outside BCAT Ops are archived (Ryne 2026-11-18): they stay PAID but are hidden from the Paid tab unless an
+ * admin asks for them.
+ */
+export function visiblePaidBills(bills: readonly CarrierBillRecord[], includeArchived: boolean): CarrierBillRecord[] {
+  return includeArchived ? [...bills] : bills.filter((b) => !b.archivedAt)
+}
+
 /** What a read actually settled, newest paid first. */
 export function paidBills(bills: readonly CarrierBillRecord[]): CarrierBillRecord[] {
   return bills

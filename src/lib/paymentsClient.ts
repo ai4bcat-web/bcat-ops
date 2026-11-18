@@ -17,7 +17,7 @@ async function gql<T>(query: string, variables: Record<string, unknown>): Promis
 
 const AR_FIELDS = 'id customerId kind receivedAt method reference amountCents appliedCents unappliedCents reversedByPaymentId'
 const AP_FIELDS =
-  'id carrierId kind paidAt method reference amountCents appliedCents unappliedCents reversedByPaymentId pdfKey remittanceSentAt'
+  'id carrierId kind paidAt method reference amountCents appliedCents unappliedCents reversedByPaymentId pdfKey remittanceSentAt archivedAt'
 
 /** Payments are stored at noon UTC on the typed day; the bounds cover whole days. */
 const bounds = (from: string, to: string) => [`${from}T00:00:00.000Z`, `${to}T23:59:59.999Z`]
@@ -53,9 +53,13 @@ export function listArPaymentsInWindow(from: string, to: string): Promise<ArPaym
   return scan<ArPaymentLine>('listArPayments', AR_FIELDS, 'receivedAt', from, to)
 }
 
-/** Every AP cash row paid in `[from, to]` (`YYYY-MM-DD`, inclusive). */
-export function listApPaymentsInWindow(from: string, to: string): Promise<ApPaymentLine[]> {
-  return scan<ApPaymentLine>('listApPayments', AP_FIELDS, 'paidAt', from, to)
+/**
+ * Every AP cash row paid in `[from, to]` (`YYYY-MM-DD`, inclusive). Payments made outside BCAT Ops (archived, Ryne
+ * 2026-11-18) are not cash this system moved, so they are left out.
+ */
+export async function listApPaymentsInWindow(from: string, to: string): Promise<ApPaymentLine[]> {
+  const rows = await scan<ApPaymentLine & { archivedAt?: string | null }>('listApPayments', AP_FIELDS, 'paidAt', from, to)
+  return rows.filter((row) => !row.archivedAt)
 }
 
 /** One Aljex CRED/DEBT memo kept as history (`LegacyAljexRow`); `fields` is the raw AWSJSON. */

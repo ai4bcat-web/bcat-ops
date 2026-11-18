@@ -7,16 +7,16 @@ import { billPaymentLines, type BillPaymentLine } from './accountingStats'
 
 const EMPTY: ReadonlyMap<string, BillPaymentLine> = new Map()
 
-export function useApPaymentLines(enabled: boolean, refreshKey = 0): ReadonlyMap<string, BillPaymentLine> {
+export function useApPaymentLines(enabled: boolean, refreshKey = 0, includeArchived = false): ReadonlyMap<string, BillPaymentLine> {
   const [lines, setLines] = useState<ReadonlyMap<string, BillPaymentLine>>(EMPTY)
   useEffect(() => {
     if (!enabled) return
     let live = true
     Promise.resolve()
-      .then(() => cachedList<ApPaymentRecord[]>(`ap:payments:${refreshKey}`, () => listApPayments(), { ttlMs: 300_000 }))
+      .then(() => cachedList<ApPaymentRecord[]>(`ap:payments:${refreshKey}:${includeArchived ? 'all' : 'live'}`, () => listApPayments({ includeArchived }), { ttlMs: 300_000 }))
       .then((rows) => { if (live) setLines(billPaymentLines(rows)) })
       .catch(() => { /* the split shows everything as not recorded */ })
     return () => { live = false }
-  }, [enabled, refreshKey])
+  }, [enabled, refreshKey, includeArchived])
   return lines
 }

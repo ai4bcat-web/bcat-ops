@@ -3442,6 +3442,10 @@ export interface CarrierBillRecord {
   voidedAt?: string | null
   voidedBy?: string | null
   voidReason?: string | null
+  /** Paid outside BCAT Ops and hidden from the Paid tab (the bill stays PAID); null/absent when live. */
+  archivedAt?: string | null
+  archivedBy?: string | null
+  archivedReason?: string | null
   note?: string | null
   createdBy: string
   updatedBy: string
@@ -3497,6 +3501,10 @@ export interface ApPaymentRecord {
   markedSentAt?: string | null
   markedSentBy?: string | null
   markedSentNote?: string | null
+  /** Paid outside BCAT Ops and hidden from the Paid and Payments views; null/absent when live. */
+  archivedAt?: string | null
+  archivedBy?: string | null
+  archivedReason?: string | null
   lastNoticeId?: string | null
   note?: string | null
   createdBy: string
