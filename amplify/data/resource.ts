@@ -2623,6 +2623,10 @@ const schema = a.schema(stageTypes({
       voidedAt:        a.datetime(),
       voidedBy:        a.string(),
       voidReason:      a.string(),
+      // Paid outside BCAT Ops and hidden from the Paid tab (see ApPayment.archivedAt); the bill stays PAID.
+      archivedAt:      a.datetime(),
+      archivedBy:      a.string(),
+      archivedReason:  a.string(),
       note:            a.string(),
       // Step AG: provenance of an AP-inbox update (only tms-ap-inbox writes these).
       apInboxItemId:   a.string(),
@@ -2681,6 +2685,11 @@ const schema = a.schema(stageTypes({
       markedSentAt:    a.datetime(),
       markedSentBy:    a.string(),
       markedSentNote:  a.string(),
+      // Paid outside BCAT Ops before go-live and hidden from the Paid and Payments views (Ryne 2026-11-18).
+      // The bill stays PAID; this row is kept, not deleted, so UNARCHIVE_AP_PAYMENTS can bring it back.
+      archivedAt:      a.datetime(),
+      archivedBy:      a.string(),
+      archivedReason:  a.string(),
       lastNoticeId:    a.string(),
       note:            a.string(),
       createdBy:       a.string().required(),

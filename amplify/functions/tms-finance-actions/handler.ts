@@ -56,6 +56,7 @@ import {
   setPayeeRemitEmail,
   setFactorRemitEmail,
 } from './apPayments'
+import { archiveApPaymentsThrough, unarchiveApPayments } from './archivePayments'
 import { repointInvoicedCustomer } from './repoint'
 import { changeInvoiceCustomer } from './changeCustomer'
 import { brokerageRepRollup } from './brokerageRep'
@@ -134,6 +135,8 @@ type Action =
   | 'RENDER_REMITTANCE_PDF'
   | 'MARK_REMITTANCE_SENT'
   | 'SAVE_AP_SETTINGS'
+  | 'ARCHIVE_AP_PAYMENTS_THROUGH'
+  | 'UNARCHIVE_AP_PAYMENTS'
   | 'RUN_COMMISSIONS'
   | 'PREVIEW_COMMISSIONS'
   | 'APPROVE_COMMISSION'
@@ -186,6 +189,8 @@ const AP_ACTIONS: Record<string, true> = {
   RENDER_REMITTANCE_PDF: true,
   MARK_REMITTANCE_SENT: true,
   SAVE_AP_SETTINGS: true,
+  ARCHIVE_AP_PAYMENTS_THROUGH: true,
+  UNARCHIVE_AP_PAYMENTS: true,
 }
 
 /** Settings are an admin act in every router here, posting rule or not. */
@@ -194,6 +199,9 @@ const ADMIN_ONLY_ACTIONS: Record<string, true> = {
   SAVE_AP_SETTINGS: true,
   SAVE_COMMISSION_SETTINGS: true,
   REPOINT_INVOICED_CUSTOMER: true,
+  // Hiding years of payment history is an admin act, never a page one.
+  ARCHIVE_AP_PAYMENTS_THROUGH: true,
+  UNARCHIVE_AP_PAYMENTS: true,
 }
 
 /**
@@ -382,6 +390,10 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return markRemittanceSent(input, caller)
     case 'SAVE_AP_SETTINGS':
       return saveApSettings(input, caller)
+    case 'ARCHIVE_AP_PAYMENTS_THROUGH':
+      return archiveApPaymentsThrough(input, caller)
+    case 'UNARCHIVE_AP_PAYMENTS':
+      return unarchiveApPayments(input, caller)
     case 'RUN_COMMISSIONS':
       return runCommissions(input, caller)
     case 'PREVIEW_COMMISSIONS':

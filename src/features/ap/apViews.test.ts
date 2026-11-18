@@ -7,7 +7,7 @@ import {
   billsExpected, billsAging, billsSelected, canSelectForPayment, invoiceAgeBuckets, payToLabel, paymentInfoFor, remitEmailOf, remittanceStatusOf, AP_TABS,
   billGates, applyToBePaidFilters, EMPTY_TO_BE_PAID_FILTERS, factorNameFor, isFactorPaid, payeeNameFor, payToLabelFor, setFactorNamesForLabels,
   payToStatusFor, payToWorklist, PAY_TO_STATUS_LABEL,
-  paidBills, paidInMonth, paidMonthOf, paidMonthOptions,
+  paidBills, paidInMonth, paidMonthOf, paidMonthOptions, visiblePaidBills,
   legIndex, legLabel, legSuffixOf, multiCarrierLoadIds, withLegSuffix,
 } from './apViews'
 import { billMonthsSince } from './useAllPaidBills'
@@ -399,5 +399,20 @@ describe('leg numbers on a load that pays several carriers (14598-1, 14598-2)', 
   it('sorts 14598-1 and 14598-2 between 14598 and 14600 under the grid\'s numeric collation', () => {
     const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
     expect(['14600', '14598-2', '9999', '14598-1', '14598'].sort(collator.compare)).toEqual(['9999', '14598', '14598-1', '14598-2', '14600'])
+  })
+})
+
+describe('bills paid outside BCAT Ops are archived (Ryne 2026-11-18)', () => {
+  const live = { id: 'a', status: 'PAID', billDate: '2026-10-02', paidAt: '2026-11-18T21:40:00.000Z' } as unknown as CarrierBillRecord
+  const old = { id: 'b', status: 'PAID', billDate: '2025-06-01', paidAt: '2025-06-05T12:00:00.000Z', archivedAt: '2026-11-18T23:00:00.000Z' } as unknown as CarrierBillRecord
+
+  it('hides archived bills by default and brings them back on request, leaving the order alone', () => {
+    expect(visiblePaidBills([live, old], false).map((b) => b.id)).toEqual(['a'])
+    expect(visiblePaidBills([live, old], true).map((b) => b.id)).toEqual(['a', 'b'])
+  })
+
+  it('files what is left by the month it was paid, so the picker offers no month that only holds archived bills', () => {
+    expect(paidMonthOptions(paidBills(visiblePaidBills([live, old], false)))).toEqual(['2026-11'])
+    expect(paidMonthOptions(paidBills(visiblePaidBills([live, old], true)))).toEqual(['2026-11', '2025-06'])
   })
 })

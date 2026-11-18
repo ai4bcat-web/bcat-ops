@@ -47,7 +47,7 @@ import {
   AP_PAYMENT_KIND_LABEL, AP_PAYMENT_METHOD_LABEL, AP_PAYEE_KIND_LABEL, AP_TABS, BILL_STATUS_LABEL,
   EMPTY_TO_BE_PAID_FILTERS, applyToBePaidFilters, avgDaysToPayBills, awaitingInvoiceTotals, billCarrierOptions,
   billGates, type BillGates, billsAging, billsExpected, billsSelected, canSelectForPayment, invoiceAgeBuckets, isOwnFleet, paidBills,
-  paidInMonth, paidMonthOptions,
+  paidInMonth, paidMonthOptions, visiblePaidBills,
   paymentInfoFor, payeeNameFor, isFactorPaid, payToStatusFor, payToWorklist, PAY_TO_STATUS_LABEL, PAY_TO_STATUS_TITLE, quickPayLabel, setFactorNamesForLabels, remitEmailOf, remitEmailOfPayment, remittanceStatusOf, selectionBalanceCents,
   selectionCarrierId, sharedProLabel, sharedProIndex, multiCarrierLoadIds, withLegSuffix, type ApTabKey, type SharedProIndex, type ToBePaidFilters,
 } from './apViews'
@@ -177,7 +177,9 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const [dialog, setDialog] = useState<ApDialog | null>(null)
   // Bumped after every dialog finishes, so a payment just posted shows how its remittance went.
   const [payRefresh, setPayRefresh] = useState(0)
-  const apPaymentLines = useApPaymentLines(tab === 'paid', payRefresh)
+  // Payments made outside BCAT Ops are archived and hidden; an admin can look at them again (Ryne 2026-11-18).
+  const [includeArchived, setIncludeArchived] = useState(false)
+  const apPaymentLines = useApPaymentLines(tab === 'paid', payRefresh, isAdmin && includeArchived)
   const [reportsOpen, setReportsOpen] = useState<AccountingReportKind | 'menu' | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -339,10 +341,12 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const agingRows = useMemo(() => applyToBePaidFilters(agingBills, filters, asOf, payInfos), [agingBills, filters, asOf, payInfos])
   const selectedRows = useMemo(() => applyToBePaidFilters(selectedBills, filters, asOf, payInfos), [selectedBills, filters, asOf, payInfos])
   const [paidMonth, setPaidMonth] = useState('')
-  const paidMonthChoices = useMemo(() => paidMonthOptions(paidBills(allPaidBills)), [allPaidBills])
+  const paidPool = useMemo(() => paidBills(visiblePaidBills(allPaidBills, isAdmin && includeArchived)), [allPaidBills, isAdmin, includeArchived])
+  const archivedPaidCount = useMemo(() => allPaidBills.filter((b) => b.status === 'PAID' && b.archivedAt).length, [allPaidBills])
+  const paidMonthChoices = useMemo(() => paidMonthOptions(paidPool), [paidPool])
   const settled = useMemo(
-    () => paidInMonth(paidBills(allPaidBills), paidMonth).filter((b) => byParty(b) && byDivision(b)),
-    [allPaidBills, paidMonth, byParty, byDivision],
+    () => paidInMonth(paidPool, paidMonth).filter((b) => byParty(b) && byDivision(b)),
+    [paidPool, paidMonth, byParty, byDivision],
   )
   const [verifyOnlyPaid, setVerifyOnlyPaid] = useState(false)
   const settledShown = useMemo(() => (verifyOnlyPaid ? settled.filter(isVerifyPaymentBill) : settled), [settled, verifyOnlyPaid])
@@ -635,6 +639,10 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       month: paidMonth,
       loading: allPaid.loading,
       onMonth: setPaidMonth,
+      canSeeArchived: isAdmin,
+      archivedCount: archivedPaidCount,
+      includeArchived: isAdmin && includeArchived,
+      onIncludeArchived: setIncludeArchived,
     })
     : tab === 'payments' ? paymentsView({
       banner: errorBanner,
@@ -1909,7 +1917,7 @@ function paidProText(bill: CarrierBillRecord): string {
   return pro ? `${pro}${bill.legSuffix ?? ''}` : '—'
 }
 
-function paidView({ banner, bills, shared, months, month, loading, onMonth, verifyOnly, verifyCount, onVerifyOnly, infos, lines, onAddRemit }: {
+function paidView({ banner, bills, shared, months, month, loading, onMonth, verifyOnly, verifyCount, onVerifyOnly, infos, lines, onAddRemit, canSeeArchived, archivedCount, includeArchived, onIncludeArchived }: {
   banner: ReactNode
   bills: CarrierBillRecord[]
   shared: SharedProIndex
@@ -1924,6 +1932,11 @@ function paidView({ banner, bills, shared, months, month, loading, onMonth, veri
   /** The payment behind each paid bill, with how its remittance went. */
   lines: ReadonlyMap<string, BillPaymentLine>
   onAddRemit: (bill: CarrierBillRecord) => void
+  /** Admins can bring back the bills paid outside BCAT Ops (archived) to look at them. */
+  canSeeArchived: boolean
+  archivedCount: number
+  includeArchived: boolean
+  onIncludeArchived: (on: boolean) => void
 }): ListView {
   const statusOf = (bill: CarrierBillRecord) => remittanceStatusOf(lines.get(bill.id), remitEmailOf(bill, infos))
   const columns: ApColumn<CarrierBillRecord>[] = [
@@ -1978,6 +1991,12 @@ function paidView({ banner, bills, shared, months, month, loading, onMonth, veri
         >
           Verify payment ({verifyCount})
         </TmsButton>
+        {canSeeArchived && archivedCount > 0 && (
+          <label className="flex items-center gap-1 text-sm" title="Bills paid outside BCAT Ops (on or before Nov 12, 2026) are hidden. Admins can show them.">
+            <input type="checkbox" checked={includeArchived} onChange={(e) => onIncludeArchived(e.target.checked)} />
+            Include archived ({archivedCount})
+          </label>
+        )}
         {loading && <span className="text-sm tms-muted">Loading…</span>}
       </>
     ),

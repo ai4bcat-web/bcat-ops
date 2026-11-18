@@ -8162,7 +8162,7 @@ const CARRIER_BILL_FIELDS = `
   lines grossCents quickPayFeeCents netCents billedCents varianceCents
   paidCents creditedCents balanceCents apOpen documentId
   approvedAt approvedBy approvalWarnings docsOverrideAt docsOverrideBy docsOverrideNote
-  paidAt voidedAt voidedBy voidReason note
+  paidAt voidedAt voidedBy voidReason archivedAt archivedBy archivedReason note
   apInboxItemId apInboxSourceUrl apInboxAppliedAt
   createdBy updatedBy version createdAt updatedAt
 `
@@ -8174,6 +8174,7 @@ const AP_PAYMENT_FIELDS = `
   loadCarrierId reversesPaymentId reversedByPaymentId
   pdfKey pdfVersion remittanceSentAt remittanceSentTo remittanceSentCc remittanceCount remittanceAttempts
   markedSentAt markedSentBy markedSentNote lastNoticeId note
+  archivedAt archivedBy archivedReason
   createdBy createdAt updatedAt
 `
 const AP_PAYMENT_JSON_FIELDS: (keyof ApPaymentRecord)[] = ['applications', 'creditApplications', 'remitTo']
@@ -8214,8 +8215,11 @@ export async function getCarrierBill(id: string): Promise<CarrierBillRecord | nu
   }
 }
 
-/** One carrier's bills, newest recorded first — the order the carrier AP tab renders. */
-export async function listBillsByCarrier(carrierId: string): Promise<CarrierBillRecord[]> {
+/**
+ * One carrier's bills, newest recorded first — the order the carrier AP tab renders. Bills paid outside BCAT Ops
+ * (archived, Ryne 2026-11-18) are left out unless `includeArchived`.
+ */
+export async function listBillsByCarrier(carrierId: string, opts: { includeArchived?: boolean } = {}): Promise<CarrierBillRecord[]> {
   if (!apModelsAvailable) return []
   try {
     const rows = await listTrackingIndex<CarrierBillRecord>({
@@ -8227,7 +8231,7 @@ export async function listBillsByCarrier(carrierId: string): Promise<CarrierBill
       limit: 500,
       sortDirection: 'DESC',
     })
-    return rows.map((bill) => parseArJson(bill, CARRIER_BILL_JSON_FIELDS))
+    return rows.filter((bill) => opts.includeArchived || !bill.archivedAt).map((bill) => parseArJson(bill, CARRIER_BILL_JSON_FIELDS))
   } catch (err) {
     forgetApModels(err)
     return []
@@ -8280,20 +8284,23 @@ export async function listBillsByMonth(month: string): Promise<CarrierBillRecord
   }
 }
 
-/** Every carrier money row, all carriers: the method and check/ref # behind each paid bill. */
-export async function listApPayments(): Promise<ApPaymentRecord[]> {
+/**
+ * Every carrier money row, all carriers: the method and check/ref # behind each paid bill. Payments made outside
+ * BCAT Ops (archived, Ryne 2026-11-18) are left out unless `includeArchived`.
+ */
+export async function listApPayments(opts: { includeArchived?: boolean } = {}): Promise<ApPaymentRecord[]> {
   if (!apModelsAvailable) return []
   try {
     const rows = await listAll<ApPaymentRecord>('listApPayments', AP_PAYMENT_FIELDS, 1000)
-    return rows.map((p) => parseArJson(p, AP_PAYMENT_JSON_FIELDS))
+    return rows.filter((p) => opts.includeArchived || !p.archivedAt).map((p) => parseArJson(p, AP_PAYMENT_JSON_FIELDS))
   } catch (err) {
     forgetApModels(err)
     return []
   }
 }
 
-/** One carrier's money rows — payments, credits and reversals — newest paid first. */
-export async function listApPaymentsByCarrier(carrierId: string): Promise<ApPaymentRecord[]> {
+/** One carrier's money rows — payments, credits and reversals — newest paid first (archived rows only with `includeArchived`). */
+export async function listApPaymentsByCarrier(carrierId: string, opts: { includeArchived?: boolean } = {}): Promise<ApPaymentRecord[]> {
   if (!apModelsAvailable) return []
   try {
     const rows = await listTrackingIndex<ApPaymentRecord>({
@@ -8305,7 +8312,7 @@ export async function listApPaymentsByCarrier(carrierId: string): Promise<ApPaym
       limit: 500,
       sortDirection: 'DESC',
     })
-    return rows.map((p) => parseArJson(p, AP_PAYMENT_JSON_FIELDS))
+    return rows.filter((p) => opts.includeArchived || !p.archivedAt).map((p) => parseArJson(p, AP_PAYMENT_JSON_FIELDS))
   } catch (err) {
     forgetApModels(err)
     return []

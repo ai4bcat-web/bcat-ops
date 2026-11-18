@@ -10,7 +10,7 @@
  * route to five of them.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, within, act, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, within, act, waitFor, cleanup } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { ApWorklistRow } from '@/hooks/useApWorklist'
 import type { CarrierBillRecord, LoadCarrierRecord, ShipmentRecord } from '@/types/tms'
@@ -20,6 +20,7 @@ import { listCarrierPaymentInfo } from '@/lib/apiClient'
 import { ApPage } from './ApPage'
 
 const worklistMock = vi.hoisted(() => vi.fn())
+const authState = vi.hoisted(() => ({ isAdmin: false }))
 const openBillsMock = vi.hoisted(() => vi.fn())
 const carrierApMock = vi.hoisted(() => vi.fn())
 const needsReviewRows = vi.hoisted(() => ({ rows: [] as unknown[] }))
@@ -50,7 +51,7 @@ vi.mock('@/hooks/useCarriers', () => ({
   useCarriers: () => ({ carriers: [], loading: false, error: null, refresh: vi.fn(), replace: vi.fn() }),
 }))
 vi.mock('@/hooks/useAuth', () => ({
-  useAuth: () => ({ isAdmin: false, isOwner: false, hasPageAccess: () => true }),
+  useAuth: () => ({ isAdmin: authState.isAdmin, isOwner: false, hasPageAccess: () => true }),
 }))
 vi.mock('@/lib/directoryCsv', async (original) => ({ ...(await original<typeof import('@/lib/directoryCsv')>()), downloadCsv: downloadCsvMock }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), message: vi.fn() } }))
@@ -724,6 +725,44 @@ describe('the Paid tab', () => {
     await act(async () => { fireEvent.change(picker, { target: { value: TODAY.slice(0, 7) } }) })
     expect(screen.getByText('Matt Hennings Trucki')).toBeTruthy()
     expect(screen.queryByText('Mmbest Transportation Inc')).toBeNull()
+  })
+
+  it('hides bills paid outside BCAT Ops (archived) and shows them again only to an admin who asks (Ryne 2026-11-18)', async () => {
+    const apiClient = await import('@/lib/apiClient')
+    const live = bill({
+      id: 'cb:live:1', status: 'PAID', billNumber: '14525', shipmentNumber: '14525', balanceCents: 0, paidCents: 95_000, netCents: 95_000,
+      billDate: '2026-10-02', billMonth: '2026-10', paidAt: `${TODAY}T21:40:14.191Z`, carrierName: 'Matt Hennings Trucki',
+    })
+    const archived = bill({
+      id: 'cb:old:1', status: 'PAID', billNumber: null, shipmentNumber: '9001', balanceCents: 0, paidCents: 50_000, netCents: 50_000,
+      billDate: '2025-06-01', billMonth: '2025-06', paidAt: '2025-06-05T12:00:00.000Z', carrierName: 'Old Outside Carrier',
+      archivedAt: '2026-11-18T23:00:00.000Z', archivedReason: 'Paid outside BCAT Ops (on or before 2026-11-12)',
+    })
+    vi.mocked(apiClient.listBillsByMonth).mockImplementation(async (month: string) => [live, archived].filter((b) => b.billMonth === month))
+    authState.isAdmin = false
+    try {
+      await setup({ bills: [] })
+      await act(async () => { fireEvent.click(screen.getByRole('tab', { name: /^Paid/ })) })
+      await waitFor(() => expect(screen.getByText('Matt Hennings Trucki')).toBeTruthy())
+      expect(screen.queryByText('Old Outside Carrier')).toBeNull()
+      // A non-admin never sees the toggle.
+      expect(screen.queryByLabelText(/Include archived/)).toBeNull()
+    } finally {
+      authState.isAdmin = false
+    }
+    cleanup()
+    authState.isAdmin = true
+    try {
+      await setup({ bills: [] })
+      await act(async () => { fireEvent.click(screen.getByRole('tab', { name: /^Paid/ })) })
+      await waitFor(() => expect(screen.getByText('Matt Hennings Trucki')).toBeTruthy())
+      expect(screen.queryByText('Old Outside Carrier')).toBeNull()
+      const toggle = await screen.findByLabelText(/Include archived \(1\)/)
+      await act(async () => { fireEvent.click(toggle) })
+      expect(screen.getByText('Old Outside Carrier')).toBeTruthy()
+    } finally {
+      authState.isAdmin = false
+    }
   })
 })
 
