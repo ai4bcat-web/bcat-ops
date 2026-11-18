@@ -372,6 +372,7 @@ describe('the AP board', () => {
       const hs = headers(/^AP aging/)
       expect(hs.some((h) => /CUSTOMER/.test(h))).toBe(true)
       expect(hs.some((h) => /DAYS PAST DUE/.test(h))).toBe(true)
+      expect(hs.some((h) => /^AGE$/.test(h.trim()))).toBe(false) // one column, not an Age beside Days past due
       const table = within(screen.getByRole('table', { name: /^AP aging/ }))
       expect(table.getByText('75 days late')).toBeTruthy()
       expect(table.getByText('1 day late')).toBeTruthy()
@@ -384,7 +385,8 @@ describe('the AP board', () => {
       const hs = headers(/^AP selected/)
       expect(hs.some((h) => /CUSTOMER/.test(h))).toBe(true)
       expect(hs.some((h) => /DAYS PAST DUE/.test(h))).toBe(true)
-      expect(within(screen.getByRole('table', { name: /^AP selected/ })).getAllByText('61 days late').length).toBeGreaterThan(0)
+      expect(hs.some((h) => /^AGE$/.test(h.trim()))).toBe(false)
+      expect(within(screen.getByRole('table', { name: /^AP selected/ })).getAllByText('61 days late')).toHaveLength(1) // one pill per bill
     })
 
     it('sorts Days past due descending with the most overdue first', async () => {
