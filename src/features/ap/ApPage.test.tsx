@@ -23,6 +23,7 @@ const openBillsMock = vi.hoisted(() => vi.fn())
 const carrierApMock = vi.hoisted(() => vi.fn())
 const needsReviewRows = vi.hoisted(() => ({ rows: [] as unknown[] }))
 const needsReviewRefresh = vi.hoisted(() => vi.fn())
+const downloadCsvMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/hooks/useApWorklist', () => ({ useApWorklist: worklistMock }))
 vi.mock('@/hooks/useOpenBills', () => ({ useOpenBills: openBillsMock }))
@@ -49,6 +50,7 @@ vi.mock('@/hooks/useCarriers', () => ({
 vi.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({ isAdmin: false, isOwner: false, hasPageAccess: () => true }),
 }))
+vi.mock('@/lib/directoryCsv', async (original) => ({ ...(await original<typeof import('@/lib/directoryCsv')>()), downloadCsv: downloadCsvMock }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), message: vi.fn() } }))
 // The AP inbox has its own tests; here it would only drag its router into a test about the board.
 vi.mock('./inbox/useApInbox', () => ({
@@ -566,6 +568,53 @@ describe('the AP board', () => {
       expect(screen.getByText('Triumph')).toBeTruthy()
       expect(screen.getByText('ap@triumph.test')).toBeTruthy()
       expect(screen.getByRole('button', { name: 'Payment info for bill BL-1' })).toBeTruthy()
+    })
+
+    describe('export', () => {
+      beforeEach(() => { downloadCsvMock.mockClear() })
+
+      it('is off while nothing is on the Selected tab', async () => {
+        await setup({ bills: two() })
+        fireEvent.click(screen.getByRole('tab', { name: /^Selected/ }))
+        expect((screen.getByRole('button', { name: 'Export all selected payables' }) as HTMLButtonElement).disabled).toBe(true)
+        expect(screen.queryByRole('button', { name: 'Export the selected payables showing' })).toBeNull()
+      })
+
+      it('is not on the Aging tab', async () => {
+        await setup({ bills: two() })
+        fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
+        expect(screen.queryByRole('button', { name: 'Export all selected payables' })).toBeNull()
+      })
+
+      it('saves every bill on the tab with a total per payee, whether or not it is ticked', async () => {
+        await setup({ bills: two().map((b) => ({ ...b, selectedForPayment: true })) })
+        fireEvent.click(screen.getByRole('tab', { name: /^Selected/ }))
+        fireEvent.click(screen.getByLabelText('Select bill BL-1'))
+        fireEvent.click(screen.getByRole('button', { name: 'Export all selected payables' }))
+        expect(downloadCsvMock).toHaveBeenCalledTimes(1)
+        const [name, csv] = downloadCsvMock.mock.calls[0] as [string, string]
+        expect(name).toBe(`selected-payables-${TODAY}.csv`)
+        expect(csv).toContain('BL-1')
+        expect(csv).toContain('RL-1')
+        expect(csv).toContain('Acme Foods')
+        expect(csv).toContain('PAY RUN TOTALS BY PAYEE')
+        expect(csv).toContain('GRAND TOTAL,2,2300.00,1,1500.00')
+      })
+
+      it('offers the filtered list too once a page filter narrows the tab', async () => {
+        await setup({ bills: two().map((b) => ({ ...b, selectedForPayment: true })) })
+        fireEvent.click(screen.getByRole('tab', { name: /^Selected/ }))
+        fireEvent.click(screen.getByRole('button', { name: /Carrier is/ }))
+        fireEvent.change(screen.getByLabelText('Filter carrier'), { target: { value: 'car2' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Export the selected payables showing' }))
+        let csv = (downloadCsvMock.mock.calls[0] as [string, string])[1]
+        expect(csv).toContain('RL-1')
+        expect(csv).not.toContain('BL-1')
+        fireEvent.click(screen.getByRole('button', { name: 'Export all selected payables' }))
+        csv = (downloadCsvMock.mock.calls[1] as [string, string])[1]
+        expect(csv).toContain('BL-1')
+        expect(csv).toContain('RL-1')
+      })
     })
 
     it('shows the summary strip figures in cents-exact dollars when opened', async () => {

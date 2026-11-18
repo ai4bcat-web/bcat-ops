@@ -35,6 +35,7 @@ import {
 } from '@/lib/arAging'
 import { chicagoDateStr } from '@/lib/date'
 import { saveBlob } from '@/lib/download'
+import { downloadCsv } from '@/lib/directoryCsv'
 import { formatCents } from '@/lib/invoiceBuild'
 import { AgingStrip } from '@/features/ar/AgingStrip'
 import { AP_STRIP_LABELS } from '@/features/ar/agingStripLabels'
@@ -68,6 +69,7 @@ import { ApAgingReportTable } from './components/ApAgingReportTable'
 import { CashRequirementsTab } from './components/CashRequirementsTab'
 import { buildApAgingReport } from './apAgingReport'
 import { cashRequirements } from './cashFridays'
+import { selectedPayablesCsv, selectedPayablesFilename } from './apSelectedExport'
 import { billCustomerName, billDaysPastDue, daysLateLabel, proOf, termsLabel, type ApReportKind, type BillFactsIndex } from './apQueue'
 import { payablesSummary, useApSummaryModel } from './useApSummaryModel'
 import { tabFromUrl } from '@/features/finance/accountingLinks'
@@ -534,6 +536,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       allBills: tab === 'aging' ? agingBills : selectedBills,
       shared,
       infos: payInfos,
+      review: reviewByShipment,
       gatesOf: (bill) => billGates({
         bill,
         row: reviewRows.get(bill.loadCarrierId),
@@ -1305,7 +1308,7 @@ function reviewView({
  * approval actions and no checkbox: it has gates to clear before it can be chosen.
  */
 function payableView({
-  mode, errorBanner, facts, onOpen, bills, allBills, shared, infos, gatesOf, filters, showFilters, selected, asOf, busy,
+  mode, errorBanner, facts, onOpen, bills, allBills, shared, infos, review, gatesOf, filters, showFilters, selected, asOf, busy,
   onToggleFilters, onFilters, onSelect, onInfo, onPay, onPaySelected, onApprove, onDates, onCharges, onVoid, onUnapprove,
   onSelectForPayment, onUnselect, onReturnToExpected, onMoveToSelected, onAddRemit,
 }: {
@@ -1317,6 +1320,8 @@ function payableView({
   allBills: CarrierBillRecord[]
   shared: SharedProIndex
   infos: readonly CarrierPaymentInfo[]
+  /** Needs review flags by shipment id, for the Selected export's flag column. */
+  review: ReadonlyMap<string, FinanceReviewShipment>
   gatesOf: (bill: CarrierBillRecord) => BillGates
   filters: ToBePaidFilters
   showFilters: boolean
@@ -1575,6 +1580,17 @@ function payableView({
       ]
   const tickedCents = selectionBalanceCents(bills, selected)
 
+  // Selected tab export: the pay run sheet. Everything on the tab by default; the page filters can narrow it.
+  const exportSelected = (list: readonly CarrierBillRecord[]) => {
+    try {
+      downloadCsv(selectedPayablesFilename(asOf), selectedPayablesCsv({ bills: list, facts, infos, review, asOf, ticked: new Set(selected) }))
+      toast.success(`Exported ${list.length} selected payable${list.length === 1 ? '' : 's'}`)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error && e.message ? e.message : 'Could not export')
+    }
+  }
+  const narrowed = bills.length !== allBills.length
+
   return view<CarrierBillRecord>({
     gridId: mode === 'aging' ? 'ap-aging-v4' : 'ap-selected-v3',
     cardLayout: mode === 'aging' ? { title: 'pro', party: 'carrier', amount: 'amount' } : { title: 'bill', party: 'carrier', amount: 'balance', pills: ['status'] },
@@ -1621,6 +1637,28 @@ function payableView({
             >
               {AP_ACTION_COPY.recordPayment.label}
             </TmsButton>
+            <TmsButton
+              size="sm"
+              variant="ghost"
+              aria-label="Export all selected payables"
+              title={`Every bill on the Selected tab (${allBills.length}, ${formatCents(sumCents(allBills, (bill) => bill.balanceCents))}) with a total per payee. Ignores the filters.`}
+              disabled={allBills.length === 0}
+              onClick={() => exportSelected(allBills)}
+            >
+              <Download size={14} aria-hidden="true" /> Export all ({allBills.length})
+            </TmsButton>
+            {narrowed && (
+              <TmsButton
+                size="sm"
+                variant="ghost"
+                aria-label="Export the selected payables showing"
+                title="Only the bills the Carrier, Due and Payee filters leave showing."
+                disabled={bills.length === 0}
+                onClick={() => exportSelected(bills)}
+              >
+                <Download size={14} aria-hidden="true" /> Export filtered ({bills.length})
+              </TmsButton>
+            )}
           </>
         )}
         <ApActionHelp mode={mode === 'aging' ? 'aging' : 'selected'} />
