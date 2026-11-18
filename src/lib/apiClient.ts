@@ -1489,6 +1489,8 @@ const TMS_SETTINGS_V17_FIELDS = ['invoiceAlwaysCopyEmails', 'aljexCutoffAt', 'di
 const TMS_SETTINGS_V18_FIELDS = ['checkCallSkipWhenDriverActive']
 // Settings > Progress steps. Its own flag again, so a backend without it keeps serving everything else.
 const TMS_SETTINGS_V19_FIELDS = ['progressSteps']
+// Dispatch > Empty trucks: the daily value of an idle truck. Its own flag again.
+const TMS_SETTINGS_V20_FIELDS = ['emptyTruckDailyValueCents']
 const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo', 'teams', 'commissionPlans', 'commissionPaySchedule', 'postalCodeAliases', 'aiAgents', 'marginTargetBpsByMode', 'defaultCheckCallPlan', 'brandSenders', 'whiteLabel', 'customerPortalDefaults', 'customerTags', 'rateConTemplate', 'carrierAgreementTemplate', 'consolidationRules', 'notificationSubscriptions', 'notificationWebhooks', 'notificationDefaults', 'paymentTerms', 'trackingAutomation', 'divisionSalesReps', 'progressSteps']
 let settingsHaveV2 = true
 let settingsHaveV3 = true
@@ -1508,6 +1510,7 @@ let settingsHaveV16 = true
 let settingsHaveV17 = true
 let settingsHaveV18 = true
 let settingsHaveV19 = true
+let settingsHaveV20 = true
 const tmsSettingsFields = () => [
   TMS_SETTINGS_FIELDS_BASE,
   settingsHaveV2 ? TMS_SETTINGS_V2_FIELDS.join(' ') : '',
@@ -1528,6 +1531,7 @@ const tmsSettingsFields = () => [
   settingsHaveV17 ? TMS_SETTINGS_V17_FIELDS.join(' ') : '',
   settingsHaveV18 ? TMS_SETTINGS_V18_FIELDS.join(' ') : '',
   settingsHaveV19 ? TMS_SETTINGS_V19_FIELDS.join(' ') : '',
+  settingsHaveV20 ? TMS_SETTINGS_V20_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 const fieldNamed = (names: string[], err: unknown) => {
   const msg = safeStringify(err)
@@ -1817,7 +1821,12 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
     try {
       return await run()
     } catch (err) {
-      if (attempt >= 18) throw err
+      if (attempt >= 19) throw err
+      if (settingsHaveV20 && fieldNamed(TMS_SETTINGS_V20_FIELDS, err)) {
+        console.warn('[apiClient] backend has no empty-truck value setting yet — querying without it until deploy')
+        settingsHaveV20 = false
+        continue
+      }
       if (settingsHaveV19 && fieldNamed(TMS_SETTINGS_V19_FIELDS, err)) {
         console.warn('[apiClient] backend has no progress-steps setting yet — querying without it until deploy')
         settingsHaveV19 = false

@@ -34,6 +34,7 @@ vi.mock('@/store/useAppStore', () => ({
 }))
 vi.mock('@/lib/apiClient', () => ({ listTruckLocations: vi.fn().mockResolvedValue([]) }))
 vi.mock('@/lib/driverSubmissionsClient', () => ({ staffUploadDriverDoc: vi.fn() }))
+vi.mock('./EmptyTrucksView', () => ({ EmptyTrucksView: () => <div data-testid="empty-trucks-stub" /> }))
 
 import { DispatchPage } from './DispatchPage'
 
@@ -50,5 +51,25 @@ describe('DispatchPage render', () => {
     render(<MemoryRouter><DispatchPage /></MemoryRouter>)
     fireEvent.click(screen.getByTitle('Filter by driver type or driver'))
     expect(screen.getByText('Filter conversations')).toBeTruthy()
+  })
+
+  it('switches between the conversations and the empty-trucks view, and a ?view=empty link opens it', () => {
+    const { unmount } = render(<MemoryRouter><DispatchPage /></MemoryRouter>)
+    expect(screen.queryByTestId('empty-trucks-stub')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Empty trucks' }))
+    expect(screen.getByTestId('empty-trucks-stub')).toBeTruthy()
+    expect(screen.queryByText('No conversations here.')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Messages' }))
+    expect(screen.queryByTestId('empty-trucks-stub')).toBeNull()
+    expect(screen.getByText('No conversations here.')).toBeTruthy()
+    unmount()
+    render(<MemoryRouter initialEntries={['/dispatch?view=empty']}><DispatchPage /></MemoryRouter>)
+    expect(screen.getByTestId('empty-trucks-stub')).toBeTruthy()
+  })
+
+  it('keeps the always-on drawer to the conversations: no view switch', () => {
+    render(<MemoryRouter initialEntries={['/dispatch?view=empty']}><DispatchPage compact /></MemoryRouter>)
+    expect(screen.queryByRole('button', { name: 'Empty trucks' })).toBeNull()
+    expect(screen.queryByTestId('empty-trucks-stub')).toBeNull()
   })
 })

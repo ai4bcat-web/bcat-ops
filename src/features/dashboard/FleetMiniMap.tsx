@@ -14,13 +14,35 @@ const isMoving = (loc: TruckLocation) =>
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n))
 
+/** A pin the caller places itself (the Dispatch empty-trucks view), coloured by how soon, over the same map. */
+export interface MapMarker {
+  id: string
+  lat: number
+  lon: number
+  tone: 'now' | 'soon' | 'later'
+  label: string
+  /** Placed at the middle of its state, not the city. */
+  approx?: boolean
+}
+
+const MARKER_FILL: Record<MapMarker['tone'], string> = {
+  now: 'var(--tms-badge-red)',
+  soon: 'var(--tms-badge-orange)',
+  later: 'var(--tms-primary)',
+}
+
 /**
  * Real US map (Census state boundaries) with each truck's last-known position as a dot,
  * pan + zoom enabled (scroll / buttons to zoom toward the cursor, drag to pan) so trucks
  * clustered in one city can be separated. us-atlas TopoJSON + d3-geo Albers-USA — free,
  * no tiles, no API key. Map data lazy-loaded as its own chunk.
  */
-export function FleetMiniMap({ locations }: { locations: TruckLocation[] }) {
+export function FleetMiniMap({ locations = [], markers, selectedMarkerId, onMarkerClick }: {
+  locations?: TruckLocation[]
+  markers?: MapMarker[]
+  selectedMarkerId?: string | null
+  onMarkerClick?: (id: string) => void
+}) {
   const svgRef = useRef<SVGSVGElement | null>(null)
   const [statePaths, setStatePaths] = useState<string[]>([])
   const [projection, setProjection] = useState<GeoProjection | null>(null)
@@ -55,6 +77,16 @@ export function FleetMiniMap({ locations }: { locations: TruckLocation[] }) {
       })
       .filter((d): d is { id: string; unit: string; x: number; y: number; moving: boolean } => d !== null)
   }, [projection, locations])
+
+  const pins = useMemo(() => {
+    if (!projection || !markers) return []
+    return markers
+      .map((m) => {
+        const xy = projection([m.lon, m.lat])
+        return xy ? { ...m, x: xy[0], y: xy[1] } : null
+      })
+      .filter((p): p is MapMarker & { x: number; y: number } => p !== null)
+  }, [projection, markers])
 
   // Pointer (client) → SVG viewBox coordinates.
   const toSvg = (clientX: number, clientY: number) => {
@@ -138,13 +170,29 @@ export function FleetMiniMap({ locations }: { locations: TruckLocation[] }) {
               {statePaths.map((d, i) => (
                 <path key={i} d={d} style={{ fill: 'var(--tms-surface-hover)', stroke: 'var(--tms-border)' }} strokeWidth={0.6 / k} strokeLinejoin="round" />
               ))}
-              {dots.map((d) => (
+              {!markers && dots.map((d) => (
                 <g key={d.id} transform={`translate(${d.x} ${d.y})`}>
                   <title>{`#${d.unit}${d.moving ? ' · driving' : ' · stopped'}`}</title>
                   <circle r={6.5 / k} style={{ fill: d.moving ? 'var(--tms-primary-tint)' : 'var(--tms-surface-hover)' }} />
                   <circle r={3.5 / k} style={{ fill: d.moving ? 'var(--tms-primary)' : 'var(--tms-muted)', stroke: 'var(--tms-card)' }} strokeWidth={1 / k} />
                 </g>
               ))}
+              {pins.map((p) => {
+                const selected = p.id === selectedMarkerId
+                return (
+                  <g
+                    key={p.id}
+                    transform={`translate(${p.x} ${p.y})`}
+                    style={{ cursor: onMarkerClick ? 'pointer' : undefined }}
+                    onClick={onMarkerClick ? (e) => { e.stopPropagation(); onMarkerClick(p.id) } : undefined}
+                    data-testid={`map-pin-${p.id}`}
+                  >
+                    <title>{p.label}{p.approx ? ' (state centre)' : ''}</title>
+                    {selected ? <circle r={11 / k} style={{ fill: 'none', stroke: MARKER_FILL[p.tone] }} strokeWidth={2 / k} /> : null}
+                    <circle r={5 / k} style={{ fill: MARKER_FILL[p.tone], stroke: 'var(--tms-card)' }} strokeWidth={1.2 / k} opacity={p.approx ? 0.6 : 1} />
+                  </g>
+                )
+              })}
             </g>
           )}
         </svg>
@@ -158,7 +206,9 @@ export function FleetMiniMap({ locations }: { locations: TruckLocation[] }) {
           </div>
         )}
       </div>
-      {projection && dots.length === 0 ? (
+      {projection && markers && pins.length === 0 ? (
+        <div style={{ fontSize: 11.5, color: 'var(--tms-muted)', textAlign: 'center', marginTop: 6 }}>Nothing to plot</div>
+      ) : projection && !markers && dots.length === 0 ? (
         <div style={{ fontSize: 11.5, color: 'var(--tms-muted)', textAlign: 'center', marginTop: 6 }}>No GPS coordinates yet</div>
       ) : statePaths.length > 0 && (
         <div style={{ fontSize: 11, color: 'var(--tms-muted)', textAlign: 'center', marginTop: 6 }}>Scroll to zoom · drag to pan</div>

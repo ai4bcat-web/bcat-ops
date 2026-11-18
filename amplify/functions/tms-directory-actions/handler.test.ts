@@ -1708,6 +1708,26 @@ describe('SAVE_SETTINGS', () => {
     await expect(handler(event('SAVE_SETTINGS', { progressSteps }, identity({ groups: ['ADMIN'] })))).rejects.toThrow(message)
   })
 
+  it('emptyTruckDailyValueCents: an admin saves a whole number of cents, and null clears it', async () => {
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+      if (cmd.__type === 'Put') return Promise.resolve({})
+      throw new Error('unexpected')
+    })
+    const saved = await handler(event('SAVE_SETTINGS', { emptyTruckDailyValueCents: 45000 }, identity({ groups: ['ADMIN'] })))
+    expect(saved.emptyTruckDailyValueCents).toBe(45000)
+    const cleared = await handler(event('SAVE_SETTINGS', { emptyTruckDailyValueCents: null }, identity({ groups: ['ADMIN'] })))
+    expect(cleared.emptyTruckDailyValueCents ?? null).toBeNull()
+  })
+
+  it.each([[-5], [12.5], ['abc']])('emptyTruckDailyValueCents: refuses %j', async (value) => {
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+      throw new Error('unexpected')
+    })
+    await expect(handler(event('SAVE_SETTINGS', { emptyTruckDailyValueCents: value }, identity({ groups: ['ADMIN'] })))).rejects.toThrow()
+  })
+
   it('keeps existing fields when not mentioned (keep semantics)', async () => {
     const existing = makeDynamoItem({
       id: 'default', marginFloorBps: 100, defaultCreditLimitCents: 50000, requireCustomerApproval: true,

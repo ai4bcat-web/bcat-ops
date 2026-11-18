@@ -62,7 +62,7 @@ const BASE_PER_MILE_CENTS: Record<string, number> = {
 const DEFAULT_PER_MILE_CENTS = 240
 
 /** Rough centroid per state, enough to put a lane within a few per cent of its real length. */
-const STATE_CENTROIDS: Record<string, [number, number]> = {
+export const STATE_CENTROIDS: Record<string, [number, number]> = {
   AL: [32.8, -86.8], AK: [64.0, -152.0], AZ: [34.3, -111.7], AR: [34.9, -92.4],
   CA: [37.2, -119.5], CO: [39.0, -105.5], CT: [41.6, -72.7], DE: [39.0, -75.5],
   FL: [28.6, -82.4], GA: [32.6, -83.4], HI: [20.3, -156.4], ID: [44.4, -114.6],
