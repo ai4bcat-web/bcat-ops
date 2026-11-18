@@ -9,6 +9,9 @@
  * (Ryne 2026-11-15); an open sent invoice links there. The preview is the
  * invoice exactly as it goes out — one PDF with the POD pages merged in. Nothing here links to
  * the shipment.
+ *
+ * An unsent draft's amounts can be edited here (Ryne 2026-11-18): "Edit amounts" writes the shipment's customer
+ * charges through the post-invoice change rule (reason, audited) and re-makes the invoice and its PDF from them.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, RefreshCw, Trash2 } from 'lucide-react'
@@ -25,6 +28,9 @@ import { centsFromInput, inputFromCents } from './money'
 import { InvoicePacketFrame } from './InvoicePacketFrame'
 import { useCustomerPaymentFacts } from '@/hooks/useCustomerPaymentFacts'
 import { PAYMENT_METHOD_LABEL, settlementOf } from '@/lib/daysToPay'
+import { rateEditBlock } from '../invoiceRateEdit'
+import { InvoiceRateEditor } from './InvoiceRateEditor'
+import { InvoiceFilesPanel } from './InvoiceFilesPanel'
 import { formatDay } from '../arViews'
 import { INVOICE_FROM_ADDRESS, isFactoredInvoice, manualRecipients } from '../sendReview'
 import { AttachmentInfo, AttachmentRow, AttachmentsSection, InvoiceEnvelope, MessageSection } from './InvoiceEmailSections'
@@ -58,6 +64,10 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
   })))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** The amounts are being edited in place (Ryne 2026-11-18): the shipment's customer charges, then this invoice again. */
+  const [editingRates, setEditingRates] = useState(false)
+  /** Bumped when a POD or rate confirmation was replaced: the preview below re-reads what the customer receives. */
+  const [filesEpoch, setFilesEpoch] = useState(0)
 
   useEffect(() => {
     let alive = true
@@ -73,6 +83,7 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
   const factored = isFactoredInvoice(current, customer)
   const sent = Boolean(current.sentAt || current.markedSentAt || (current.sentCount ?? 0) > 0)
   const locked = current.paidCents > 0 || current.writtenOffCents > 0 || Boolean(factoringItem?.otrInvoiceId) || current.status === 'VOID'
+  const rateBlock = rateEditBlock(current, factoringItem)
   const po = invoicePoNumber(current.references)
   const pro = current.shipmentNumber || current.number
   const email = useMemo(() => renderInvoiceEmail({
@@ -207,13 +218,40 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
 
         <section aria-label="Invoice lines">
           <h3 className="font-semibold">Lines</h3>
-          <ul>
-            {(current.lines ?? []).filter((l) => l.code !== 'ADJUSTMENT').map((l) => (
-              <li key={l.chargeId} className="flex justify-between"><span>{l.label ?? l.code}</span><span>{formatCents(l.amountCents)}</span></li>
-            ))}
-          </ul>
-          <p className="tms-muted text-xs">Charges come from the shipment; change them there, then Save & regenerate here.</p>
+          {editingRates ? (
+            <InvoiceRateEditor
+              invoice={current}
+              onCancel={() => setEditingRates(false)}
+              onSaved={(fresh) => { setCurrent(fresh); setEditingRates(false); onSaved() }}
+            />
+          ) : (
+            <>
+              <ul>
+                {(current.lines ?? []).filter((l) => l.code !== 'ADJUSTMENT').map((l) => (
+                  <li key={l.chargeId} className="flex justify-between"><span>{l.label ?? l.code}</span><span>{formatCents(l.amountCents)}</span></li>
+                ))}
+              </ul>
+              {canEdit && !rateBlock && (
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <TmsButton size="sm" aria-label="Edit amounts" disabled={saving} onClick={() => setEditingRates(true)}>Edit amounts</TmsButton>
+                  <span className="tms-muted text-xs">Updates the shipment's charges and regenerates this invoice.</span>
+                </div>
+              )}
+              {(!canEdit || rateBlock) && <p className="tms-muted text-xs" data-testid="rate-edit-block">{rateBlock ?? 'You cannot change amounts.'}</p>}
+            </>
+          )}
         </section>
+
+        {canEdit && current.status !== 'VOID' && (
+          <section aria-label="Invoice files">
+            <h3 className="font-semibold">Files</h3>
+            <InvoiceFilesPanel
+              invoice={current}
+              factoringItem={factoringItem}
+              onChanged={() => { setFilesEpoch((n) => n + 1); onSaved() }}
+            />
+          </section>
+        )}
 
         <section aria-label="Adjustments">
           <div className="flex items-center justify-between">
@@ -244,7 +282,7 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
         {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
 
         {!factored && current.status !== 'VOID'
-          ? <section aria-label="Invoice preview"><h3 className="font-semibold">What the customer receives</h3><InvoicePacketFrame invoiceId={current.id} pdfKey={current.pdfKey} /></section>
+          ? <section aria-label="Invoice preview"><h3 className="font-semibold">What the customer receives</h3><InvoicePacketFrame key={`${current.pdfKey ?? ''}:${current.pdfVersion ?? ''}:${current.totalCents}:${filesEpoch}`} invoiceId={current.id} pdfKey={current.pdfKey} /></section>
           : pdfUrl
             ? <iframe title={`Invoice ${current.number} PDF`} src={pdfUrl} style={{ width: '100%', height: 520, border: '1px solid var(--tms-border)' }} />
             : <p className="tms-muted">{current.pdfKey ? 'Loading the PDF…' : 'No PDF stored yet.'}</p>}

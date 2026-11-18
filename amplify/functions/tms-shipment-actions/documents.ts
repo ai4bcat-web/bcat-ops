@@ -73,6 +73,7 @@ import {
   supersede,
 } from '../../../src/lib/shipmentDocuments'
 import { isCarShipperLoad } from '../../../src/lib/carShipper'
+import { isCustomerRateCon } from '../../../src/lib/invoiceDelivery'
 import { isLegacyHistory } from '../../../src/lib/legacyHistory'
 import { customerRefOf, type CustomerRefReference } from '../../../src/lib/customerRef'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
@@ -410,6 +411,26 @@ export async function prepareDocumentUpload(deps: DocumentDeps, input: Row): Pro
   return { uploadUrl, s3Key, documentId }
 }
 
+// ── COMMIT_DOCUMENT: replacing a POD or the customer's rate confirmation ──────
+
+export const REPLACE_GONE_OUT_MESSAGE = 'This invoice has already gone out with that file. Upload a corrected copy as a new document; the original stays.'
+
+/**
+ * The live document a replacing upload retires, or the sentence that says why it cannot. A POD, or the customer's rate confirmation
+ * (never BCAT's own to a carrier, which holds carrier pay); the same type as the new file; and the invoice behind the shipment
+ * still a draft: not e-mailed, not marked sent, nothing paid, nothing at OTR.
+ */
+async function replaceableDocument(deps: DocumentDeps, bundle: Pick<Bundle, 'orders' | 'documents'>, replacesId: string, newType: string): Promise<Row> {
+  const old = bundle.documents.find((doc) => doc.id === replacesId)
+  if (!old) throw new Error('The document to replace is not on this shipment')
+  if (old.status !== 'ACTIVE') throw new Error('That document is no longer the active one')
+  if (old.type !== newType) throw new Error('A replacement has to be the same kind of document')
+  const customerRateCon = isCustomerRateCon({ type: old.type as never, source: old.source as never, orderId: (old.orderId ?? null) as never, loadCarrierId: (old.loadCarrierId ?? null) as never })
+  if (!(old.type === 'POD' || customerRateCon)) throw new Error('Only a POD or the customer rate confirmation can be replaced this way')
+  if (billedPaperworkRefusal(bundle, old) && !(await paperworkOpenToChange(deps, bundle))) throw new Error(REPLACE_GONE_OUT_MESSAGE)
+  return old
+}
+
 // ── COMMIT_DOCUMENT ──────────────────────────────────────────────────────────
 
 export async function commitDocument(deps: DocumentDeps, input: Row, caller: Caller): Promise<Row> {
@@ -464,6 +485,13 @@ export async function commitDocument(deps: DocumentDeps, input: Row, caller: Cal
   // conversion files the original as it came.
   const converted = await convertStoredPodImage(deps.s3, deps.bucket, { key: s3Key, contentType, name, type, sizeBytes })
 
+  // Replace (Ryne 2026-11-18, from the draft invoice): the file this one replaces is retired in the SAME transaction that files the
+  // new one, as SUPERSEDED (kept, with its bytes, as history) and not voided, so the required type is never uncovered and a person
+  // who did not file the old one is not refused. Only a POD or the customer's rate confirmation, and only while the invoice is a draft.
+  const replacesId = optionalString(input.replacesDocumentId, 100)
+  const replaceReason = optionalString(input.replaceReason, MAX_NOTE)
+  const retiring = replacesId ? await replaceableDocument(deps, bundle, replacesId, type) : null
+
   const now = nowIso()
   const row: Row = {
     id: documentId,
@@ -483,24 +511,43 @@ export async function commitDocument(deps: DocumentDeps, input: Row, caller: Cal
     audience,
     status: 'ACTIVE',
     version: nextVersion(bundle.documents as unknown as ShipmentDocumentRecord[], type, loadId),
+    ...(retiring ? { supersedesId: String(retiring.id) } : {}),
     uploadedBy: caller.email,
     uploadedAt: now,
     createdBy: caller.email,
     createdAt: now,
     updatedAt: now,
   }
+  const retired = retiring
+    ? bundle.documents.map((doc) => (doc.id === retiring.id ? { ...doc, status: 'SUPERSEDED' } : doc))
+    : bundle.documents
 
   await transact(
     deps.store.db,
     [
       putItem(deps.store.tables.shipmentDocument, row),
-      ...(await recacheDocGates(deps, bundle, withDocument(bundle.documents, row), now)),
+      ...(retiring
+        ? [updateItemTx(deps.store.tables.shipmentDocument, String(retiring.id), { status: 'SUPERSEDED', updatedBy: caller.email, updatedAt: now }, null)]
+        : []),
+      ...(await recacheDocGates(deps, bundle, withDocument(retired, row), now)),
     ],
     'document',
   )
   await deps.writeAudit('SHIPMENT_DOCUMENT', documentId, 'COMMIT_DOCUMENT', caller, {
     shipmentId, type, name, s3Key, orderId, loadId, loadCarrierId,
+    ...(retiring ? { supersedesId: String(retiring.id) } : {}),
   })
+  if (retiring) {
+    // On the shipment's own history: who swapped which document, the old and new file names, and why.
+    await deps.writeAudit('SHIPMENT', shipmentId, 'REPLACE_DOCUMENT', caller, {
+      type,
+      oldDocumentId: String(retiring.id),
+      oldName: String(retiring.name ?? ''),
+      newDocumentId: documentId,
+      newName: String(row.name ?? name),
+      reason: replaceReason,
+    })
+  }
   // Step R. A POD is the one document the dashboard times; stamp the lane sample.
   await stampPodReceived(deps, row)
   return documentResult(deps, shipmentId, row)

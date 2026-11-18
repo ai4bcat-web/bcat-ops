@@ -1,0 +1,18 @@
+.tms-portal .ire { display: grid; gap: 8px; }
+.tms-portal .ire-lines { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.tms-portal .ire-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
+.tms-portal .ire-name { flex: 1; min-width: 140px; }
+.tms-portal .ire-rate { width: 96px; text-align: right; }
+.tms-portal .ire-qty { width: 56px; text-align: right; }
+.tms-portal .ire-amount { min-width: 84px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.tms-portal .ire-unit { font-size: 12px; color: var(--tms-text-muted, inherit); opacity: 0.75; }
+.tms-portal .ire-quick { display: flex; flex-wrap: wrap; gap: 4px; }
+.tms-portal .ire-totals { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; }
+.tms-portal .ire-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tms-portal .ire-reason { display: grid; gap: 2px; }
+.tms-portal .ifp { display: grid; gap: 10px; }
+.tms-portal .ifp-section { display: grid; gap: 4px; }
+.tms-portal .ifp-title { display: flex; align-items: center; gap: 8px; margin: 0; }
+.tms-portal .ifp-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.tms-portal .ifp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.tms-portal .ifp-name { flex: 1; min-width: 160px; overflow-wrap: anywhere; }
