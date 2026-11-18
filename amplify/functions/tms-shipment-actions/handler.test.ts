@@ -516,7 +516,7 @@ const OUTSIDER = {
   username: 'out',
   claims: { email: 'driveradmin@bcatcorp.com', 'cognito:groups': ['page-drivers'] },
 }
-/** Step R. The BROKERAGE section's key: every TMS page, no void and no settings. */
+/** Step R. The BROKERAGE section's key: every TMS page and void (Ryne 2026-11-18), no settings. */
 const TMS_USER = {
   sub: 'sub-tms',
   username: 'tmsuser',
@@ -1398,8 +1398,8 @@ function repointCall(shipmentId: string, customerId: string, reason = 'Customer 
 }
 
 describe('VOID_SHIPMENT', () => {
-  it('allows shipments staff to void when unrestricted and records their identity', async () => {
-    seedSettings({ cancelDeleteAdminOnly: false })
+  it.each([false, true])('lets every shipments staff member void when the admin-only cancel switch is %s, and records who', async (restricted) => {
+    seedSettings({ cancelDeleteAdminOnly: restricted })
     for (const identity of [DISPATCHER, TMS_USER, ADMIN, OWNER]) {
       const { shipmentId } = await createDraft()
       const result = await voidCall(shipmentId, identity) as { shipment: Row }
@@ -1408,24 +1408,19 @@ describe('VOID_SHIPMENT', () => {
     }
   })
 
-  it('refuses staff voids without changing the shipment when the org requires an admin', async () => {
+  it('still keeps cancel admin-only when the org asks for it (void no longer is)', async () => {
     seedSettings({ cancelDeleteAdminOnly: true })
-    for (const identity of [DISPATCHER, TMS_USER]) {
-      const { shipmentId } = await createDraft()
-      const before = { ...table(TABLES.shipment).get(shipmentId)! }
-      await expect(voidCall(shipmentId, identity)).rejects.toThrow(/Forbidden/)
-      expect(table(TABLES.shipment).get(shipmentId)).toEqual(before)
-    }
+    const { shipmentId } = await createDraft()
+    await expect(
+      call('SET_SHIPMENT_STATUS', { shipmentId, status: 'CANCELED', reason: 'x', expectedUpdatedAt: shipmentUpdatedAt(shipmentId) }, DISPATCHER),
+    ).rejects.toThrow(/Forbidden/)
   })
 
-  it('allows ADMIN and OWNER to void when the org requires an admin', async () => {
-    seedSettings({ cancelDeleteAdminOnly: true })
-    for (const identity of [ADMIN, OWNER]) {
-      const { shipmentId } = await createDraft()
-      const result = await voidCall(shipmentId, identity) as { shipment: Row }
-      expect(result.shipment.voidedAt).toBeTruthy()
-      expect(result.shipment.voidedBy).toBe(identity.claims.email)
-    }
+  it('refuses a void from someone with no shipments page access, and leaves the shipment alone', async () => {
+    const { shipmentId } = await createDraft()
+    const before = { ...table(TABLES.shipment).get(shipmentId)! }
+    await expect(voidCall(shipmentId, OUTSIDER)).rejects.toThrow(/Forbidden/)
+    expect(table(TABLES.shipment).get(shipmentId)).toEqual(before)
   })
 
   it('records the reason and refuses an empty one', async () => {

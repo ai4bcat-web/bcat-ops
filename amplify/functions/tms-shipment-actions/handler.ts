@@ -2824,7 +2824,7 @@ async function checkCredit(input: Row): Promise<Row> {
 
 // ── Shipment status ──────────────────────────────────────────────────────────
 
-/** The org's "only an admin cancels or voids" switch (TmsSettings.cancelDeleteAdminOnly). Owner/ADMIN always pass. */
+/** The org's "only an admin cancels" switch (TmsSettings.cancelDeleteAdminOnly). Void is every team member's (Ryne 2026-11-18). Owner/ADMIN always pass. */
 async function requireAdminForCancel(action: string, caller: Caller, settings: Row | null): Promise<void> {
   if (settings?.cancelDeleteAdminOnly === true && !caller.isAdmin) {
     throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
@@ -3104,7 +3104,7 @@ async function voidShipment(input: Row, caller: Caller): Promise<Row> {
   if (isVoided(shipment)) {
     throw new Error(`Shipment ${String(shipment.number ?? shipmentId)} is already voided`)
   }
-  await requireAdminForCancel('VOID', caller, await getSettings())
+  // Ryne 2026-11-18: every team member who can open shipments may void; the cancel switch no longer gates it.
   await assertNoInvoicedOrders(shipmentId, 'void')
 
   const { apBoardLegsClosed, loadsCanceled } = await applyVoid(shipment, caller, reason, expectedUpdatedAt)
