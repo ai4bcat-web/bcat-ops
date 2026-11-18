@@ -6,7 +6,9 @@ import {
   billsInReview, sharedProIndex, sharedProLabel, siblingCarriers, awaitingInvoiceTotals,
   billsExpected, billsAging, billsSelected, canSelectForPayment, invoiceAgeBuckets, payToLabel, paymentInfoFor, remitEmailOf, remittanceStatusOf, AP_TABS,
   billGates, applyToBePaidFilters, EMPTY_TO_BE_PAID_FILTERS, factorNameFor, isFactorPaid, payeeNameFor, payToLabelFor, setFactorNamesForLabels,
+  paidBills, paidInMonth, paidMonthOf, paidMonthOptions,
 } from './apViews'
+import { billMonthsSince } from './useAllPaidBills'
 
 const lc = (id: string, over: Record<string, unknown> = {}) => ({
   id, loadId: 'l1', kind: 'CARRIER' as const, status: 'ACTIVE' as const, carrierName: `Carrier ${id}`, invoiceId: null, sequence: 1, ...over,
@@ -227,5 +229,42 @@ describe('Pay to names the factor when the carrier has one (Ryne 2026-11-18)', (
     expect(direct.map((b) => b.carrierName)).toEqual(['ARCTIC HORIZON INC'])
     // With no methods handed in the filter reads the bill alone, as it did before.
     expect(applyToBePaidFilters(bills, { ...EMPTY_TO_BE_PAID_FILTERS, payeeKind: 'FACTOR' }, '2026-11-18')).toEqual([])
+  })
+})
+
+describe('the Paid tab lists payments by the month they were paid in', () => {
+  const paid = (id: string, over: Partial<CarrierBillRecord> = {}) => ({
+    id, status: 'PAID', billDate: '2026-10-02', billMonth: '2026-10', paidAt: '2026-11-18T21:40:14.191Z', ...over,
+  }) as CarrierBillRecord
+
+  it('files a bill under the month it was paid, not the month it was dated', () => {
+    // Bill 14525: dated October, paid on Nov 18 (the case the November list used to miss).
+    expect(paidMonthOf(paid('cb:lcr-abcc:1'))).toBe('2026-11')
+  })
+
+  it('reads the paid day on the Chicago calendar, so a late-evening payment stays on its day', () => {
+    // 9:30 pm Chicago on Nov 30 is Dec 1 in UTC.
+    expect(paidMonthOf(paid('late', { paidAt: '2026-12-01T03:30:00.000Z' }))).toBe('2026-11')
+    expect(paidMonthOf(paid('early', { paidAt: '2026-12-01T07:00:00.000Z' }))).toBe('2026-12')
+  })
+
+  it('falls back to the bill date when no paid time was stored', () => {
+    expect(paidMonthOf(paid('old', { paidAt: null }))).toBe('2026-10')
+  })
+
+  it('keeps every payment ever for all time, and one month when a month is picked', () => {
+    const bills = [paid('a'), paid('b', { paidAt: '2026-10-14T12:00:00.000Z' }), paid('c', { paidAt: '2025-06-05T12:00:00.000Z' }), paid('open', { status: 'TO_BE_PAID' })]
+    const settled = paidBills(bills)
+    expect(settled.map((b) => b.id)).toEqual(['a', 'b', 'c'])
+    expect(paidInMonth(settled, '').map((b) => b.id)).toEqual(['a', 'b', 'c'])
+    expect(paidInMonth(settled, '2026-11').map((b) => b.id)).toEqual(['a'])
+    expect(paidMonthOptions(settled)).toEqual(['2026-11', '2026-10', '2025-06'])
+  })
+
+  it('reads every bill month from the first AP month through this one', () => {
+    expect(billMonthsSince('2026-11-18', '2026-09')).toEqual(['2026-11', '2026-10', '2026-09'])
+    expect(billMonthsSince('2026-11-18')[0]).toBe('2026-11')
+    expect(billMonthsSince('2026-11-18').at(-1)).toBe('2024-01')
+    expect(billMonthsSince('2023-01-01')).toEqual([])
   })
 })

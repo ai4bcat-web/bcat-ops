@@ -47,6 +47,7 @@ import {
   AP_PAYMENT_KIND_LABEL, AP_PAYMENT_METHOD_LABEL, AP_PAYEE_KIND_LABEL, AP_TABS, BILL_STATUS_LABEL,
   EMPTY_TO_BE_PAID_FILTERS, applyToBePaidFilters, avgDaysToPayBills, awaitingInvoiceTotals, billCarrierOptions,
   billGates, type BillGates, billsAging, billsExpected, billsSelected, canSelectForPayment, invoiceAgeBuckets, isOwnFleet, paidBills,
+  paidInMonth, paidMonthOptions,
   paymentInfoFor, payeeNameFor, isFactorPaid, quickPayLabel, setFactorNamesForLabels, remitEmailOf, remitEmailOfPayment, remittanceStatusOf, selectionBalanceCents,
   selectionCarrierId, sharedProLabel, sharedProIndex, type ApTabKey, type SharedProIndex, type ToBePaidFilters,
 } from './apViews'
@@ -79,6 +80,7 @@ import { ApSummaryStrip } from './components/ApSummaryStrip'
 import { apCompactItems } from './apCompactItems'
 import { AccountingReportsDialog } from '@/features/finance/AccountingReportsDialog'
 import { useApPaymentLines } from '@/features/finance/useApPaymentLines'
+import { useAllPaidBills } from './useAllPaidBills'
 import type { BillPaymentLine } from '@/features/finance/accountingStats'
 import type { AccountingReportKind } from '@/features/finance/accountingReports'
 import { ApAgingCard, ApExpectedCard, ApPaidCard, ProfitCheckCard } from '@/features/finance/AccountingCards'
@@ -186,9 +188,9 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const [payInfos, setPayInfos] = useState<CarrierPaymentInfo[]>([])
 
   const months = useMemo(() => lastThreeMonths(asOf), [asOf])
-  const [month, setMonth] = useState(() => months[0])
+  // This month's bills feed the aging view's days-to-pay and the shared-PRO chips; the Paid tab reads every month itself.
+  const [month] = useState(() => months[0])
   const [monthBills, setMonthBills] = useState<CarrierBillRecord[]>([])
-  const [monthLoading, setMonthLoading] = useState(true)
 
   const [apCarrierId, setApCarrierId] = useState<string | null>(null)
   const carrierAp = useCarrierAp(apCarrierId)
@@ -200,8 +202,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const loadMonth = useCallback(() =>
     listBillsByMonth(month)
       .then((rows) => setMonthBills(rows))
-      .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not load that month'))
-      .finally(() => setMonthLoading(false)),
+      .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not load that month')),
   [month])
   useEffect(() => { loadMonth() }, [loadMonth])
 
@@ -306,7 +307,14 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const drawerBill = drawerId ? open.bills.find((b) => b.id === drawerId) ?? null : null
   const agingRows = useMemo(() => applyToBePaidFilters(agingBills, filters, asOf, payInfos), [agingBills, filters, asOf, payInfos])
   const selectedRows = useMemo(() => applyToBePaidFilters(selectedBills, filters, asOf, payInfos), [selectedBills, filters, asOf, payInfos])
-  const settled = useMemo(() => paidBills(monthBills).filter((b) => byParty(b) && byDivision(b)), [monthBills, byParty, byDivision])
+  // The Paid tab lists every payment ever, by the month it was PAID in ('' is all time), not by the month the bill was dated.
+  const allPaid = useAllPaidBills(asOf, tab === 'paid', payRefresh)
+  const [paidMonth, setPaidMonth] = useState('')
+  const paidMonthChoices = useMemo(() => paidMonthOptions(paidBills(allPaid.bills)), [allPaid.bills])
+  const settled = useMemo(
+    () => paidInMonth(paidBills(allPaid.bills), paidMonth).filter((b) => byParty(b) && byDivision(b)),
+    [allPaid.bills, paidMonth, byParty, byDivision],
+  )
   const [verifyOnlyPaid, setVerifyOnlyPaid] = useState(false)
   const settledShown = useMemo(() => (verifyOnlyPaid ? settled.filter(isVerifyPaymentBill) : settled), [settled, verifyOnlyPaid])
   const awaitingTotals = useMemo(() => awaitingInvoiceTotals(awaiting.rows), [awaiting.rows])
@@ -580,10 +588,10 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       verifyCount: settled.filter(isVerifyPaymentBill).length,
       onVerifyOnly: setVerifyOnlyPaid,
       shared,
-      months,
-      month,
-      loading: monthLoading,
-      onMonth: (ym: string) => { setMonthLoading(true); setMonth(ym) },
+      months: paidMonthChoices,
+      month: paidMonth,
+      loading: allPaid.loading,
+      onMonth: setPaidMonth,
     })
     : tab === 'payments' ? paymentsView({
       banner: errorBanner,
@@ -1761,6 +1769,12 @@ function payableView({
 
 /* ── Paid ────────────────────────────────────────────────────────────────── */
 
+/** The bill's own number, else the PRO it belongs to: imported bills carry no carrier invoice number, and the id is not something to read. */
+function paidBillLabel(bill: CarrierBillRecord): string {
+  const pro = bill.shipmentNumber ?? bill.loadNumber
+  return bill.billNumber || (pro ? `PRO ${pro}` : bill.id)
+}
+
 function paidView({ banner, bills, shared, months, month, loading, onMonth, verifyOnly, verifyCount, onVerifyOnly, infos, lines, onAddRemit }: {
   banner: ReactNode
   bills: CarrierBillRecord[]
@@ -1782,9 +1796,15 @@ function paidView({ banner, bills, shared, months, month, loading, onMonth, veri
     {
       key: 'bill',
       header: 'BILL',
-      text: (bill) => bill.billNumber ?? bill.id,
+      text: (bill) => paidBillLabel(bill),
       extraPx: 40,
-      render: (bill) => <><Link to={`/tms/invoicing/payable/bills/${bill.id}`}>{bill.billNumber ?? bill.id}</Link><VerifyPaymentBadge bill={bill} /></>,
+      render: (bill) => <><Link to={`/tms/invoicing/payable/bills/${bill.id}`}>{paidBillLabel(bill)}</Link><VerifyPaymentBadge bill={bill} /></>,
+    },
+    {
+      key: 'pro',
+      header: 'PRO',
+      text: (bill) => bill.shipmentNumber ?? bill.loadNumber ?? '—',
+      render: (bill) => <>{bill.shipmentNumber ?? bill.loadNumber ?? '—'}</>,
     },
     facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
     dayCol<CarrierBillRecord>('billDate', 'BILL DATE', (bill) => bill.billDate),
@@ -1803,16 +1823,17 @@ function paidView({ banner, bills, shared, months, month, loading, onMonth, veri
   ]
 
   return view<CarrierBillRecord>({
-    gridId: 'ap-paid-v2',
+    gridId: 'ap-paid-v3',
     cardLayout: { title: 'bill', party: 'carrier', amount: 'net' },
     kpis: [
-      { label: `Paid in ${monthLabel(month)}`, value: bills.length },
+      { label: month ? `Paid in ${monthLabel(month)}` : 'Paid, all time', value: bills.length },
       { label: 'Net paid', value: formatCents(sumCents(bills, (bill) => bill.netCents)) },
       { label: 'Verify payment', value: verifyCount, tone: 'warn' },
     ],
     actions: (
       <>
-        <TmsSelect aria-label="Bill month" value={month} onChange={(e) => onMonth(e.target.value)}>
+        <TmsSelect aria-label="Paid month" value={month} onChange={(e) => onMonth(e.target.value)}>
+          <option value="">All time</option>
           {months.map((ym) => <option key={ym} value={ym}>{monthLabel(ym)}</option>)}
         </TmsSelect>
         <TmsButton
@@ -1830,7 +1851,7 @@ function paidView({ banner, bills, shared, months, month, loading, onMonth, veri
     columns,
     rows: bills,
     rowKey: (bill) => bill.id,
-    emptyText: `No carrier was paid off a ${monthLabel(month)} bill.`,
+    emptyText: month ? `No carrier was paid in ${monthLabel(month)}.` : 'No carrier has been paid yet.',
   })
 }
 

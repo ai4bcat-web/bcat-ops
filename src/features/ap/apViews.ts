@@ -11,6 +11,7 @@
 import { isVerifyPaymentBill } from '@/lib/verifyPayment'
 import { approvalReadiness, billPayee, PENDING_DATES_BLOCK, type ApprovalWarning, type BillPayee } from '@/lib/carrierBill'
 import { daysLate } from '@/lib/arAging'
+import { chicagoDateStr } from '@/lib/date'
 import { canonicalFactorName, paysThroughFactor, type FactorNameIndex } from '@/lib/factorRemit'
 import type { ApWorklistRow } from '@/hooks/useApWorklist'
 import type { CarrierPaymentInfo } from '@/lib/apiClient'
@@ -320,11 +321,26 @@ export function billsToPay(bills: readonly CarrierBillRecord[]): CarrierBillReco
     .sort((a, b) => a.dueAt.localeCompare(b.dueAt))
 }
 
-/** What a month's read actually settled, newest paid first. */
+/** What a read actually settled, newest paid first. */
 export function paidBills(bills: readonly CarrierBillRecord[]): CarrierBillRecord[] {
   return bills
     .filter((b) => b.status === 'PAID')
     .sort((a, b) => String(b.paidAt ?? b.billDate).localeCompare(String(a.paidAt ?? a.billDate)))
+}
+
+/** The month a bill was paid in, 'YYYY-MM' on the Chicago calendar (not the month it was billed). */
+export function paidMonthOf(bill: Pick<CarrierBillRecord, 'paidAt' | 'billDate'>): string {
+  return (bill.paidAt ? chicagoDateStr(bill.paidAt) : bill.billDate).slice(0, 7)
+}
+
+/** The Paid tab's month picker: every month something was paid in, newest first ('All time' is added by the picker). */
+export function paidMonthOptions(bills: readonly CarrierBillRecord[]): string[] {
+  return [...new Set(bills.map(paidMonthOf))].sort().reverse()
+}
+
+/** '' is every payment ever; a 'YYYY-MM' keeps the bills paid in that month. */
+export function paidInMonth(bills: readonly CarrierBillRecord[], ym: string): CarrierBillRecord[] {
+  return ym ? bills.filter((b) => paidMonthOf(b) === ym) : [...bills]
 }
 
 export interface ToBePaidFilters {
