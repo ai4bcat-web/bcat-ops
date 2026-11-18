@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { MoneyField } from '@/features/directory/components/MoneyField'
 import { AuthContext } from '@/hooks/useAuth'
+import { useAppStore } from '@/store/useAppStore'
 import { nextLoadStatuses, LOAD_WORKFLOW_STATUS_LABELS, isTruckloadMode } from '@/lib/shipmentStatus'
 import { formatDateTimeInput, fromDateTimeInput } from '@/lib/date'
 import { formatCents } from '@/lib/tmsDirectory'
@@ -109,8 +110,7 @@ export function ShipmentRowActions({ shipment, isAdmin, cancelDeleteAdminOnly, h
   // Same optional read as `useAuthUser`: row menus render in lists, drawers and tests
   // that do not always sit under AuthProvider, and the router is the real gate.
   const auth = useContext(AuthContext)
-  // Void is every staff member's unless the org switched cancel/void to admin-only (the Lambda decides);
-  // unvoid, re-point and delete are not (the Lambda decides each).
+  // Void is every staff member's (Ryne 2026-11-18); unvoid, re-point and delete are not (the Lambda decides each).
   const mayManage = isAdmin || (auth?.isOwner ?? false)
   const mayDelete = (auth?.isOwner ?? false) && onDeleted != null
 
@@ -208,7 +208,7 @@ export function ShipmentRowActions({ shipment, isAdmin, cancelDeleteAdminOnly, h
               <RotateCcw size={14} className="mr-2" />Unvoid shipment…
             </DropdownMenuItem>
           )}
-          {!voided && (mayCancel || mayManage) && (
+          {!voided && (
             <DropdownMenuItem
               className="text-[color:var(--tms-badge-red)]"
               onSelect={() => setDialog({ kind: 'void' })}
@@ -258,12 +258,17 @@ export function ShipmentRowActions({ shipment, isAdmin, cancelDeleteAdminOnly, h
           onDeleted={(outcome) => onDeleted?.(outcome)}
         />
       )}
-      {dialog?.kind === 'void' && !voided && (mayCancel || mayManage) && (
+      {dialog?.kind === 'void' && !voided && (
         <VoidShipmentDialog
           shipment={{ id: shipment.id, number: shipment.number, updatedAt: shipment.updatedAt }}
           open
           onClose={() => setDialog(null)}
-          onVoided={(bundle) => { handlers.onVoid(bundle); setDialog(null) }}
+          onVoided={(bundle) => {
+            // Off the calendar at once: the store's loads feed every calendar and schedule view.
+            useAppStore.getState().markShipmentLoadsVoided(shipment.id, new Date().toISOString())
+            handlers.onVoid(bundle)
+            setDialog(null)
+          }}
         />
       )}
     </>

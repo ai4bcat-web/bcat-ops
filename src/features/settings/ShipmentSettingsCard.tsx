@@ -142,8 +142,8 @@ export function ShipmentSettingsCard() {
             </TmsField>
             <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 6 }}>
               <CheckRow
-                ariaLabel="Cancel and void admin only"
-                label="Only an admin may cancel or void a shipment"
+                ariaLabel="Cancel admin only"
+                label="Only an admin may cancel a shipment (anyone on the team can void)"
                 checked={cancelDeleteAdminOnly}
                 onChange={setCancelDeleteAdminOnly}
               />

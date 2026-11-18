@@ -92,6 +92,7 @@ import { TonuDialog, TonuPill } from './components/Tonu'
 import { detentionStopGuess } from './detentionStop'
 import { ShipmentRowActions, type ShipmentActionHandlers } from './components/StatusActions'
 import { DeleteShipmentsDialog } from './components/DeleteShipmentsDialog'
+import { useAppStore } from '@/store/useAppStore'
 import { UnvoidShipmentDialog } from './components/UnvoidShipmentDialog'
 import { CoverCarrierDialog } from '@/features/carriers/cover/CoverCarrierDialog'
 import { needsCover } from '@/features/tms/carrierSales/carrierSalesQueue'
@@ -1591,7 +1592,7 @@ function BoardPane({
           shipment={dialogShipment}
           open
           onOpenChange={(open) => { if (!open) setDialogShipment(null) }}
-          onUnvoided={async () => { setDialogShipment(null); await handleRefresh() }}
+          onUnvoided={async () => { setDialogShipment(null); void useAppStore.getState().refreshCalendarData(); await handleRefresh() }}
         />
       )}
 

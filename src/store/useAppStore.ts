@@ -486,6 +486,9 @@ interface AppState {
   updateLoad: (id: string, patch: Partial<Omit<Load, 'id' | 'createdAt'>>) => Promise<void>
   /** A shipment the server just deleted: its legs leave this client's working set now (no subscription event exists for a delete). */
   dropShipmentLoads: (shipmentIds: readonly string[]) => void
+  // A voided shipment's loads are stamped voided in place: every working-set view (`useLoads`) drops them at once,
+  // while the table keeps them, because a voided load's PRO stays claimed (the duplicate-PRO check reads the table).
+  markShipmentLoadsVoided: (shipmentId: string, voidedAt: string) => void
   // No deleteLoad: a PRO number is permanent (Ryne, 2026-10-28). The Load model has
   // no delete operation at all; a shipment leaves the working set by being voided.
 
@@ -925,6 +928,10 @@ export const useAppStore = create<AppState>()(
         if (gone.size === 0) return
         set((s) => ({ loads: s.loads.filter((l) => !(l.shipmentId && gone.has(l.shipmentId))) }))
       },
+
+      markShipmentLoadsVoided: (shipmentId, voidedAt) => set((s) => ({
+        loads: s.loads.map((l) => (l.shipmentId === shipmentId && !l.voidedAt ? { ...l, voidedAt } : l)),
+      })),
 
       updateLoad: async (id, patch) => {
         const before = get().loads.find((l) => l.id === id)

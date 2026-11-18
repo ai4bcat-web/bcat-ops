@@ -7,13 +7,14 @@
  *    rethrows after the handler has already toasted produced an unhandled rejection on
  *    every refused action. The dialog must also stay open, so the user can retry after
  *    reading the toast rather than watch it vanish on failure.
- * 2. Void follows the org restriction; management actions remain owner/admin-only
- *    and hard Delete requires an owner with a host callback.
+ * 2. Void is every staff member's (Ryne 2026-11-18) and takes the load off the calendar at once;
+ *    management actions remain owner/admin-only and hard Delete requires an owner with a host callback.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ShipmentRowActions, type ShipmentActionHandlers } from './components/StatusActions'
 import { AuthContext } from '@/hooks/useAuth'
+import { useAppStore } from '@/store/useAppStore'
 import type { ShipmentRecord } from '@/types/tms'
 
 vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
@@ -21,8 +22,11 @@ vi.mock('./components/DeleteShipmentsDialog', () => ({
   DeleteShipmentsDialog: () => <div data-testid="delete-dialog" />,
 }))
 vi.mock('./components/VoidShipmentDialog', () => ({
-  VoidShipmentDialog: ({ shipment }: { shipment: { number: string } }) => (
-    <div data-testid="void-dialog">Void {shipment.number}</div>
+  VoidShipmentDialog: ({ shipment, onVoided }: { shipment: { number: string }; onVoided: (bundle: never) => void }) => (
+    <div data-testid="void-dialog">
+      Void {shipment.number}
+      <button onClick={() => onVoided({} as never)}>confirm-void</button>
+    </div>
   ),
 }))
 
@@ -111,24 +115,23 @@ describe('the PRO never leaves', () => {
     expect(screen.queryByText('Re-point customer…')).toBeNull()
     expect(screen.queryByText('Delete shipment…')).toBeNull()
   })
-  it('hides Void from staff when the org requires an admin', async () => {
+  it('offers Void to staff even when the org requires an admin to cancel', async () => {
     render(<ShipmentRowActions shipment={shipment} isAdmin={false} cancelDeleteAdminOnly handlers={handlers()} />)
-    openMenu()
-    await screen.findByText('Duplicate')
-    expect(screen.queryByText('Void shipment…')).toBeNull()
-    expect(screen.queryByTestId('void-dialog')).toBeNull()
-  })
-
-  it('closes the staff void entry when the org restriction changes', async () => {
-    const actions = handlers()
-    const { rerender } = render(
-      <ShipmentRowActions shipment={shipment} isAdmin={false} cancelDeleteAdminOnly={false} handlers={actions} />,
-    )
     openMenu()
     fireEvent.click(await screen.findByText('Void shipment…'))
     expect(await screen.findByTestId('void-dialog')).toBeTruthy()
-    rerender(<ShipmentRowActions shipment={shipment} isAdmin={false} cancelDeleteAdminOnly handlers={actions} />)
-    expect(screen.queryByTestId('void-dialog')).toBeNull()
+  })
+
+  it('stamps the voided shipment\'s loads voided in the store at once (so every calendar view drops them), and only those', async () => {
+    useAppStore.setState({ loads: [{ id: 'l1', shipmentId: 'shp-1' }, { id: 'l2', shipmentId: 'shp-other' }] as never })
+    const actions = handlers()
+    render(<ShipmentRowActions shipment={shipment} isAdmin={false} cancelDeleteAdminOnly handlers={actions} />)
+    openMenu()
+    fireEvent.click(await screen.findByText('Void shipment…'))
+    fireEvent.click(await screen.findByText('confirm-void'))
+    const loads = useAppStore.getState().loads
+    expect(loads.map((l) => [l.id, Boolean(l.voidedAt)])).toEqual([['l1', true], ['l2', false]])
+    expect(actions.onVoid).toHaveBeenCalled()
   })
 
   it.each([false, true])('offers Void to an owner with admin-only=%s', async (cancelDeleteAdminOnly) => {
