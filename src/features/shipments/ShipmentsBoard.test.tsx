@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { personalTemplateId } from '@/lib/personalColumnLayout'
 import { ShipmentTabsProvider } from './tabs/ShipmentTabsProvider'
 import { ShipmentTabStrip } from './tabs/ShipmentTabStrip'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -1132,13 +1133,76 @@ describe('ShipmentsBoard team column layout', () => {
     expect(heads[2]).not.toHaveClass('tms-dg-sticky')
   })
 
-  it('a non-admin gets no layout editing at all', async () => {
+  it('a non-admin cannot edit the team layout, but can customize their own', async () => {
     auth.isAdmin = false
     renderBoard('/tms/shipments', [row('S001')])
     await screen.findByText('S001')
-    expect(screen.queryByRole('button', { name: /Edit layout/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Edit team layout/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Columns$/ })).toBeNull()
     expect(screen.queryByLabelText('Column template')).toBeNull()
+    expect(screen.getByTestId('customize-my-layout')).toBeTruthy()
+  })
+
+  it('a non-admin saves their own layout under their own row, never shared, and never touches the team default', async () => {
+    auth.isAdmin = false
+    vi.mocked(saveShipmentColumnTemplate).mockResolvedValue({})
+    vi.mocked(listShipmentColumnTemplates).mockResolvedValue([teamTemplate(['proNumber', 'originCity'])])
+    renderBoard('/tms/shipments', [row('S001')])
+    await screen.findByText('S001')
+    fireEvent.click(screen.getByTestId('customize-my-layout'))
+    expect(screen.queryByRole('button', { name: 'Save as team default' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^Columns$/ }))
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Destination' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save my layout' }))
+    await waitFor(() => expect(saveShipmentColumnTemplate).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(saveShipmentColumnTemplate).mock.calls[0][0]).toMatchObject({
+      id: personalTemplateId('active', 'ryne@bcatcorp.com'),
+      shared: false,
+      columns: ['proNumber', 'originCity', 'destinationCity'],
+    })
+  })
+
+  it('a person with their own layout sees it, can switch to the team layout, and can reset back to the team layout', async () => {
+    auth.isAdmin = false
+    vi.mocked(deleteShipmentColumnTemplate).mockResolvedValue({})
+    vi.mocked(listShipmentColumnTemplates).mockResolvedValue([
+      teamTemplate(['proNumber', 'originCity']),
+      { ...teamTemplate(['proNumber', 'destinationCity']), id: personalTemplateId('all', 'ryne@bcatcorp.com'), shared: false, name: 'My All layout' },
+    ])
+    renderBoard('/tms/shipments?list=all', [row('S001', { status: 'DELIVERED' })])
+    await waitFor(() => expect(headers().join('|')).toContain('Destination'))
+    expect(headers().join('|')).not.toContain('Origin')
+    fireEvent.click(screen.getByRole('tab', { name: 'Team layout' }))
+    await waitFor(() => expect(headers().join('|')).toContain('Origin'))
+    expect(headers().join('|')).not.toContain('Destination')
+    fireEvent.click(screen.getByRole('tab', { name: 'My layout' }))
+    fireEvent.click(screen.getByTestId('customize-my-layout'))
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to team layout' }))
+    await waitFor(() => expect(deleteShipmentColumnTemplate).toHaveBeenCalledWith({ id: personalTemplateId('all', 'ryne@bcatcorp.com') }))
+  })
+
+  it("somebody else's personal row never shows as mine", async () => {
+    auth.isAdmin = false
+    vi.mocked(listShipmentColumnTemplates).mockResolvedValue([
+      teamTemplate(['proNumber', 'originCity']),
+      { ...teamTemplate(['proNumber', 'destinationCity']), id: personalTemplateId('active', 'alice@bcatcorp.com'), ownerEmail: 'alice@bcatcorp.com', shared: false },
+    ])
+    renderBoard('/tms/shipments', [row('S001')])
+    await waitFor(() => expect(headers().join('|')).toContain('Origin'))
+    expect(headers().join('|')).not.toContain('Destination')
+  })
+
+  it('the team layout was updated hint shows when an admin saves after the person last saved theirs, and Keep mine dismisses it', async () => {
+    auth.isAdmin = false
+    vi.mocked(listShipmentColumnTemplates).mockResolvedValue([
+      { ...teamTemplate(['proNumber', 'originCity']), id: 'shipments-team-default-active', updatedAt: '2026-11-18T12:00:00.000Z' },
+      { ...teamTemplate(['proNumber', 'destinationCity']), id: personalTemplateId('active', 'ryne@bcatcorp.com'), shared: false, updatedAt: '2026-11-10T12:00:00.000Z' },
+    ])
+    renderBoard('/tms/shipments', [row('S001')])
+    expect(await screen.findByTestId('team-layout-updated')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Keep mine' }))
+    await waitFor(() => expect(screen.queryByTestId('team-layout-updated')).toBeNull())
   })
 
   it('an admin edits the layout and saves it as the team default', async () => {
@@ -1146,7 +1210,7 @@ describe('ShipmentsBoard team column layout', () => {
     vi.mocked(listShipmentColumnTemplates).mockResolvedValue([teamTemplate(['proNumber', 'originCity'])])
     renderBoard('/tms/shipments', [row('S001')])
     await screen.findByText('S001')
-    fireEvent.click(screen.getByRole('button', { name: /Edit layout/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Edit team layout/ }))
     fireEvent.click(screen.getByRole('button', { name: /^Columns$/ }))
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Destination' }))
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
@@ -1165,7 +1229,7 @@ describe('ShipmentsBoard team column layout', () => {
     vi.mocked(listShipmentColumnTemplates).mockResolvedValue([teamTemplate(['proNumber', 'originCity'])])
     renderBoard('/tms/shipments?list=all', [row('S001', { status: 'DELIVERED' })])
     await screen.findByText('S001')
-    fireEvent.click(screen.getByRole('button', { name: /Edit layout/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Edit team layout/ }))
     fireEvent.click(screen.getByRole('button', { name: /^Columns$/ }))
     expect(await screen.findByText('Columns for All')).toBeTruthy()
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Destination' }))
@@ -1183,7 +1247,7 @@ describe('ShipmentsBoard team column layout', () => {
     vi.mocked(listShipmentColumnTemplates).mockResolvedValue([teamTemplate(['proNumber', 'originCity'])])
     renderBoard('/tms/shipments', [row('S001')])
     await screen.findByText('S001')
-    fireEvent.click(screen.getByRole('button', { name: /Edit layout/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Edit team layout/ }))
     fireEvent.click(screen.getByRole('button', { name: /Fit widths/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Save as team default' }))
     await waitFor(() => expect(saveShipmentColumnTemplate).toHaveBeenCalledTimes(1))
@@ -1200,12 +1264,12 @@ describe('ShipmentsBoard team column layout', () => {
     expect(widths).toContain(77)
   })
 
-  it('an admin pins a column in Edit layout > Columns, and the pin is saved with the team default', async () => {
+  it('an admin pins a column in Edit team layout > Columns, and the pin is saved with the team default', async () => {
     vi.mocked(saveShipmentColumnTemplate).mockResolvedValue({})
     vi.mocked(listShipmentColumnTemplates).mockResolvedValue([teamTemplate(['proNumber', 'status', 'originCity'], {}, ['proNumber'])])
     renderBoard('/tms/shipments', [row('S001')])
     await screen.findByText('S001')
-    fireEvent.click(screen.getByRole('button', { name: /Edit layout/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Edit team layout/ }))
     fireEvent.click(screen.getByRole('button', { name: /^Columns$/ }))
     fireEvent.click(await screen.findByRole('button', { name: 'Pin Origin' }))
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
@@ -1221,7 +1285,7 @@ describe('ShipmentsBoard team column layout', () => {
     vi.mocked(listShipmentColumnTemplates).mockResolvedValue([teamTemplate(['proNumber', 'originCity'])])
     renderBoard('/tms/shipments', [row('S001')])
     await screen.findByText('S001')
-    fireEvent.click(screen.getByRole('button', { name: /Edit layout/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Edit team layout/ }))
     expect(screen.queryByTestId('layout-unsaved')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /^Columns$/ }))
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Destination' }))
@@ -1234,7 +1298,7 @@ describe('ShipmentsBoard team column layout', () => {
   it('Cancel drops the unsaved layout edit', async () => {
     renderBoard('/tms/shipments', [row('S001')])
     await screen.findByText('S001')
-    fireEvent.click(screen.getByRole('button', { name: /Edit layout/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Edit team layout/ }))
     fireEvent.click(screen.getByRole('button', { name: /^Columns$/ }))
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Destination' }))
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
