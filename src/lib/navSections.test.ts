@@ -126,7 +126,7 @@ describe('buildNavSections', () => {
     expect(sections.map((s) => s.key)).toEqual(['CAR_SHIPPING', 'COMPANY'])
     expect(businesses.map((b) => b.key)).toEqual(['BROKERAGE', 'CAR_SHIPPING'])
     expect(labels(sections[1].items)).toEqual([
-      'Financial operations', 'Finances', 'Profit Review', 'Weekly Cash Check-in', 'Expenses', 'Insurance', 'Reddit Queue',
+      'Financial operations', 'Finances', 'Profit Review', 'Weekly Cash Check-in', 'Cash planner', 'Expenses', 'Insurance', 'Reddit Queue',
     ])
     // The header reads as a business name, not as a code: `CAR SHIPPING [Best Care Auto Transport]`.
     expect(sections[0].name).toBe('CAR SHIPPING')

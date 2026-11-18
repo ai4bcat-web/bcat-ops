@@ -35,7 +35,7 @@ export const ACCOUNTING_PAGES: readonly AccountingPage[] = [
   { key: 'hours', label: 'Employee hours', covers: 'Time cards, PTO days and hourly pay' },
   { key: 'commissions', label: 'Commissions', covers: 'Run, approve and pay sales commissions' },
   { key: 'finances', label: 'Finances', covers: 'Expenses, financial operations and profit review' },
-  { key: 'cashCheckIn', label: 'Weekly cash check-in', covers: 'The weekly cash check-in' },
+  { key: 'cashCheckIn', label: 'Weekly cash check-in', covers: 'The weekly cash check-in and the Cash planner' },
 ]
 
 export const ACCOUNTING_PAGE_KEYS: readonly string[] = ACCOUNTING_PAGES.map((p) => p.key)

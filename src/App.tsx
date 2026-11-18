@@ -21,6 +21,7 @@ import { TrackPage } from '@/features/tracking/TrackPage'
 import { DriverInfoPage } from '@/features/driver-info/DriverInfoPage'
 import { ProfitReviewPage } from '@/features/finances/ProfitReviewPage'
 import { WeeklyCashCheckInPage } from '@/features/cash-checkin/WeeklyCashCheckInPage'
+import { CashPlannerPage } from '@/features/cash-planner/CashPlannerPage'
 import { ApptsPage } from '@/features/appts/ApptsPage'
 import { CustomersPage, LocationsPage } from '@/features/directory/DirectoryPages'
 import { CarriersPage } from '@/features/carriers/CarriersPage'
@@ -236,6 +237,7 @@ export default function App() {
               <Route path="/finances" element={<RequirePage page="finances"><FinancesPage /></RequirePage>} />
               <Route path="/finances/review" element={<RequirePage page="finances"><ProfitReviewPage /></RequirePage>} />
               <Route path="/finance/cash-checkin" element={<RequirePage page="cashCheckIn"><WeeklyCashCheckInPage /></RequirePage>} />
+              <Route path="/finance/cash-planner" element={<RequirePage page="cashCheckIn"><CashPlannerPage /></RequirePage>} />
               <Route path="/factoring" element={<ParamRedirect to="/tms/invoicing/factored" />} />
               <Route path="/ar" element={<ParamRedirect to="/tms/invoicing" />} />
               <Route path="/ar/invoices/:id" element={<ParamRedirect to="/tms/invoicing/invoices/:id" />} />

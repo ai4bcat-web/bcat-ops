@@ -53,6 +53,9 @@ export function CashRequirementsTab({ bills, facts, infos, asOf, busy, onMoveToS
         <div><dt className="tms-muted text-xs">Past due</dt><dd className="text-lg">{formatCents(cash.pastDue.totalCents)}</dd></div>
         <div><dt className="tms-muted text-xs">Open AP in total</dt><dd className="text-lg">{formatCents(cash.openCents)}</dd></div>
       </dl>
+      <p className="text-sm" style={{ margin: '0 0 12px' }}>
+        <Link to="/finance/cash-planner">Plan this week's payments against your bank balances</Link>
+      </p>
 
       <ul aria-label="Due by Friday" style={{ listStyle: 'none', padding: 0, margin: '0 0 12px', display: 'grid', gap: 6 }}>
         {[cash.pastDue, ...cash.weeks].map((l) => (
