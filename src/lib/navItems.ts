@@ -117,6 +117,8 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/finances',  label: 'Finances',  icon: LineChart, pageKey: 'finances', section: 'COMPANY' },
   { to: '/finances/review', label: 'Profit Review', icon: ClipboardList, pageKey: 'finances', section: 'COMPANY' },
   { to: '/finance/cash-checkin', label: 'Weekly Cash Check-in', icon: Wallet, pageKey: 'cashCheckIn', section: 'COMPANY' },
+  // Same access as the check-in: it reads the payables against the bank balances Ryne types in (2026-11-18).
+  { to: '/finance/cash-planner', label: 'Cash planner', icon: Wallet, pageKey: 'cashCheckIn', section: 'COMPANY' },
   // Truck costs and the fleet's insurance are company money, not fleet-manager pages (Ryne 2026-11-14).
   { to: '/expenses',    label: 'Expenses',        icon: WalletCards, pageKey: 'finances', section: 'COMPANY' },
   { to: '/insurance',   label: 'Insurance',       icon: Umbrella, pageKey: 'insurance', section: 'COMPANY' },
