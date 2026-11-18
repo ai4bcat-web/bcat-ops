@@ -15,6 +15,9 @@ export const LETTERHEAD_HEIGHT = 70
 
 const LOGO_BOX_W = 150
 const LOGO_BOX_H = 38
+/** Width of the band's right-hand zone: the left text stops 150 pt short of the right margin. */
+const SUBTITLE_ZONE_W = 150
+const SUBTITLE_MIN_PT = 7
 
 /**
  * The division logo fitted into its box, or null. Every failure (no key, loader null or
@@ -67,6 +70,22 @@ export function drawLetterhead(doc: jsPDF, content: LetterheadContent): void {
     doc.setTextColor(190, 200, 215)
     doc.text(text, x, y)
   }
+  /**
+   * The line under the title, right-aligned to the page margin like the title. It shrinks
+   * (to 7 pt) and then wraps inside the right-hand zone so a long number is never clipped.
+   */
+  const subtitle = (text: string) => {
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(190, 200, 215)
+    let size = 10
+    doc.setFontSize(size)
+    while (size > SUBTITLE_MIN_PT && doc.getTextWidth(text) > SUBTITLE_ZONE_W) {
+      size -= 0.5
+      doc.setFontSize(size)
+    }
+    const lines = doc.splitTextToSize(text, SUBTITLE_ZONE_W) as string[]
+    lines.slice(0, 2).forEach((line, i) => doc.text(line, W - M, 48 + i * (size + 2), { align: 'right' }))
+  }
   if (logo) {
     // Brand marks are usually dark: sit it on a white plate inside the black band. The
     // fixed alias embeds the image once however many pages draw the header.
@@ -90,5 +109,5 @@ export function drawLetterhead(doc: jsPDF, content: LetterheadContent): void {
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(13)
   doc.text(content.title, W - M, 32, { align: 'right' })
-  small(content.subtitle, W - M, 48, 10)
+  subtitle(content.subtitle)
 }
