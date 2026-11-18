@@ -67,6 +67,7 @@ import { withDefaultChargeCodes } from '@/lib/chargeCodeDefaults'
 import { parseTrackingPrefs, type TrackingPrefsOverride } from '@/lib/trackingPrefs'
 import { parseDetentionFlag, type DetentionFlagInput } from '@/lib/detentionFlag'
 import { parseTonuFlag, type TonuFlagInput } from '@/lib/tonuFlag'
+import { parseToVoidFlag, type ToVoidFlagInput } from '@/lib/toVoidFlag'
 import { batchByIndex, batchByIndexPairs, batchGet, setDefaultGraphqlRunner } from '@/lib/aliasBatch'
 import { costMonthIds, parseJsonField, toMeta, toMonthRow, type CostManualEntry, type CostMeta, type CostMonthRow } from '@/lib/costToRun'
 import { LOAD_WORKFLOW_STATUSES } from '@/lib/shipmentStatus'
@@ -2452,6 +2453,9 @@ let shipmentsHaveDetention = true
 // TONU flag (Ryne 2026-11-16): one JSON field. Own flag, same reason.
 const SHIPMENT_TONU_FIELDS = ['tonuFlag']
 let shipmentsHaveTonu = true
+// To-void flag (Ryne 2026-11-18): one JSON field. Own flag, same reason.
+const SHIPMENT_TO_VOID_FIELDS = ['toVoidFlag']
+let shipmentsHaveToVoid = true
 /** AppSync hands the AWSJSON back as a string, the Lambda bundle as an object: normalise both so consumers see `TrackingPrefsOverride | null`. */
 function withParsedPrefs<T>(result: T): T {
   const fix = (row: unknown) => {
@@ -2463,6 +2467,9 @@ function withParsedPrefs<T>(result: T): T {
     }
     if (row && typeof row === 'object' && 'tonuFlag' in row) {
       row.tonuFlag = parseTonuFlag(row.tonuFlag)
+    }
+    if (row && typeof row === 'object' && 'toVoidFlag' in row) {
+      row.toVoidFlag = parseToVoidFlag(row.toVoidFlag)
     }
   }
   if (Array.isArray(result)) result.forEach(fix)
@@ -2488,6 +2495,7 @@ async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T>
         shipmentsHaveTrackingPrefs ? SHIPMENT_TRACKING_PREFS_FIELDS.join(' ') : '',
         shipmentsHaveDetention ? SHIPMENT_DETENTION_FIELDS.join(' ') : '',
         shipmentsHaveTonu ? SHIPMENT_TONU_FIELDS.join(' ') : '',
+        shipmentsHaveToVoid ? SHIPMENT_TO_VOID_FIELDS.join(' ') : '',
         shipmentsHaveRevTag ? SHIPMENT_REV_FIELDS.join(' ') : '',
         shipmentsHaveCoverage ? SHIPMENT_COVERAGE_FIELDS.join(' ') : '',
         shipmentsHaveAssignment ? SHIPMENT_ASSIGNMENT_FIELDS.join(' ') : '',
@@ -2512,6 +2520,10 @@ async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T>
       }
       if (shipmentsHaveTonu && fieldNamed(SHIPMENT_TONU_FIELDS, err)) {
         shipmentsHaveTonu = false
+        continue
+      }
+      if (shipmentsHaveToVoid && fieldNamed(SHIPMENT_TO_VOID_FIELDS, err)) {
+        shipmentsHaveToVoid = false
         continue
       }
       if (shipmentsHaveTrackingPrefs && fieldNamed(SHIPMENT_TRACKING_PREFS_FIELDS, err)) {
@@ -10009,6 +10021,14 @@ export async function setTonuFlag(
   input: { shipmentId: string; flag: TonuFlagInput | null },
 ): Promise<{ shipment: ShipmentRecord }> {
   const r = await shipmentAction<{ shipment: ShipmentRecord }>('SET_TONU_FLAG', input)
+  return { shipment: withParsedPrefs(r.shipment) }
+}
+
+/** Flag a shipment to be voided (or clear it with `flag: null`). A review marker: the shipment stays live until it is voided. The Lambda stamps who and when and logs it in Activity. */
+export async function setToVoidFlag(
+  input: { shipmentId: string; flag: ToVoidFlagInput | null },
+): Promise<{ shipment: ShipmentRecord }> {
+  const r = await shipmentAction<{ shipment: ShipmentRecord }>('SET_TO_VOID_FLAG', input)
   return { shipment: withParsedPrefs(r.shipment) }
 }
 

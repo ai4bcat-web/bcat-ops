@@ -90,6 +90,7 @@ import { SEED_DIVISIONS, topLevelOf } from '@/lib/ownership'
 import { cn } from '@/lib/utils'
 import { DetentionDialog, DetentionPill } from './components/Detention'
 import { TonuDialog, TonuPill } from './components/Tonu'
+import { ToVoidDialog, ToVoidPill } from './components/ToVoid'
 import { detentionStopGuess } from './detentionStop'
 import { ShipmentRowActions, type ShipmentActionHandlers } from './components/StatusActions'
 import { DeleteShipmentsDialog } from './components/DeleteShipmentsDialog'
@@ -343,6 +344,14 @@ export function ShipmentsBoard() {
   }, [])
 
   const visiblePanes: Array<'left' | 'right'> = split ? ['left', 'right'] : ['left']
+  /** The stats strip's Voided chip: the left pane follows the URL's list. */
+  const openLeftList = useCallback((next: ShipmentList) => {
+    setListParams((prev) => {
+      const out = new URLSearchParams(prev)
+      out.set('list', next)
+      return out
+    })
+  }, [setListParams])
   // A search typed on Active reaches every shipment (the All list's data), so All's rows load for it too.
   const searchesAll = visiblePanes.some((pane) => (pane === 'left' ? list : rightList) === 'active' && reports[pane].query.trim() !== '')
   const wantsAllList = searchesAll || visiblePanes.some((pane) => (pane === 'left' ? list : rightList) === 'all')
@@ -358,7 +367,8 @@ export function ShipmentsBoard() {
     kind: 'window', months: windowMonths,
   })
   const { shipments: voidedRows, loading: voidedLoading, error: voidedError, refresh: refreshVoided } = useShipments({
-    kind: 'window', months: wantsVoidedList ? months : [], includeVoided: true,
+    // Off the Voided list this month's voided shipments are still read, so the stats strip's Voided chip has a count (Ryne 2026-11-18).
+    kind: 'window', months: wantsVoidedList ? months : [thisMonth], includeVoided: true,
   })
   const { shipments: allYearsRows, loading: allYearsLoading, error: allYearsError, refresh: refreshAllYears } = useShipments(
     wantsAllList && year === 'all' ? { kind: 'all' } : { kind: 'ids', ids: [] },
@@ -486,6 +496,7 @@ export function ShipmentsBoard() {
           year={year}
           searchIdSet={searchIdSet}
           searchCapped={searchCapped}
+          onOpenList={openLeftList}
           allRows={allRows}
           loading={loading}
           error={error}
@@ -511,6 +522,7 @@ export function ShipmentsBoard() {
             searchIdSet={searchIdSet}
             searchCapped={searchCapped}
             onListChange={setRightList}
+            onOpenList={setRightList}
             allRows={allRows}
             loading={loading}
             error={error}
@@ -555,6 +567,8 @@ interface BoardPaneProps {
   searchCapped?: boolean
   /** Only the split-screen's right pane picks its own list; the left one follows the URL. */
   onListChange?: (list: ShipmentList) => void
+  /** Opens a list in this pane (the stats strip's Voided chip), whichever way the pane keeps its list. */
+  onOpenList?: (list: ShipmentList) => void
   allRows: ShipmentRow[]
   loading?: boolean
   error?: string | null
@@ -580,6 +594,7 @@ function BoardPane({
   searchIdSet,
   searchCapped,
   onListChange,
+  onOpenList,
   allRows,
   refresh,
   customers,
@@ -719,7 +734,7 @@ function BoardPane({
   const [dialogShipment, setDialogShipment] = useState<ShipmentRow | null>(null)
   // Frozen when opened: the auto-refresh must not pull the rows (and this dialog's Restore) out from under it.
   const [deleteTargets, setDeleteTargets] = useState<Array<{ id: string; number: string }> | null>(null)
-  const [dialogKind, setDialogKind] = useState<'unvoid' | 'repoint' | 'cover' | 'detention' | 'tonu' | null>(null)
+  const [dialogKind, setDialogKind] = useState<'unvoid' | 'repoint' | 'cover' | 'detention' | 'tonu' | 'toVoid' | null>(null)
 
   // The page decides what to fetch, so it hears what this pane is asking for: a typed PRO
   // adds that exact row (R4, §4.3). The Voided list is its own pane list, never a facet of All.
@@ -1077,6 +1092,7 @@ function BoardPane({
             {late && <TmsBadge tone="red" title={late.tooltip} data-testid="past-delivery-pill">Past delivery date · {late.daysLate} d</TmsBadge>}
             <DetentionPill flag={row.detentionFlag} onClick={() => { setDialogShipment(row); setDialogKind('detention') }} />
             <TonuPill flag={row.tonuFlag} onClick={() => { setDialogShipment(row); setDialogKind('tonu') }} />
+            <ToVoidPill flag={row.toVoidFlag} onClick={() => { setDialogShipment(row); setDialogKind('toVoid') }} />
           </span>
         )
       }
@@ -1253,6 +1269,8 @@ function BoardPane({
         detentionFlagged: row.detentionFlag != null,
         onTonu: () => { setDialogShipment(row); setDialogKind('tonu') },
         tonuFlagged: row.tonuFlag != null,
+        onToVoid: () => { setDialogShipment(row); setDialogKind('toVoid') },
+        toVoidFlagged: row.toVoidFlag != null,
       }
     },
     [refresh],
@@ -1339,6 +1357,9 @@ function BoardPane({
     resetPage()
   }, [resetPage, setQuery, prefs, viewKey])
 
+  // Voided shipments the board has loaded: this month's off the Voided list, the chosen period's on it. The strip's Voided chip counts them.
+  const voidedCount = useMemo(() => allRows.filter((r) => boardStatusOf(r) === 'VOIDED').length, [allRows])
+
   // The stats strip counts what the list shows now, so it follows every filter. It is always on.
   // Revenue and gross profit count only delivered shipments (DELIVERED is the shipment's last
   // status; released, invoiced and paid live on the order, so those loads are still DELIVERED here).
@@ -1350,6 +1371,7 @@ function BoardPane({
     let pastDelivery = 0
     let detention = 0
     let tonu = 0
+    let toVoid = 0
     let ready = 0
     let revenue = 0
     const nowMs = Date.now()
@@ -1367,6 +1389,7 @@ function BoardPane({
       if (pastDeliveryOf(r, nowMs)) pastDelivery += 1
       if (r.detentionFlag != null) detention += 1
       if (r.tonuFlag != null) tonu += 1
+      if (r.toVoidFlag != null) toVoid += 1
       if (readyForReviewOf(r)) ready += 1
     }
     const split = profitByDivision(deliveredRows, (code) => topLevelOf(divisions, code))
@@ -1446,6 +1469,26 @@ function BoardPane({
           return next
         }),
       },
+      {
+        label: 'To void',
+        value: toVoid,
+        tone: toVoid > 0 ? 'bad' : undefined,
+        title: flags.has('toVoid') ? 'Showing only shipments flagged to be voided. Click to show all.' : 'Shipments someone flagged as ones that should be voided. They stay live until voided. Click to show only these.',
+        active: flags.has('toVoid'),
+        onClick: () => setFlags((prev) => {
+          const next = new Set(prev)
+          if (next.has('toVoid')) next.delete('toVoid')
+          else next.add('toVoid')
+          return next
+        }),
+      },
+      {
+        label: 'Voided',
+        value: voidedCount,
+        title: list === 'voided' ? 'Showing the Voided list. Click to go back to Active.' : 'Voided shipments with a pickup this month. Click to open the Voided list.',
+        active: list === 'voided',
+        ...(onOpenList ? { onClick: () => onOpenList(list === 'voided' ? 'active' : 'voided') } : {}),
+      },
       { label: 'Delivered revenue', value: <span title={DELIVERED_ONLY_TIP}>{formatCents(revenue)}</span> },
       {
         label: 'Delivered gross profit',
@@ -1459,7 +1502,7 @@ function BoardPane({
         ),
       },
     ]
-  }, [filteredRows, divisions, flags])
+  }, [filteredRows, divisions, flags, list, onOpenList, voidedCount])
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -1742,6 +1785,15 @@ function BoardPane({
           target={{ ...dialogShipment, defaultStop: detentionStopGuess(dialogShipment) }}
           onClose={() => setDialogShipment(null)}
           onSaved={() => { void handleRefresh() }}
+        />
+      )}
+
+      {dialogShipment && dialogKind === 'toVoid' && (
+        <ToVoidDialog
+          target={dialogShipment}
+          onClose={() => setDialogShipment(null)}
+          onSaved={() => { void handleRefresh() }}
+          onVoided={() => { void handleRefresh() }}
         />
       )}
 

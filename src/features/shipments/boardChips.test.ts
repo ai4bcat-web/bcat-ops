@@ -77,4 +77,14 @@ describe('board chips', () => {
     expect(only('tonu')).toEqual(['t', 'b'])
     expect(BOARD_FLAG_LABELS.tonu).toBe('TONU')
   })
+  it('matches the to-void flag on the stored flag only, and a flagged shipment still counts as live', () => {
+    const stamp = { flaggedAt: '2026-11-18T10:00:00.000Z', flaggedBy: 'a@b.c' }
+    const flagged = row('v', { toVoidFlag: { reason: 'Duplicate of 14872', ...stamp } })
+    const tonu = row('t', { tonuFlag: { ...stamp } })
+    const none = row('n')
+    const only = (flag: BoardFlag) => [flagged, tonu, none].filter((r) => matchesFlags(r, new Set([flag]), NOW)).map((r) => r.id)
+    expect(only('toVoid')).toEqual(['v'])
+    expect(only('tonu')).toEqual(['t'])
+    expect(BOARD_FLAG_LABELS.toVoid).toBe('To void')
+  })
 })
