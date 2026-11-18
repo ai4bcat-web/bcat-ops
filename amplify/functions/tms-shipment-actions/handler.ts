@@ -151,10 +151,12 @@ import {
   rejectOffer,
   requestOffers,
 } from './offers'
+import { deliveredDayOfLoad } from '../../../src/lib/laneKey'
 import {
   excludeLaneSample,
   isDeliveredOrLater,
   writeLaneSample,
+  ensureDeliveredLaneSamples,
 } from './laneSamples'
 import {
   contextOf,
@@ -460,6 +462,8 @@ const rederiveShipmentStatus = async (shipmentId: string, caller: Caller) => {
   await pullBackFromReviewIfNotDelivered(shipmentId, caller)
   await autoPushToReview(shipmentId, caller)
   await reconcileOpenIntake(intakeDeps, shipmentId, caller)
+  // A load delivered by its stops, a check call or the driver app is a lane sample too.
+  await ensureDeliveredLaneSamples(quoteDeps, result as { loads?: Row[] })
   return result
 }
 
@@ -692,6 +696,7 @@ type Action =
   | 'ATTACH_DRIVER_DOC'
   | 'DELIVER_ON_POD'
   | 'SWEEP_POD_DELIVERIES'
+  | 'RESAMPLE_DELIVERED_LOADS'
   // The invoice the accounting post generated, filed on its shipment as a document (system caller: tms-finance-actions).
   | 'ATTACH_INVOICE_DOC'
   | 'REVIEW_DOCUMENT'
@@ -833,6 +838,7 @@ const ADMIN_ONLY_ACTIONS: Record<string, true> = {
   REASSIGN_SHIPMENTS_BY_REP_CODE: true,
   RETAG_SHIPMENTS: true,
   SWEEP_POD_DELIVERIES: true,
+  RESAMPLE_DELIVERED_LOADS: true,
 }
 
 const QUOTES_PAGE_GROUP = 'page-quotes'
@@ -5242,6 +5248,52 @@ async function sweepPodDeliveries(input: Row, caller: Caller): Promise<Row> {
     }
   }
   return { dryRun, delivered, rederived, failed } as unknown as Row
+}
+
+/**
+ * RESAMPLE_DELIVERED_LOADS (ADMIN): bring the lane samples the dashboards count from in line with the loads. A delivered
+ * load with no sample (delivered by its stops, a check call or the driver app before `ensureDeliveredLaneSamples`
+ * existed) is missing from every Brokerage figure; a sample dated on the appointment sits in a different month than the
+ * delivery. Dry run unless `apply: true`; `from` / `to` (`YYYY-MM`) bound the months looked at (a load counts when its
+ * delivered month or its sample's month is inside); `limit` caps one apply (default 300).
+ */
+async function resampleDeliveredLoads(input: Row, caller: Caller): Promise<Row> {
+  const apply = input.apply === true
+  const month = (value: unknown, label: string): string | null => {
+    const text = optionalString(value, 7)
+    if (text && !/^\d{4}-(0[1-9]|1[0-2])$/.test(text)) throw new Error(`${label} must be YYYY-MM`)
+    return text
+  }
+  const from = month(input.from, 'from') ?? '0000-00'
+  const to = month(input.to, 'to') ?? '9999-99'
+  const limit = Math.min(Math.max(numberOrNull(input.limit) ?? 300, 1), 1000)
+  const [loads, samples] = await Promise.all([
+    scanTableSegmented(LOAD_TABLE_NAME, ['id', 'aljexId', 'status', 'stops', 'deliveredAt', 'voidedAt']),
+    scanTableSegmented(LANE_RATE_SAMPLE_TABLE_NAME, ['id', 'date', 'sampleMonth']),
+  ])
+  const sampleById = new Map(samples.map((row) => [String(row.id), row]))
+  const missing: Row[] = []
+  const redated: Row[] = []
+  for (const load of loads) {
+    if (load.voidedAt || !isDeliveredOrLater(load.status)) continue
+    const id = String(load.id)
+    const day = deliveredDayOfLoad(readStops(load) as never, typeof load.deliveredAt === 'string' ? load.deliveredAt : null)
+    const sample = sampleById.get(`lrs:${id}`)
+    const inRange = (m: string | null | undefined) => !!m && m >= from && m <= to
+    if (!inRange(day?.slice(0, 7)) && !inRange(sample ? String(sample.sampleMonth ?? '') : null)) continue
+    if (!sample) missing.push({ loadId: id, pro: load.aljexId ?? null, day })
+    else if (day && sample.date !== day) redated.push({ loadId: id, pro: load.aljexId ?? null, from: sample.date, to: day })
+  }
+  const todo = [...missing, ...redated].slice(0, limit)
+  let attempted = 0
+  if (apply) {
+    for (const row of todo) {
+      await writeLaneSample(quoteDeps, String(row.loadId))
+      attempted += 1
+    }
+    await writeAudit('LOAD', 'RESAMPLE_DELIVERED_LOADS', 'RESAMPLE_DELIVERED_LOADS', caller, { from, to, missing: missing.length, redated: redated.length, attempted })
+  }
+  return { apply, from, to, missing, redated, attempted, capped: missing.length + redated.length > limit } as unknown as Row
 }
 
 async function updateStop(input: Row, caller: Caller, opts: { silent?: boolean } = {}): Promise<Row> {
@@ -9897,6 +9949,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return afterPodFiled(await attachDriverDoc(documentDeps, input, caller), input, caller)
     case 'DELIVER_ON_POD':
       return deliverOnPodAction(input, caller)
+    case 'RESAMPLE_DELIVERED_LOADS':
+      return resampleDeliveredLoads(input, caller)
     case 'SWEEP_POD_DELIVERIES':
       return sweepPodDeliveries(input, caller)
     case 'ATTACH_INVOICE_DOC':

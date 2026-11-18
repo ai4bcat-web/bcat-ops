@@ -86,7 +86,7 @@ export function BrokerageSection() {
               <div className="tms-card" style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 20, width: 'min(560px, 86vw)', padding: '12px 16px', fontSize: 12.5, color: 'var(--tms-text-2)', boxShadow: 'var(--tms-shadow)' }}>
                 <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <li><b>Scope:</b> shipments whose revenue division is Brokerage (BCAT Logistics) and any division under it. Ivan Cartage, its subsidiaries and untagged shipments are not here. Voided and canceled shipments, and loads whose carrier was TONU'd, are not counted.</li>
-                  <li><b>Month:</b> the month a load was delivered (its delivery appointment, else the day it was marked delivered), the same date the Company strips and the lane history use. A load is counted once it is delivered and priced.</li>
+                  <li><b>Month:</b> the month a load was delivered: the actual time at its last delivery stop (read in Chicago time), else its delivered date, else its delivery appointment. The lane history uses the same date. A load is counted once it is delivered and priced.</li>
                   <li><b>Revenue:</b> what the customer is charged for the load (the sum of its customer charge lines: line haul, fuel and accessorials), the same figure the TMS revenue and margin cards use.</li>
                   <li><b>Expense:</b> what the carrier charges us for the load (the sum of its carrier charge lines: carrier rate and carrier accessorials), the same cost those margin cards use.</li>
                   <li><b>Profit</b> = revenue − expense. <b>Profit margin</b> = profit ÷ revenue; a month or rep with no revenue shows a dash.</li>

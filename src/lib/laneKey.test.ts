@@ -178,8 +178,31 @@ describe('laneSampleFor', () => {
     })
   })
 
-  it('dates the sample on the last delivery appointment', () => {
+  it('dates the sample on the last delivery appointment when nothing says it was delivered another day', () => {
     expect(laneSampleFor(base(), '2026-02-20T00:00:00.000Z')?.date).toBe('2026-02-12')
+  })
+
+  it('dates the sample on the day the freight was delivered, not the appointment (Ryne 2026-11-17)', () => {
+    const input = base()
+    input.load.deliveredAt = '2026-02-14T18:00:00.000Z'
+    expect(laneSampleFor(input, '2026-02-20T00:00:00.000Z')?.date).toBe('2026-02-14')
+    // The actual time at the last delivery stop beats the load's own stamp.
+    input.load.stops = [chicago, stop({ type: 'delivery', sequence: 1, city: 'Danville, IL', appt: '2026-02-12T15:00:00.000Z', departedAt: '2026-02-15T16:00:00.000Z' })]
+    expect(laneSampleFor(input, '2026-02-20T00:00:00.000Z')?.date).toBe('2026-02-15')
+  })
+
+  it('reads a delivery time in Chicago: 8 pm on the last day of a month stays in that month', () => {
+    const input = base()
+    input.load.stops = [chicago, stop({ type: 'delivery', sequence: 1, city: 'Danville, IL', appt: '2026-10-31T16:00:00.000Z', departedAt: '2026-11-01T01:30:00.000Z' })]
+    const sample = laneSampleFor(input, '2026-11-05T00:00:00.000Z')
+    expect(sample?.date).toBe('2026-10-31')
+    expect(sample?.sampleMonth).toBe('2026-10')
+  })
+
+  it('does not trust the shipment stamp, which the Aljex import set to the import day', () => {
+    const input = base()
+    input.shipment = { ...input.shipment, deliveredAt: '2026-11-08T12:00:00.000Z' }
+    expect(laneSampleFor(input, '2026-11-20T00:00:00.000Z')?.date).toBe('2026-02-12')
   })
 
   it('falls back to the delivery stamp, then to now, when there is no appointment', () => {
