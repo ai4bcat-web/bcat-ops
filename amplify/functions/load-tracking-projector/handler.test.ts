@@ -11,7 +11,8 @@ import {
   type ProjectorDeps,
   type StreamEvent,
 } from './handler'
-import type { Row } from '../_shared/shipmentStore'
+import { getById, queryIndex, type Row } from '../_shared/shipmentStore'
+import type { LaneSampleDeps } from '../tms-shipment-actions/laneSamples'
 import { CHECK_CALL_TABLE, DRIVER_TABLE, FakeDynamo, NOW, TABLES } from './fakeTables'
 
 type Stop = {
@@ -337,5 +338,78 @@ describe('driverRoster', () => {
     expect(driverIdFor(await driverRoster(client, DRIVER_TABLE), 'lee@bcatcorp.com')).toBe('drv-7')
     expect(driverIdFor(await driverRoster(client, DRIVER_TABLE), 'drv-7')).toBe('drv-7')
     expect(db.scans).toBe(1)
+  })
+})
+
+describe('the lane sample of a delivered load', () => {
+  const LANE_TABLE = 'LaneRateSample-test'
+  const deliveredStops = stops(
+    { id: 'st-1', type: 'pickup', sequence: 0, city: 'JOLIET, IL', arrivedAt: '2026-11-02T09:00:00Z', departedAt: '2026-11-02T10:30:00Z' },
+    { id: 'st-2', type: 'delivery', sequence: 1, city: 'MESA, AZ', arrivedAt: '2026-11-04T14:00:00Z', departedAt: '2026-11-05T03:30:00Z' },
+  )
+  const dispatched = () => loadRow({ stops: deliveredStops, revDivision: 'BROKERAGE', salesRepId: 'rep-1' })
+  const delivered = () => ({ ...dispatched(), status: 'DELIVERED', deliveredAt: '2026-11-05T03:30:00Z', updatedAt: '2026-11-05T03:31:00.000Z' })
+
+  function withSamples(loads: Row[] = [delivered()]): { db: FakeDynamo; deps: ProjectorDeps } {
+    const { db, deps } = setup(loads)
+    db.seed(TABLES.loadFinancials, { __typename: 'LoadFinancials', id: 'load-1', loadId: 'load-1', revenueCents: 150000, costCents: 110000, profitCents: 40000 })
+    const laneSample: LaneSampleDeps = {
+      db: db as unknown as DynamoDBClient,
+      store: { tables: { shipmentDocument: '' } },
+      tables: { laneSample: LANE_TABLE, load: TABLES.load, loadFinancials: TABLES.loadFinancials, shipment: TABLES.shipment, order: TABLES.order, customer: 'Customer-test', loadCarrier: TABLES.loadCarrier },
+      getById: (table, id) => getById(db as unknown as DynamoDBClient, table, id),
+      queryIndex: (table, index, key, value) => queryIndex(db as unknown as DynamoDBClient, table, index, key, value),
+      getSettings: async () => null,
+    }
+    return { db, deps: { ...deps, laneSample } }
+  }
+
+  /** The record a delivery produces: the same load, status and deliveredAt now set. */
+  const deliveredRecord = () => stamp(dispatched(), delivered())
+
+  it('writes the sample in the delivered Chicago month when the stream shows a load delivered', async () => {
+    const { db, deps } = withSamples()
+    await projectLoadStream(deliveredRecord(), deps)
+    const sample = db.get(LANE_TABLE, 'lrs:load-1')
+    // 03:30Z on 11/05 is 9:30 pm on 11/04 in Chicago.
+    expect(sample).toMatchObject({ id: 'lrs:load-1', date: '2026-11-04', sampleMonth: '2026-11', revenueCents: 150000, costCents: 110000, profitCents: 40000, revDivision: 'BROKERAGE', salesRepId: 'rep-1' })
+  })
+
+  it('does not write it twice: a replayed record finds the sample current', async () => {
+    const { db, deps } = withSamples()
+    await projectLoadStream(deliveredRecord(), deps)
+    await projectLoadStream(deliveredRecord(), deps)
+    expect(db.writes.filter((w) => w.table === LANE_TABLE)).toHaveLength(1)
+  })
+
+  it('refreshes it when a delivered load is given another rep', async () => {
+    const { db, deps } = withSamples()
+    await projectLoadStream(deliveredRecord(), deps)
+    await projectLoadStream(stamp(delivered(), { ...delivered(), salesRepId: 'rep-2', updatedAt: '2026-11-06T10:00:00.000Z' }), deps)
+    expect(db.writes.filter((w) => w.table === LANE_TABLE)).toHaveLength(2)
+  })
+
+  it('reads nothing for an update that moves no delivery, tag or rep fact', async () => {
+    const { db, deps } = withSamples()
+    const before = delivered()
+    await projectLoadStream(stamp(before, { ...before, lastKnownCity: 'MESA', updatedAt: '2026-11-06T10:00:00.000Z' }), deps)
+    expect(db.get(LANE_TABLE, 'lrs:load-1')).toBeUndefined()
+    expect(db.writes).toEqual([])
+  })
+
+  it('writes no sample for a load that is not delivered yet', async () => {
+    const { db, deps } = withSamples([dispatched()])
+    await projectLoadStream(stamp(loadRow(), dispatched()), deps)
+    expect(db.get(LANE_TABLE, 'lrs:load-1')).toBeUndefined()
+  })
+
+  it('writes no sample for a voided shipment, and none where the stack has no sample table', async () => {
+    const voided = withSamples()
+    voided.db.seed(TABLES.shipment, { __typename: 'Shipment', id: 'ship-1', number: 'S-1001', status: 'DELIVERED', voidedAt: '2026-11-06T00:00:00Z', version: 3 })
+    await projectLoadStream(deliveredRecord(), voided.deps)
+    expect(voided.db.get(LANE_TABLE, 'lrs:load-1')).toBeUndefined()
+    const bare = withSamples()
+    await projectLoadStream(deliveredRecord(), { ...bare.deps, laneSample: undefined })
+    expect(bare.db.get(LANE_TABLE, 'lrs:load-1')).toBeUndefined()
   })
 })

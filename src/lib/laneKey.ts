@@ -206,6 +206,58 @@ export function deliveredDayOfLoad(stops: Stop[] | null | undefined, loadDeliver
   return deliveredDayOf(stops, loadDeliveredAt, endpointsOf(stops)?.delivery.appt)
 }
 
+/** Why a delivered load's sample must be written again; null when it already says what the load says. */
+export type LaneSampleRefresh = 'missing' | 'date' | 'stale'
+
+export interface LaneSampleRefreshInput {
+  /** The stored `lrs:<loadId>` row, or null. */
+  sample: {
+    date?: string | null
+    revenueCents?: number | null
+    costCents?: number | null
+    profitCents?: number | null
+    revDivision?: string | null
+    revSubdivision?: string | null
+    salesRepId?: string | null
+  } | null
+  /** `deliveredDayOfLoad` for the load right now. */
+  day: string | null
+  /** The load's money (`LoadFinancials`); omitted when there is none, which leaves the money alone. */
+  financials?: { revenueCents?: number | null; costCents?: number | null; profitCents?: number | null } | null
+  /** The tag and rep the dashboard groups by: the Load's mirror, else the Shipment's. */
+  revDivision?: string | null
+  revSubdivision?: string | null
+  salesRepId?: string | null
+}
+
+/**
+ * One rule for "is this load's sample current", shared by the actions that end in a re-derive, the tracking
+ * projector and RESAMPLE_DELIVERED_LOADS, so the three can never disagree.
+ *
+ * - `missing`: a delivered load with no sample is left out of every figure.
+ * - `date`: the sample sits on another Chicago day than the delivery, so it can be in the wrong month.
+ * - `stale`: the money, the revenue division or the rep on the sample is no longer what the load says (a cost
+ *   recorded after the sample was taken, a load re-tagged or re-assigned afterwards).
+ * A sample with no rep of its own is not stale: the dashboard falls back to the shipment's.
+ */
+export function laneSampleRefreshReason(input: LaneSampleRefreshInput): LaneSampleRefresh | null {
+  const { sample } = input
+  if (!sample) return 'missing'
+  if (input.day && sample.date !== input.day) return 'date'
+  const same = (a: number | null | undefined, b: number | null | undefined) => (cents(a) ?? 0) === (cents(b) ?? 0)
+  if (input.financials) {
+    if (!same(sample.revenueCents, input.financials.revenueCents)) return 'stale'
+    if (!same(sample.costCents, input.financials.costCents)) return 'stale'
+    if (!same(sample.profitCents, input.financials.profitCents)) return 'stale'
+  }
+  if ((text(sample.revDivision) ?? null) !== (text(input.revDivision) ?? null)) return 'stale'
+  if ((text(sample.revSubdivision) ?? null) !== (text(input.revSubdivision) ?? null)) return 'stale'
+  const sampleRep = text(sample.salesRepId)
+  const rep = text(input.salesRepId)
+  if (sampleRep && rep && sampleRep !== rep) return 'stale'
+  return null
+}
+
 /**
  * One delivered, priced load as a lane rate sample — or null when it is not one yet.
  *

@@ -3644,6 +3644,27 @@ new EventSourceMapping(Stack.of(brokerAlertFn), 'BrokerLoadStreamMapping', {
       `${stageTables['LoadCharge'].tableArn}/index/*`,
     ],
   }))
+  // The lane sample of a load the projector just saw delivered (the Brokerage dashboard counts only these rows).
+  // Written by `ensureLaneSampleForLoad`, the same code the shipment router uses, so it reads the load's customer
+  // (team), the settings (check-call grace) and the shipment's document index (POD arrival) and writes one sample.
+  // The document table rides its own variable name: `SHIPMENT_DOCUMENT_TABLE_NAME` stays unset here on purpose,
+  // so the bundle `rederiveShipmentStatus` reads is exactly what it was before.
+  projectorFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:PutItem'],
+    resources: [stageTables['LaneRateSample'].tableArn],
+  }))
+  projectorFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:GetItem'],
+    resources: [stageTables['Customer'].tableArn, stageTables['TmsSettings'].tableArn],
+  }))
+  projectorFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:Query'],
+    resources: [stageTables['ShipmentDocument'].tableArn, `${stageTables['ShipmentDocument'].tableArn}/index/*`],
+  }))
+  projectorFn.addEnvironment('LANE_RATE_SAMPLE_TABLE_NAME', stageTables['LaneRateSample'].tableName)
+  projectorFn.addEnvironment('CUSTOMER_TABLE_NAME',         stageTables['Customer'].tableName)
+  projectorFn.addEnvironment('TMS_SETTINGS_TABLE_NAME',     stageTables['TmsSettings'].tableName)
+  projectorFn.addEnvironment('SAMPLE_SHIPMENT_DOCUMENT_TABLE_NAME', stageTables['ShipmentDocument'].tableName)
   projectorFn.addEnvironment('LOAD_TABLE_NAME',            loadTable.tableName)
   projectorFn.addEnvironment('LOAD_CHECK_CALL_TABLE_NAME', trackingCheckCallTbl.tableName)
   projectorFn.addEnvironment('SHIPMENT_TABLE_NAME',        trackingShipmentTbl.tableName)
