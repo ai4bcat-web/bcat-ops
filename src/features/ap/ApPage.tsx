@@ -68,7 +68,7 @@ import { ApAgingReportTable } from './components/ApAgingReportTable'
 import { CashRequirementsTab } from './components/CashRequirementsTab'
 import { buildApAgingReport } from './apAgingReport'
 import { cashRequirements } from './cashFridays'
-import { proOf, termsLabel, type ApReportKind, type BillFactsIndex } from './apQueue'
+import { billCustomerName, billDaysPastDue, daysLateLabel, proOf, termsLabel, type ApReportKind, type BillFactsIndex } from './apQueue'
 import { payablesSummary, useApSummaryModel } from './useApSummaryModel'
 import { tabFromUrl } from '@/features/finance/accountingLinks'
 
@@ -511,6 +511,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     })
     : tab === 'expected' ? reviewView({
       banner: queueBanner,
+      asOf,
       bills: expectedBills,
       review: reviewByShipment,
       facts,
@@ -1021,6 +1022,46 @@ function loadColumns(facts: BillFactsIndex, onOpen: (bill: CarrierBillRecord) =>
   ]
 }
 
+/** Customer: who the load was hauled for, read off the shipment. Internal to the AP desk. */
+function customerColumn(facts: BillFactsIndex): ApColumn<CarrierBillRecord> {
+  return facetCol<CarrierBillRecord>(
+    'customer',
+    'CUSTOMER',
+    (bill) => billCustomerName(bill, facts) ?? '—',
+    undefined,
+    { extraPx: 60 },
+  )
+}
+
+/**
+ * Days past due: the red `N days late` pill AR shows, from the bill's due date as of today (Chicago). A bill not
+ * yet due reads muted, and one with no due date to age by (waiting on the invoice date) or already paid stays blank.
+ * Sorted by the day count, so descending puts the most overdue first.
+ */
+function daysPastDueColumn(asOf: string): ApColumn<CarrierBillRecord> {
+  const textOf = (bill: CarrierBillRecord) => {
+    const days = billDaysPastDue(bill, asOf)
+    if (days == null) return ''
+    if (days > 0) return daysLateLabel(days)
+    return days === 0 ? 'Due today' : `Due in ${-days} day${days === -1 ? '' : 's'}`
+  }
+  return {
+    key: 'daysPastDue',
+    header: 'DAYS PAST DUE',
+    text: textOf,
+    sortValue: (bill) => billDaysPastDue(bill, asOf),
+    filter: 'number',
+    numberOf: (bill) => billDaysPastDue(bill, asOf),
+    numberUnit: 'days',
+    extraPx: 24,
+    render: (bill) => {
+      const days = billDaysPastDue(bill, asOf)
+      if (days == null) return null
+      return days > 0 ? <TmsBadge tone="red">{daysLateLabel(days)}</TmsBadge> : <span className="tms-muted">{textOf(bill)}</span>
+    },
+  }
+}
+
 /** Carrier pay (gross) and the terms it is paid on — quick pay or standard. */
 function payColumns(): ApColumn<CarrierBillRecord>[] {
   return [
@@ -1140,9 +1181,10 @@ function awaitingView({ banner, rows, shared, busy, onRecord }: {
 /* ── In review ───────────────────────────────────────────────────────────── */
 
 function reviewView({
-  banner, bills, review, facts, onOpen, shared, busy, onDates, infos, onAddRemit, onClearReview,
+  banner, bills, review, facts, onOpen, shared, busy, onDates, infos, onAddRemit, onClearReview, asOf,
 }: {
   banner: ReactNode
+  asOf: string
   bills: CarrierBillRecord[]
   /** Needs review flags by shipment id: shown on the bill so AP sees what to fix (Ryne 2026-11-13). */
   review: Map<string, FinanceReviewShipment>
@@ -1176,6 +1218,7 @@ function reviewView({
         </Link>
       ),
     },
+    customerColumn(facts),
     facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
     facetCol<CarrierBillRecord>('payTo', 'PAY TO', payeeLabel, (bill) => (
       bill.payeeKind === 'FACTOR' ? <TmsBadge tone="blue">{payeeLabel(bill)}</TmsBadge> : payeeLabel(bill)
@@ -1189,6 +1232,7 @@ function reviewView({
         ) : null}
       </span>
     )),
+    daysPastDueColumn(asOf),
     facetCol<CarrierBillRecord>('status', 'STATUS', statusText, (bill) => (
       <>
         {pendingDates(bill) ? <TmsBadge tone="orange">Needs invoice date</TmsBadge> : <TmsBadge tone="gray">{BILL_STATUS_LABEL[bill.status]}</TmsBadge>}
@@ -1230,8 +1274,8 @@ function reviewView({
   ]
 
   return view<CarrierBillRecord>({
-    // v3: the Remit to column was added (2026-11-17), so a saved column layout from the old grid must not hide it.
-    gridId: 'ap-expected-v3',
+    // v4: Customer and Days past due were added (2026-11-18); v3 added Remit to. A saved column layout from an older grid must not hide them.
+    gridId: 'ap-expected-v4',
     cardLayout: { title: 'pro', party: 'carrier', amount: 'amount', pills: ['status'] },
     banner,
     columns,
@@ -1344,6 +1388,7 @@ function payableView({
       ),
     },
     ...loadColumns(facts, onOpen),
+    customerColumn(facts),
     facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
     ...payColumns(),
     dayCol<CarrierBillRecord>('billDate', 'INVOICE DATE', (bill) => bill.billDate),
@@ -1360,6 +1405,7 @@ function payableView({
         return <TmsBadge tone={chip.late ? 'red' : 'gray'}>{chip.label}</TmsBadge>
       },
     },
+    daysPastDueColumn(asOf),
     facetCol<CarrierBillRecord>('status', 'STATUS', (bill) => statusChip(bill).label, (bill) => {
       const chip = statusChip(bill)
       return <TmsBadge tone={chip.tone}>{chip.label}</TmsBadge>
@@ -1442,6 +1488,7 @@ function payableView({
         </Link>
       ),
     },
+    customerColumn(facts),
     facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
     facetCol<CarrierBillRecord>('payTo', 'PAY TO', payeeLabel, (bill) => (
       bill.payeeKind === 'FACTOR' ? <TmsBadge tone="blue">{payeeLabel(bill)}</TmsBadge> : payeeLabel(bill)
@@ -1449,6 +1496,7 @@ function payableView({
     dayCol<CarrierBillRecord>('billDate', 'INVOICE DATE', (bill) => bill.billDate),
     dayCol<CarrierBillRecord>('agingDate', 'AGING DATE', (bill) => bill.billDate),
     dayCol<CarrierBillRecord>('due', 'DUE DATE', (bill) => bill.dueAt),
+    daysPastDueColumn(asOf),
     moneyCol<CarrierBillRecord>('amount', 'AMOUNT', (bill) => bill.balanceCents, (bill) => (
       <span className={RIGHT}>
         {formatCents(bill.balanceCents)}
@@ -1516,7 +1564,7 @@ function payableView({
   const tickedCents = selectionBalanceCents(bills, selected)
 
   return view<CarrierBillRecord>({
-    gridId: mode === 'aging' ? 'ap-aging-v3' : 'ap-selected-v2',
+    gridId: mode === 'aging' ? 'ap-aging-v4' : 'ap-selected-v3',
     cardLayout: mode === 'aging' ? { title: 'pro', party: 'carrier', amount: 'amount' } : { title: 'bill', party: 'carrier', amount: 'balance', pills: ['status'] },
     onRowClick: onOpen,
     kpis,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  apReportCsv, apReportRows, apReportTotals, apSummary, billFactsIndex, inDivision, cashRequirements, estimatedDueAt, isAljexBill, payablesQueue,
+  apReportCsv, apReportRows, apReportTotals, apSummary, billCustomerName, billDaysPastDue, billFactsIndex, daysLateLabel, inDivision, cashRequirements, estimatedDueAt, isAljexBill, payablesQueue,
   termsLabel, type BillShipmentFacts,
 } from './apQueue'
 import type { CarrierBillRecord, OrderRecord, ShipmentRecord } from '@/types/tms'
@@ -40,7 +40,51 @@ describe('billFactsIndex', () => {
   it('reads the PO off the order and delivery off the shipment', () => {
     const shipments = [{ id: 's1', number: '20027', status: 'DELIVERED', deliveredAt: null } as unknown as ShipmentRecord]
     const orders = [{ id: 'o1', shipmentId: 's1', references: [{ code: 'PO', value: ' FR-1 ' }] } as unknown as OrderRecord]
-    expect(billFactsIndex(shipments, orders).get('s1')).toEqual({ shipmentNumber: '20027', po: 'FR-1', deliveredAt: null, delivered: true, revDivision: null, revSubdivision: null })
+    expect(billFactsIndex(shipments, orders).get('s1')).toEqual({ shipmentNumber: '20027', po: 'FR-1', deliveredAt: null, delivered: true, revDivision: null, revSubdivision: null, customerName: null })
+  })
+
+  it('names the customer from the shipment, else its order, and bills read it by shipment', () => {
+    const shipments = [
+      { id: 's1', number: '20027', status: 'DELIVERED', customerName: ' DENALI INGREDIENTS ' } as unknown as ShipmentRecord,
+      { id: 's2', number: '20028', status: 'DELIVERED', customerName: null } as unknown as ShipmentRecord,
+      { id: 's3', number: '20029', status: 'DELIVERED' } as unknown as ShipmentRecord,
+    ]
+    const orders = [{ id: 'o2', shipmentId: 's2', customerName: 'CARLYN DAIRY PRODUCTS' } as unknown as OrderRecord]
+    const facts = billFactsIndex(shipments, orders)
+    expect(billCustomerName(bill({ shipmentId: 's1' }), facts)).toBe('DENALI INGREDIENTS')
+    expect(billCustomerName(bill({ shipmentId: 's2' }), facts)).toBe('CARLYN DAIRY PRODUCTS')
+    expect(billCustomerName(bill({ shipmentId: 's3' }), facts)).toBeNull()
+    expect(billCustomerName(bill({ shipmentId: 'unread' }), facts)).toBeNull()
+  })
+})
+
+describe('billDaysPastDue', () => {
+  const asOf = '2026-11-18'
+  it('counts whole days past the due date, 0 on it and negative before it', () => {
+    expect(billDaysPastDue(bill({ dueAt: '2026-11-06' }), asOf)).toBe(12)
+    expect(billDaysPastDue(bill({ dueAt: '2026-11-17' }), asOf)).toBe(1)
+    expect(billDaysPastDue(bill({ dueAt: '2026-11-18' }), asOf)).toBe(0)
+    expect(billDaysPastDue(bill({ dueAt: '2026-11-21' }), asOf)).toBe(-3)
+  })
+
+  it('is blank for paid and void bills and for a bill still waiting on its invoice date', () => {
+    expect(billDaysPastDue(bill({ dueAt: '2026-10-01', status: 'PAID' }), asOf)).toBeNull()
+    expect(billDaysPastDue(bill({ dueAt: '2026-10-01', status: 'VOID' }), asOf)).toBeNull()
+    expect(billDaysPastDue(bill({ dueAt: '2026-10-01', datesPending: true }), asOf)).toBeNull()
+    expect(billDaysPastDue(bill({ dueAt: '' }), asOf)).toBeNull()
+  })
+
+  it('reads the same day count the Aging buckets use', async () => {
+    const { agingBucket } = await import('@/lib/arAging')
+    expect(agingBucket('2026-10-19', asOf)).toBe('D1_30') // 30 days late
+    expect(billDaysPastDue(bill({ dueAt: '2026-10-19' }), asOf)).toBe(30)
+    expect(agingBucket('2026-10-18', asOf)).toBe('D31_60') // 31 days late
+    expect(billDaysPastDue(bill({ dueAt: '2026-10-18' }), asOf)).toBe(31)
+  })
+
+  it('words one day as singular', () => {
+    expect(daysLateLabel(1)).toBe('1 day late')
+    expect(daysLateLabel(986)).toBe('986 days late')
   })
 })
 

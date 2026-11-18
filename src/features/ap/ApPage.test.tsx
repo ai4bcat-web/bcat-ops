@@ -39,7 +39,7 @@ vi.mock('@/features/finance/MarkReviewedDialog', () => ({
 // Every bill in these tests is on a delivered load (the Payables rule); PO and delivery are fixed.
 vi.mock('./useBillFacts', () => ({
   useBillFacts: () => ({
-    facts: { get: () => ({ shipmentNumber: 'S-1001', po: 'PO-77', deliveredAt: '2026-10-20T12:00:00.000Z', delivered: true }) },
+    facts: { get: () => ({ shipmentNumber: 'S-1001', po: 'PO-77', deliveredAt: '2026-10-20T12:00:00.000Z', delivered: true, customerName: 'Acme Foods' }) },
     loading: false,
   }),
 }))
@@ -344,6 +344,62 @@ describe('the AP board', () => {
     needsReviewRows.rows = []
     await setup({ bills: [bill({ status: 'IN_REVIEW', datesPending: true, billNumber: 'BL-9' })] })
     expect(screen.queryByRole('button', { name: /reviewed$/ })).toBeNull()
+  })
+
+  /** Ryne 2026-11-18: who the load was for and how late the bill is, on the lists the pay run is worked from. */
+  describe('Customer and Days past due columns', () => {
+    const headers = (name: RegExp) => within(screen.getByRole('table', { name })).getAllByRole('columnheader').map((h) => h.textContent ?? '')
+
+    it('puts both on Expected, with the customer filled and no day count on a bill still waiting for its invoice date', async () => {
+      await setup({ bills: [
+        bill({ id: 'cb:lc2:1', loadCarrierId: 'lc2', status: 'IN_REVIEW', datesPending: true, billNumber: null, dueAt: daysAgo(40) }),
+      ] })
+      const hs = headers(/^AP expected/)
+      expect(hs.some((h) => /CUSTOMER/.test(h))).toBe(true)
+      expect(hs.some((h) => /DAYS PAST DUE/.test(h))).toBe(true)
+      const table = within(screen.getByRole('table', { name: /^AP expected/ }))
+      expect(table.getByText('Acme Foods')).toBeTruthy()
+      expect(table.queryByText(/days late$/)).toBeNull()
+    })
+
+    it('puts both on Aging, and the day count matches the Aging chip words: 1 day late is singular', async () => {
+      await setup({ bills: [
+        bill({ id: 'cb:lc1:1', billNumber: 'BL-1', dueAt: daysAgo(75) }),
+        bill({ id: 'cb:lc2:1', loadCarrierId: 'lc2', billNumber: 'BL-2', dueAt: daysAgo(1) }),
+        bill({ id: 'cb:lc3:1', loadCarrierId: 'lc3', billNumber: 'BL-3', dueAt: daysAgo(-5) }),
+      ] })
+      fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
+      const hs = headers(/^AP aging/)
+      expect(hs.some((h) => /CUSTOMER/.test(h))).toBe(true)
+      expect(hs.some((h) => /DAYS PAST DUE/.test(h))).toBe(true)
+      const table = within(screen.getByRole('table', { name: /^AP aging/ }))
+      expect(table.getByText('75 days late')).toBeTruthy()
+      expect(table.getByText('1 day late')).toBeTruthy()
+      expect(table.getByText('Due in 5 days')).toBeTruthy() // not yet due: muted text, not a red pill
+    })
+
+    it('puts both on Selected', async () => {
+      await setup({ bills: [bill({ billNumber: 'BL-1', dueAt: daysAgo(61), selectedForPayment: true })] })
+      fireEvent.click(screen.getByRole('tab', { name: /^Selected/ }))
+      const hs = headers(/^AP selected/)
+      expect(hs.some((h) => /CUSTOMER/.test(h))).toBe(true)
+      expect(hs.some((h) => /DAYS PAST DUE/.test(h))).toBe(true)
+      expect(within(screen.getByRole('table', { name: /^AP selected/ })).getAllByText('61 days late').length).toBeGreaterThan(0)
+    })
+
+    it('sorts Days past due descending with the most overdue first', async () => {
+      await setup({ bills: [
+        bill({ id: 'cb:lc1:1', billNumber: 'BL-1', dueAt: daysAgo(5) }),
+        bill({ id: 'cb:lc2:1', loadCarrierId: 'lc2', billNumber: 'BL-2', dueAt: daysAgo(66) }),
+        bill({ id: 'cb:lc3:1', loadCarrierId: 'lc3', billNumber: 'BL-3', dueAt: daysAgo(30) }),
+      ] })
+      fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
+      const table = screen.getByRole('table', { name: /^AP aging/ })
+      const header = within(table).getByRole('columnheader', { name: /DAYS PAST DUE/ })
+      fireEvent.click(within(header).getAllByRole('button')[0]) // asc
+      fireEvent.click(within(header).getAllByRole('button')[0]) // desc
+      expect(within(table).getAllByText(/^\d+ days late$/).map((n) => n.textContent)).toEqual(['66 days late', '30 days late', '5 days late'])
+    })
   })
 
   it('draws Aging by carrier like the receivables aging: a row per carrier whose twisty opens its bills', async () => {
