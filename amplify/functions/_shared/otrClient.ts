@@ -18,6 +18,7 @@
 import { buildMultipart } from './multipart'
 import { sniffDoc, withExt } from './sniffDoc'
 import { toAsciiSafePdf, wrapImageInPdf } from './asciiSafePdf'
+import { otrStatusMeta } from '../../../src/lib/otrInvoiceStatus'
 
 export const OTR_STAGING_BASE = 'https://servicesstg.otrsolutions.com/CarrierTmsV3'
 
@@ -153,6 +154,121 @@ export class OtrError extends Error {
     super(message)
     this.name = 'OtrError'
   }
+}
+
+/** Why a 409 "already exists" invoice was NOT carried on with. */
+export type OtrAdoptRefusal =
+  /** OTR's copy carries a different invoice number than the one we sent. */
+  | 'number_mismatch'
+  /** OTR's copy carries a different amount than the one we sent. */
+  | 'amount_mismatch'
+  /** OTR holds it as Dead or Duplicate: there is nothing live to attach documents to. */
+  | 'unusable'
+  /** OTR did not say enough about the invoice (no number or no amount) to be sure it is ours. */
+  | 'unconfirmed'
+  /** We could not read the invoice back from OTR. */
+  | 'lookup_failed'
+
+/**
+ * A 409 "already exists" that must NOT be carried on with.
+ *
+ * Carries the OTR invoice id and its status so the queue can say exactly what OTR holds,
+ * and so the caller never writes that id onto the row.
+ */
+export class OtrAlreadyExistsError extends OtrError {
+  constructor(
+    message: string,
+    status: number,
+    body: string,
+    readonly reason: OtrAdoptRefusal,
+    readonly invoiceId: number,
+    /** OTR's own label for the invoice's status ("Dead", "Duplicate"), when we could read it. */
+    readonly otrStatus: string | null,
+  ) {
+    super(message, status, body)
+    this.name = 'OtrAlreadyExistsError'
+  }
+}
+
+/** OTR statuses that mean the invoice is finished and is not ours to attach documents to. */
+const UNUSABLE_OTR_STATUS_CODES = new Set([4, 7]) // Dead, Duplicate
+
+export type AdoptVerdict =
+  | { adopt: true }
+  | { adopt: false; reason: OtrAdoptRefusal; message: string }
+
+/**
+ * Is the invoice OTR says "already exists" really OURS, and still live?
+ *
+ * OTR answers a repeat create with 409 and the id of whatever invoice it matched, and it
+ * matches on more than our invoice number (the same PO is enough). Carrying on with that id
+ * means the POD and rate confirmation go onto the wrong invoice, or onto a dead one. So the
+ * invoice is read back and must agree with what we sent, on the invoice number AND the
+ * amount, before it is adopted. Anything we cannot confirm is refused: a refusal leaves the
+ * row exactly where it was, and a wrong adoption does not.
+ *
+ * `bodyInvoiceNo` is the number the 409 body itself named; the read-back's own number wins
+ * when it has one.
+ */
+export function judgeExistingInvoice(
+  sent: { invoiceNo: string; amountDollars: number },
+  found: { invoiceNo: string; invoiceAmount: number; status: string },
+  invoiceId: number,
+  bodyInvoiceNo = '',
+): AdoptVerdict {
+  const sentNo = String(sent.invoiceNo).trim()
+  const foundNo = String(found.invoiceNo ?? '').trim() || String(bodyInvoiceNo ?? '').trim()
+  const meta = otrStatusMeta(found.status)
+  const label = meta?.label ?? null
+
+  if (!foundNo) {
+    return {
+      adopt: false,
+      reason: 'unconfirmed',
+      message:
+        `OTR already has invoice ${invoiceId} for this PO but did not say which invoice number it holds, ` +
+        `so it was not attached to ${sentNo}. Check invoice ${invoiceId} in the OTR portal.`,
+    }
+  }
+  if (foundNo !== sentNo) {
+    return {
+      adopt: false,
+      reason: 'number_mismatch',
+      message:
+        `OTR already has invoice ${invoiceId} (their #${foundNo}) with this PO number, a different PRO. ` +
+        `Nothing was created for ${sentNo}. Check the PO number, then submit again.`,
+    }
+  }
+  const foundCents = Math.round(Number(found.invoiceAmount) * 100)
+  const sentCents = Math.round(Number(sent.amountDollars) * 100)
+  if (!(foundCents > 0)) {
+    return {
+      adopt: false,
+      reason: 'unconfirmed',
+      message:
+        `OTR already has invoice ${invoiceId} for ${sentNo} but did not say its amount, so it was not ` +
+        `attached. Check invoice ${invoiceId} in the OTR portal.`,
+    }
+  }
+  if (foundCents !== sentCents) {
+    return {
+      adopt: false,
+      reason: 'amount_mismatch',
+      message:
+        `OTR already has invoice ${invoiceId} for ${sentNo} at $${(foundCents / 100).toFixed(2)}, not ` +
+        `$${(sentCents / 100).toFixed(2)}. It was not attached. Ask OTR to correct or void it, then submit again.`,
+    }
+  }
+  if (meta && (UNUSABLE_OTR_STATUS_CODES.has(meta.code) || /dead|duplicate|reject|void|cancel/i.test(meta.label))) {
+    return {
+      adopt: false,
+      reason: 'unusable',
+      message:
+        `OTR already has invoice ${invoiceId} for ${sentNo} (${label}). ` +
+        `Ask OTR to void it, or change the invoice number.`,
+    }
+  }
+  return { adopt: true }
 }
 
 /** Load.rate is cents. OTR wants dollars. Rounds to the cent, never to the dollar. */
@@ -504,6 +620,16 @@ export class OtrClient {
        * is a clash to fix, not an invoice to continue with.
        */
       const dupNo = String(dup?.invoiceNo ?? dup?.InvoiceNo ?? '').trim()
+      /*
+       * What OTR actually said, kept: until now a 409's body was dropped on the floor, so
+       * when two invoices ended up on the same OTR id there was nothing to read afterwards.
+       * Invoice numbers, ids and statuses only; the body carries no credentials.
+       */
+      console.warn('[otr] create answered 409', {
+        invoiceNo: payload.InvoiceNo,
+        poNumber: payload.PoNumber,
+        body: text.slice(0, 600),
+      })
       if (Number.isFinite(dupId) && dupNo && dupNo !== String(payload.InvoiceNo).trim()) {
         throw new OtrError(
           `OTR already has invoice ${dupId} (their #${dupNo}) with this PO number — a different PRO. ` +
@@ -513,6 +639,51 @@ export class OtrClient {
         )
       }
       if (Number.isFinite(dupId)) {
+        /*
+         * Read the invoice back and make sure it is OURS and still live before carrying on.
+         * Only an invoice that agrees on number and amount and is not Dead / Duplicate is
+         * adopted; everything else, including a read-back that fails, is refused and leaves
+         * the row where it was.
+         */
+        let found: OtrInvoiceDetails
+        try {
+          found = await this.getInvoice(dupId)
+        } catch (err) {
+          throw new OtrAlreadyExistsError(
+            `OTR already has an invoice ${dupId} for ${payload.InvoiceNo}, but it could not be read back ` +
+              `(${err instanceof Error ? err.message : String(err)}), so it was not attached. ` +
+              `Check invoice ${dupId} in the OTR portal, then submit again.`,
+            res.status,
+            text,
+            'lookup_failed',
+            dupId,
+            null,
+          )
+        }
+        const verdict = judgeExistingInvoice(
+          { invoiceNo: String(payload.InvoiceNo), amountDollars: Number(payload.InvoiceAmount) },
+          found,
+          dupId,
+          dupNo,
+        )
+        if (!verdict.adopt) {
+          console.warn('[otr] 409 invoice not adopted', {
+            invoiceNo: payload.InvoiceNo,
+            invoiceId: dupId,
+            reason: verdict.reason,
+            otrStatus: found.status,
+            otrInvoiceNo: found.invoiceNo,
+            otrAmount: found.invoiceAmount,
+          })
+          throw new OtrAlreadyExistsError(
+            verdict.message,
+            res.status,
+            text,
+            verdict.reason,
+            dupId,
+            otrStatusMeta(found.status)?.label ?? (found.status || null),
+          )
+        }
         console.warn('[otr] invoice already exists at OTR; continuing with it', {
           invoiceNo: payload.InvoiceNo,
           invoiceId: dupId,

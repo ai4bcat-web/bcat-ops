@@ -9,7 +9,7 @@
  * v1/v2 renames that sat behind it.
  */
 import { describe, it, expect, vi } from 'vitest'
-import { OtrClient } from './otrClient'
+import { OtrClient, OtrAlreadyExistsError, judgeExistingInvoice } from './otrClient'
 
 const V2 = 'https://services.otrsolutions.com/carrier-tms/2'
 
@@ -27,15 +27,35 @@ const PAYLOAD = {
   ToZip: '60607',
 }
 
-/** A fetch that answers the token call, then hands `invoiceReply` to POST /invoices. */
-function stubFetch(invoiceReply: { status: number; body: unknown }) {
+/**
+ * A fetch that answers the token call, then hands `invoiceReply` to POST /invoices and `lookup`
+ * to the read-back GET /invoices?invoicePkeys=... a 409 now makes. A test that does not pass a
+ * lookup gets the matching invoice back (number 14523, $500, Pending), so only the cases that
+ * care about the read-back have to say anything about it.
+ */
+function stubFetch(
+  invoiceReply: { status: number; body: unknown },
+  lookup: { status: number; body: unknown } = {
+    status: 200,
+    body: { InvoiceNo: '14523', invoiceAmount: 500, Status: 1 },
+  },
+) {
   const calls: Array<{ url: string; body: unknown }> = []
+  const gets: string[] = []
   const impl = vi.fn(async (url: string, init?: RequestInit) => {
     if (String(url).endsWith('/auth/token')) {
       return new Response(
         JSON.stringify({ access_token: 'tok', expires_in: 7199 }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       )
+    }
+    if (init?.method === 'GET') {
+      gets.push(String(url))
+      const lb = typeof lookup.body === 'string' ? lookup.body : JSON.stringify(lookup.body)
+      return new Response(lb === '' ? null : lb, {
+        status: lookup.status,
+        headers: { 'content-type': 'application/json' },
+      })
     }
     calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) })
     // A raw string is sent verbatim, so a test can hand back an empty or non-JSON body.
@@ -47,7 +67,7 @@ function stubFetch(invoiceReply: { status: number; body: unknown }) {
       headers: { 'content-type': 'application/json' },
     })
   })
-  return { impl, calls }
+  return { impl, calls, gets }
 }
 
 function client(impl: unknown) {
@@ -226,5 +246,151 @@ describe('the broker check that gates a submit', () => {
     await expect(
       client(stubBroker({ status: 500, body: 'boom' })).brokerCheck({ brokerMc: '730061' }),
     ).rejects.toThrow(/Broker check failed/)
+  })
+})
+
+describe('a 409 "already exists" is only carried on with when the invoice is OURS and live', () => {
+  const quiet = () => vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+  async function refused(reply: { status: number; body: unknown }, lookup?: { status: number; body: unknown }) {
+    const { impl, gets } = stubFetch(reply, lookup)
+    try {
+      await client(impl).createInvoice(PAYLOAD)
+    } catch (e) {
+      return { e: e as OtrAlreadyExistsError, gets }
+    }
+    throw new Error('expected createInvoice to refuse')
+  }
+
+  it('reads the invoice back before adopting it', async () => {
+    const warn = quiet()
+    const { impl, gets } = stubFetch({ status: 409, body: CREATED })
+    await client(impl).createInvoice(PAYLOAD)
+    warn.mockRestore()
+    expect(gets).toHaveLength(1)
+    expect(gets[0]).toContain('25520749')
+  })
+
+  it('logs the 409 body so there is something to read afterwards', async () => {
+    const warn = quiet()
+    const { impl } = stubFetch({ status: 409, body: CREATED })
+    await client(impl).createInvoice(PAYLOAD)
+    expect(warn).toHaveBeenCalledWith('[otr] create answered 409', expect.objectContaining({
+      invoiceNo: '14523',
+      body: expect.stringContaining('25520749'),
+    }))
+    warn.mockRestore()
+  })
+
+  it('adopts an invoice that agrees on number and amount and is still Pending', async () => {
+    const warn = quiet()
+    const { impl } = stubFetch({ status: 409, body: CREATED }, { status: 200, body: { InvoiceNo: '14523', invoiceAmount: 500, Status: 1 } })
+    expect((await client(impl).createInvoice(PAYLOAD)).invoiceId).toBe(25520749)
+    warn.mockRestore()
+  })
+
+  it('refuses when OTR\'s copy carries a different invoice number', async () => {
+    const warn = quiet()
+    const { e } = await refused({ status: 409, body: CREATED }, { status: 200, body: { InvoiceNo: '14999', invoiceAmount: 500, Status: 1 } })
+    warn.mockRestore()
+    expect(e).toBeInstanceOf(OtrAlreadyExistsError)
+    expect(e.reason).toBe('number_mismatch')
+    expect(e.invoiceId).toBe(25520749)
+    expect(e.message).toMatch(/different PRO/)
+  })
+
+  it('refuses when OTR\'s copy carries a different amount', async () => {
+    const warn = quiet()
+    const { e } = await refused({ status: 409, body: CREATED }, { status: 200, body: { InvoiceNo: '14523', invoiceAmount: 650, Status: 1 } })
+    warn.mockRestore()
+    expect(e.reason).toBe('amount_mismatch')
+    expect(e.message).toMatch(/\$650\.00, not \$500\.00/)
+  })
+
+  it('refuses an invoice OTR holds as Dead (status 4), and says to ask OTR to void it', async () => {
+    const warn = quiet()
+    const { e } = await refused({ status: 409, body: CREATED }, { status: 200, body: { InvoiceNo: '14523', invoiceAmount: 500, Status: 4 } })
+    warn.mockRestore()
+    expect(e.reason).toBe('unusable')
+    expect(e.otrStatus).toBe('Dead')
+    expect(e.message).toBe('OTR already has invoice 25520749 for 14523 (Dead). Ask OTR to void it, or change the invoice number.')
+  })
+
+  it('refuses an invoice OTR holds as Duplicate (status 7)', async () => {
+    const warn = quiet()
+    const { e } = await refused({ status: 409, body: CREATED }, { status: 200, body: { InvoiceNo: '14523', invoiceAmount: 500, Status: 7 } })
+    warn.mockRestore()
+    expect(e.reason).toBe('unusable')
+    expect(e.otrStatus).toBe('Duplicate')
+  })
+
+  it('reads a status that arrives as a word, not a number', async () => {
+    const warn = quiet()
+    const { e } = await refused({ status: 409, body: CREATED }, { status: 200, body: { InvoiceNo: '14523', invoiceAmount: 500, Status: 'Dead' } })
+    warn.mockRestore()
+    expect(e.reason).toBe('unusable')
+  })
+
+  it('refuses when the invoice cannot be read back', async () => {
+    const warn = quiet()
+    const { e } = await refused({ status: 409, body: CREATED }, { status: 500, body: { message: 'boom' } })
+    warn.mockRestore()
+    expect(e.reason).toBe('lookup_failed')
+    expect(e.message).toMatch(/could not be read back/)
+  })
+
+  it('refuses when OTR does not say the amount, because it cannot be confirmed', async () => {
+    const warn = quiet()
+    const { e } = await refused({ status: 409, body: CREATED }, { status: 200, body: { InvoiceNo: '14523', Status: 1 } })
+    warn.mockRestore()
+    expect(e.reason).toBe('unconfirmed')
+  })
+
+  it('falls back to the number the 409 body named when the read-back has none', async () => {
+    const warn = quiet()
+    const { impl } = stubFetch({ status: 409, body: CREATED }, { status: 200, body: { invoiceAmount: 500, Status: 1 } })
+    expect((await client(impl).createInvoice(PAYLOAD)).invoiceId).toBe(25520749)
+    warn.mockRestore()
+  })
+
+  it('still raises on a 409 with no invoice id, and does not read anything back', async () => {
+    const warn = quiet()
+    const { impl, gets } = stubFetch({ status: 409, body: { message: 'conflict' } })
+    await expect(client(impl).createInvoice(PAYLOAD)).rejects.toThrow(/Duplicate/)
+    warn.mockRestore()
+    expect(gets).toHaveLength(0)
+  })
+
+  it('a refusal never returns an invoice, so nothing can be uploaded to it', async () => {
+    const warn = quiet()
+    const { impl } = stubFetch({ status: 409, body: CREATED }, { status: 200, body: { InvoiceNo: '14523', invoiceAmount: 500, Status: 4 } })
+    await expect(client(impl).createInvoice(PAYLOAD)).rejects.toBeInstanceOf(OtrAlreadyExistsError)
+    warn.mockRestore()
+  })
+})
+
+describe('judgeExistingInvoice', () => {
+  const sent = { invoiceNo: '20041', amountDollars: 400 }
+  it('adopts a matching live invoice', () => {
+    expect(judgeExistingInvoice(sent, { invoiceNo: '20041', invoiceAmount: 400, status: '1' }, 1).adopt).toBe(true)
+  })
+  it('adopts a matching Approved invoice: it is ours and it is live', () => {
+    expect(judgeExistingInvoice(sent, { invoiceNo: '20041', invoiceAmount: 400, status: '3' }, 1).adopt).toBe(true)
+  })
+  it('compares cents, so 400 and 400.004 agree but 400 and 400.01 do not', () => {
+    expect(judgeExistingInvoice(sent, { invoiceNo: '20041', invoiceAmount: 400.004, status: '1' }, 1).adopt).toBe(true)
+    expect(judgeExistingInvoice(sent, { invoiceNo: '20041', invoiceAmount: 400.01, status: '1' }, 1).adopt).toBe(false)
+  })
+  it('trims the invoice numbers', () => {
+    expect(judgeExistingInvoice({ invoiceNo: ' 20041 ', amountDollars: 400 }, { invoiceNo: '20041 ', invoiceAmount: 400, status: '1' }, 1).adopt).toBe(true)
+  })
+  it('refuses when neither OTR nor the 409 body gives a number', () => {
+    const v = judgeExistingInvoice(sent, { invoiceNo: '', invoiceAmount: 400, status: '1' }, 1, '')
+    expect(v.adopt).toBe(false)
+    expect(!v.adopt && v.reason).toBe('unconfirmed')
+  })
+  it('judges the number before the status, so a different PRO is reported as that', () => {
+    const v = judgeExistingInvoice(sent, { invoiceNo: '20000', invoiceAmount: 400, status: '4' }, 1)
+    expect(!v.adopt && v.reason).toBe('number_mismatch')
   })
 })
