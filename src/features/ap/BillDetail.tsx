@@ -23,6 +23,7 @@ import { VERIFY_PAYMENT_LABEL, VERIFY_PAYMENT_NOTE, isVerifyPaymentBill } from '
 import { TmsAlert, TmsBadge, TmsButton, TmsCard, TmsMetaList, TmsPage, TmsTabs, TmsTimeline } from '@/features/tms/kit'
 import { useCarrierBill } from '@/hooks/useCarrierBill'
 import { graphqlErrorText, unapproveBill, voidBill } from '@/lib/apiClient'
+import { AP_ACTION_COPY } from './apActionCopy'
 import { APPROVAL_WARNING_KEYS, billData } from '@/lib/carrierBill'
 import { chicagoDateStr, formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/invoiceBuild'
@@ -167,11 +168,12 @@ export function BillDetail() {
             Approve
           </TmsButton>
           <TmsButton
-            aria-label="Unapprove bill"
+            aria-label="Send bill back to review"
+            title={AP_ACTION_COPY.sendBackToReview.hint}
             disabled={busy || view.status !== 'TO_BE_PAID'}
             onClick={() => setDialog({ kind: 'unapprove' })}
           >
-            Unapprove
+            {AP_ACTION_COPY.sendBackToReview.label}
           </TmsButton>
           <TmsButton
             variant="destructive"
@@ -452,10 +454,10 @@ export function BillDetail() {
       )}
       {dialog?.kind === 'unapprove' && (
         <ReasonDialog
-          title={`Take bill ${label} back to review`}
-          description="The bill leaves the pay run and goes back to In review. The approval stays on the record."
+          title={`Send bill ${label} back to review`}
+          description="The bill leaves the pay run and goes back to In review. It has to be approved again before it can be paid. A bill that already has a payment applied cannot be sent back. The earlier approval stays on the record."
           label="Why it is going back"
-          confirmLabel="Take back"
+          confirmLabel="Send back to review"
           tone="default"
           busy={busy}
           onClose={() => setDialog(null)}

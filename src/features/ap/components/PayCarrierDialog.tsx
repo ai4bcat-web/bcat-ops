@@ -228,13 +228,13 @@ export function PayCarrierDialog({ carrierId, preselectBillIds, open, onOpenChan
     <TmsDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={`Pay carrier${bills[0]?.carrierName ? ` — ${bills[0].carrierName}` : ''}`}
+      title={`Record payment${bills[0]?.carrierName ? ` — ${bills[0].carrierName}` : ''}`}
       className="tms-dialog-wide"
       footer={
         <>
           <TmsButton variant="ghost" onClick={() => onOpenChange(false)} disabled={posting}>Cancel</TmsButton>
           <TmsButton variant="primary" onClick={submit} disabled={disabled || !plan.ok || unallocated || checkNumberMissing}>
-            {posting ? 'Posting…' : 'Post'}
+            {posting ? 'Posting…' : 'Post payment'}
           </TmsButton>
         </>
       }
@@ -247,6 +247,13 @@ export function PayCarrierDialog({ carrierId, preselectBillIds, open, onOpenChan
 
       {!loading && (
         <div className="flex flex-col gap-4">
+          <p className="m-0 text-sm tms-muted" data-testid="pay-dialog-explainer">
+            Pay the carrier first (ACH, check, etc.), then post it here. BCAT Ops does not send any money. Posting
+            marks the bills you apply it to as Paid
+            {applications.length > 0 ? ` (${applications.length} ${applications.length === 1 ? 'bill' : 'bills'}, ${formatCents(plan.appliedCents)})` : ''}
+            {' '}and e-mails remittance to the payee&apos;s remit e-mail, once. If the payee has no remit e-mail, nothing
+            is sent: add one first, or send it later from Paid.
+          </p>
           <div className="tms-grid tms-grid-4">
             <TmsField label="Paid">
               <TmsInput

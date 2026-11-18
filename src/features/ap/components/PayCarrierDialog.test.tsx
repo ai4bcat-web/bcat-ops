@@ -84,7 +84,7 @@ function total(label: string): string {
 }
 
 function postButton(): HTMLButtonElement {
-  return screen.getByRole('button', { name: 'Post' }) as HTMLButtonElement
+  return screen.getByRole('button', { name: 'Post payment' }) as HTMLButtonElement
 }
 
 beforeEach(() => {
@@ -100,6 +100,16 @@ async function openForm(): Promise<HTMLInputElement> {
 }
 
 describe('PayCarrierDialog', () => {
+  it('says in plain words what Post payment does: no money moves, bills are marked Paid, remittance is e-mailed', async () => {
+    await openForm()
+    const text = screen.getByTestId('pay-dialog-explainer').textContent ?? ''
+    expect(text).toMatch(/does not send any money/)
+    expect(text).toMatch(/marks the bills you apply it to as Paid/)
+    expect(text).toMatch(/e-mails remittance/)
+    expect(text).toMatch(/nothing\s+is sent/)
+    expect(screen.getByRole('heading', { name: /Record payment/ })).toBeTruthy()
+  })
+
   it('refuses to post cash that is not against a bill, and posts once every cent is', async () => {
     await openForm()
 
