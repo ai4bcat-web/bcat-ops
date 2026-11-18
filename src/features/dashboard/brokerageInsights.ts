@@ -5,7 +5,7 @@ export interface Insight { key: string; tone: 'good' | 'watch' | 'neutral'; text
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 export const monthName = (m: string) => MONTHS[Number(m.slice(5, 7)) - 1]
-export const monthShort = (m: string) => `${monthName(m)} ${m.slice(2, 4)}`
+export const monthShort = (m: string) => `${monthName(m)} ${m.slice(0, 4)}`
 
 /**
  * Two to four plain-English takeaways from the figures already on the page: how the last finished month compared,

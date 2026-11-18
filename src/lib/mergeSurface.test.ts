@@ -132,6 +132,11 @@ describe('apiClient', () => {
  * (`vendorApExtractFn` is wired again, behind the stage gate, until the stage that creates WorkflowRun.)
  */
 const REPLACED_WIRING: Record<string, string> = { directoryActionsFn: 'DATA_TABLE_SUFFIX' }
+/**
+ * Env wiring removed on purpose. `dispatchWebhookFn` no longer files PODs from texted pictures (PR #617: a POD
+ * is added only by a driver upload or by staff), so it has no driver-submission tables to write.
+ */
+const REMOVED_WIRING = new Set(['dispatchWebhookFn:DRIVER_SUBMISSION_DOC_TABLE_NAME', 'dispatchWebhookFn:DRIVER_SUBMISSION_TABLE_NAME'])
 
 describe('backend.ts env wiring', () => {
   const backend = read('amplify/backend.ts')
@@ -145,7 +150,7 @@ describe('backend.ts env wiring', () => {
     expect(wantedPairs.length).toBeGreaterThan(100)
     const lost = wantedPairs.filter((p) => {
       const lambda = p.split(':')[0]
-      return !wired.has(p) && !(lambda in REPLACED_WIRING)
+      return !wired.has(p) && !REMOVED_WIRING.has(p) && !(lambda in REPLACED_WIRING)
     })
     expect(lost).toEqual([])
   })

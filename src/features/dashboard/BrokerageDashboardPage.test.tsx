@@ -70,8 +70,8 @@ describe('Brokerage cards under the Dashboard', () => {
     // Clicking a rep opens their month-by-month numbers.
     fireEvent.click(within(rows[0]).getByRole('button'))
     const detail = within(rows[0]).getByTestId('brokerage-rep-detail')
-    expect(detail).toHaveTextContent('Oct 26')
-    expect(detail).toHaveTextContent('Nov 26 · to date')
+    expect(detail).toHaveTextContent('Oct 2026')
+    expect(detail).toHaveTextContent('Nov 2026 · to date')
 
     // The old rep-by-month table is behind the summary and still ties to the month figures.
     expect(screen.getByTestId('brokerage-table-details')).toBeInTheDocument()

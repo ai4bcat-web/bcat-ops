@@ -7,17 +7,17 @@ import { legacyTrendFrom } from './useLegacyTrend'
 import { ROLLUP_SCHEMA_VERSION } from '@/lib/dashboardRollup'
 
 const pts = (partialLast: boolean): TrendPoint[] => [
-  { month: '2026-09', label: 'Sep 26', value: 100 },
-  { month: '2026-10', label: 'Oct 26', value: 140 },
-  { month: '2026-11', label: 'Nov 26', value: 20, partial: partialLast },
+  { month: '2026-09', label: 'Sep 2026', value: 100 },
+  { month: '2026-10', label: 'Oct 2026', value: 140 },
+  { month: '2026-11', label: 'Nov 2026', value: 20, partial: partialLast },
 ]
 
 describe('Sparkline', () => {
   it('draws the month in progress dashed so a half month is not read as a drop', () => {
     render(<Sparkline points={pts(true)} label="Loads" format={(v) => `${v} loads`} />)
     expect(screen.getByTestId('kpi-sparkline-partial')).toBeInTheDocument()
-    expect(screen.getByTestId('kpi-sparkline')).toHaveTextContent('Nov 26 · so far')
-    expect(screen.getByRole('img')).toHaveAccessibleName(/Nov 26 20 loads \(to date\)/)
+    expect(screen.getByTestId('kpi-sparkline')).toHaveTextContent('Nov 2026 · so far')
+    expect(screen.getByRole('img')).toHaveAccessibleName(/Nov 2026 20 loads \(to date\)/)
   })
   it('has no dashed segment when every month is finished, and nothing with fewer than two months', () => {
     const { rerender } = render(<Sparkline points={pts(false)} label="Loads" format={String} />)

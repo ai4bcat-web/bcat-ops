@@ -27,7 +27,7 @@ const FOUR_LABEL: Record<Exclude<RepMetric, 'all'>, string> = { loads: 'Loads', 
 const REP_COLORS = ['var(--tms-chart-1)', 'var(--tms-chart-5)', 'var(--tms-chart-3)', 'var(--tms-chart-6)', 'var(--tms-chart-4)']
 const OTHER_COLOR = 'var(--tms-chart-9)'
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const monthLabel = (m: string) => `${MONTHS[Number(m.slice(5, 7)) - 1]} ${m.slice(2, 4)}`
+const monthLabel = (m: string) => `${MONTHS[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`
 
 const valueOf = (m: Measures, metric: Exclude<RepMetric, 'all'>): number =>
   metric === 'loads' ? m.loads : metric === 'revenue' ? m.revenueCents : metric === 'expense' ? m.expenseCents : m.profitCents
