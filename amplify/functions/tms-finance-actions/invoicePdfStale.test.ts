@@ -33,6 +33,20 @@ describe('invoicePdfIsStale', () => {
     expect(invoicePdfIsStale(invoice({ pdfFingerprint: fingerprint, revision: 2 }))).toBe(true)
   })
 
+  it('re-renders when the invoice is switched to or from factoring, since a factored invoice carries the factor stamp', () => {
+    const plain = invoicePdfFingerprint(invoice())
+    const stamped = invoicePdfFingerprint(invoice({ factored: true }))
+    expect(stamped).not.toBe(plain)
+    expect(invoicePdfIsStale(invoice({ pdfFingerprint: plain, factored: true }))).toBe(true)
+    expect(invoicePdfIsStale(invoice({ pdfFingerprint: stamped, factored: false }))).toBe(true)
+    expect(invoicePdfIsStale(invoice({ pdfFingerprint: stamped, factored: true }))).toBe(false)
+  })
+
+  it('leaves the fingerprint of an invoice that is not factored exactly as it was', () => {
+    expect(invoicePdfFingerprint(invoice())).toBe('20027|175000|1|LINEHAUL:165000,FUEL:10000')
+    expect(invoicePdfFingerprint(invoice({ factored: false }))).toBe('20027|175000|1|LINEHAUL:165000,FUEL:10000')
+  })
+
   it('judges a PDF rendered before fingerprints existed by its key alone', () => {
     expect(invoicePdfIsStale(invoice({ pdfFingerprint: undefined }))).toBe(false)
   })

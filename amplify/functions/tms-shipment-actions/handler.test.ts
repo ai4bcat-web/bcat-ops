@@ -6357,6 +6357,26 @@ describe('ATTACH_INVOICE_DOC', () => {
     expect([...table(TABLES.shipmentDocument).values()].filter((d) => d.type === 'INVOICE')).toHaveLength(1)
   })
 
+  it('filing the same invoice file again, as a send does, adds no row and no version', async () => {
+    const { shipmentId, orderId } = await shipment()
+    await asFinance({ shipmentId, orderId, invoiceId: 'inv-3', number: 'INV-1003', s3Key: 'invoices/c1/INV-1003-v1.pdf', sizeBytes: 100 })
+    const first = { ...table(TABLES.shipmentDocument).get('inv:inv-3')! }
+    await asFinance({ shipmentId, orderId, invoiceId: 'inv-3', number: 'INV-1003', s3Key: 'invoices/c1/INV-1003-v1.pdf', sizeBytes: 100 })
+    expect(table(TABLES.shipmentDocument).get('inv:inv-3')).toEqual(first)
+    expect([...table(TABLES.shipmentDocument).values()].filter((d) => d.type === 'INVOICE')).toHaveLength(1)
+  })
+
+  it('a send puts back an invoice row that was voided or never filed', async () => {
+    const { shipmentId, orderId } = await shipment()
+    // Never filed: the row appears.
+    await asFinance({ shipmentId, orderId, invoiceId: 'inv-4', number: 'INV-1004', s3Key: 'invoices/c1/INV-1004-v1.pdf' })
+    expect(table(TABLES.shipmentDocument).get('inv:inv-4')).toMatchObject({ status: 'ACTIVE', version: 1 })
+    // A row marked VOID is listed again when the same invoice is filed.
+    await asFinance({ shipmentId, invoiceId: 'inv-4', void: true })
+    await asFinance({ shipmentId, orderId, invoiceId: 'inv-4', number: 'INV-1004', s3Key: 'invoices/c1/INV-1004-v1.pdf' })
+    expect(table(TABLES.shipmentDocument).get('inv:inv-4')).toMatchObject({ status: 'ACTIVE', version: 2 })
+  })
+
   it('voiding the invoice marks its document VOID', async () => {
     const { shipmentId, orderId } = await shipment()
     await asFinance({ shipmentId, orderId, invoiceId: 'inv-2', number: 'INV-1002', s3Key: 'invoices/c1/INV-1002-v1.pdf' })

@@ -75,6 +75,16 @@ export async function fileInvoiceDocument(input: { shipmentId: string; invoiceId
   }
 }
 
+/**
+ * List the invoice that was just sent (by e-mail or by hand) on its shipment's Documents (Ryne 2026-11-18). The document was
+ * filed when the PDF was made; this puts back a row that never landed, and does nothing for an invoice with no PDF or a void one.
+ * The row is the same one (`inv:<invoiceId>`), and the same file already listed is left alone, so a resend adds nothing.
+ */
+export async function fileSentInvoiceDocument(invoice: { id: string; shipmentId?: string | null; orderId?: string | null; number?: string | null; pdfKey?: string | null; pdfSizeBytes?: number | null; status?: string | null }): Promise<boolean> {
+  if (!invoice.pdfKey || !invoice.shipmentId || invoice.status === 'VOID') return false
+  return fileInvoiceDocument({ shipmentId: invoice.shipmentId, invoiceId: invoice.id, orderId: invoice.orderId ?? null, number: invoice.number ?? null, s3Key: invoice.pdfKey, sizeBytes: invoice.pdfSizeBytes ?? null })
+}
+
 export const INVOICE_TABLE_NAME = process.env.INVOICE_TABLE_NAME ?? ''
 export const AR_PAYMENT_TABLE_NAME = process.env.AR_PAYMENT_TABLE_NAME ?? ''
 export const ORDER_TABLE_NAME = process.env.ORDER_TABLE_NAME ?? ''

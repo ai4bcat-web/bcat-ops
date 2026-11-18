@@ -657,6 +657,9 @@ export async function attachInvoiceDoc(deps: DocumentDeps, input: Row, caller: C
 
   const s3Key = assertString(input.s3Key, 's3Key')
   if (!s3Key.startsWith('invoices/')) throw new Error('An invoice document must point at the invoices/ folder')
+  // A send files the invoice again to heal a missing row; the same file already listed is left as it is, so a resend never
+  // adds a version of an unchanged invoice.
+  if (existing && existing.status === 'ACTIVE' && existing.s3Key === s3Key) return { document: existing }
   const number = optionalString(input.number, 60) ?? invoiceId
   const row: Row = {
     id: documentId,

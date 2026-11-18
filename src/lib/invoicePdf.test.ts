@@ -241,6 +241,61 @@ describe('buildInvoicePdf', () => {
     expect(text).toContain('Assigned to Acme Capital. Remit payment to PO Box 1.')
   })
 
+  describe('the factor stamp (Ryne 2026-11-18)', () => {
+    const OTR_REMIT = {
+      name: 'OTR Capital, LLC d/b/a OTR Solutions',
+      address: { street: 'PO BOX 1175760', city: 'ATLANTA', state: 'GA', zip: '30368-7576' },
+      email: 'bankinginfo@otrsolutions.com',
+    }
+
+    it('says at the top and at the bottom that a factored invoice is payable to OTR Solutions, with where to pay', async () => {
+      const lines = (await textOf({ factored: true, remitTo: OTR_REMIT })).split('\n')
+      // Top stamp: a heading and the factor's name.
+      expect(lines.filter((l) => l === 'PAYABLE TO OUR FACTORING COMPANY')).toHaveLength(1)
+      expect(lines.filter((l) => l === 'OTR SOLUTIONS')).toHaveLength(1)
+      // Bottom band: the full sentence and the remit-to line, built from the invoice's own remit-to.
+      expect(lines).toContain('THIS INVOICE IS PAYABLE TO OUR FACTORING COMPANY, OTR SOLUTIONS')
+      expect(lines).toContain('REMIT PAYMENT TO: OTR CAPITAL, LLC D/B/A OTR SOLUTIONS, PO BOX 1175760, ATLANTA, GA 30368-7576, bankinginfo@otrsolutions.com')
+    })
+
+    it('names OTR Solutions even when the invoice carries no remit-to', async () => {
+      const lines = (await textOf({ factored: true, remitTo: { name: '' } })).split('\n')
+      expect(lines).toContain('THIS INVOICE IS PAYABLE TO OUR FACTORING COMPANY, OTR SOLUTIONS')
+      expect(lines.some((l) => l.startsWith('REMIT PAYMENT TO'))).toBe(false)
+    })
+
+    it('prints another factor by its own name', async () => {
+      const lines = (await textOf({ factored: true, remitTo: { name: 'Acme Capital LLC', email: null } })).split('\n')
+      expect(lines).toContain('ACME CAPITAL LLC')
+      expect(lines).toContain('THIS INVOICE IS PAYABLE TO OUR FACTORING COMPANY, ACME CAPITAL LLC')
+      expect(lines).not.toContain('OTR SOLUTIONS')
+    })
+
+    it('prints nothing about a factor on an invoice that is not factored', async () => {
+      const text = await textOf({ factored: false, remitTo: OTR_REMIT })
+      expect(text).not.toContain('FACTORING')
+      expect(text).not.toContain('OTR')
+    })
+
+    it('stamps every page of a long invoice', async () => {
+      const many = Array.from({ length: 30 }, (_, i) =>
+        line({ chargeId: `x${i}`, code: 'ACC', label: `Accessorial ${i + 1}`, rateCents: 1000, amountCents: 1000 }))
+      const pages = await pageTexts(await buildInvoicePdf(input({ lines: [line(), ...many], totalCents: 145000, factored: true, remitTo: OTR_REMIT })))
+      expect(pages.length).toBeGreaterThan(1)
+      for (const page of pages) {
+        expect(page).toContain('PAYABLE TO OUR FACTORING COMPANY')
+        expect(page).toContain('THIS INVOICE IS PAYABLE TO OUR FACTORING COMPANY, OTR SOLUTIONS')
+      }
+    })
+
+    it('keeps the assignment notice under the band and never prints carrier pay beside the stamp', async () => {
+      const text = await textOf({ factored: true, remitTo: OTR_REMIT, factorNoticeText: 'Assigned to OTR. Pay only OTR.' })
+      expect(text.indexOf('NOTICE OF ASSIGNMENT')).toBeGreaterThan(text.indexOf('THIS INVOICE IS PAYABLE'))
+      expect(text).not.toContain(CARRIER_PAY)
+      expect(text).not.toContain(MARGIN)
+    })
+  })
+
   it('is an unencrypted PDF that the OTR ASCII-safe rewrite can load back', async () => {
     const doc = await PDFDocument.load(await buildInvoicePdf(input()))
     expect(doc.isEncrypted).toBe(false)
