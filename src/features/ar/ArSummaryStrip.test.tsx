@@ -43,8 +43,8 @@ describe('ArSummaryStrip', () => {
   it('renders stat cards and filters by a division row', () => {
     const onDivision = vi.fn()
     render(<div className="tms-shell"><ArSummaryStrip summary={summary([slice({ cents: 1000_00 })])} division={null} onDivision={onDivision} /></div>)
-    expect(screen.getByText('Factored, open')).toBeTruthy()
-    expect(screen.getByText('2 invoices')).toBeTruthy()
+    // The combined "Factored, open" stat is gone (Ryne 2026-11-18); the buckets stay.
+    expect(screen.queryByText('Factored, open')).toBeNull()
     expect(screen.getByText('Waiting on OTR approval')).toBeTruthy()
     expect(screen.getByText('Approved by OTR, not marked paid')).toBeTruthy()
     // Empty buckets are not listed.

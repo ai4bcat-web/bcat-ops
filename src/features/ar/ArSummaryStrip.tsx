@@ -25,9 +25,8 @@ export function ArSummaryStrip({ summary, division, onDivision, onCollected }: {
         testId="ar-summary"
         rows={[
           { key: 'open', label: 'Open AR', value: formatCents(summary.openCents), sub: invoices(summary.openCount) },
-          { key: 'otr', label: 'Factored, open', value: formatCents(summary.pendingOtrCents), sub: invoices(summary.pendingOtrCount), title: 'Every factored invoice not marked paid yet' },
           ...FACTORED_BUCKET_ORDER.filter((b) => summary.factored[b].count > 0).map((b) => ({
-            key: `otr-${b}`, kind: 'sub' as const, label: FACTORED_BUCKET_LABEL[b], title: FACTORED_BUCKET_TITLE[b],
+            key: `otr-${b}`, label: FACTORED_BUCKET_LABEL[b], title: FACTORED_BUCKET_TITLE[b],
             value: formatCents(summary.factored[b].cents), sub: invoices(summary.factored[b].count),
           })),
           { key: 'shippers', label: 'Pending with shippers', value: formatCents(summary.pendingShippersCents), sub: invoices(summary.pendingShippersCount) },

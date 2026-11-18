@@ -25,7 +25,7 @@ export interface ArDivisionSlice {
 }
 
 export interface ArSummary {
-  /** Every open factored invoice ("Factored, open"); split by where it stands with OTR in `factored`. */
+  /** Every open factored invoice (not shown as its own stat); split by where it stands with OTR in `factored`. */
   pendingOtrCents: number
   pendingOtrCount: number
   factored: FactoredBuckets
