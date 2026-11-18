@@ -2,7 +2,7 @@
  * Rows for Carriers › Remit e-mails: who each carrier's remittance goes to, and each factoring company's
  * one address. Pure, so the page stays a thin shell and the rules are tested without a DOM.
  */
-import { canonicalFactorName, factorKeyOf, paysThroughFactor, type FactorNameIndex, type FactorRemitMap, type FactorSummary } from '@/lib/factorRemit'
+import { canonicalFactorName, factorKeyOf, payeeEmailFor, paysThroughFactor, type FactorNameIndex, type FactorRemitMap, type FactorSummary, type PayeeKind, type PayeeSummary } from '@/lib/factorRemit'
 import { isValidEmail } from '@/lib/billingMethod'
 
 export interface RemitMethod {
@@ -23,6 +23,8 @@ export interface CarrierRemitRow {
   status: string
   /** 'Direct' or the factor's name as the Factoring companies table spells it; '' when nothing is on file. */
   paidVia: string
+  /** The PAY TO the remittance is filed under: the factor, else the carrier itself; '' when nothing is on file. */
+  payTo: string
   factorKey: string | null
   email: string
   state: CarrierRemitState
@@ -38,12 +40,14 @@ function methodOf(methods: readonly RemitMethod[]): RemitMethod | null {
 
 /**
  * One row per carrier. `methods` must already have each factor's one address laid over the carriers paid
- * through it (`applyFactorRemit`), so a factor-paid carrier simply reads its method's address.
+ * through it (`applyFactorRemit`), so a factor-paid carrier simply reads its method's address. A carrier paid
+ * directly is its own pay-to: the address filed for that name (`payeeEmails`) wins over its method's copy.
  */
 export function carrierRemitRows(
   carriers: ReadonlyArray<{ id: string; name: string; mcNumber?: string | null; status?: string | null; email?: string | null }>,
   methods: readonly RemitMethod[],
   factorNames?: FactorNameIndex,
+  payeeEmails?: FactorRemitMap | null,
 ): CarrierRemitRow[] {
   const byCarrier = new Map<string, RemitMethod[]>()
   for (const m of methods) {
@@ -53,8 +57,9 @@ export function carrierRemitRows(
   }
   return carriers.map((carrier) => {
     const method = methodOf(byCarrier.get(carrier.id) ?? [])
-    const email = (method?.payeeEmail ?? '').trim()
     const factored = paysThroughFactor(method)
+    const filed = method && !factored ? payeeEmailFor(payeeEmails, carrier.name) : ''
+    const email = filed || (method?.payeeEmail ?? '').trim()
     let state: CarrierRemitState
     if (!method) state = 'NO_PAYMENT_INFO'
     else if (!email) state = 'MISSING'
@@ -66,6 +71,7 @@ export function carrierRemitRows(
       mcNumber: carrier.mcNumber?.trim() ?? '',
       status: carrier.status ?? '',
       paidVia: !method ? '' : factored ? canonicalFactorName(factorNames, method.factorName) : 'Direct',
+      payTo: !method ? '' : factored ? canonicalFactorName(factorNames, method.factorName) : carrier.name.trim(),
       factorKey: factored ? factorKeyOf(method?.factorName) : null,
       email,
       state,
@@ -98,6 +104,19 @@ export function matchesSearch(needle: string, ...fields: Array<string | null | u
 }
 
 export type { FactorRemitMap }
+
+/** The type filter on the Pay to table: factoring companies, direct payees, or both. */
+export type PayeeKindFilter = 'ALL' | PayeeKind
+
+export const PAYEE_KIND_FILTERS: ReadonlyArray<{ key: PayeeKindFilter; label: string }> = [
+  { key: 'ALL', label: 'All payees' },
+  { key: 'FACTOR', label: 'Factoring companies' },
+  { key: 'DIRECT', label: 'Direct payees' },
+]
+
+export const PAYEE_KIND_LABEL: Record<PayeeKind, string> = { FACTOR: 'Factoring company', DIRECT: 'Direct' }
+
+export type { PayeeSummary }
 
 /** The status filter on the Factoring companies table. */
 export type FactorStatusFilter = 'ALL' | FactorSummary['source']

@@ -4,7 +4,8 @@ import { applyFactorRemit, factorNameIndex, factorKeyOf } from '@/lib/factorRemi
 import type { CarrierBillRecord } from '@/types/tms'
 import {
   billsInReview, sharedProIndex, sharedProLabel, siblingCarriers, awaitingInvoiceTotals,
-  billsExpected, billsAging, billsSelected, canSelectForPayment, invoiceAgeBuckets, payToLabel, paymentInfoFor, remitEmailOf, remittanceStatusOf, AP_TABS,
+  billsExpected, billsAging, billsSelected, canSelectForPayment, invoiceAgeBuckets, payToLabel, paymentInfoFor, remitEmailOf, remitEmailOfPayment, remittanceStatusOf, AP_TABS,
+  payeeCopies, setPayeeRemitForLabels,
   billGates, applyToBePaidFilters, EMPTY_TO_BE_PAID_FILTERS, factorNameFor, isFactorPaid, payeeNameFor, payToLabelFor, setFactorNamesForLabels,
   payToStatusFor, payToWorklist, PAY_TO_STATUS_LABEL,
   paidBills, paidInMonth, paidMonthOf, paidMonthOptions,
@@ -399,5 +400,44 @@ describe('leg numbers on a load that pays several carriers (14598-1, 14598-2)', 
   it('sorts 14598-1 and 14598-2 between 14598 and 14600 under the grid\'s numeric collation', () => {
     const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
     expect(['14600', '14598-2', '9999', '14598-1', '14598'].sort(collator.compare)).toEqual(['9999', '14598', '14598-1', '14598-2', '14600'])
+  })
+})
+
+describe('remittance is mapped to the pay to, not the carrier (Ryne 2026-11-19)', () => {
+  const infos = [
+    { id: 'p1', carrierId: 'car1', recipientType: 'FACTOR', factorName: 'RTS Financial', payeeEmail: 'old1@rts.test', isPreferred: true, status: 'ACTIVE' },
+    { id: 'p2', carrierId: 'car2', recipientType: 'FACTOR', factorName: 'RTS FINANCIAL', payeeEmail: 'old2@rts.test', isPreferred: true, status: 'ACTIVE' },
+    { id: 'p3', carrierId: 'car3', recipientType: 'CARRIER', payeeEmail: 'ap@green.test', isPreferred: true, status: 'ACTIVE' },
+  ] as never
+  const bill = (carrierId: string, carrierName: string, over: Record<string, unknown> = {}) =>
+    ({ carrierId, carrierName, payeeKind: 'CARRIER', paymentMethodId: null, remitTo: null, ...over }) as unknown as CarrierBillRecord
+  afterEach(() => setPayeeRemitForLabels(null))
+
+  it('gives two carriers paid to the same factor the one address filed for it', () => {
+    setPayeeRemitForLabels({ 'RTS FINANCIAL': { name: 'RTS Financial', email: 'remit@rts.test' } })
+    expect(remitEmailOf(bill('car1', 'Blue Line'), infos)).toBe('remit@rts.test')
+    expect(remitEmailOf(bill('car2', 'Red Line'), infos)).toBe('remit@rts.test')
+  })
+
+  it('reads the address filed for a direct payee over the carrier\'s own copy and a snapshot on the bill', () => {
+    setPayeeRemitForLabels({ 'GREEN HAUL': { name: 'Green Haul Inc', email: 'filed@green.test' } })
+    expect(remitEmailOf(bill('car3', 'Green Haul Inc', { remitTo: { name: 'Green Haul Inc', payeeEmail: 'snap@green.test' } }), infos)).toBe('filed@green.test')
+  })
+
+  it('falls back to the carrier\'s copy only while nothing is filed for the pay to', () => {
+    expect(remitEmailOf(bill('car3', 'Green Haul Inc'), infos)).toBe('ap@green.test')
+    expect(remitEmailOf(bill('car1', 'Blue Line'), infos)).toBe('old1@rts.test')
+  })
+
+  it('reads a payment by its pay to as well', () => {
+    setPayeeRemitForLabels({ 'GREEN HAUL': { name: 'Green Haul Inc', email: 'filed@green.test' } })
+    expect(remitEmailOfPayment({ carrierId: 'car3', remitTo: { name: 'Green Haul Inc', payeeEmail: 'snap@green.test' } }, infos, 'Green Haul Inc')).toBe('filed@green.test')
+  })
+
+  it('counts the carriers paid to a name and the different addresses they carry', () => {
+    const bills = [bill('car1', 'Blue Line'), bill('car2', 'Red Line'), bill('car3', 'Green Haul Inc')]
+    expect(payeeCopies('RTS Financial', bills, infos)).toEqual({ carriers: 2, emails: ['old1@rts.test', 'old2@rts.test'] })
+    expect(payeeCopies('Green Haul Inc', bills, infos)).toEqual({ carriers: 1, emails: ['ap@green.test'] })
+    expect(payeeCopies('', bills, infos)).toEqual({ carriers: 0, emails: [] })
   })
 })

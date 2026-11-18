@@ -1,9 +1,10 @@
 /**
  * `/tms/carriers/remit` — Carriers › Remit e-mails.
  *
- * Two lists of where remittance advice goes: every carrier, and every factoring company. A factoring
- * company has ONE address that every carrier it funds inherits, so a carrier paid through a factor shows
- * that address read-only and is edited at the factor. A direct-paid carrier keeps its own.
+ * Remittance advice goes to the PAY TO, not to the carrier. The Pay to table lists every payee, factoring
+ * companies and carriers paid directly, with ONE address each that every carrier paid to that name uses.
+ * The Carriers table is read-only: it shows each carrier's pay-to and the address that resolves to, with a
+ * link to edit the payee.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -12,13 +13,13 @@ import { TmsBadge, TmsButton, TmsInput, TmsListPage, TmsPage, TmsSegmentedTabs, 
 import { useCarriers } from '@/hooks/useCarriers'
 import { useAuth } from '@/hooks/useAuth'
 import {
-  getFactorRemitEmails, graphqlErrorText, listCarrierRemitEmails, setFactorRemitEmail, setPayeeRemitEmail,
+  getFactorRemitEmails, graphqlErrorText, listCarrierRemitEmails, setFactorRemitEmail,
 } from '@/lib/apiClient'
-import { applyFactorRemit, factorNameIndex, isRemitEmail, summarizeFactors, type FactorRemitMap, type FactorSummary } from '@/lib/factorRemit'
+import { applyFactorRemit, factorNameIndex, isRemitEmail, summarizeFactors, summarizePayees, type FactorRemitMap, type PayeeSummary } from '@/lib/factorRemit'
 import {
-  CARRIER_PAID_FILTERS, FACTOR_SOURCE_LABEL, FACTOR_STATUS_FILTERS, carrierMatchesPaidFilter, carrierNeedsRemit, carrierRemitRows,
+  CARRIER_PAID_FILTERS, FACTOR_SOURCE_LABEL, FACTOR_STATUS_FILTERS, PAYEE_KIND_FILTERS, PAYEE_KIND_LABEL, carrierMatchesPaidFilter, carrierNeedsRemit, carrierRemitRows,
   factorNeedsRemit, matchesSearch,
-  type CarrierPaidFilter, type CarrierRemitRow, type FactorStatusFilter, type RemitMethod,
+  type CarrierPaidFilter, type CarrierRemitRow, type FactorStatusFilter, type PayeeKindFilter, type RemitMethod,
 } from './remitDirectory'
 
 type Kind = 'carriers' | 'factors'
@@ -86,6 +87,7 @@ export function RemitDirectoryPage() {
   const [query, setQuery] = useState('')
   const [missingOnly, setMissingOnly] = useState(false)
   const [factorStatus, setFactorStatus] = useState<FactorStatusFilter>('ALL')
+  const [payeeKind, setPayeeKind] = useState<PayeeKindFilter>('ALL')
   const [carrierPaid, setCarrierPaid] = useState<CarrierPaidFilter>('ALL')
   const [editing, setEditing] = useState<string | null>(null)
 
@@ -101,28 +103,30 @@ export function RemitDirectoryPage() {
 
   // The raw methods feed the factor summary (to see carriers that disagree); the laid-over ones feed the carrier rows.
   const effective = useMemo(() => (methods ? applyFactorRemit(methods, factorEmails) : []), [methods, factorEmails])
-  const factorRows = useMemo(() => (methods ? summarizeFactors(methods, factorEmails) : []), [methods, factorEmails])
-  // The factor table is the one source of the factor's name: the carrier rows spell it exactly as it is spelled here.
-  const factorNames = useMemo(() => factorNameIndex(factorRows), [factorRows])
-  const carrierRows = useMemo(() => carrierRemitRows(carriers, effective, factorNames), [carriers, effective, factorNames])
+  // The Pay to table is the one source of a factor's name: the carrier rows spell it exactly as it is spelled here.
+  const factorNames = useMemo(() => factorNameIndex(methods ? summarizeFactors(methods, factorEmails) : []), [methods, factorEmails])
+  // Every payee, factoring companies and carriers paid directly, with the one address each is paid at.
+  const payeeRows = useMemo(() => (methods ? summarizePayees(carriers, methods, factorEmails) : []), [carriers, methods, factorEmails])
+  const carrierRows = useMemo(() => carrierRemitRows(carriers, effective, factorNames, factorEmails), [carriers, effective, factorNames, factorEmails])
 
-  const missingCarriers = carrierRows.filter(carrierNeedsRemit).length
-  const missingFactors = factorRows.filter(factorNeedsRemit).length
+  // Missing counts are payees, not carriers: a factor with no address is one gap however many carriers it funds.
+  const missingPayees = payeeRows.filter(factorNeedsRemit).length
 
   const shownCarriers = useMemo(
     () => carrierRows.filter((r) => (!missingOnly || carrierNeedsRemit(r)) && carrierMatchesPaidFilter(r, carrierPaid) && matchesSearch(query, r.name, r.mcNumber, r.paidVia, r.email)),
     [carrierRows, missingOnly, carrierPaid, query],
   )
-  const shownFactors = useMemo(
-    () => factorRows.filter((r) => (!missingOnly || factorNeedsRemit(r)) && (factorStatus === 'ALL' || r.source === factorStatus) && matchesSearch(query, r.name, r.email, ...r.otherNames)),
-    [factorRows, missingOnly, factorStatus, query],
+  const shownPayees = useMemo(
+    () => payeeRows.filter((r) => (!missingOnly || factorNeedsRemit(r)) && (factorStatus === 'ALL' || r.source === factorStatus) && (payeeKind === 'ALL' || r.kind === payeeKind) && matchesSearch(query, r.name, r.email, ...r.otherNames, ...r.carrierNames)),
+    [payeeRows, missingOnly, factorStatus, payeeKind, query],
   )
 
-  function editFactor(name: string) {
+  function editPayee(name: string) {
     setKind('factors')
     setQuery(name)
     setMissingOnly(false)
     setFactorStatus('ALL')
+    setPayeeKind('ALL')
     setEditing(null)
   }
 
@@ -134,53 +138,30 @@ export function RemitDirectoryPage() {
     },
     { key: 'mc', header: 'MC', width: 100, render: (r) => r.mcNumber || '—', text: (r) => r.mcNumber },
     {
-      key: 'via', header: 'Paid to', width: 260,
-      render: (r) => (r.paidVia === '' ? <span className="tms-muted">No payment info</span> : <span>{r.paidVia}</span>),
-      text: (r) => r.paidVia || 'No payment info',
+      key: 'via', header: 'Pay to', width: 280,
+      render: (r) => (r.paidVia === ''
+        ? <span className="tms-muted">No payment info</span>
+        : <span>{r.payTo}{r.paidVia === 'Direct' && <span className="tms-muted"> · direct</span>}</span>),
+      text: (r) => r.payTo || 'No payment info',
     },
     {
-      key: 'email', header: 'Remit e-mail',
+      key: 'email', header: 'Remit e-mail (from the pay to)',
       render: (r) => {
-        if (editing === `c:${r.id}`) {
-          return (
-            <EmailEditor
-              initial={r.email}
-              label={r.name}
-              onCancel={() => setEditing(null)}
-              onSave={async (email) => { await setPayeeRemitEmail({ carrierId: r.id, email }); toast.success('Remit e-mail saved'); reload() }}
-            />
-          )
-        }
         if (r.state === 'NO_PAYMENT_INFO') {
           return <Link className="tms-link" to={`/tms/carriers/${r.id}`}>Add payment info on the profile</Link>
         }
-        if (r.state === 'FACTOR') {
-          return (
-            <span title={`Set once for ${r.paidVia}; every carrier it funds uses it`}>
-              {r.email}{' '}
-              {canEdit && <button type="button" className="tms-link" onClick={() => editFactor(r.paidVia)}>Edit at {r.paidVia}</button>}
-            </span>
-          )
-        }
-        if (r.state === 'OWN') {
-          return (
-            <span>
-              {r.email}{' '}
-              {canEdit && <button type="button" className="tms-link" onClick={() => setEditing(`c:${r.id}`)}>Edit</button>}
-            </span>
-          )
-        }
-        // Missing or invalid. A factor-paid carrier is fixed at the factor.
-        if (r.factorKey) {
-          return canEdit
-            ? <button type="button" className="tms-link" onClick={() => editFactor(r.paidVia)}>Add at {r.paidVia}</button>
-            : <TmsBadge tone="orange">Missing</TmsBadge>
+        // The address belongs to the pay to: it is read here and edited on the Pay to table.
+        const link = canEdit && r.payTo
+          ? <button type="button" className="tms-link whitespace-nowrap" onClick={() => editPayee(r.payTo)}>{r.email ? `Edit at ${r.payTo}` : `Add at ${r.payTo}`}</button>
+          : null
+        if (r.state === 'FACTOR' || r.state === 'OWN') {
+          return <span title={`Filed once for ${r.payTo}; every carrier paid to that name uses it`}>{r.email} {link}</span>
         }
         return (
-          <span className="inline-flex items-center gap-2">
-            <TmsBadge tone={r.state === 'INVALID' ? 'red' : 'orange'}>{r.state === 'INVALID' ? `Invalid: ${r.email}` : 'Missing'}</TmsBadge>
+          <span className="inline-flex flex-wrap items-center gap-2">
+            {r.state === 'INVALID' ? <TmsBadge tone="red">Invalid: {r.email}</TmsBadge> : <TmsBadge tone="orange">Missing</TmsBadge>}
             {r.carrierEmail && <span className="tms-muted" title="Used when the payment method has no remit e-mail">falls back to {r.carrierEmail}</span>}
-            {canEdit && <button type="button" className="tms-link whitespace-nowrap" onClick={() => setEditing(`c:${r.id}`)}>Add remit e-mail</button>}
+            {link}
           </span>
         )
       },
@@ -188,9 +169,9 @@ export function RemitDirectoryPage() {
     },
   ]
 
-  const factorColumns: Array<ColumnDef<FactorSummary>> = [
+  const payeeColumns: Array<ColumnDef<PayeeSummary>> = [
     {
-      key: 'name', header: 'Factoring company', width: 320,
+      key: 'name', header: 'Pay to', width: 320,
       render: (r) => (
         <span title={r.otherNames.length ? `Also spelled: ${r.otherNames.join('; ')}` : undefined}>
           {r.name}{r.otherNames.length > 0 && <span className="tms-muted"> +{r.otherNames.length} spelling{r.otherNames.length === 1 ? '' : 's'}</span>}
@@ -198,7 +179,17 @@ export function RemitDirectoryPage() {
       ),
       text: (r) => r.name,
     },
-    { key: 'n', header: 'Carriers', width: 90, align: 'right', render: (r) => r.carrierCount, text: (r) => String(r.carrierCount), sortValue: (r) => r.carrierCount, filter: 'number' },
+    {
+      key: 'kind', header: 'Type', width: 150,
+      render: (r) => <TmsBadge tone={r.kind === 'FACTOR' ? 'blue' : 'gray'}>{PAYEE_KIND_LABEL[r.kind]}</TmsBadge>,
+      text: (r) => PAYEE_KIND_LABEL[r.kind],
+      filter: 'multi',
+    },
+    {
+      key: 'n', header: 'Carriers', width: 90, align: 'right',
+      render: (r) => <span title={r.carrierNames.length ? r.carrierNames.join('; ') : undefined}>{r.carrierCount}</span>,
+      text: (r) => String(r.carrierCount), sortValue: (r) => r.carrierCount, filter: 'number',
+    },
     {
       key: 'email', header: 'Remit e-mail',
       render: (r) => {
@@ -210,8 +201,8 @@ export function RemitDirectoryPage() {
               allowClear={r.source === 'SET'}
               onCancel={() => setEditing(null)}
               onSave={async (email) => {
-                await setFactorRemitEmail({ factorName: r.name, email })
-                toast.success(email ? 'Remit e-mail saved for every carrier paid through this factor' : 'Remit e-mail cleared')
+                await setFactorRemitEmail({ payeeName: r.name, email })
+                toast.success(email ? `Remit e-mail saved for every carrier paid to ${r.name}` : 'Remit e-mail cleared')
                 reload()
               }}
             />
@@ -243,30 +234,30 @@ export function RemitDirectoryPage() {
   ]
 
   const busy = loading || methods === null
-  const rows = kind === 'carriers' ? shownCarriers : shownFactors
-  const total = kind === 'carriers' ? carrierRows.length : factorRows.length
+  const rows = kind === 'carriers' ? shownCarriers : shownPayees
+  const total = kind === 'carriers' ? carrierRows.length : payeeRows.length
 
   return (
     <TmsPage title="Remit e-mails">
       <p className="tms-muted mb-3" style={{ maxWidth: 760 }}>
-        Where remittance advice goes when a carrier is paid. A factoring company has one address, shared by every carrier it funds;
-        a carrier paid directly has its own.
+        Where remittance advice goes when a bill is paid. It goes to the Pay to, not to the carrier: each factoring company or direct payee
+        has one address, shared by every carrier paid to that name.
       </p>
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <TmsSegmentedTabs
-          aria-label="Carriers or factoring companies"
+          aria-label="Carriers or pay to"
           active={kind}
           onSelect={(k) => { setKind(k as Kind); setEditing(null) }}
           tabs={[
-            { key: 'carriers', label: `Carriers${missingCarriers ? ` · ${missingCarriers} missing` : ''}` },
-            { key: 'factors', label: `Factoring companies${missingFactors ? ` · ${missingFactors} to fix` : ''}` },
+            { key: 'carriers', label: 'Carriers' },
+            { key: 'factors', label: `Pay to${missingPayees ? ` · ${missingPayees} to fix` : ''}` },
           ]}
         />
         <TmsInput
           aria-label="Search remit e-mails"
           value={query}
-          placeholder={kind === 'carriers' ? 'Search carrier, MC, factor or e-mail' : 'Search factoring company or e-mail'}
+          placeholder={kind === 'carriers' ? 'Search carrier, MC, pay to or e-mail' : 'Search pay to, carrier or e-mail'}
           style={{ minWidth: 300 }}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -275,9 +266,14 @@ export function RemitDirectoryPage() {
             {CARRIER_PAID_FILTERS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
           </select>
         ) : (
-          <select aria-label="Filter by status" style={SELECT_STYLE} value={factorStatus} onChange={(e) => setFactorStatus(e.target.value as FactorStatusFilter)}>
-            {FACTOR_STATUS_FILTERS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
-          </select>
+          <>
+            <select aria-label="Filter by type" style={SELECT_STYLE} value={payeeKind} onChange={(e) => setPayeeKind(e.target.value as PayeeKindFilter)}>
+              {PAYEE_KIND_FILTERS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+            </select>
+            <select aria-label="Filter by status" style={SELECT_STYLE} value={factorStatus} onChange={(e) => setFactorStatus(e.target.value as FactorStatusFilter)}>
+              {FACTOR_STATUS_FILTERS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+            </select>
+          </>
         )}
         <label className="inline-flex items-center gap-1 text-sm">
           <input type="checkbox" checked={missingOnly} onChange={(e) => setMissingOnly(e.target.checked)} />
@@ -303,13 +299,13 @@ export function RemitDirectoryPage() {
       ) : (
         <TmsListPage
           embedded
-          title="Factoring company remit e-mails"
-          gridId="remit-factors"
-          columns={factorColumns}
-          rows={shownFactors}
+          title="Pay to remit e-mails"
+          gridId="remit-payees"
+          columns={payeeColumns}
+          rows={shownPayees}
           rowKey={(r) => r.key}
-          emptyText={busy ? 'Loading…' : 'No factoring companies match.'}
-          page={{ from: shownFactors.length ? 1 : 0, to: shownFactors.length, total: shownFactors.length, pageSize: shownFactors.length }}
+          emptyText={busy ? 'Loading…' : 'No payees match.'}
+          page={{ from: shownPayees.length ? 1 : 0, to: shownPayees.length, total: shownPayees.length, pageSize: shownPayees.length }}
         />
       )}
     </TmsPage>
