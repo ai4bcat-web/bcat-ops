@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { Driver, Load, Stop } from '@/types'
 import type { Equipment } from '@/types/equipment'
-import { computeEmptyTrucks, isOwnFleetDriver, roadMiles, BACK_TO_BACK_HOURS, LONG_DEADHEAD_MILES } from './emptyTrucks'
+import { computeEmptyTrucks, isOwnFleetDriver, roadMiles, urgencyOf, deadheadTier, BACK_TO_BACK_HOURS, LONG_DEADHEAD_MILES, SHORT_DEADHEAD_MILES } from './emptyTrucks'
 
 // Wed 2026-11-18 12:30 in Chicago. The half hour keeps whole-hour offsets off Chicago midnight, which counts as "no time".
 const NOW = Date.parse('2026-11-18T18:30:00Z')
@@ -277,5 +277,71 @@ describe('roadMiles', () => {
   it('is null when either end has no position', () => {
     expect(roadMiles({ lat: null, lng: null }, { lat: 42, lng: -88 })).toBeNull()
     expect(roadMiles({ lat: 42.5875, lng: -87.88 }, { lat: 41.837, lng: -87.6849 })).toBeGreaterThan(50)
+  })
+})
+
+describe('what the map draws', () => {
+  const openLoad = (city: string, hoursFromNow: number, over: Record<string, unknown> = {}) => load({
+    status: 'SOURCING', customer: 'Acme Foods', rate: 180_000,
+    stops: [
+      stop({ id: `o${seq}`, type: 'pickup', sequence: 0, city, appt: at(hoursFromNow), driverId: null }),
+      stop({ id: `p${seq}`, type: 'delivery', sequence: 1, city: 'Dallas, TX', appt: at(hoursFromNow + 20), driverId: null }),
+    ],
+    ...over,
+  })
+
+  it('gives each row where the run started, so the map can draw the run the truck just did', () => {
+    const [row] = computeEmptyTrucks({ ...base, drivers: [driver()], loads: [run(30)] }).rows
+    expect(row.from.place).toBe('Kenosha, WI')
+    expect(row.from.lat).not.toBeNull()
+    expect(row.point.place).toBe('Chicago, IL')
+  })
+
+  it('gives each open load its pickup point, so the map can draw the empty run to it', () => {
+    const [row] = computeEmptyTrucks({ ...base, drivers: [driver()], loads: [run(30), openLoad('Elgin, IL', 34)] }).rows
+    expect(row.matches[0].pickupPoint.place).toBe('Elgin, IL')
+    expect(row.matches[0].pickupPoint.lat).not.toBeNull()
+  })
+
+  it('counts the trucks empty now and the open loads that could cover a truck', () => {
+    const a = driver({ id: 'a', name: 'Amy' })
+    const b = driver({ id: 'b', name: 'Bo', assignedTruckId: null })
+    const fits = openLoad('Elgin, IL', 34)
+    const r = computeEmptyTrucks({ ...base, drivers: [a, b], loads: [run(-3, {}, 'a'), run(30, {}, 'b'), fits, openLoad('Dallas, TX', 24 * 30)] })
+    expect(r.summary.trucks).toBe(2)
+    expect(r.summary.emptyNow).toBe(1)
+    // The same open load offered to both trucks counts once; the one a month out is not in reach.
+    expect(r.summary.openLoadsCovering).toBe(1)
+  })
+
+  it('lists the open loads picking up in the window, matched or not, with a point each', () => {
+    const lonely = openLoad('Phoenix, AZ', 40)
+    const gone = openLoad('Elgin, IL', 24 * 60)
+    const r = computeEmptyTrucks({ ...base, drivers: [driver()], loads: [run(30), lonely, gone] })
+    expect(r.openLoads.map((o) => o.loadId)).toEqual([lonely.id])
+    expect(r.openLoads[0].point.place).toBe('Phoenix, AZ')
+  })
+})
+
+describe('pin colour', () => {
+  const row = (emptyHours: number, alreadyEmpty = false) => ({ alreadyEmpty, emptyAt: NOW + emptyHours * H })
+  it('is red for a truck already empty, amber within a day, blue within the week, gray after', () => {
+    expect(urgencyOf(row(-2, true), NOW)).toBe('now')
+    expect(urgencyOf(row(5), NOW)).toBe('soon')
+    expect(urgencyOf(row(24), NOW)).toBe('soon')
+    expect(urgencyOf(row(25), NOW)).toBe('week')
+    expect(urgencyOf(row(24 * 7), NOW)).toBe('week')
+    expect(urgencyOf(row(24 * 7 + 1), NOW)).toBe('beyond')
+  })
+})
+
+describe('empty run colour', () => {
+  it('is green up to 75 miles, amber up to 150, red beyond, gray when unknown', () => {
+    expect(deadheadTier(0)).toBe('short')
+    expect(deadheadTier(SHORT_DEADHEAD_MILES)).toBe('short')
+    expect(deadheadTier(SHORT_DEADHEAD_MILES + 1)).toBe('medium')
+    expect(deadheadTier(LONG_DEADHEAD_MILES)).toBe('medium')
+    expect(deadheadTier(LONG_DEADHEAD_MILES + 1)).toBe('long')
+    expect(deadheadTier(null)).toBe('unknown')
   })
 })
