@@ -32,6 +32,7 @@ import {
   dueDateFor,
   invoiceCcRecipients,
   invoiceData,
+  invoiceIsFactored,
   invoiceLinesFor,
   invoiceNumberFormatError,
   invoiceReadiness,
@@ -638,16 +639,25 @@ export function invoicePdfFingerprint(invoice: Pick<InvoiceRecord, 'number' | 't
  * names another number (renumbered), or it was rendered from different numbers/lines. Invoices
  * rendered before fingerprints existed are judged by the key alone.
  */
-export function invoicePdfIsStale(invoice: InvoiceRecord & { pdfFingerprint?: string | null; revision?: number | null }): boolean {
+export function invoicePdfIsStale(invoice: InvoiceRecord & { pdfFingerprint?: string | null; revision?: number | null }, factored?: boolean): boolean {
   if (!invoice.pdfKey || !invoice.pdfVersion) return true
   if (invoice.pdfKey !== invoicePdfKey(invoice.customerId, invoice.number, invoice.pdfVersion)) return true
-  if (invoice.pdfFingerprint && invoice.pdfFingerprint !== invoicePdfFingerprint(invoice)) return true
+  if (invoice.pdfFingerprint && invoice.pdfFingerprint !== invoicePdfFingerprint(factored === undefined ? invoice : { ...invoice, factored })) return true
   return false
+}
+
+/**
+ * The factored state the PDF is rendered with (invoiceIsFactored, the rule invoiceData prints from), not only the invoice's raw flag:
+ * an invoice that never set `factored` for a customer billed by FACTOR prints the stamp, so its fingerprint must say so too.
+ */
+function contextFactored(invoice: InvoiceRecord, context: OrderContext): boolean {
+  const revDivision = (context.shipment as unknown as { revDivision?: string | null } | null | undefined)?.revDivision ?? null
+  return invoiceIsFactored(invoice, context.customer, revDivision)
 }
 
 /** Re-render before a send or preview when the stored PDF is stale; otherwise hand the invoice back untouched. */
 async function freshPdfInvoice(invoice: InvoiceRecord, context: OrderContext, caller: Caller): Promise<InvoiceRecord> {
-  if (!invoicePdfIsStale(invoice)) return invoice
+  if (!invoicePdfIsStale(invoice, contextFactored(invoice, context))) return invoice
   const { documentFiled: _filed, ...stored } = await storePdf(invoice, context, caller)
   if (!stored.pdfKey) throw new Error('The invoice PDF is out of date and could not be re-rendered; try again')
   console.log('[tms-finance-actions] re-rendered stale invoice PDF', invoice.id, invoice.pdfKey, '->', stored.pdfKey)
@@ -673,7 +683,7 @@ async function storePdf(invoice: InvoiceRecord, context: OrderContext, caller: C
         pdfKey: key,
         pdfSizeBytes: bytes.byteLength,
         pdfVersion: version,
-        pdfFingerprint: invoicePdfFingerprint(invoice),
+        pdfFingerprint: invoicePdfFingerprint({ ...invoice, factored: contextFactored(invoice, context) }),
         updatedAt: now,
         updatedBy: caller.email,
       })],
@@ -681,7 +691,7 @@ async function storePdf(invoice: InvoiceRecord, context: OrderContext, caller: C
     )
     // The invoice shows on its shipment as a document the moment its PDF exists (and again, as the next version, when it is re-rendered).
     const documentFiled = await fileInvoiceDocument({ shipmentId: invoice.shipmentId, invoiceId: invoice.id, orderId: invoice.orderId, number: invoice.number, s3Key: key, sizeBytes: bytes.byteLength })
-    return { ...invoice, pdfKey: key, pdfSizeBytes: bytes.byteLength, pdfVersion: version, pdfFingerprint: invoicePdfFingerprint(invoice), documentFiled } as InvoiceRecord & { documentFiled?: boolean }
+    return { ...invoice, pdfKey: key, pdfSizeBytes: bytes.byteLength, pdfVersion: version, pdfFingerprint: invoicePdfFingerprint({ ...invoice, factored: contextFactored(invoice, context) }), documentFiled } as InvoiceRecord & { documentFiled?: boolean }
   } catch (err) {
     console.error('[tms-finance-actions] invoice PDF failed', invoice.id, String(err))
     return { ...invoice, pdfKey: null, pdfSizeBytes: null, pdfVersion: null }

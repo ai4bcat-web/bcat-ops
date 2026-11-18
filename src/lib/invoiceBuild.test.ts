@@ -7,6 +7,7 @@ import {
   formatInvoiceNumber,
   invoiceCcRecipients,
   invoiceData,
+  invoiceIsFactored,
   invoiceLinesFor,
   invoiceNumberFormatError,
   invoiceReadiness,
@@ -523,5 +524,26 @@ describe('invoiceData', () => {
   it('falls back to Net terms when the org has written no terms text', () => {
     const base = dataInput()
     expect(invoiceData({ ...base, settings: { factorRemitTo: null, invoiceTerms: null } }).termsText).toBe('Net 30')
+  })
+})
+
+describe('invoiceIsFactored', () => {
+  const factorCustomer = { billingMethod: 'FACTOR', factored: null } as CustomerRecord
+  const manualCustomer = { billingMethod: 'MANUAL', factored: false } as CustomerRecord
+
+  it('stamps an invoice that never set the flag when the customer is billed by FACTOR (Transportation One: FACTOR, factored unset)', () => {
+    expect(invoiceIsFactored({ factored: null }, factorCustomer, 'ASSETS')).toBe(true)
+    expect(invoiceIsFactored({}, factorCustomer, 'ASSETS')).toBe(true)
+  })
+
+  it('lets the invoice decide when it set the flag: a draft pinned to MANUAL stays manual for a FACTOR customer', () => {
+    expect(invoiceIsFactored({ factored: false }, factorCustomer, 'ASSETS')).toBe(false)
+    expect(invoiceIsFactored({ factored: true }, manualCustomer, 'ASSETS')).toBe(true)
+  })
+
+  it('never stamps a brokered load, and never a MANUAL customer that left the flag unset', () => {
+    expect(invoiceIsFactored({ factored: null }, factorCustomer, 'BROKERAGE')).toBe(false)
+    expect(invoiceIsFactored({ factored: null }, manualCustomer, 'ASSETS')).toBe(false)
+    expect(invoiceIsFactored({ factored: null }, undefined, 'ASSETS')).toBe(false)
   })
 })
