@@ -10,7 +10,7 @@
  * Naming the assignment is optional and worth doing: it is what lets the leg show what
  * it owes back before anybody has spent the credit.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsButton, TmsDialog, TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
@@ -19,9 +19,12 @@ import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateInput } from '@/lib/date'
 import { centsFromInput } from '@/features/ar/components/money'
 import type { CarrierBillRecord } from '@/types/tms'
+import { withLegSuffix, type LegIndex } from '../apViews'
 
-export function ApCreditDialog({ carrierId, loadCarrierId, open, onOpenChange, onDone }: {
+export function ApCreditDialog({ carrierId, loadCarrierId, legs, open, onOpenChange, onDone }: {
   carrierId: string
+  /** Which carrier leg each bill is, for loads that pay several carriers (14598-1, 14598-2). Display only. */
+  legs?: LegIndex
   /** Raised from one leg — a TONU adjustment, a claim — rather than against the account. */
   loadCarrierId?: string
   open: boolean
@@ -35,7 +38,8 @@ export function ApCreditDialog({ carrierId, loadCarrierId, open, onOpenChange, o
   const [amount, setAmount] = useState('')
   const [reason, setReason] = useState('')
   const [assignment, setAssignment] = useState(loadCarrierId ?? '')
-  const [bills, setBills] = useState<CarrierBillRecord[]>([])
+  const [rawBills, setBills] = useState<CarrierBillRecord[]>([])
+  const bills = useMemo(() => withLegSuffix(rawBills, legs), [rawBills, legs])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -151,7 +155,7 @@ export function ApCreditDialog({ carrierId, loadCarrierId, open, onOpenChange, o
               <option value="">The account — no particular leg</option>
               {bills.map((row) => (
                 <option key={row.id} value={row.loadCarrierId}>
-                  {row.billNumber ?? row.id} · {row.loadNumber ?? row.shipmentNumber ?? row.shipmentId}
+                  {row.billNumber ?? row.id} · {(row.loadNumber ?? row.shipmentNumber) ? `${row.loadNumber ?? row.shipmentNumber}${row.legSuffix ?? ''}` : row.shipmentId}
                   {' '}· {formatCents(row.netCents)}
                 </option>
               ))}

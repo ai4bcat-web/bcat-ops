@@ -15,7 +15,8 @@ import { getFactorRemitEmails, graphqlErrorText, listCarrierPaymentInfo, selectB
 import { chicagoDateStr } from '@/lib/date'
 import { applyFactorRemit, factorNameIndex, summarizeFactors } from '@/lib/factorRemit'
 import { formatCents } from '@/lib/invoiceBuild'
-import { payeeNameFor, setFactorNamesForLabels } from '@/features/ap/apViews'
+import { multiCarrierLoadIds, payeeNameFor, setFactorNamesForLabels, withLegSuffix } from '@/features/ap/apViews'
+import { useLegIndex } from '@/features/ap/useLegIndex'
 import {
   buildCashPlan, cents, DEFAULT_PLANNER_INPUTS, PLANNER_FIELD_KEYS, readAmount, readInputs,
   type PlanBillRow, type PlannerBill, type PlannerFields, type PlannerInputs,
@@ -112,9 +113,13 @@ export function CashPlannerPage() {
 
   const inputs = useMemo(() => readInputs(fields), [fields])
   // Drawn each time rather than memoised: the labels read the factor names, which load after the bills. 100-odd rows.
-  const bills: PlannerBill[] = open.bills.map((b) => ({
+  // A load that pays several carriers lists each bill as 14598-1, 14598-2.
+  const billedLegIds = useMemo(() => new Set(open.bills.map((b) => b.loadCarrierId)), [open.bills])
+  const legLoadIds = useMemo(() => multiCarrierLoadIds([], open.bills), [open.bills])
+  const legs = useLegIndex(legLoadIds, billedLegIds)
+  const bills: PlannerBill[] = withLegSuffix(open.bills, legs).map((b) => ({
     id: b.id,
-    pro: b.shipmentNumber || b.loadNumber || b.billNumber || b.id.slice(0, 8),
+    pro: (b.shipmentNumber || b.loadNumber) ? `${b.shipmentNumber || b.loadNumber}${b.legSuffix ?? ''}` : b.billNumber || b.id.slice(0, 8),
     carrier: b.carrierName || 'Carrier',
     payee: payeeNameFor(b, infos),
     dueAt: (b.dueAt || '').slice(0, 10),

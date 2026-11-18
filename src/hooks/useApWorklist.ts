@@ -50,6 +50,8 @@ export interface ApWorklistRow {
   rateConSigned: boolean
   /** What the cached fields alone can say is standing in the way. */
   reasons: string[]
+  /** Display only: "-2" when the load pays several carriers (see `withLegSuffix`). */
+  legSuffix?: string | null
 }
 
 export interface ApWorklist {

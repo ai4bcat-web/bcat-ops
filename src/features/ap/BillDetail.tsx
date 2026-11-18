@@ -29,7 +29,7 @@ import { chicagoDateStr, formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/invoiceBuild'
 import { agingChipFor, formatDay } from '@/features/ar/arViews'
 import { ReasonDialog } from '@/features/ar/components/ReasonDialog'
-import { AP_PAYEE_KIND_LABEL, AP_PAYMENT_KIND_LABEL, BILL_STATUS_LABEL, paymentsForBill, siblingCarriers } from './apViews'
+import { AP_PAYEE_KIND_LABEL, AP_PAYMENT_KIND_LABEL, BILL_STATUS_LABEL, legIndex, legSuffixOf, paymentsForBill, siblingCarriers } from './apViews'
 import { ApproveBillDialog } from './components/ApproveBillDialog'
 import { SetBillDatesDialog } from './components/SetBillDatesDialog'
 import { BillInboxStrip } from './inbox/BillInboxStrip'
@@ -97,6 +97,8 @@ export function BillDetail() {
   const document = (bundle?.documents ?? []).find((doc) => doc.id === view.documentId) ?? null
   const applied = paymentsForBill(payments, bill.id)
   const siblings = siblingCarriers(bundle?.loadCarriers ?? [], bill)
+  // A load that pays several carriers numbers its bills 14598-1, 14598-2.
+  const legSuffix = legSuffixOf(legIndex(new Map([[bill.loadId, bundle?.loadCarriers ?? []]]), new Set([bill.loadCarrierId])), bill.loadCarrierId)
   const acknowledged = bill.approvalWarnings ?? []
   const label = view.billNumber ?? view.id
   // Everything that has already settled part of this bill, however it got there.
@@ -220,7 +222,7 @@ export function BillDetail() {
             { label: 'Carrier', value: view.carrier.name || bill.carrierId },
             {
               label: 'Shipment',
-              value: <Link to={shipmentEditorPath(view.shipmentId)}>{view.shipmentNumber ?? view.shipmentId}</Link>,
+              value: <Link to={shipmentEditorPath(view.shipmentId)}>{view.shipmentNumber ? `${view.shipmentNumber}${legSuffix}` : view.shipmentId}</Link>,
             },
             { label: 'Load', value: view.loadNumber },
             {

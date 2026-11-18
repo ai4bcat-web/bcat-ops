@@ -3369,6 +3369,11 @@ export interface CarrierBillRecord {
   loadId: string
   shipmentId: string
   shipmentNumber?: string | null
+  /**
+   * Display only, never stored: "-2" on the second carrier's bill of a load that pays several carriers, so the
+   * AP lists read 14598-1 and 14598-2. Set by `withLegSuffix` (src/features/ap/apViews.ts).
+   */
+  legSuffix?: string | null
   loadNumber?: string | null
   carrierId: string
   carrierName?: string | null
