@@ -148,7 +148,8 @@ function data(over: Partial<RemittanceDataInput> = {}) {
 describe('remittanceData', () => {
   it('builds a row per application and totals exactly what was sent', () => {
     const built = data()
-    expect(built.rows.map((r) => r.billNumber)).toEqual(['BL-55012', 'BL-55013'])
+    expect(built.rows.map((r) => r.shipmentNumber)).toEqual(['BC-1001', 'BC-1002'])
+    expect(built.rows[0]).not.toHaveProperty('billNumber')
     expect(built.rows[1]).toMatchObject({ shipmentNumber: 'BC-1002', creditCents: 5_000, paidCents: 145_000 })
     expect(built.totals).toEqual({
       grossCents: 400_000,
@@ -162,7 +163,7 @@ describe('remittanceData', () => {
   it('keeps the money of a bill the caller failed to load', () => {
     const built = data({ bills: [BILLS[0]] })
     expect(built.rows).toHaveLength(2)
-    expect(built.rows[1]).toMatchObject({ billNumber: '', shipmentNumber: '', paidCents: 145_000 })
+    expect(built.rows[1]).toMatchObject({ shipmentNumber: '', paidCents: 145_000 })
     expect(built.totals.paidCents).toBe(392_500)
   })
 
@@ -185,7 +186,8 @@ describe('buildRemittancePdf', () => {
     expect(text).toContain('BCAT Logistics LLC')
     expect(text).toContain('$3,925.00')
     expect(text).toContain('TOTAL PAID')
-    expect(text).toContain('BL-55012')
+    expect(text).toContain('BC-1001')
+    expect(text).not.toContain('BL-55012')
     expect(text).toContain('BC-1002')
     expect(text).toContain('Feb 10, 2026')
   })

@@ -557,6 +557,8 @@ export interface TmsSettings {
   apRequireSignedRateCon?: boolean | null
   /** Body of the remittance e-mail. Must contain `{reference}`. */
   remittanceEmailTemplate?: string | null
+  /** Copied on every remittance e-mail; unset means the default (billing@bcatcorp.com), [] means nobody. */
+  remittanceCcEmails?: string[] | null
   /** Carrier paperwork a bill needs before approval. Defaults to `requiredCarrierUploadTypes`. */
   apBillDocsRequired?: string[] | null
 
@@ -3478,6 +3480,7 @@ export interface ApPaymentRecord {
   pdfVersion?: number | null
   remittanceSentAt?: string | null
   remittanceSentTo?: string | null
+  remittanceSentCc?: string | null
   remittanceCount?: number | null
   /** Every send attempt, delivered or not. */
   remittanceAttempts?: number | null
@@ -3497,6 +3500,8 @@ export interface ApSettings {
   apPostingAdminOnly?: boolean | null
   apRequireSignedRateCon?: boolean | null
   remittanceEmailTemplate?: string | null
+  /** Copied on every remittance e-mail; unset means the default (billing@bcatcorp.com), [] means nobody. */
+  remittanceCcEmails?: string[] | null
   apBillDocsRequired?: string[] | null
   defaultCarrierTermsDays?: number | null
 }

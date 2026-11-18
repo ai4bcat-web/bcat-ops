@@ -28,6 +28,7 @@ import {
   type RemittanceEmailResult,
 } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
+import { remittanceCcFor } from '@/lib/remittanceCc'
 import { renderRemittanceEmail } from '@/lib/shipmentNotices'
 import type { ApPaymentRecord, CarrierBillRecord } from '@/types/tms'
 
@@ -119,8 +120,10 @@ export function SendRemittanceDialog({ payment, open, onOpenChange, onDone }: {
         // assigned, the carrier otherwise.
         const payee = payment.remitTo?.payeeEmail ?? carrier?.email ?? null
         setBills(settled)
-        setTo(payee ? [payee.trim().toLowerCase()] : [])
-        setCc([])
+        const toList = payee ? [payee.trim().toLowerCase()] : []
+        setTo(toList)
+        // The standing copy (billing@bcatcorp.com unless an admin changed it) is pre-filled and can be edited.
+        setCc(remittanceCcFor(settings?.remittanceCcEmails, toList))
         setPreview(renderRemittanceEmail({
           payment,
           bills: settled,

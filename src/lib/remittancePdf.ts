@@ -46,9 +46,9 @@ const RULE = rgb(203 / 255, 213 / 255, 225 / 255)
 
 /** Column boxes for the bill table. Money columns are named by their right edge. */
 const COL = {
-  bill: { x: M + 4, w: 86 },
-  shipment: { x: M + 94, w: 76 },
-  load: { x: M + 174, w: 70 },
+  // The carrier's own invoice number is not printed (Ryne 2026-11-18): the shipment (PRO) leads.
+  shipment: { x: M + 4, w: 96 },
+  load: { x: M + 108, w: 90 },
   gross: { right: 368 },
   fee: { right: 434 },
   credit: { right: 500 },
@@ -170,8 +170,6 @@ export interface RemittancePayee {
 /** One bill this payment settled, as the payee sees it. */
 export interface RemittanceRow {
   billId: string
-  /** The carrier's own invoice number — what they will match on. */
-  billNumber: string
   shipmentNumber: string
   loadNumber: string
   grossCents: number
@@ -250,7 +248,6 @@ export function remittanceData(input: RemittanceDataInput): RemittanceData {
     const creditCents = application.creditCents ?? 0
     const row: RemittanceRow = {
       billId: application.billId,
-      billNumber: bill?.billNumber ?? '',
       shipmentNumber: bill?.shipmentNumber ?? '',
       loadNumber: bill?.loadNumber ?? '',
       grossCents: bill?.grossCents ?? 0,
@@ -401,7 +398,6 @@ function drawMeta(d: Doc, data: RemittanceData): void {
 function drawTableHead(d: Doc): void {
   band(d, d.y, 18, BAND)
   const baseline = d.y + 12.5
-  textAt(d, 'BILL', COL.bill.x, baseline, ROW_SIZE, d.bold, WHITE)
   textAt(d, 'SHIPMENT', COL.shipment.x, baseline, ROW_SIZE, d.bold, WHITE)
   textAt(d, 'LOAD', COL.load.x, baseline, ROW_SIZE, d.bold, WHITE)
   rightAt(d, 'GROSS', COL.gross.right, baseline, ROW_SIZE, d.bold, WHITE)
@@ -424,8 +420,7 @@ function drawRows(d: Doc, data: RemittanceData): void {
     const top = d.y
     if (i % 2 === 1) band(d, top - 4, height, ZEBRA)
     const baseline = top + 8
-    textAt(d, fit(d.bold, row.billNumber || '-', ROW_SIZE, COL.bill.w), COL.bill.x, baseline, ROW_SIZE, d.bold, INK)
-    textAt(d, fit(d.font, row.shipmentNumber, ROW_SIZE, COL.shipment.w), COL.shipment.x, baseline, ROW_SIZE, d.font, BODY)
+    textAt(d, fit(d.bold, row.shipmentNumber || row.loadNumber || '-', ROW_SIZE, COL.shipment.w), COL.shipment.x, baseline, ROW_SIZE, d.bold, INK)
     textAt(d, fit(d.font, row.loadNumber, ROW_SIZE, COL.load.w), COL.load.x, baseline, ROW_SIZE, d.font, BODY)
     rightAt(d, cents(row.grossCents), COL.gross.right, baseline, ROW_SIZE, d.font, BODY)
     rightAt(d, row.quickPayFeeCents ? `-${cents(row.quickPayFeeCents)}` : '-', COL.fee.right, baseline, ROW_SIZE, d.font, BODY)
