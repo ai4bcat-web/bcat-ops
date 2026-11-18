@@ -2,7 +2,7 @@
  * The Invoicing status tabs' labels and badges (Ryne 2026-11-15: every badge must tie to a number on
  * the cards). One set of definitions, shared with the Receivables card:
  *  - Invoiced = sent, unpaid invoices. With Billed: All it is "Open AR"; Manually invoiced is
- *    "Pending with shippers"; Factoring is "Factored, open". The tooltip says which.
+ *    "Pending with shippers"; Factoring is the factored invoices still unpaid. The tooltip says which.
  *  - Labels are just "Ready to Invoice", "Invoiced", "Aging" (Ryne 2026-11-16); the amounts live in the tooltips.
  *  - There is no Paid tab (Ryne 2026-11-16): what was paid, and when, lives on Accounting → Payments Received.
  *  - Aging = the same invoices as "Open AR" (any billing), counted in invoices, not customers.
@@ -32,7 +32,7 @@ export function arTabs(input: {
     { key: 'invoiced', label: 'Invoiced', count: input.invoiced.count, testId: 'ar-tab-invoiced',
       title: `${input.invoiced.total} open. ` + (billedBy === 'all' ? 'Sent and unpaid. Same as "Open AR".'
         : billedBy === 'manual' ? 'Sent to the customer and unpaid. Same as "Pending with shippers". Pick Billed: All to see OTR too.'
-          : 'Factored through OTR and unpaid. Same as "Factored, open". Pick Billed: All to see shippers too.') },
+          : 'Factored through OTR and unpaid. Pick Billed: All to see shippers too.') },
     { key: 'aging', label: 'Aging', count: input.aging.count, testId: 'ar-tab-aging',
       title: `${input.aging.total} open. Every open invoice by age, any billing. Same as "Open AR".` },
     { key: 'review', label: 'Needs review', count: input.review, testId: 'ar-tab-review',
@@ -45,7 +45,6 @@ export function arCompactItems(summary: ArSummary): TmsSummaryChip[] {
   const inv = (n: number) => `${n} ${n === 1 ? 'invoice' : 'invoices'}`
   return [
     { key: 'open', label: 'Open AR', value: formatCents(summary.openCents), sub: inv(summary.openCount) },
-    { key: 'otr', label: 'Factored, open', value: formatCents(summary.pendingOtrCents), sub: inv(summary.pendingOtrCount) },
     { key: 'otr-waiting', label: 'Waiting on OTR approval', value: formatCents(summary.factored.WAITING.cents), sub: inv(summary.factored.WAITING.count) },
     { key: 'shippers', label: 'Pending with shippers', value: formatCents(summary.pendingShippersCents), sub: inv(summary.pendingShippersCount) },
     { key: 'late', label: 'Late', value: formatCents(summary.lateCents), sub: inv(summary.lateCount), tone: summary.lateCents > 0 ? 'bad' : 'default' },
