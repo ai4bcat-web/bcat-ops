@@ -119,4 +119,43 @@ describe('buildBolPdf', () => {
     await buildBolPdf(model(), { loadLogo })
     expect(loadLogo).not.toHaveBeenCalled()
   })
+
+  /** The right-hand header lines under the title: `[x, text]` for each text run in the band's right zone. */
+  const headerSubtitle = (doc: jsPDF): Array<{ x: number; text: string }> => {
+    const runs = [...pageTexts(doc)[0].matchAll(/([\d.]+) ([\d.]+) Td\n\((.*)\) Tj/g)]
+    // The band is 70 pt tall at the top of a 792 pt page; the title sits at y 760, the subtitle below it.
+    return runs
+      .filter((m) => Number(m[2]) > 792 - 70 && Number(m[2]) < 756 && Number(m[1]) > 300)
+      .map((m) => ({ x: Number(m[1]), text: m[3] }))
+  }
+
+  it('right-aligns the BOL number under the title so it is never cut off', async () => {
+    for (const bolNumber of ['20064', 'M371205-A', 'M371205-A-REVISED-RESEND-2']) {
+      const doc = await buildBolPdf(model({ bolNumber }))
+      const runs = headerSubtitle(doc)
+      expect(runs.length).toBeGreaterThan(0)
+      // Whole number present, and every run starts inside the page's right-hand zone (the page is 612 wide, 40 margin).
+      expect(runs.map((r) => r.text).join(' ')).toContain(bolNumber.length > 12 ? 'M371205-A-REVISED' : bolNumber)
+      for (const run of runs) {
+        expect(run.x).toBeGreaterThanOrEqual(612 - 40 - 150 - 1)
+        expect(run.x).toBeLessThan(612 - 40)
+      }
+    }
+  })
+
+  it('has no carrier block when no carrier is assigned, and keeps a seal blank when a seal is required', async () => {
+    const none = pageTexts(await buildBolPdf(model({ carriers: [], chips: [] }))).join('\n')
+    expect(none).not.toContain('To be assigned')
+    expect(none).not.toContain('(CARRIER) Tj')
+    expect(none).not.toContain('Seal ____')
+    const sealed = pageTexts(await buildBolPdf(model({ carriers: [], chips: ['Seal required'] }))).join('\n')
+    expect(sealed).not.toContain('To be assigned')
+    expect(sealed).toContain('Seal ________')
+  })
+
+  it('still names an assigned carrier', async () => {
+    const text = pageTexts(await buildBolPdf(model())).join('\n')
+    expect(text).toContain('Acme Trucking')
+    expect(text).toContain('Ray Driver')
+  })
 })

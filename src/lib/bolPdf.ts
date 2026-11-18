@@ -217,11 +217,10 @@ export async function buildBolPdf(input: BolInput, options: BuildBolOptions = {}
       ]),
       { widths: { 1: 52, 3: 56, 4: 56, 5: 62 } },
     )
-  } else {
-    label('CARRIER')
-    y += 14
+  } else if (sealBlank) {
+    // No carrier yet: no CARRIER block, but a seal-required load still gets its blank to write on.
     body()
-    doc.text(`To be assigned${sealBlank ? '          Seal ________' : ''}`, M, y)
+    doc.text('Seal ________', M, y + 4)
     y += 22
   }
 
