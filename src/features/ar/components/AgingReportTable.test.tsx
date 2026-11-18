@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import { AgingReportTable } from './AgingReportTable'
 import { buildAgingReport } from '../agingReport'
@@ -84,6 +84,60 @@ describe('AgingReportTable', () => {
       fireEvent.change(screen.getByLabelText('Search the aging report'), { target: { value: '' } })
       fireEvent.click(screen.getByTestId('aging-past-due-only'))
       expect(names().map((n) => n.includes('Mid'))).toEqual([true])
+    })
+  })
+
+  describe('last aging report', () => {
+    const sentReport = buildAgingReport([
+      inv({ id: 'a', number: 'A', customerName: 'Acme' }),
+      inv({ id: 'b', number: 'B', customerId: 'c2', customerName: 'Beta' }),
+      inv({ id: 'g', number: 'G', customerId: 'c3', customerName: 'Gamma' }),
+    ], '2026-11-15', {
+      lastStatementOf: (id) => (id === 'c1' ? { at: '2026-11-14T16:00:00Z', to: 'ap@acme.com' } : id === 'c2' ? { at: '2026-10-01T16:00:00Z', to: null } : null),
+    })
+    const draw = () => render(<AgingReportTable report={sentReport} onOpenInvoice={vi.fn()} onPreview={vi.fn()} onStatement={vi.fn()} selected={[]} onSelect={vi.fn()} busy={false} />)
+    const rowOf = (name: string) => within(screen.getByRole('table', { name: 'Aging by customer' })).getAllByTestId('aging-customer-row').find((r) => (r.textContent ?? '').includes(name))!
+    beforeEach(() => {
+      try { window.localStorage.clear() } catch { /* jsdom */ }
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date('2026-11-17T18:00:00Z'))
+    })
+    afterEach(() => { vi.useRealTimers() })
+
+    it('shows the day it went out, how long ago, and who got it on hover; Never when none was sent', () => {
+      draw()
+      const acme = within(rowOf('Acme')).getByTestId('aging-last-statement')
+      expect(acme.textContent).toContain('Nov 14, 2026')
+      expect(acme.textContent).toContain('3d ago')
+      expect(acme.getAttribute('title')).toContain('sent to ap@acme.com')
+      expect(within(rowOf('Gamma')).getByTestId('aging-last-statement').textContent).toBe('Never')
+      expect(within(rowOf('Gamma')).getByTestId('aging-last-statement').getAttribute('title')).toBe('Never sent')
+    })
+
+    it('shows the same line when a customer is expanded', () => {
+      draw()
+      fireEvent.click(screen.getByRole('button', { name: 'Expand Acme' }))
+      expect(screen.getByTestId('aging-last-statement-detail').textContent).toContain('sent to ap@acme.com')
+    })
+
+    it('the first click on the header lists never-sent customers first, the second the most recent', () => {
+      draw()
+      const order = () => within(screen.getByRole('table', { name: 'Aging by customer' })).getAllByTestId('aging-customer-row').map((r) => (r.textContent ?? '').slice(0, 5))
+      fireEvent.click(screen.getByTitle('Sort by Last aging report'))
+      expect(order()[0]).toContain('Gamma')
+      fireEvent.click(screen.getByTitle('Sort by Last aging report'))
+      expect(order()[0]).toContain('Acme')
+    })
+
+    it('filters to customers nobody has e-mailed, or not in 14+ days', () => {
+      draw()
+      fireEvent.change(screen.getByLabelText('Filter by last aging report sent'), { target: { value: 'never' } })
+      expect(within(screen.getByRole('table', { name: 'Aging by customer' })).getAllByTestId('aging-customer-row')).toHaveLength(1)
+      fireEvent.change(screen.getByLabelText('Filter by last aging report sent'), { target: { value: 'stale' } })
+      const names = within(screen.getByRole('table', { name: 'Aging by customer' })).getAllByTestId('aging-customer-row').map((r) => r.textContent ?? '')
+      expect(names).toHaveLength(2)
+      expect(names.join(' ')).toContain('Beta')
+      expect(names.join(' ')).toContain('Gamma')
     })
   })
 })

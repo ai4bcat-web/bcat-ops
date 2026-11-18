@@ -13,6 +13,7 @@
 import { AR_AGING_BUCKETS, daysLate, daysSinceInvoice, invoiceAgeBucket } from '@/lib/arAging'
 import type { InvoiceRecord } from '@/types/tms'
 import { isFactoredInvoice } from '@/lib/agingStatement'
+import { chicagoDateStr } from '@/lib/date'
 
 export type AgingReportBucket = (typeof AR_AGING_BUCKETS)[number]
 
@@ -49,6 +50,10 @@ export interface AgingReportCustomer {
   /** Days since the oldest open invoice's invoice date. */
   oldestDays: number
   lastPaidAt: string | null
+  /** When the aging report was last e-mailed to this customer (Customer.agingStatementSentAt); null = never sent. */
+  lastStatementAt: string | null
+  /** Who it went to (Customer.agingStatementSentTo), for the hover text. */
+  lastStatementTo: string | null
   /** The customer's average days to pay (invoice date → paid), factored invoices left out; null until read. */
   avgDaysToPay: number | null
   invoices: AgingReportInvoice[]
@@ -72,6 +77,7 @@ export function buildAgingReport(
     refOf?: (inv: InvoiceRecord) => string | null
     termsOf?: (customerId: string) => number | null
     lastPaidOf?: (customerId: string) => string | null
+    lastStatementOf?: (customerId: string) => { at: string | null; to: string | null } | null
     avgDaysToPayOf?: (customerId: string) => number | null
   } = {},
 ): AgingReport {
@@ -111,6 +117,8 @@ export function buildAgingReport(
         count: 0,
         oldestDays: 0,
         lastPaidAt: lookups.lastPaidOf?.(inv.customerId) ?? null,
+        lastStatementAt: lookups.lastStatementOf?.(inv.customerId)?.at || null,
+        lastStatementTo: lookups.lastStatementOf?.(inv.customerId)?.to || null,
         avgDaysToPay: lookups.avgDaysToPayOf?.(inv.customerId) ?? null,
         invoices: [],
       }
@@ -136,7 +144,7 @@ export function buildAgingReport(
   return report
 }
 
-export type AgingSortKey = 'customer' | AgingReportBucket | 'total' | 'pastDue' | 'oldest' | 'lastPaid' | 'terms' | 'count' | 'daysToPay'
+export type AgingSortKey = 'customer' | AgingReportBucket | 'total' | 'pastDue' | 'oldest' | 'lastPaid' | 'lastStatement' | 'terms' | 'count' | 'daysToPay'
 
 export function sortAgingCustomers(rows: readonly AgingReportCustomer[], key: AgingSortKey, dir: 'asc' | 'desc'): AgingReportCustomer[] {
   const val = (c: AgingReportCustomer): string | number => {
@@ -146,6 +154,8 @@ export function sortAgingCustomers(rows: readonly AgingReportCustomer[], key: Ag
       case 'pastDue': return c.pastDueCents
       case 'oldest': return c.oldestDays
       case 'lastPaid': return c.lastPaidAt ?? ''
+      // Never sent sorts as the oldest: ascending puts the customers nobody has e-mailed first.
+      case 'lastStatement': return c.lastStatementAt ?? ''
       case 'terms': return c.termsDays ?? -1
       case 'daysToPay': return c.avgDaysToPay ?? -1
       case 'count': return c.count
@@ -174,15 +184,43 @@ export interface AgingFilters {
   buckets: AgingReportBucket[]
   /** Only customers with something past due. */
   pastDueOnly: boolean
+  /** The last aging report e-mailed to the customer ('' = any). */
+  statement: AgingStatementFilter
 }
 
-export const EMPTY_AGING_FILTERS: AgingFilters = { search: '', customer: '', terms: '', buckets: [], pastDueOnly: false }
+/** Never sent, sent in the last 7 days, or not sent in 14+ days (never counts as not sent). */
+export type AgingStatementFilter = '' | 'never' | 'recent' | 'stale'
+
+export const AGING_STATEMENT_FILTER_LABEL: Record<Exclude<AgingStatementFilter, ''>, string> = {
+  never: 'Never sent',
+  recent: 'Sent in the last 7 days',
+  stale: 'Not sent in 14+ days',
+}
+
+/** Whole Chicago calendar days since the aging report went out; null when it never did. */
+export function daysSinceStatement(sentAt: string | null | undefined, nowIso: string): number | null {
+  if (!sentAt) return null
+  const sent = chicagoDateStr(sentAt)
+  const today = chicagoDateStr(nowIso)
+  if (!sent || !today) return null
+  return Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${sent}T00:00:00Z`)) / 86_400_000)
+}
+
+/** 'today', 'yesterday' or '3d ago'. */
+export function statementAgoLabel(days: number | null): string {
+  if (days == null) return ''
+  if (days <= 0) return 'today'
+  if (days === 1) return 'yesterday'
+  return `${days}d ago`
+}
+
+export const EMPTY_AGING_FILTERS: AgingFilters = { search: '', customer: '', terms: '', buckets: [], pastDueOnly: false, statement: '' }
 
 export function agingFilterCount(f: AgingFilters): number {
-  return (f.search.trim() ? 1 : 0) + (f.customer.trim() ? 1 : 0) + (f.terms ? 1 : 0) + f.buckets.length + (f.pastDueOnly ? 1 : 0)
+  return (f.search.trim() ? 1 : 0) + (f.customer.trim() ? 1 : 0) + (f.terms ? 1 : 0) + f.buckets.length + (f.pastDueOnly ? 1 : 0) + (f.statement ? 1 : 0)
 }
 
-export function filterAgingCustomers(rows: readonly AgingReportCustomer[], f: AgingFilters): AgingReportCustomer[] {
+export function filterAgingCustomers(rows: readonly AgingReportCustomer[], f: AgingFilters, nowIso: string = new Date().toISOString()): AgingReportCustomer[] {
   const q = f.search.trim().toLowerCase()
   const cust = f.customer.trim().toLowerCase()
   return rows.filter((c) => {
@@ -190,6 +228,12 @@ export function filterAgingCustomers(rows: readonly AgingReportCustomer[], f: Ag
     if (f.terms && String(c.termsDays ?? '') !== f.terms) return false
     if (f.pastDueOnly && c.pastDueCents <= 0) return false
     if (f.buckets.length && !f.buckets.some((b) => c.byBucket[b] > 0)) return false
+    if (f.statement) {
+      const days = daysSinceStatement(c.lastStatementAt, nowIso)
+      if (f.statement === 'never' && days != null) return false
+      if (f.statement === 'recent' && (days == null || days > 7)) return false
+      if (f.statement === 'stale' && days != null && days < 14) return false
+    }
     if (q) {
       const hit = c.customerName.toLowerCase().includes(q)
         || c.invoices.some((i) => [i.pro, i.number, i.customerRef ?? ''].some((v) => v.toLowerCase().includes(q)))

@@ -9,6 +9,7 @@ import { TmsButton } from '@/features/tms/kit'
 import { useAuthUser } from '@/hooks/useAuth'
 import { AR_AGING_BUCKETS, AR_AGING_BUCKET_LABEL } from '@/lib/arAging'
 import { formatCents } from '@/lib/invoiceBuild'
+import { chicagoDateStr } from '@/lib/date'
 import { formatDay } from '../arViews'
 import {
   DEFAULT_AGING_SORT,
@@ -17,7 +18,11 @@ import {
   filterAgingCustomers,
   sortAgingCustomers,
   summarizeAging,
+  daysSinceStatement,
+  statementAgoLabel,
+  AGING_STATEMENT_FILTER_LABEL,
   type AgingFilters,
+  type AgingStatementFilter,
   type AgingReportBucket,
   type AgingReport,
   type AgingReportCustomer,
@@ -77,7 +82,8 @@ export function AgingReportTable({
   const [sort, setSort] = useState<AgingSort>(() => readPrefs(prefsKey).sort ?? DEFAULT_AGING_SORT)
   const [filters, setFilters] = useState<AgingFilters>(() => readPrefs(prefsKey).filters ?? EMPTY_AGING_FILTERS)
   useEffect(() => { writePrefs(prefsKey, sort, filters) }, [prefsKey, sort, filters])
-  const filtered = useMemo(() => filterAgingCustomers(report.customers, filters), [report.customers, filters])
+  const nowIso = useMemo(() => new Date().toISOString(), [])
+  const filtered = useMemo(() => filterAgingCustomers(report.customers, filters, nowIso), [report.customers, filters, nowIso])
   const rows = useMemo(() => sortAgingCustomers(filtered, sort.key, sort.dir), [filtered, sort])
   const shown = useMemo(() => summarizeAging(rows), [rows])
   const isFiltered = rows.length !== report.customers.length
@@ -101,7 +107,7 @@ export function AgingReportTable({
   const pick = (id: string) => onSelect(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id])
   const onSort = (key: AgingSortKey) => setSort((s) => (s.key === key
     ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
-    : { key, dir: key === 'customer' ? 'asc' : 'desc' }))
+    : { key, dir: key === 'customer' || key === 'lastStatement' ? 'asc' : 'desc' }))
 
   const head = (key: AgingSortKey, label: string, right = true) => (
     <th scope="col" className={right ? 'tms-dg-right' : undefined} aria-sort={sort.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
@@ -126,6 +132,13 @@ export function AgingReportTable({
         <select id="aging-filter-terms" className="tms-aging-input" value={filters.terms} onChange={(e) => setF({ terms: e.target.value })} aria-label="Filter by terms">
           <option value="">Any terms</option>
           {termsOptions.map((d) => <option key={d} value={String(d)}>Net {d}</option>)}
+        </select>
+        <select id="aging-filter-statement" className="tms-aging-input" value={filters.statement}
+          onChange={(e) => setF({ statement: e.target.value as AgingStatementFilter })} aria-label="Filter by last aging report sent">
+          <option value="">Any last report</option>
+          {(Object.keys(AGING_STATEMENT_FILTER_LABEL) as Array<Exclude<AgingStatementFilter, ''>>).map((k) => (
+            <option key={k} value={k}>{AGING_STATEMENT_FILTER_LABEL[k]}</option>
+          ))}
         </select>
         {AR_AGING_BUCKETS.map((b) => (
           <button key={b} type="button" className={`tms-aging-chip${filters.buckets.includes(b) ? ' tms-on' : ''}`}
@@ -168,6 +181,7 @@ export function AgingReportTable({
               {head('count', 'Invoices')}
               {head('oldest', 'Oldest')}
               {head('lastPaid', 'Last paid', false)}
+              {head('lastStatement', 'Last aging report', false)}
               <th scope="col"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
@@ -195,13 +209,19 @@ export function AgingReportTable({
                     <td className="tms-dg-right">{c.count}</td>
                     <td className="tms-dg-right">{c.oldestDays}d</td>
                     <td>{formatDay(c.lastPaidAt) || '—'}</td>
+                    <td data-testid="aging-last-statement" title={statementTitle(c)}>
+                      <StatementCell c={c} nowIso={nowIso} />
+                    </td>
                     <td className="tms-aging-actions">
                       <CustomerActions c={c} onPreview={onPreview} onStatement={onStatement} busy={busy} />
                     </td>
                   </tr>
                   {isOpen && (
                     <tr className="tms-aging-detail-row">
-                      <td colSpan={15}>
+                      <td colSpan={16}>
+                        <p className="tms-muted text-sm" data-testid="aging-last-statement-detail" style={{ margin: '4px 0 8px' }}>
+                          Last aging report: {statementTitle(c)}
+                        </p>
                         <InvoiceTable invoices={c.invoices} onOpenInvoice={onOpenInvoice} />
                       </td>
                     </tr>
@@ -220,7 +240,7 @@ export function AgingReportTable({
               <td className="tms-dg-right"><strong>{formatCents(shown.totalCents)}</strong></td>
               <td className="tms-dg-right">{money(shown.pastDueCents)}</td>
               <td className="tms-dg-right">{shown.count}</td>
-              <td colSpan={3} />
+              <td colSpan={4} />
             </tr>
           </tfoot>
         </table>
@@ -246,6 +266,7 @@ export function AgingReportTable({
                 <div><dt>Avg days to pay</dt><dd>{daysToPay(c.avgDaysToPay)}</dd></div>
                 <div><dt>Oldest</dt><dd>{c.oldestDays}d</dd></div>
                 <div><dt>Last paid</dt><dd>{formatDay(c.lastPaidAt) || '—'}</dd></div>
+                <div><dt>Last aging report</dt><dd title={statementTitle(c)}><StatementCell c={c} nowIso={nowIso} /></dd></div>
               </dl>
               <div className="tms-aging-card-actions">
                 <label className="tms-aging-card-check">
@@ -278,6 +299,25 @@ export function AgingReportTable({
         </li>
       </ul>
     </div>
+  )
+}
+
+/** Hover / detail text: the exact day and time, and who it went to. */
+function statementTitle(c: AgingReportCustomer): string {
+  if (!c.lastStatementAt) return 'Never sent'
+  const when = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(c.lastStatementAt))
+  return c.lastStatementTo ? `${when} · sent to ${c.lastStatementTo}` : when
+}
+
+/** The day it went out, with how long ago in muted type; 'Never' when nobody has sent one. */
+function StatementCell({ c, nowIso }: { c: AgingReportCustomer; nowIso: string }) {
+  if (!c.lastStatementAt) return <span className="tms-muted">Never</span>
+  const ago = statementAgoLabel(daysSinceStatement(c.lastStatementAt, nowIso))
+  return (
+    <>
+      {formatDay(chicagoDateStr(c.lastStatementAt))}
+      {ago && <> <span className="tms-muted">{ago}</span></>}
+    </>
   )
 }
 

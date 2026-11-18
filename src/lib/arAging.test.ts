@@ -320,6 +320,23 @@ describe('agingCsv', () => {
     expect(lines[1]).toBe('"Rev, Inc","1250.50","0.00","0.00","0.07","1250.57","1","75"')
   })
 
+  it('adds a Last aging report column (Chicago day, empty when never sent) only when asked', () => {
+    const { byCustomer } = ageInvoices(
+      [
+        invoice({ id: 'i1', customerId: 'c2', customerName: 'Rev, Inc', invoiceDate: '2026-09-20', dueAt: '2026-10-20', balanceCents: 125_050 }),
+        invoice({ id: 'i3', customerId: 'c3', customerName: 'Never Co', invoiceDate: '2026-09-20', dueAt: '2026-10-20', balanceCents: 100 }),
+      ],
+      '2026-10-15',
+      { fromInvoiceDate: true },
+    )
+    expect(agingCsv(byCustomer)).not.toContain('Last aging report')
+    const lines = agingCsv(byCustomer, (id) => (id === 'c2' ? '2026-11-15T03:30:00Z' : null)).split('\n')
+    expect(lines[0].endsWith(',"Last aging report"')).toBe(true)
+    // 03:30 UTC on the 15th is still the 14th in Chicago.
+    expect(lines.find((l) => l.startsWith('"Rev, Inc"'))!.endsWith(',"2026-11-14"')).toBe(true)
+    expect(lines.find((l) => l.startsWith('"Never Co"'))!.endsWith(',""')).toBe(true)
+  })
+
   it('doubles an embedded quote and renders a header for no rows', () => {
     expect(agingCsv([]).split('\n')).toHaveLength(1)
     const csv = agingCsv([
