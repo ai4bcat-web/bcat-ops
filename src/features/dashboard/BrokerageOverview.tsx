@@ -4,7 +4,7 @@ import { Lightbulb } from 'lucide-react'
 import type { MonthMeasures } from '@/lib/brokerageRevenue'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { money0, moneyCompact, moneyK, netColor, pct, previousMonth } from './brokerageFormat'
-import { monthName, monthShort, type Insight } from './brokerageInsights'
+import { monthName, monthShort, samePeriodLabel, type Insight, type SamePeriod } from './brokerageInsights'
 
 const TONE: Record<Insight['tone'], string> = { good: 'var(--tms-badge-green)', watch: 'var(--tms-badge-orange)', neutral: 'var(--tms-chart-9)' }
 
@@ -19,15 +19,17 @@ function Kpi({ label, value, caption, color, testId }: { label: string; value: s
 }
 
 /**
- * The Brokerage headline: five figures for the month in progress, to date (revenue, expenses, profit, margin, loads), each with last month in full
- * beside it; one revenue-expenses-profit chart by month for the chosen range; and a few plain-English takeaways. The range picker drives the chart and
+ * The Brokerage headline: five figures for the month in progress, to date (revenue, expenses, profit, margin, loads), each with the same days of last month
+ * beside it ("Oct 1–18: $X"); one revenue-expenses-profit chart by month for the chosen range; and a few plain-English takeaways. The range picker drives the chart and
  * the takeaways, never the headline figures. Everything finer (rep by month, every figure) sits behind the table at the bottom.
  */
-export function BrokerageOverview({ rows, current, loading, insights }: {
+export function BrokerageOverview({ rows, current, loading, insights, same }: {
   rows: MonthMeasures[]
   current: string
   loading: boolean
   insights: Insight[]
+  /** Last month's first N days (N = the day the month in progress has reached); null when the day rows are not available. */
+  same?: SamePeriod | null
 }) {
   const isMobile = useIsMobile()
   const now = rows.find((r) => r.month === current)
@@ -41,17 +43,20 @@ export function BrokerageOverview({ rows, current, loading, insights }: {
   })), [rows, current])
   const dash = loading ? '…' : undefined
   const eyebrow = `${monthName(current)} to date`
-  // Last month in full, so the month in progress has something to be read against (it is not the same days, and says so).
-  const lastFull = (text: string | undefined) => (last && text !== undefined ? `${monthName(last.month)} in full: ${text}` : `${monthShort(current)}, delivered so far`)
+  // The same days of last month ("Oct 1–18: $X"), so the month in progress is read against like for like. Without the day rows
+  // (a rep sees only their own month totals) it falls back to last month in full, and says so.
+  const lastFull = (text: string | undefined, pick?: (m: MonthMeasures) => string) =>
+    same && pick ? `${samePeriodLabel(same)}: ${pick({ month: same.month, ...same.measures })}`
+      : last && text !== undefined ? `${monthName(last.month)} in full: ${text}` : `${monthShort(current)}, delivered so far`
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(5, minmax(0, 1fr))', gap: 14 }}>
-        <Kpi testId="brokerage-total-revenue" label={`Revenue · ${eyebrow}`} value={dash ?? money0(mtd.revenueCents)} caption={lastFull(last && moneyCompact(last.revenueCents))} />
-        <Kpi testId="brokerage-total-expenses" label={`Expenses · ${eyebrow}`} value={dash ?? money0(mtd.expenseCents)} caption={lastFull(last && moneyCompact(last.expenseCents))} />
-        <Kpi testId="brokerage-total-profit" label={`Profit · ${eyebrow}`} value={dash ?? money0(mtd.profitCents)} color={netColor(mtd.profitCents)} caption={lastFull(last && moneyCompact(last.profitCents))} />
-        <Kpi testId="brokerage-total-profit-pct" label={`Profit margin · ${eyebrow}`} value={dash ?? pct(mtd.marginBps)} color={netColor(mtd.profitCents)} caption={last ? lastFull(pct(last.marginBps)) : 'Profit ÷ revenue'} />
-        <Kpi testId="brokerage-total-loads" label={`Loads delivered · ${eyebrow}`} value={dash ?? String(mtd.loads)} caption={lastFull(last && String(last.loads))} />
+        <Kpi testId="brokerage-total-revenue" label={`Revenue · ${eyebrow}`} value={dash ?? money0(mtd.revenueCents)} caption={lastFull(last && moneyCompact(last.revenueCents), (m) => moneyCompact(m.revenueCents))} />
+        <Kpi testId="brokerage-total-expenses" label={`Expenses · ${eyebrow}`} value={dash ?? money0(mtd.expenseCents)} caption={lastFull(last && moneyCompact(last.expenseCents), (m) => moneyCompact(m.expenseCents))} />
+        <Kpi testId="brokerage-total-profit" label={`Profit · ${eyebrow}`} value={dash ?? money0(mtd.profitCents)} color={netColor(mtd.profitCents)} caption={lastFull(last && moneyCompact(last.profitCents), (m) => moneyCompact(m.profitCents))} />
+        <Kpi testId="brokerage-total-profit-pct" label={`Profit margin · ${eyebrow}`} value={dash ?? pct(mtd.marginBps)} color={netColor(mtd.profitCents)} caption={same || last ? lastFull(last && pct(last.marginBps), (m) => pct(m.marginBps)) : 'Profit ÷ revenue'} />
+        <Kpi testId="brokerage-total-loads" label={`Loads delivered · ${eyebrow}`} value={dash ?? String(mtd.loads)} caption={lastFull(last && String(last.loads), (m) => String(m.loads))} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 2fr) minmax(0, 1fr)', gap: 14, alignItems: 'stretch' }}>

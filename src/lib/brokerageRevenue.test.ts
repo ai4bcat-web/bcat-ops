@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { computeMonth, dirtyKeysForRecord, repKeyOf, type MonthPayload, type MonthSource, type RepSplit, type RollupRow, type SampleLite, type ShipmentLite } from './dashboardRollup'
 import {
-  inDivision, isBrokerageScope, monthChange, monthRows, monthRowsFromRep, monthsBetween, repMonthMatrix, repRows, tieOut, totalsOf, trailingMonths, NO_REP_LABEL,
+  inDivision, isBrokerageScope, monthChange, monthRows, monthRowsFromRep, monthRowsThroughDay, monthsBetween, repMonthMatrix, repRows, tieOut, totalsOf, trailingMonths, NO_REP_LABEL,
 } from './brokerageRevenue'
 
 const DIVISIONS = [
@@ -202,5 +202,30 @@ describe('month over month change', () => {
   it('has nothing to compare against when the earlier month was zero or a loss', () => {
     expect(monthChange(100, 0, 'money')).toBeNull()
     expect(monthChange(100, -20, 'money')).toBeNull()
+  })
+})
+
+describe('month rows cut off at a day of the month', () => {
+  const fin = (n: number, rev: number, cost: number) => ({ n, rev, cost, prof: rev - cost })
+  const row = (month: string, days: Record<string, Record<string, ReturnType<typeof fin>>>): RollupRow<MonthPayload> =>
+    ({ id: `M:${month}`, schemaVersion: 1, computedAt: '2026-11-18T00:00:00Z', payload: { v: 1, month, ship: {}, fin: days } as MonthPayload })
+  const oct = row('2026-10', {
+    '2026-10-04': { 'BROKERAGE|': fin(1, 100_000, 80_000) },
+    '2026-10-18': { 'BROKERAGE|': fin(2, 300_000, 200_000), 'ASSETS|': fin(9, 9_000_000, 1) },
+    '2026-10-19': { 'BROKERAGE|': fin(5, 500_000, 400_000) },
+  })
+
+  it('sums only the days on or before the cut-off, Brokerage only', () => {
+    const [m] = monthRowsThroughDay([oct], ['2026-10'], DIVISIONS, 18)
+    expect(m).toMatchObject({ month: '2026-10', loads: 3, revenueCents: 400_000, expenseCents: 280_000, profitCents: 120_000, marginBps: 3000 })
+  })
+
+  it('the first day counts only the first day, and the 31st is the whole month', () => {
+    expect(monthRowsThroughDay([oct], ['2026-10'], DIVISIONS, 1)[0]).toMatchObject({ loads: 0, revenueCents: 0, marginBps: null })
+    expect(monthRowsThroughDay([oct], ['2026-10'], DIVISIONS, 31)[0]).toEqual(monthRows([oct], ['2026-10'], DIVISIONS)[0])
+  })
+
+  it('a month with no row is a zero row', () => {
+    expect(monthRowsThroughDay([oct], ['2026-09'], DIVISIONS, 18)[0]).toMatchObject({ month: '2026-09', loads: 0, revenueCents: 0 })
   })
 })

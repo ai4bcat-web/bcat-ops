@@ -5,7 +5,7 @@ import { chicagoDateStr } from '@/lib/date'
 import { readRollupRows, ROLLUP_MAX_AGE_MS, ROLLUP_STALE_MS, type RawRollupRow } from '@/lib/dashboardRollupClient'
 import { ROLLUP_SCHEMA_VERSION, rollupSourceEmpty } from '@/lib/dashboardRollup'
 import { reduceLegacy, type LegacyKpis, type LegacyMonthPayload } from '@/lib/dashboardRollupLegacy'
-import { legacyKpisFromLoads, legacyWindow, type DateRangeKey } from './legacyKpiMath'
+import { compareLabel, legacyKpisFromLoads, legacyWindow, type DateRangeKey } from './legacyKpiMath'
 
 export type { DateRangeKey }
 export type LegacyKpiState = 'loading' | 'ready' | 'stale'
@@ -20,10 +20,13 @@ export interface LegacyKpiResult {
   asOf: string | null
   /** Times the painted numbers changed after the first paint (the gate wants 0). */
   flips: number
+  /** What the change badges are read against: "vs. Oct 1–18" (the same days of the previous period), "vs. yesterday". */
+  compareLabel: string
 }
 
 const SEED_MAX_AGE_MS = 30 * 60_000
-const SEED_PREFIX = 'bcat.dash.legacy.v1:'
+// v2: the periods are cut to today and the previous one to the same day; a v1 seed holds whole-period figures.
+const SEED_PREFIX = 'bcat.dash.legacy.v2:'
 
 interface Seed { from: string; kpis: LegacyKpis; asOf: string | null; savedAt: number }
 
@@ -88,8 +91,15 @@ export function usableLegacyRows(rows: RawRollupRow[], months: string[], now: nu
  * unusable. Numbers are never painted as zeros while unknown.
  */
 export function useLegacyDashboardKpis(rangeKey: DateRangeKey): LegacyKpiResult {
-  const [now0] = useState(() => new Date())
-  const win = useMemo(() => legacyWindow(rangeKey, now0), [rangeKey, now0])
+  // The day the periods are cut at. A page left open past midnight moves to the next day on its own.
+  const [dayKey, setDayKey] = useState(() => chicagoDateStr(new Date()))
+  useEffect(() => {
+    const t = setInterval(() => setDayKey((cur) => { const next = chicagoDateStr(new Date()); return next === cur ? cur : next }), 60_000)
+    return () => clearInterval(t)
+  }, [])
+  // `dayKey` is the only thing that moves `now`: the window is rebuilt when the Chicago day changes, never per render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const win = useMemo(() => legacyWindow(rangeKey, new Date()), [rangeKey, dayKey])
   const drivers = useAppStore((s) => s.drivers)
   const allLoads = useAppStore((s) => s.loads)
   const loadedMonths = useAppStore((s) => s.loadedMonths)
@@ -166,5 +176,5 @@ export function useLegacyDashboardKpis(rangeKey: DateRangeKey): LegacyKpiResult 
 
   const stale = rollupKpis ? rollup?.stale === true : source === 'cache' && usableSeed ? seedBox.stale : false
   const state: LegacyKpiState = !kpis ? 'loading' : stale ? 'stale' : 'ready'
-  return { kpis, state, source, asOf, flips }
+  return { kpis, state, source, asOf, flips, compareLabel: compareLabel(rangeKey, win) }
 }
