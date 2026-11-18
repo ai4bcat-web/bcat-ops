@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { applyFactorRemit } from '@/lib/factorRemit'
-import { carrierNeedsRemit, carrierRemitRows, matchesSearch } from './remitDirectory'
+import { factorNameIndex, summarizeFactors } from '@/lib/factorRemit'
+import { carrierMatchesPaidFilter, carrierNeedsRemit, carrierRemitRows, matchesSearch } from './remitDirectory'
 
 const carriers = [
   { id: 'c1', name: 'Direct Haul', mcNumber: '111', status: 'ACTIVE', email: 'office@direct.test' },
@@ -40,5 +41,26 @@ describe('matchesSearch', () => {
     expect(matchesSearch('rts', 'Factored Freight', 'RTS Financial')).toBe(true)
     expect(matchesSearch('zzz', 'Factored Freight', null)).toBe(false)
     expect(matchesSearch('  ', 'anything')).toBe(true)
+  })
+})
+
+describe('factor names in the carrier rows', () => {
+  const infos = [
+    { carrierId: 'c2', recipientType: 'FACTOR', factorName: 'rts financial inc', payeeEmail: null, isPreferred: true },
+    { carrierId: 'c6', recipientType: 'FACTOR', factorName: 'RTS Financial', payeeEmail: null, isPreferred: true },
+    { carrierId: 'c7', recipientType: 'FACTOR', factorName: 'RTS Financial', payeeEmail: null, isPreferred: true },
+  ]
+  const names = factorNameIndex(summarizeFactors(infos, {}))
+  it('spells the factor exactly as the factor table does, with no "via"', () => {
+    const rows = carrierRemitRows([{ id: 'c2', name: 'Factored Freight' }], infos, names)
+    expect(rows[0]!.paidVia).toBe('RTS Financial')
+  })
+  it('filters carriers by how they are paid', () => {
+    const rows = carrierRemitRows(carriers, applyFactorRemit(methods, map), names)
+    const ids = (f: Parameters<typeof carrierMatchesPaidFilter>[1]) => rows.filter((r) => carrierMatchesPaidFilter(r, f)).map((r) => r.id)
+    expect(ids('FACTOR')).toEqual(['c2'])
+    expect(ids('DIRECT')).toEqual(['c1', 'c4', 'c5'])
+    expect(ids('NEEDS')).toEqual(['c3', 'c4', 'c5'])
+    expect(ids('ALL')).toHaveLength(5)
   })
 })

@@ -118,7 +118,7 @@ describe('who is paid and where', () => {
 
   it('says Direct, or the factor by name', () => {
     expect(payToLabel(bill({}))).toBe('Direct')
-    expect(payToLabel(bill({ payeeKind: 'FACTOR', remitTo: { name: 'Blue Line', factorName: 'Triumph' } }))).toBe('Factor — Triumph')
+    expect(payToLabel(bill({ payeeKind: 'FACTOR', remitTo: { name: 'Blue Line', factorName: 'Triumph' } }))).toBe('Triumph')
     expect(payToLabel(bill({ payeeKind: 'FACTOR' }))).toBe('Factor')
   })
 

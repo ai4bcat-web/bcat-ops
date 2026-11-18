@@ -154,10 +154,13 @@ export function summarizeFactors(
       else if (carrierEmails.length > 1) { email = ''; source = 'CONFLICT' }
       else { email = ''; source = 'NONE' }
     }
+    // A name filed on the factor wins, so the table and every carrier view spell the factor one way.
+    const setName = map?.[key]?.name?.trim() ?? ''
+    const ordered = setName ? [setName, ...names.filter((n) => n !== setName)] : names
     rows.push({
       key,
-      name: names[0] ?? key,
-      otherNames: names.slice(1),
+      name: ordered[0] ?? key,
+      otherNames: ordered.slice(1),
       carrierCount: acc.carriers.size,
       email,
       source,
@@ -165,4 +168,29 @@ export function summarizeFactors(
     })
   }
   return rows.sort((a, b) => b.carrierCount - a.carrierCount || a.name.localeCompare(b.name))
+}
+
+/** Factor key to the one spelling of its name, as the Factoring companies table shows it. */
+export type FactorNameIndex = ReadonlyMap<string, string>
+
+/** A key with the spaces gone, so "First Line Funding" and "FIRSTLINE FUNDING" meet. Filed under a `~` prefix. */
+const compactKey = (key: string) => `~${key.replace(/ /g, '')}`
+
+export function factorNameIndex(summaries: readonly Pick<FactorSummary, 'key' | 'name'>[]): FactorNameIndex {
+  const index = new Map<string, string>()
+  for (const s of summaries) index.set(s.key, s.name)
+  for (const s of summaries) if (!index.has(compactKey(s.key))) index.set(compactKey(s.key), s.name)
+  return index
+}
+
+/**
+ * A factor's name the way the Factoring companies table spells it. Every place that shows a carrier's
+ * factor goes through this, so "OTR Capital" and "OTR CAPITAL LLC" never appear side by side. A name the
+ * index does not know is shown as typed.
+ */
+export function canonicalFactorName(index: FactorNameIndex | null | undefined, name: string | null | undefined): string {
+  const typed = String(name ?? '').trim()
+  if (!typed) return ''
+  const key = factorKeyOf(typed)
+  return index?.get(key) ?? index?.get(compactKey(key)) ?? typed
 }

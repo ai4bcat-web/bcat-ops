@@ -8,20 +8,24 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { TmsBadge, TmsButton, TmsInput, TmsPage, TmsSegmentedTabs, TmsTable, type ColumnDef } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsInput, TmsListPage, TmsPage, TmsSegmentedTabs, type ColumnDef } from '@/features/tms/kit'
 import { useCarriers } from '@/hooks/useCarriers'
 import { useAuth } from '@/hooks/useAuth'
 import {
   getFactorRemitEmails, graphqlErrorText, listCarrierRemitEmails, setFactorRemitEmail, setPayeeRemitEmail,
 } from '@/lib/apiClient'
-import { applyFactorRemit, isRemitEmail, summarizeFactors, type FactorRemitMap, type FactorSummary } from '@/lib/factorRemit'
+import { applyFactorRemit, factorNameIndex, isRemitEmail, summarizeFactors, type FactorRemitMap, type FactorSummary } from '@/lib/factorRemit'
 import {
-  FACTOR_SOURCE_LABEL, carrierNeedsRemit, carrierRemitRows, factorNeedsRemit, matchesSearch,
-  type CarrierRemitRow, type RemitMethod,
+  CARRIER_PAID_FILTERS, FACTOR_SOURCE_LABEL, FACTOR_STATUS_FILTERS, carrierMatchesPaidFilter, carrierNeedsRemit, carrierRemitRows,
+  factorNeedsRemit, matchesSearch,
+  type CarrierPaidFilter, type CarrierRemitRow, type FactorStatusFilter, type RemitMethod,
 } from './remitDirectory'
 
 type Kind = 'carriers' | 'factors'
-const PAGE_SIZE = 200
+const SELECT_STYLE = {
+  height: 32, padding: '0 8px', background: 'var(--tms-field)', border: '1px solid var(--tms-input-border)',
+  borderRadius: 'var(--tms-radius-sm)', color: 'var(--tms-text)', fontSize: 13,
+} as const
 
 /** The inline address editor: a field with Save and Cancel, Enter saves, Escape cancels. */
 function EmailEditor({ initial, label, allowClear, onSave, onCancel }: {
@@ -55,6 +59,8 @@ function EmailEditor({ initial, label, allowClear, onSave, onCancel }: {
         style={{ minWidth: 240 }}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
+          // The grid around the field has its own keys; typing here is not for it.
+          e.stopPropagation()
           if (e.key === 'Enter') void save()
           if (e.key === 'Escape') onCancel()
         }}
@@ -79,7 +85,8 @@ export function RemitDirectoryPage() {
   const [kind, setKind] = useState<Kind>('carriers')
   const [query, setQuery] = useState('')
   const [missingOnly, setMissingOnly] = useState(false)
-  const [limit, setLimit] = useState(PAGE_SIZE)
+  const [factorStatus, setFactorStatus] = useState<FactorStatusFilter>('ALL')
+  const [carrierPaid, setCarrierPaid] = useState<CarrierPaidFilter>('ALL')
   const [editing, setEditing] = useState<string | null>(null)
 
   useEffect(() => {
@@ -94,25 +101,28 @@ export function RemitDirectoryPage() {
 
   // The raw methods feed the factor summary (to see carriers that disagree); the laid-over ones feed the carrier rows.
   const effective = useMemo(() => (methods ? applyFactorRemit(methods, factorEmails) : []), [methods, factorEmails])
-  const carrierRows = useMemo(() => carrierRemitRows(carriers, effective), [carriers, effective])
   const factorRows = useMemo(() => (methods ? summarizeFactors(methods, factorEmails) : []), [methods, factorEmails])
+  // The factor table is the one source of the factor's name: the carrier rows spell it exactly as it is spelled here.
+  const factorNames = useMemo(() => factorNameIndex(factorRows), [factorRows])
+  const carrierRows = useMemo(() => carrierRemitRows(carriers, effective, factorNames), [carriers, effective, factorNames])
 
   const missingCarriers = carrierRows.filter(carrierNeedsRemit).length
   const missingFactors = factorRows.filter(factorNeedsRemit).length
 
   const shownCarriers = useMemo(
-    () => carrierRows.filter((r) => (!missingOnly || carrierNeedsRemit(r)) && matchesSearch(query, r.name, r.mcNumber, r.paidVia, r.email)),
-    [carrierRows, missingOnly, query],
+    () => carrierRows.filter((r) => (!missingOnly || carrierNeedsRemit(r)) && carrierMatchesPaidFilter(r, carrierPaid) && matchesSearch(query, r.name, r.mcNumber, r.paidVia, r.email)),
+    [carrierRows, missingOnly, carrierPaid, query],
   )
   const shownFactors = useMemo(
-    () => factorRows.filter((r) => (!missingOnly || factorNeedsRemit(r)) && matchesSearch(query, r.name, r.email, ...r.otherNames)),
-    [factorRows, missingOnly, query],
+    () => factorRows.filter((r) => (!missingOnly || factorNeedsRemit(r)) && (factorStatus === 'ALL' || r.source === factorStatus) && matchesSearch(query, r.name, r.email, ...r.otherNames)),
+    [factorRows, missingOnly, factorStatus, query],
   )
 
   function editFactor(name: string) {
     setKind('factors')
     setQuery(name)
     setMissingOnly(false)
+    setFactorStatus('ALL')
     setEditing(null)
   }
 
@@ -124,10 +134,9 @@ export function RemitDirectoryPage() {
     },
     { key: 'mc', header: 'MC', width: 100, render: (r) => r.mcNumber || '—', text: (r) => r.mcNumber },
     {
-      key: 'via', header: 'Paid', width: 240,
-      render: (r) => (r.paidVia === '' ? <span className="tms-muted">No payment info</span>
-        : r.factorKey ? <span>via {r.paidVia}</span> : <span>Direct</span>),
-      text: (r) => r.paidVia,
+      key: 'via', header: 'Paid to', width: 260,
+      render: (r) => (r.paidVia === '' ? <span className="tms-muted">No payment info</span> : <span>{r.paidVia}</span>),
+      text: (r) => r.paidVia || 'No payment info',
     },
     {
       key: 'email', header: 'Remit e-mail',
@@ -175,7 +184,7 @@ export function RemitDirectoryPage() {
           </span>
         )
       },
-      text: (r) => r.email,
+      text: (r) => r.email || (r.state === 'NO_PAYMENT_INFO' ? 'No payment info' : 'Missing'),
     },
   ]
 
@@ -189,7 +198,7 @@ export function RemitDirectoryPage() {
       ),
       text: (r) => r.name,
     },
-    { key: 'n', header: 'Carriers', width: 90, align: 'right', render: (r) => r.carrierCount, sortValue: (r) => r.carrierCount },
+    { key: 'n', header: 'Carriers', width: 90, align: 'right', render: (r) => r.carrierCount, text: (r) => String(r.carrierCount), sortValue: (r) => r.carrierCount, filter: 'number' },
     {
       key: 'email', header: 'Remit e-mail',
       render: (r) => {
@@ -219,7 +228,7 @@ export function RemitDirectoryPage() {
           </span>
         )
       },
-      text: (r) => r.email,
+      text: (r) => r.email || (r.source === 'CONFLICT' ? r.conflicting.join(', ') : 'None on file'),
     },
     {
       key: 'source', header: 'Status', width: 170,
@@ -229,6 +238,7 @@ export function RemitDirectoryPage() {
         </TmsBadge>
       ),
       text: (r) => FACTOR_SOURCE_LABEL[r.source],
+      filter: 'multi',
     },
   ]
 
@@ -247,7 +257,7 @@ export function RemitDirectoryPage() {
         <TmsSegmentedTabs
           aria-label="Carriers or factoring companies"
           active={kind}
-          onSelect={(k) => { setKind(k as Kind); setEditing(null); setLimit(PAGE_SIZE) }}
+          onSelect={(k) => { setKind(k as Kind); setEditing(null) }}
           tabs={[
             { key: 'carriers', label: `Carriers${missingCarriers ? ` · ${missingCarriers} missing` : ''}` },
             { key: 'factors', label: `Factoring companies${missingFactors ? ` · ${missingFactors} to fix` : ''}` },
@@ -258,10 +268,19 @@ export function RemitDirectoryPage() {
           value={query}
           placeholder={kind === 'carriers' ? 'Search carrier, MC, factor or e-mail' : 'Search factoring company or e-mail'}
           style={{ minWidth: 300 }}
-          onChange={(e) => { setQuery(e.target.value); setLimit(PAGE_SIZE) }}
+          onChange={(e) => setQuery(e.target.value)}
         />
+        {kind === 'carriers' ? (
+          <select aria-label="Filter carriers" style={SELECT_STYLE} value={carrierPaid} onChange={(e) => setCarrierPaid(e.target.value as CarrierPaidFilter)}>
+            {CARRIER_PAID_FILTERS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+          </select>
+        ) : (
+          <select aria-label="Filter by status" style={SELECT_STYLE} value={factorStatus} onChange={(e) => setFactorStatus(e.target.value as FactorStatusFilter)}>
+            {FACTOR_STATUS_FILTERS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+          </select>
+        )}
         <label className="inline-flex items-center gap-1 text-sm">
-          <input type="checkbox" checked={missingOnly} onChange={(e) => { setMissingOnly(e.target.checked); setLimit(PAGE_SIZE) }} />
+          <input type="checkbox" checked={missingOnly} onChange={(e) => setMissingOnly(e.target.checked)} />
           {kind === 'carriers' ? 'Missing remit e-mail only' : 'Missing or conflicting only'}
         </label>
         <span className="tms-muted" style={{ fontSize: 12 }}>{busy ? 'Loading…' : `${rows.length} of ${total}`}</span>
@@ -269,25 +288,29 @@ export function RemitDirectoryPage() {
 
       {(loadError || carriersError) && <p className="mb-2 text-sm" style={{ color: 'var(--tms-badge-red)' }}>{loadError ?? carriersError}</p>}
 
+      {/* One list for both tables: click a header to sort, use its filter to narrow, the field picker to choose columns. */}
       {kind === 'carriers' ? (
-        <TmsTable
+        <TmsListPage
+          embedded
+          title="Carrier remit e-mails"
+          gridId="remit-carriers"
           columns={carrierColumns}
-          rows={shownCarriers.slice(0, limit)}
+          rows={shownCarriers}
           rowKey={(r) => r.id}
-          empty={busy ? 'Loading…' : 'No carriers match.'}
+          emptyText={busy ? 'Loading…' : 'No carriers match.'}
+          page={{ from: shownCarriers.length ? 1 : 0, to: shownCarriers.length, total: shownCarriers.length, pageSize: shownCarriers.length }}
         />
       ) : (
-        <TmsTable
+        <TmsListPage
+          embedded
+          title="Factoring company remit e-mails"
+          gridId="remit-factors"
           columns={factorColumns}
-          rows={shownFactors.slice(0, limit)}
+          rows={shownFactors}
           rowKey={(r) => r.key}
-          empty={busy ? 'Loading…' : 'No factoring companies match.'}
+          emptyText={busy ? 'Loading…' : 'No factoring companies match.'}
+          page={{ from: shownFactors.length ? 1 : 0, to: shownFactors.length, total: shownFactors.length, pageSize: shownFactors.length }}
         />
-      )}
-      {rows.length > limit && (
-        <div className="mt-3">
-          <TmsButton variant="secondary" onClick={() => setLimit((n) => n + PAGE_SIZE)}>Show {Math.min(PAGE_SIZE, rows.length - limit)} more</TmsButton>
-        </div>
       )}
     </TmsPage>
   )

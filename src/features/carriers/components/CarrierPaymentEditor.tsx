@@ -5,13 +5,13 @@
  * Full account and routing numbers are never typed here and never stored — only the last
  * four, which is all anyone needs to tell two bank accounts apart on a settlement.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Plus, Trash2 } from 'lucide-react'
 import { CityInput, TmsBadge, TmsButton, TmsField, TmsIconButton, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { useAddressAutofill } from '@/hooks/useAddressAutofill'
 import { getFactorRemitEmails } from '@/lib/apiClient'
-import { factorEmailFor, type FactorRemitMap } from '@/lib/factorRemit'
+import { canonicalFactorName, factorEmailFor, type FactorRemitMap } from '@/lib/factorRemit'
 import { formatCents } from '@/lib/invoiceBuild'
 import type { CarrierPayeeType, CarrierPaymentMethodKind, CarrierPaymentMethodRecord } from '@/types/tms'
 
@@ -134,6 +134,7 @@ function PaymentRow({ method, factorEmails, disabled, onSave, onArchive, onCance
   const [error, setError] = useState<string | null>(null)
 
   const inheritedEmail = recipientType === 'FACTOR' ? factorEmailFor(factorEmails, factorName) : ''
+  const factorNames = useMemo(() => new Map(Object.entries(factorEmails).map(([key, entry]) => [key, entry.name])), [factorEmails])
 
   const { hint: addressHint, pickCity } = useAddressAutofill({
     zip, city, state, upper: true,
@@ -155,7 +156,8 @@ function PaymentRow({ method, factorEmails, disabled, onSave, onArchive, onCance
         expectedUpdatedAt: method?.updatedAt,
         method: kind,
         recipientType,
-        factorName: factorName.trim() || null,
+        // Filed under the factor's one spelling (the Factoring companies table), so a retyped name never forks it.
+        factorName: canonicalFactorName(factorNames, factorName) || null,
         bankName: bankName.trim() || null,
         accountName: accountName.trim() || null,
         accountLast4: accountLast4.trim() || null,
@@ -200,11 +202,17 @@ function PaymentRow({ method, factorEmails, disabled, onSave, onArchive, onCance
           <TmsField label={recipientType === 'FACTOR' ? 'Factor name *' : 'Account name'}>
             <TmsInput
               aria-label={recipientType === 'FACTOR' ? 'Factor name' : 'Account name'}
+              list={recipientType === 'FACTOR' ? 'carrier-factor-names' : undefined}
               value={recipientType === 'FACTOR' ? factorName : accountName}
               disabled={disabled}
               onChange={(e) => (recipientType === 'FACTOR' ? setFactorName(e.target.value) : setAccountName(e.target.value))}
             />
           </TmsField>
+          {recipientType === 'FACTOR' && (
+            <datalist id="carrier-factor-names">
+              {[...factorNames.values()].sort().map((n) => <option key={n} value={n} />)}
+            </datalist>
+          )}
         </div>
       </div>
 

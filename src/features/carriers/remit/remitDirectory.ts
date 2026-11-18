@@ -2,7 +2,7 @@
  * Rows for Carriers › Remit e-mails: who each carrier's remittance goes to, and each factoring company's
  * one address. Pure, so the page stays a thin shell and the rules are tested without a DOM.
  */
-import { factorKeyOf, paysThroughFactor, type FactorRemitMap, type FactorSummary } from '@/lib/factorRemit'
+import { canonicalFactorName, factorKeyOf, paysThroughFactor, type FactorNameIndex, type FactorRemitMap, type FactorSummary } from '@/lib/factorRemit'
 import { isValidEmail } from '@/lib/billingMethod'
 
 export interface RemitMethod {
@@ -21,7 +21,7 @@ export interface CarrierRemitRow {
   name: string
   mcNumber: string
   status: string
-  /** 'Direct' or the factor's name; '' when nothing is on file. */
+  /** 'Direct' or the factor's name as the Factoring companies table spells it; '' when nothing is on file. */
   paidVia: string
   factorKey: string | null
   email: string
@@ -43,6 +43,7 @@ function methodOf(methods: readonly RemitMethod[]): RemitMethod | null {
 export function carrierRemitRows(
   carriers: ReadonlyArray<{ id: string; name: string; mcNumber?: string | null; status?: string | null; email?: string | null }>,
   methods: readonly RemitMethod[],
+  factorNames?: FactorNameIndex,
 ): CarrierRemitRow[] {
   const byCarrier = new Map<string, RemitMethod[]>()
   for (const m of methods) {
@@ -64,7 +65,7 @@ export function carrierRemitRows(
       name: carrier.name,
       mcNumber: carrier.mcNumber?.trim() ?? '',
       status: carrier.status ?? '',
-      paidVia: !method ? '' : factored ? String(method.factorName).trim() : 'Direct',
+      paidVia: !method ? '' : factored ? canonicalFactorName(factorNames, method.factorName) : 'Direct',
       factorKey: factored ? factorKeyOf(method?.factorName) : null,
       email,
       state,
@@ -97,3 +98,31 @@ export function matchesSearch(needle: string, ...fields: Array<string | null | u
 }
 
 export type { FactorRemitMap }
+
+/** The status filter on the Factoring companies table. */
+export type FactorStatusFilter = 'ALL' | FactorSummary['source']
+
+export const FACTOR_STATUS_FILTERS: ReadonlyArray<{ key: FactorStatusFilter; label: string }> = [
+  { key: 'ALL', label: 'All statuses' },
+  { key: 'SET', label: FACTOR_SOURCE_LABEL.SET },
+  { key: 'CARRIERS', label: FACTOR_SOURCE_LABEL.CARRIERS },
+  { key: 'CONFLICT', label: FACTOR_SOURCE_LABEL.CONFLICT },
+  { key: 'NONE', label: FACTOR_SOURCE_LABEL.NONE },
+]
+
+/** The filter on the Carriers table: who is paid how, and who has nothing to send a remittance to. */
+export type CarrierPaidFilter = 'ALL' | 'DIRECT' | 'FACTOR' | 'NEEDS'
+
+export const CARRIER_PAID_FILTERS: ReadonlyArray<{ key: CarrierPaidFilter; label: string }> = [
+  { key: 'ALL', label: 'All carriers' },
+  { key: 'DIRECT', label: 'Paid direct' },
+  { key: 'FACTOR', label: 'Paid through a factor' },
+  { key: 'NEEDS', label: 'Needs a remit e-mail' },
+]
+
+export function carrierMatchesPaidFilter(row: CarrierRemitRow, filter: CarrierPaidFilter): boolean {
+  if (filter === 'DIRECT') return row.paidVia === 'Direct'
+  if (filter === 'FACTOR') return row.factorKey !== null
+  if (filter === 'NEEDS') return carrierNeedsRemit(row)
+  return true
+}

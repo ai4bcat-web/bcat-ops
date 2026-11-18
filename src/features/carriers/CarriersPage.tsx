@@ -32,7 +32,7 @@ import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import { useAuth } from '@/hooks/useAuth'
 import { useCarriers } from '@/hooks/useCarriers'
 import { getFactorRemitEmails, getTmsSettings, graphqlErrorText, upsertCarrier, listCarrierRemitEmails } from '@/lib/apiClient'
-import { applyFactorRemit } from '@/lib/factorRemit'
+import { applyFactorRemit, factorNameIndex, summarizeFactors, type FactorNameIndex } from '@/lib/factorRemit'
 import { effectiveCarrierStatus } from '@/lib/carrierStatus'
 import { CarrierProfile } from './components/CarrierProfile'
 import { CARRIER_TYPES } from './components/carrierFormModel'
@@ -57,10 +57,11 @@ export function CarriersPage() {
   const [tab, setTab] = useState<CarrierTabKey | 'all'>('active')
   const [methods, setMethods] = useState<RemitEmailFields[] | null>(null)
   const [methodsError, setMethodsError] = useState<string | null>(null)
+  const [factorNames, setFactorNames] = useState<FactorNameIndex | undefined>(undefined)
   const [methodsVersion, setMethodsVersion] = useState(0)
   useEffect(() => {
     let live = true
-    Promise.all([listCarrierRemitEmails(), getFactorRemitEmails()]).then(([rows, factorEmails]) => { if (live) { setMethods(applyFactorRemit(rows, factorEmails)); setMethodsError(null) } })
+    Promise.all([listCarrierRemitEmails(), getFactorRemitEmails()]).then(([rows, factorEmails]) => { if (live) { setFactorNames(factorNameIndex(summarizeFactors(rows, factorEmails))); setMethods(applyFactorRemit(rows, factorEmails)); setMethodsError(null) } })
       .catch(() => { if (live) { setMethods(null); setMethodsError('Remittance e-mail flags unavailable — refresh to retry.') } })
     return () => { live = false }
   }, [methodsVersion])
@@ -78,7 +79,7 @@ export function CarriersPage() {
 
   useEffect(() => { getTmsSettings().then(setSettings).catch(() => setSettings(null)) }, [])
 
-  const payTo = useCallback((row: CarrierRow) => (methodsByCarrier === null ? '' : carrierPayToText(row, methodsByCarrier.get(row.id) ?? [])), [methodsByCarrier])
+  const payTo = useCallback((row: CarrierRow) => (methodsByCarrier === null ? '' : carrierPayToText(row, methodsByCarrier.get(row.id) ?? [], factorNames)), [methodsByCarrier, factorNames])
   const catalog = useMemo(() => carrierGridColumns(now, remitState, payTo), [now, remitState, payTo])
   const prefs = useDenseGridPrefs({
     gridId: 'carriers',

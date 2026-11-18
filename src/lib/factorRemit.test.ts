@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyFactorRemit, effectivePayeeEmail, factorKeyOf, parseFactorRemitMap, summarizeFactors } from './factorRemit'
+import { applyFactorRemit, canonicalFactorName, effectivePayeeEmail, factorNameIndex, factorKeyOf, parseFactorRemitMap, summarizeFactors } from './factorRemit'
 
 const map = parseFactorRemitMap({ 'OTR CAPITAL': { name: 'OTR Capital LLC', email: 'remit@otr.test' } })
 
@@ -69,5 +69,29 @@ describe('summarizeFactors', () => {
   })
   it('lists no direct-paid carriers', () => {
     expect(rows).toHaveLength(4)
+  })
+})
+
+describe('canonicalFactorName', () => {
+  const infos = [
+    { carrierId: 'a', recipientType: 'FACTOR', factorName: 'OTR CAPITAL', payeeEmail: null },
+    { carrierId: 'b', recipientType: 'FACTOR', factorName: 'OTR CAPITAL LLC', payeeEmail: null },
+    { carrierId: 'c', recipientType: 'FACTOR', factorName: 'OTR CAPITAL LLC', payeeEmail: null },
+  ]
+  it('spells every variant the way the table does: the most used spelling', () => {
+    const index = factorNameIndex(summarizeFactors(infos, {}))
+    expect(canonicalFactorName(index, 'OTR Capital')).toBe('OTR CAPITAL LLC')
+    expect(canonicalFactorName(index, 'otr capital llc')).toBe('OTR CAPITAL LLC')
+  })
+  it('meets spellings that differ only by a space', () => {
+    const index = factorNameIndex(summarizeFactors([{ carrierId: 'a', recipientType: 'FACTOR', factorName: 'FIRSTLINE FUNDING GROUP', payeeEmail: null }], {}))
+    expect(canonicalFactorName(index, 'FIRST LINE FUNDING GROUP')).toBe('FIRSTLINE FUNDING GROUP')
+  })
+  it('lets the name filed on the factor win, and shows an unknown factor as typed', () => {
+    const index = factorNameIndex(summarizeFactors(infos, { 'OTR CAPITAL': { name: 'OTR Capital', email: 'r@otr.test' } }))
+    expect(canonicalFactorName(index, 'OTR CAPITAL LLC')).toBe('OTR Capital')
+    expect(canonicalFactorName(index, 'Somebody Else')).toBe('Somebody Else')
+    expect(canonicalFactorName(index, '  ')).toBe('')
+    expect(canonicalFactorName(null, ' Typed ')).toBe('Typed')
   })
 })
