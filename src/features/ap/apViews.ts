@@ -12,7 +12,7 @@ import { isVerifyPaymentBill } from '@/lib/verifyPayment'
 import { approvalReadiness, billPayee, PENDING_DATES_BLOCK, type ApprovalWarning, type BillPayee } from '@/lib/carrierBill'
 import { daysLate } from '@/lib/arAging'
 import { chicagoDateStr } from '@/lib/date'
-import { canonicalFactorName, paysThroughFactor, type FactorNameIndex } from '@/lib/factorRemit'
+import { canonicalFactorName, factorKeyOf, payeeEmailFor, paysThroughFactor, type FactorNameIndex, type FactorRemitMap } from '@/lib/factorRemit'
 import type { ApWorklistRow } from '@/hooks/useApWorklist'
 import type { CarrierPaymentInfo } from '@/lib/apiClient'
 import type {
@@ -95,6 +95,14 @@ export function payeeLabel(bill: Pick<CarrierBillRecord, 'payeeKind' | 'carrierN
  */
 let factorNames: FactorNameIndex | null = null
 export function setFactorNamesForLabels(index: FactorNameIndex | null): void { factorNames = index }
+
+/**
+ * The one remit address filed per pay-to (`TmsSettings.factorRemitEmails`, keyed by the pay-to name: a factor or
+ * a direct payee). Set once beside the factor names, so every Remit to cell reads it first and two carriers paid
+ * to the same name can never show two addresses.
+ */
+let payeeRemit: FactorRemitMap | null = null
+export function setPayeeRemitForLabels(map: FactorRemitMap | null): void { payeeRemit = map }
 
 /** A factor-paid bill's factor, in the table's spelling; just the name, nothing around it. */
 function factorLabelOf(bill: Pick<CarrierBillRecord, 'remitTo'>): string {
@@ -320,33 +328,68 @@ export function paymentInfoFor(
 }
 
 /**
- * The e-mail remittance goes to. A carrier paid through a factor goes to the factor's one address (the
- * payment infos handed in already carry it, see `applyFactorRemit`); anyone else, the address snapshotted
- * on the bill, else their payment method's.
+ * The e-mail remittance goes to, by PAY TO: the address filed for the pay-to name (a factor's, or a direct
+ * payee's) wins, so every carrier paid to the same name reads the same one. Only a pay-to with nothing filed falls
+ * back to the old order: a factor's address on the payment infos (`applyFactorRemit`), else the address
+ * snapshotted on the bill, else the payment method's own.
  */
 export function remitEmailOf(
-  bill: Pick<CarrierBillRecord, 'remitTo' | 'carrierId' | 'paymentMethodId'>,
+  bill: Pick<CarrierBillRecord, 'remitTo' | 'carrierId' | 'paymentMethodId' | 'payeeKind' | 'carrierName'>,
   infos: readonly CarrierPaymentInfo[],
 ): string {
+  const filed = payeeEmailFor(payeeRemit, payeeNameFor(bill, infos))
+  if (filed) return filed
   const info = paymentInfoFor(bill, infos)
   const live = info?.payeeEmail?.trim() || ''
   if (paysThroughFactor(info) && live) return live
   return bill.remitTo?.payeeEmail?.trim() || live
 }
 
-/** The remit address for a whole carrier (the Aging by carrier rows): their preferred active payment method's. */
-export function remitEmailOfCarrier(carrierId: string, infos: readonly CarrierPaymentInfo[]): string {
-  const mine = infos.filter((i) => i.carrierId === carrierId && i.status !== 'INACTIVE')
-  return (mine.find((i) => i.isPreferred) ?? mine[0])?.payeeEmail?.trim() || ''
+/**
+ * Who is paid to this name: how many carriers, and the different addresses those carriers carry on their own
+ * payment methods (what a staff member picks between when they disagree). Read from the open bills on the board
+ * and, for a factor, from every payment method that names it.
+ */
+export function payeeCopies(
+  payTo: string,
+  bills: ReadonlyArray<Parameters<typeof payeeNameFor>[0]>,
+  infos: readonly CarrierPaymentInfo[],
+): { carriers: number; emails: string[] } {
+  const key = factorKeyOf(payTo)
+  const carriers = new Set<string>()
+  if (!key) return { carriers: 0, emails: [] }
+  for (const bill of bills) if (factorKeyOf(payeeNameFor(bill, infos)) === key) carriers.add(bill.carrierId)
+  for (const info of infos) if (info.status !== 'INACTIVE' && paysThroughFactor(info) && factorKeyOf(info.factorName) === key) carriers.add(info.carrierId)
+  const emails = new Map<string, string>()
+  for (const id of carriers) {
+    const mine = infos.filter((i) => i.carrierId === id && i.status !== 'INACTIVE')
+    const email = ((mine.find((i) => i.isPreferred) ?? mine[0])?.payeeEmail ?? '').trim()
+    if (email && !emails.has(email.toLowerCase())) emails.set(email.toLowerCase(), email)
+  }
+  return { carriers: carriers.size, emails: [...emails.values()] }
 }
 
-/** The remit address on a payment row: the carrier's factor address if they are paid through one, else the one snapshotted when it was paid, else the carrier's current one. */
+/** The remit address for a whole carrier (the Aging by carrier rows): the one filed for who they are paid. */
+export function remitEmailOfCarrier(carrierId: string, infos: readonly CarrierPaymentInfo[], carrierName?: string | null): string {
+  const mine = infos.filter((i) => i.carrierId === carrierId && i.status !== 'INACTIVE')
+  const info = mine.find((i) => i.isPreferred) ?? mine[0]
+  const filed = payeeEmailFor(payeeRemit, paysThroughFactor(info) ? canonicalFactorName(factorNames, info?.factorName) : carrierName)
+  return filed || info?.payeeEmail?.trim() || ''
+}
+
+/** The remit address on a payment row: the one filed for its pay-to, else the factor's, else the one snapshotted when it was paid, else the carrier's current one. */
 export function remitEmailOfPayment(
-  payment: { carrierId: string; remitTo?: { payeeEmail?: string | null } | null },
+  payment: { carrierId: string; remitTo?: { payeeEmail?: string | null; name?: string | null; factorName?: string | null } | null },
   infos: readonly CarrierPaymentInfo[],
+  carrierName?: string | null,
 ): string {
   const mine = infos.filter((i) => i.carrierId === payment.carrierId && i.status !== 'INACTIVE')
   const info = mine.find((i) => i.isPreferred) ?? mine[0]
+  const payTo = paysThroughFactor(info)
+    ? canonicalFactorName(factorNames, info?.factorName)
+    : payment.remitTo?.factorName?.trim() || payment.remitTo?.name?.trim() || carrierName
+  const filed = payeeEmailFor(payeeRemit, payTo)
+  if (filed) return filed
   const live = info?.payeeEmail?.trim() || ''
   if (paysThroughFactor(info) && live) return live
   return payment.remitTo?.payeeEmail?.trim() || live

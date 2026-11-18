@@ -32,7 +32,7 @@ import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import { useAuth } from '@/hooks/useAuth'
 import { useCarriers } from '@/hooks/useCarriers'
 import { getFactorRemitEmails, getTmsSettings, graphqlErrorText, upsertCarrier, listCarrierRemitEmails } from '@/lib/apiClient'
-import { applyFactorRemit, factorNameIndex, summarizeFactors, type FactorNameIndex } from '@/lib/factorRemit'
+import { applyFactorRemit, factorNameIndex, summarizeFactors, type FactorNameIndex, type FactorRemitMap } from '@/lib/factorRemit'
 import { effectiveCarrierStatus } from '@/lib/carrierStatus'
 import { CarrierProfile } from './components/CarrierProfile'
 import { CARRIER_TYPES } from './components/carrierFormModel'
@@ -58,15 +58,16 @@ export function CarriersPage() {
   const [methods, setMethods] = useState<RemitEmailFields[] | null>(null)
   const [methodsError, setMethodsError] = useState<string | null>(null)
   const [factorNames, setFactorNames] = useState<FactorNameIndex | undefined>(undefined)
+  const [payeeEmails, setPayeeEmails] = useState<FactorRemitMap>({})
   const [methodsVersion, setMethodsVersion] = useState(0)
   useEffect(() => {
     let live = true
-    Promise.all([listCarrierRemitEmails(), getFactorRemitEmails()]).then(([rows, factorEmails]) => { if (live) { setFactorNames(factorNameIndex(summarizeFactors(rows, factorEmails))); setMethods(applyFactorRemit(rows, factorEmails)); setMethodsError(null) } })
+    Promise.all([listCarrierRemitEmails(), getFactorRemitEmails()]).then(([rows, factorEmails]) => { if (live) { setFactorNames(factorNameIndex(summarizeFactors(rows, factorEmails))); setPayeeEmails(factorEmails); setMethods(applyFactorRemit(rows, factorEmails)); setMethodsError(null) } })
       .catch(() => { if (live) { setMethods(null); setMethodsError('Remittance e-mail flags unavailable — refresh to retry.') } })
     return () => { live = false }
   }, [methodsVersion])
   const methodsByCarrier = useMemo(() => methods === null ? null : groupRemitMethods(methods), [methods])
-  const remitState = useCallback((row: CarrierRow) => methodsByCarrier === null ? null : carrierRemitEmailState(row, methodsByCarrier.get(row.id) ?? []), [methodsByCarrier])
+  const remitState = useCallback((row: CarrierRow) => methodsByCarrier === null ? null : carrierRemitEmailState(row, methodsByCarrier.get(row.id) ?? [], payeeEmails), [methodsByCarrier, payeeEmails])
   const missingRemitCount = useMemo(() => methodsByCarrier === null ? null : carriers.filter((row) => { const state = remitState(row); return state === 'MISSING' || state === 'INVALID' }).length, [carriers, methodsByCarrier, remitState])
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState<DenseFilters>({})

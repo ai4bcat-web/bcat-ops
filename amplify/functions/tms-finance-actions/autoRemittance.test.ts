@@ -73,3 +73,34 @@ describe('autoRemittanceDecision', () => {
     expect(autoRemittanceDecision(ctx(), 'off')).toEqual({ action: 'SKIP', reason: 'TURNED_OFF' })
   })
 })
+
+describe('the remit address is the pay to\'s (Ryne 2026-11-19)', () => {
+  const direct = (name: string) => [{ id: 'b1', carrierId: 'car1', paymentMethodId: 'pm1', carrierName: name, payeeKind: 'CARRIER' } as CarrierBillRecord]
+
+  it('sends a direct payee to the address filed for its name, over the snapshot and its own method copy', () => {
+    const decision = autoRemittanceDecision(
+      ctx({ bills: direct('Green Haul Inc'), factorEmails: { 'GREEN HAUL': { name: 'Green Haul Inc', email: 'filed@green.test' } }, payment: { remitTo: { payeeEmail: 'snap@green.test' } } }),
+      undefined,
+    )
+    expect(decision).toEqual({ action: 'SEND', to: ['filed@green.test'] })
+  })
+
+  it('sends two carriers paid through the same factor to the same address', () => {
+    const factorEmails = { 'RTS FINANCIAL': { name: 'RTS Financial', email: 'remit@rts.test' } }
+    const method = (carrierId: string, factorName: string) => [{ id: 'pm1', carrierId, status: 'ACTIVE', recipientType: 'FACTOR', factorName, payeeEmail: `own-${carrierId}@rts.test` }] as CarrierPaymentMethodRecord[]
+    const a = autoRemittanceDecision(ctx({ methods: method('car1', 'RTS Financial'), factorEmails }), undefined)
+    const b = autoRemittanceDecision(ctx({ methods: method('car2', 'RTS FINANCIAL'), factorEmails }), undefined)
+    expect(a).toEqual({ action: 'SEND', to: ['remit@rts.test'] })
+    expect(b).toEqual(a)
+  })
+
+  it('names a payee frozen on the bill, so a pay to that is not the carrier gets its own address', () => {
+    const bills = [{ id: 'b1', carrierId: 'car1', paymentMethodId: 'pm1', carrierName: 'Owner Op', payeeKind: 'CARRIER', remitTo: { name: 'Fleet Manager LLC' } } as CarrierBillRecord]
+    const factorEmails = { 'FLEET MANAGER': { name: 'Fleet Manager LLC', email: 'pay@fleetmanager.test' } }
+    expect(autoRemittanceDecision(ctx({ bills, factorEmails }), undefined)).toEqual({ action: 'SEND', to: ['pay@fleetmanager.test'] })
+  })
+
+  it('falls back to the carrier\'s own address while nothing is filed for the pay to', () => {
+    expect(autoRemittanceDecision(ctx({ bills: direct('Green Haul Inc'), factorEmails: {} }), undefined)).toEqual({ action: 'SEND', to: ['ap@blue.com'] })
+  })
+})
