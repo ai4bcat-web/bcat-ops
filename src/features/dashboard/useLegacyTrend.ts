@@ -10,7 +10,7 @@ import type { TrendPoint } from './Sparkline'
 export interface LegacyTrend { loads: TrendPoint[]; revenue: TrendPoint[]; broker: TrendPoint[] }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const label = (m: string) => `${MONTHS[Number(m.slice(5, 7)) - 1]} ${m.slice(2, 4)}`
+const label = (m: string) => `${MONTHS[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`
 const TREND_MONTHS = 6
 
 /**
