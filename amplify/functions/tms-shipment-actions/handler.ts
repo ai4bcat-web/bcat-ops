@@ -177,6 +177,7 @@ import { SHIPMENT_ACTIONS_TABLES } from './tableEnv'
 import { parseTrackingPrefs, validateTrackingPrefsOverride, type TrackingPrefsOverride } from '../../../src/lib/trackingPrefs'
 import { parseDetentionFlag, validateDetentionInput, type DetentionFlag } from '../../../src/lib/detentionFlag'
 import { parseTonuFlag, validateTonuInput, type TonuFlag } from '../../../src/lib/tonuFlag'
+import { parseToVoidFlag, validateToVoidInput, type ToVoidFlag } from '../../../src/lib/toVoidFlag'
 import {
   buildPostInvoiceEntry, cleanGuardedInput, diffSnapshots, isInvoicedOrder, isPostInvoiceGuarded, POST_INVOICE_ACTION,
   postInvoiceCleared, readChangeReason, REASON_REQUIRED_MESSAGE, snapshotOf, type PostInvoiceGuardedAction,
@@ -657,6 +658,7 @@ type Action =
   | 'SET_TRACKING_PREFS'
   | 'SET_DETENTION_FLAG'
   | 'SET_TONU_FLAG'
+  | 'SET_TO_VOID_FLAG'
   | 'BATCH_SHIPMENT_TASK'
   | 'TEST_OWNERSHIP_RULES'
   | 'RETAG_SHIPMENTS'
@@ -3023,6 +3025,8 @@ async function applyVoid(
         voidedAt: now,
         voidedBy: caller.email,
         voidReason: reason,
+        // Ryne 2026-11-18: voiding a shipment flagged to void answers the flag.
+        ...(parseToVoidFlag(shipment.toVoidFlag) ? { toVoidFlag: null } : {}),
         updatedBy: caller.email,
         updatedAt: now,
         version: (numberOrNull(shipment.version) ?? 1) + 1,
@@ -3114,6 +3118,8 @@ async function voidShipment(input: Row, caller: Caller): Promise<Row> {
     reason,
     apBoardLegsClosed,
     loadsCanceled,
+    // The to-void flag this void answered (Ryne 2026-11-18), kept in the history because the flag itself comes off.
+    ...(parseToVoidFlag(shipment.toVoidFlag) ? { clearedToVoidFlag: parseToVoidFlag(shipment.toVoidFlag) } : {}),
   })
   return readBundle(shipmentId) as unknown as Row
 }
@@ -4066,6 +4072,40 @@ async function setTonuFlag(input: Row, caller: Caller): Promise<Row> {
     'shipment',
   )
   await writeAudit('SHIPMENT', shipmentId, flag ? 'FLAG_TONU' : 'CLEAR_TONU', caller, {
+    from: prior,
+    to: flag,
+  })
+  return { shipment: await getById(SHIPMENT_TABLE_NAME, shipmentId) } as unknown as Row
+}
+
+/**
+ * SET_TO_VOID_FLAG (Ryne 2026-11-18) — flag a shipment as one that should be voided, or clear the flag (`flag: null`).
+ * A review marker only: the shipment stays live (calendar, AR, AP) until someone actually voids it, and VOID_SHIPMENT clears
+ * the flag. Same rules as the detention and TONU flags: any office user may flag, who and when are stamped here (never
+ * client-supplied), a reason is required, it is logged in Activity, and a voided shipment is refused.
+ */
+async function setToVoidFlag(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  if (!('flag' in input)) throw new Error('flag is required; send null to clear it')
+  const sent = input.flag == null ? null : validateToVoidInput(input.flag)
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  assertNotVoided(shipment)
+  const prior = parseToVoidFlag(shipment.toVoidFlag)
+  if (!sent && !prior) return { shipment }
+  const now = nowIso()
+  const flag: ToVoidFlag | null = sent ? { ...sent, flaggedAt: now, flaggedBy: caller.email } : null
+  await transact(
+    [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+      toVoidFlag: flag,
+      updatedBy: caller.email,
+      updatedAt: now,
+      version: (numberOrNull(shipment.version) ?? 1) + 1,
+    }, null)],
+    'shipment',
+  )
+  await writeAudit('SHIPMENT', shipmentId, flag ? 'FLAG_TO_VOID' : 'CLEAR_TO_VOID', caller, {
+    number: optionalString(shipment.number, 60),
     from: prior,
     to: flag,
   })
@@ -9927,6 +9967,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return setDetentionFlag(input, caller)
     case 'SET_TONU_FLAG':
       return setTonuFlag(input, caller)
+    case 'SET_TO_VOID_FLAG':
+      return setToVoidFlag(input, caller)
     case 'ASSIGN_CARRIER_REP':
       return assignCarrierRep(input, caller)
     case 'BATCH_SHIPMENT_TASK':

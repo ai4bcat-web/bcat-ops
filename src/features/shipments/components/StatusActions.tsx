@@ -81,6 +81,9 @@ export interface ShipmentActionHandlers {
   /** TONU flag (Ryne 2026-11-16): open the TONU dialog. `tonuFlagged` relabels the item. */
   onTonu?: () => void
   tonuFlagged?: boolean
+  /** To-void flag (Ryne 2026-11-18): open the to-void dialog. `toVoidFlagged` relabels the item. */
+  onToVoid?: () => void
+  toVoidFlagged?: boolean
 }
 
 /** Everything the row menu needs to read, including what the void dialog stamps. */
@@ -149,6 +152,11 @@ export function ShipmentRowActions({ shipment, isAdmin, cancelDeleteAdminOnly, h
           {handlers.onTonu && (
             <DropdownMenuItem disabled={voided} data-testid="row-tonu" onSelect={() => handlers.onTonu?.()}>
               <PackageX size={14} className="mr-2" />{handlers.tonuFlagged ? 'Edit TONU…' : 'Flag waiting for TONU…'}
+            </DropdownMenuItem>
+          )}
+          {handlers.onToVoid && (
+            <DropdownMenuItem disabled={voided} data-testid="row-to-void" onSelect={() => handlers.onToVoid?.()}>
+              <Ban size={14} className="mr-2" />{handlers.toVoidFlagged ? 'Edit to-void flag…' : 'Flag to void…'}
             </DropdownMenuItem>
           )}
           <DropdownMenuItem disabled={voided} onSelect={() => setDialog({ kind: 'duplicate' })}>

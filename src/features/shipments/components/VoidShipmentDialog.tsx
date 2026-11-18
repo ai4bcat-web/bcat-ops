@@ -9,13 +9,15 @@ import type { ShipmentBundle, ShipmentRecord } from '@/types/tms'
 
 const MAX_REASON = 500
 
-export function VoidShipmentDialog({ shipment, open, onClose, onVoided }: {
+export function VoidShipmentDialog({ shipment, open, onClose, onVoided, initialReason }: {
   shipment: Pick<ShipmentRecord, 'id' | 'number' | 'updatedAt'>
+  /** Filled into the reason box when the dialog opens (a to-void flag's reason). Still editable. */
+  initialReason?: string
   open: boolean
   onClose: () => void
   onVoided: (bundle: ShipmentBundle) => void
 }) {
-  const [reason, setReason] = useState('')
+  const [reason, setReason] = useState(initialReason ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 

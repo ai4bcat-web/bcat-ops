@@ -244,7 +244,9 @@ describe('ShipmentsBoard', () => {
     renderBoard('/tms/shipments', [row('S001', { status: 'OPEN' })])
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
     const windows = () => __views.filter((v) => (v as { kind: string }).kind === 'window') as Array<{ months: string[]; includeVoided?: boolean }>
-    expect(windows().every((w) => w.months.length === 0)).toBe(true)
+    // This month's voided shipments are read off the Voided list too, only so the strip's Voided chip can count them.
+    expect(windows().every((w) => w.months.length === 0 || (w.includeVoided === true && w.months.length === 1))).toBe(true)
+    expect(windows().some((w) => w.includeVoided !== true && w.months.length > 0)).toBe(false)
 
     fireEvent.click(screen.getByRole('tab', { name: /Voided/ }))
     await waitFor(() => expect(windows().some((w) => w.months.length > 0 && w.includeVoided === true)).toBe(true))
@@ -267,9 +269,10 @@ describe('ShipmentsBoard', () => {
   it('the All list asks for the twelve months of the current year without voided rows', async () => {
     renderBoard('/tms/shipments?list=all', [row('S001')])
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
-    const asked = (__views as Array<{ kind: string; months?: string[]; includeVoided?: boolean }>).filter((v) => v.kind === 'window' && v.months!.length > 0)
+    // The one voided read off the Voided list is this month only, for the strip's Voided chip; it is not the All list's window.
+    const asked = (__views as Array<{ kind: string; months?: string[]; includeVoided?: boolean }>).filter((v) => v.kind === 'window' && v.months!.length > 0 && !v.includeVoided)
     expect(asked.length).toBeGreaterThan(0)
-    expect(asked.every((w) => w.months!.length === 12 && w.months![0] === `${chicagoYear()}-01` && !w.includeVoided)).toBe(true)
+    expect(asked.every((w) => w.months!.length === 12 && w.months![0] === `${chicagoYear()}-01`)).toBe(true)
   })
 
   it('narrows rows by the Status header filter and keeps its option counts from the unfiltered list', async () => {
@@ -528,6 +531,51 @@ describe('ShipmentsBoard', () => {
     fireEvent.click(toggle)
     await waitFor(() => expect(screen.queryByText('S002')).toBeNull())
     expect(screen.getByText('S001')).toBeTruthy()
+  })
+
+  it('shows a To void pill on flagged shipments, counts them in the strip, and the To void count filters to them (the shipments stay live)', async () => {
+    const flag = { reason: 'Duplicate of 14872', note: null, flaggedAt: '2026-11-18T18:00:00.000Z', flaggedBy: 'ryne@bcatcorp.com' }
+    renderBoard('/tms/shipments', [
+      row('S001', { status: 'IN_TRANSIT', toVoidFlag: flag }),
+      row('S002', { status: 'IN_TRANSIT' }),
+    ])
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+    const pills = screen.getAllByTestId('to-void-pill')
+    expect(pills).toHaveLength(1)
+    expect(pills[0].closest('td')?.getAttribute('data-col')).toBe('status')
+    expect(pills[0].getAttribute('title')).toContain('Duplicate of 14872')
+    expect(pills[0].getAttribute('title')).toContain('ryne@bcatcorp.com')
+    const toggle = screen.getByRole('button', { name: /To void/ })
+    expect(toggle).toHaveTextContent('1')
+    fireEvent.click(toggle)
+    await waitFor(() => expect(screen.queryByText('S002')).toBeNull())
+    expect(screen.getByText('S001')).toBeTruthy()
+  })
+
+  it('opens the to-void dialog from the row menu, filled from the existing flag', async () => {
+    const flag = { reason: 'Duplicate of 14872', note: null, flaggedAt: '2026-11-18T18:00:00.000Z', flaggedBy: 'ryne@bcatcorp.com' }
+    renderBoard('/tms/shipments', [row('S001', { status: 'IN_TRANSIT', toVoidFlag: flag })])
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+    fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Edit to-void flag/i }))
+    const box = await screen.findByLabelText(/Why should it be voided/)
+    expect((box as HTMLInputElement).value).toBe('Duplicate of 14872')
+  })
+
+  it('the Voided chip counts this month\'s voided shipments from any list and opens the Voided list', async () => {
+    renderBoard('/tms/shipments', [
+      row('S001', { status: 'OPEN' }),
+      row('S002', { status: 'OPEN', voidedAt: '2026-11-02T00:00:00Z' }),
+      row('S003', { status: 'OPEN', voidedAt: '2026-11-03T00:00:00Z' }),
+    ])
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+    expect(screen.queryByText('S002')).toBeNull()
+    const chip = screen.getByRole('button', { name: /^Voided\s*2|Voided/ , description: undefined })
+    expect(chip).toHaveTextContent('2')
+    fireEvent.click(chip)
+    await waitFor(() => expect(screen.getByText('S002')).toBeTruthy())
+    expect(screen.getByText('S003')).toBeTruthy()
+    expect(screen.queryByText('S001')).toBeNull()
   })
 
   it('shows the tracking chip beside the carrier name and keeps past delivery beside status', async () => {

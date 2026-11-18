@@ -1410,6 +1410,17 @@ describe('VOID_SHIPMENT', () => {
     }
   })
 
+  it('voiding a shipment flagged to void clears the flag and keeps it in the void audit entry', async () => {
+    const { shipmentId } = await createDraft()
+    await call('SET_TO_VOID_FLAG', { shipmentId, flag: { reason: 'Duplicate of 14872' } }, TMS_USER)
+    expect(table(TABLES.shipment).get(shipmentId)!.toVoidFlag).toMatchObject({ reason: 'Duplicate of 14872' })
+    const result = await voidCall(shipmentId, DISPATCHER) as { shipment: Row }
+    expect(result.shipment.voidedAt).toBeTruthy()
+    expect(table(TABLES.shipment).get(shipmentId)!.toVoidFlag ?? null).toBeNull()
+    const audit = [...table(TABLES.audit).values()].find((row) => row.action === 'VOID_SHIPMENT' && row.entityId === shipmentId)
+    expect(JSON.parse(String(audit!.changes)).clearedToVoidFlag).toMatchObject({ reason: 'Duplicate of 14872' })
+  })
+
   it('still keeps cancel admin-only when the org asks for it (void no longer is)', async () => {
     seedSettings({ cancelDeleteAdminOnly: true })
     const { shipmentId } = await createDraft()
@@ -2296,6 +2307,39 @@ describe('tracker assignee', () => {
     const actions = [...table(TABLES.audit).values()].filter((row) => row.entityId === a.shipmentId).map((row) => row.action)
     expect(actions).toContain('FLAG_DETENTION')
     expect(actions).toContain('CLEAR_DETENTION')
+  })
+
+  it('flags to void and clears it: a reason is required, the server stamps who and when, the shipment stays live, and each change is logged in Activity', async () => {
+    const a = await createDraft()
+    const other = await createDraft()
+    const set = (await call('SET_TO_VOID_FLAG', {
+      shipmentId: a.shipmentId,
+      flag: { reason: 'Duplicate of 14872', note: 'Same PO', flaggedBy: 'spoof@x.com' },
+    }, TMS_USER)) as { shipment: Row }
+    const stored = set.shipment.toVoidFlag as Record<string, unknown>
+    expect(stored).toMatchObject({ reason: 'Duplicate of 14872', note: 'Same PO' })
+    expect(stored.flaggedBy).not.toBe('spoof@x.com')
+    expect(typeof stored.flaggedAt).toBe('string')
+    // A review marker only: nothing is voided, and the other shipment is untouched.
+    expect(set.shipment.voidedAt ?? null).toBeNull()
+    expect(table(TABLES.shipment).get(other.shipmentId)!.toVoidFlag ?? null).toBeNull()
+
+    await expect(call('SET_TO_VOID_FLAG', { shipmentId: a.shipmentId, flag: { note: 'x' } }, TMS_USER)).rejects.toThrow(/say why/)
+    await expect(call('SET_TO_VOID_FLAG', { shipmentId: a.shipmentId }, TMS_USER)).rejects.toThrow(/flag is required/)
+    await expect(call('SET_TO_VOID_FLAG', { shipmentId: a.shipmentId, flag: { reason: 'x' } }, OUTSIDER)).rejects.toThrow(/Forbidden/)
+
+    await call('SET_TO_VOID_FLAG', { shipmentId: a.shipmentId, flag: null }, TMS_USER)
+    expect(table(TABLES.shipment).get(a.shipmentId)!.toVoidFlag ?? null).toBeNull()
+
+    const actions = [...table(TABLES.audit).values()].filter((row) => row.entityId === a.shipmentId).map((row) => row.action)
+    expect(actions).toContain('FLAG_TO_VOID')
+    expect(actions).toContain('CLEAR_TO_VOID')
+  })
+
+  it('refuses to flag a voided shipment to void', async () => {
+    const a = await createDraft()
+    await call('VOID_SHIPMENT', { shipmentId: a.shipmentId, reason: 'Duplicate', expectedUpdatedAt: String(table(TABLES.shipment).get(a.shipmentId)!.updatedAt) }, ADMIN)
+    await expect(call('SET_TO_VOID_FLAG', { shipmentId: a.shipmentId, flag: { reason: 'x' } }, TMS_USER)).rejects.toThrow(/voided/)
   })
 
   it('flags and clears waiting-for-TONU: the server stamps who and when, both flags can stand together, and each is logged in Activity', async () => {

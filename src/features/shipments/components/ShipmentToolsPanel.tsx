@@ -5,9 +5,11 @@
 import { useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { TmsButton } from '@/features/tms/kit'
+import { parseToVoidFlag } from '@/lib/toVoidFlag'
 import { useShipmentContext, type ShipmentContextOptions } from '../useShipmentContext'
 import { ShipmentTools } from './ShipmentTools'
 import { ShipmentRowActions } from './StatusActions'
+import { ToVoidDialog } from './ToVoid'
 import type { DetailTabKey } from './detailTabs'
 
 interface Props {
@@ -24,6 +26,8 @@ function Body({ shipmentId, options, initialTab, onChanged, onDeleted, onOpen }:
   useEffect(() => { onOpen?.() }, [onOpen])
   const ctx = useShipmentContext(shipmentId, options, onChanged)
   const shipment = ctx.bundle?.shipment ?? null
+  // Ryne 2026-11-18: flag the shipment to be voided from its own page, as the board's row menu does.
+  const [toVoidOpen, setToVoidOpen] = useState(false)
   return (
     <div className="space-y-3" data-testid="ship-tools-body">
       {ctx.loading && <p className="tms-muted text-sm">Loading…</p>}
@@ -34,10 +38,13 @@ function Body({ shipmentId, options, initialTab, onChanged, onDeleted, onOpen }:
             shipment={shipment}
             isAdmin={options.isAdmin}
             cancelDeleteAdminOnly={ctx.cancelDeleteAdminOnly}
-            handlers={ctx.actions.shipment}
+            handlers={{ ...ctx.actions.shipment, onToVoid: () => setToVoidOpen(true), toVoidFlagged: parseToVoidFlag(shipment.toVoidFlag) != null }}
             onDeleted={onDeleted}
           />
         </div>
+      )}
+      {shipment && toVoidOpen && (
+        <ToVoidDialog target={shipment} onClose={() => setToVoidOpen(false)} onSaved={onChanged} onVoided={onChanged} />
       )}
       {ctx.bundle && <ShipmentTools {...ctx.detailProps} initialTab={initialTab} />}
     </div>
