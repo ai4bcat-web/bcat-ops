@@ -55,3 +55,15 @@ describe('carrierPayToText', () => {
     expect(carrierPayToText(carrier, [])).toBe('')
   })
 })
+
+describe('remit readiness follows the pay to (Ryne 2026-11-19)', () => {
+  const method = { carrierId: 'c1', recipientType: 'CARRIER', payeeEmail: null, isPreferred: true } as never
+  it('counts an address filed for the carrier\'s own pay to', () => {
+    expect(carrierRemitEmailState({ id: 'c1', name: 'Green Haul Inc' }, [method], { 'GREEN HAUL': { name: 'Green Haul Inc', email: 'filed@green.test' } })).toBe('OK')
+    expect(carrierRemitEmailState({ id: 'c1', name: 'Green Haul Inc' }, [method], {})).toBe('MISSING')
+  })
+  it('counts an address filed for the carrier\'s factor', () => {
+    const factored = { carrierId: 'c1', recipientType: 'FACTOR', factorName: 'RTS Financial', payeeEmail: null, isPreferred: true } as never
+    expect(carrierRemitEmailState({ id: 'c1', name: 'Green Haul Inc' }, [factored], { 'RTS FINANCIAL': { name: 'RTS Financial', email: 'remit@rts.test' } })).toBe('OK')
+  })
+})

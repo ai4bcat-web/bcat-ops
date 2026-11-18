@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyFactorRemit, canonicalFactorName, effectivePayeeEmail, factorNameIndex, factorKeyOf, parseFactorRemitMap, summarizeFactors } from './factorRemit'
+import { applyFactorRemit, canonicalFactorName, effectivePayeeEmail, factorNameIndex, factorKeyOf, parseFactorRemitMap, payeeEmailFor, payToNameFor, summarizeFactors, summarizePayees } from './factorRemit'
 
 const map = parseFactorRemitMap({ 'OTR CAPITAL': { name: 'OTR Capital LLC', email: 'remit@otr.test' } })
 
@@ -93,5 +93,67 @@ describe('canonicalFactorName', () => {
     expect(canonicalFactorName(index, 'Somebody Else')).toBe('Somebody Else')
     expect(canonicalFactorName(index, '  ')).toBe('')
     expect(canonicalFactorName(null, ' Typed ')).toBe('Typed')
+  })
+})
+
+describe('the remit e-mail belongs to the pay to (Ryne 2026-11-19)', () => {
+  const carriers = [
+    { id: 'a', name: 'Blue Line Trucking Inc' },
+    { id: 'b', name: 'Red Line Express LLC' },
+    { id: 'c', name: 'Green Haul Inc' },
+    { id: 'd', name: 'No Method Inc' },
+  ]
+  const infos = [
+    { carrierId: 'a', recipientType: 'FACTOR', factorName: 'RTS Financial', payeeEmail: 'cash@rts.test', isPreferred: true },
+    { carrierId: 'b', recipientType: 'FACTOR', factorName: 'RTS FINANCIAL', payeeEmail: 'cash@rts.test', isPreferred: true },
+    { carrierId: 'c', recipientType: 'CARRIER', payeeEmail: 'ap@green.test', isPreferred: true },
+  ]
+
+  it('files a direct payee under its own name, the same key a factor uses', () => {
+    const m = parseFactorRemitMap({ 'GREEN HAUL': { name: 'Green Haul Inc', email: 'filed@green.test' } })
+    expect(payeeEmailFor(m, 'GREEN HAUL INC')).toBe('filed@green.test')
+    expect(payeeEmailFor(m, 'RTS Financial')).toBe('')
+  })
+
+  it('names the pay to: the factor, else the carrier', () => {
+    expect(payToNameFor(infos[0], 'Blue Line Trucking Inc')).toBe('RTS Financial')
+    expect(payToNameFor(infos[2], 'Green Haul Inc')).toBe('Green Haul Inc')
+  })
+
+  it('lists factors and direct payees in one table, one row per pay to, and skips carriers with no method', () => {
+    const rows = summarizePayees(carriers, infos, {})
+    expect(rows.map((r) => [r.name, r.kind, r.carrierCount])).toEqual([
+      ['RTS Financial', 'FACTOR', 2],
+      ['Green Haul Inc', 'DIRECT', 1],
+    ])
+    expect(rows.find((r) => r.name === 'No Method Inc')).toBeUndefined()
+  })
+
+  it('counts a missing address once per payee, however many carriers it funds', () => {
+    const rows = summarizePayees(carriers, [
+      { carrierId: 'a', recipientType: 'FACTOR', factorName: 'Outgo Inc', payeeEmail: null },
+      { carrierId: 'b', recipientType: 'FACTOR', factorName: 'Outgo Inc', payeeEmail: null },
+      { carrierId: 'c', recipientType: 'CARRIER', payeeEmail: null },
+    ], {})
+    expect(rows.filter((r) => r.source === 'NONE').map((r) => r.name).sort()).toEqual(['Green Haul Inc', 'Outgo Inc'])
+  })
+
+  it('reads an address filed for a direct payee as Set, over the carrier\'s own copy', () => {
+    const rows = summarizePayees(carriers, infos, parseFactorRemitMap({ 'GREEN HAUL': { name: 'Green Haul Inc', email: 'filed@green.test' } }))
+    expect(rows.find((r) => r.name === 'Green Haul Inc')).toMatchObject({ source: 'SET', email: 'filed@green.test' })
+  })
+
+  it('flags carriers paid to one name with different addresses as a conflict', () => {
+    const rows = summarizePayees(
+      [{ id: 'x', name: 'Twin Haul Inc' }, { id: 'y', name: 'Twin Haul LLC' }],
+      [
+        { carrierId: 'x', recipientType: 'CARRIER', payeeEmail: 'a@twin.test', isPreferred: true },
+        { carrierId: 'y', recipientType: 'CARRIER', payeeEmail: 'b@twin.test', isPreferred: true },
+      ],
+      {},
+    )
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ kind: 'DIRECT', carrierCount: 2, source: 'CONFLICT', email: '' })
+    expect(rows[0]!.conflicting.sort()).toEqual(['a@twin.test', 'b@twin.test'])
   })
 })

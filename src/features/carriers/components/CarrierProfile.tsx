@@ -404,6 +404,7 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
                 <TmsCard title="Payment methods">
                   <CarrierPaymentEditor
                     methods={bundle.paymentMethods}
+                    carrierName={bundle.carrier.name}
                     awaitingPayment={awaitingPayment}
                     onSave={savePaymentMethod}
                     onArchive={async (method) => {

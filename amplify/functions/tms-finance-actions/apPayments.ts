@@ -51,6 +51,7 @@ import { buildRemittancePdf, remittanceData, remittanceFilename } from '../../..
 import { normalizeCcList, remittanceCcFor } from '../../../src/lib/remittanceCc'
 import {
   effectivePayeeEmail,
+  payeeEmailFor,
   factorKeyOf,
   isRemitEmail,
   parseFactorRemitMap,
@@ -702,6 +703,9 @@ export function remitRecipientsFor(context: {
   const named = context.methods.find((row) => row.id === context.bills[0]?.paymentMethodId)
   const active = context.methods.filter((row) => row.status !== 'INACTIVE')
   const method = named ?? active.find((row) => row.isPreferred) ?? active[0] ?? null
+  // The address belongs to the PAY TO: the one filed for that name wins, for a factor and for a direct payee alike.
+  const filed = payeeEmailFor(context.factorEmails, payToNameOfContext(context, method))
+  if (filed.includes('@')) return [filed]
   if (paysThroughFactor(method)) {
     const shared = effectivePayeeEmail(method, context.factorEmails)
     if (shared.includes('@')) return [shared]
@@ -712,6 +716,21 @@ export function remitRecipientsFor(context: {
   ].map((email) => (email ?? '').trim()).find((email) => email.includes('@'))
   if (snapshot) return [snapshot]
   return remittanceRecipients(context.carrier, context.contacts, method)
+}
+
+/**
+ * The name the payment is paid to, the way the Pay to column reads it: the factor for a carrier paid through
+ * one (the method's, else the one frozen on the bill), otherwise the payee frozen on the bill, else the carrier.
+ */
+export function payToNameOfContext(
+  context: { payment: Row; bills: CarrierBillRecord[]; carrier: CarrierRecord | null },
+  method: CarrierPaymentMethodRecord | null,
+): string {
+  if (paysThroughFactor(method)) return String(method?.factorName ?? '').trim()
+  const lead = context.bills[0]
+  if (lead?.payeeKind === 'FACTOR') return (lead.remitTo?.factorName ?? lead.remitTo?.name ?? '').trim()
+  const frozen = (context.payment.remitTo as { name?: string | null; factorName?: string | null } | null | undefined)
+  return (lead?.remitTo?.name ?? frozen?.factorName ?? frozen?.name ?? lead?.carrierName ?? context.carrier?.name ?? '').trim()
 }
 
 export type AutoRemittanceDecision =
@@ -762,8 +781,9 @@ async function autoSendRemittance(paymentRowId: string, caller: Caller): Promise
 const EMAIL_SHAPE = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/
 
 /**
- * Save the address a payee's remittance goes to, from the Remit to column. It is written onto the payment
- * method the bill is paid under (the one the column reads), so the carrier profile shows the same address.
+ * Save the address a payee's remittance goes to, from the Remit to column. It is filed under the PAY TO name
+ * (`TmsSettings.factorRemitEmails`, which holds every payee, not only factors), so each carrier paid to that
+ * name uses it; a direct payee's own payment method keeps a matching copy for the carrier profile.
  * A carrier with no payment info at all is sent to the profile instead: inventing a method here would
  * invent a way to pay them.
  */
@@ -792,13 +812,18 @@ export async function setPayeeRemitEmail(input: Row, caller: Caller): Promise<Ro
     throw new Error('This carrier has no payment info on file. Add it on the carrier profile, then the remit e-mail can be saved there.')
   }
 
-  // A carrier paid through a factor has no address of its own: the factor's one address is what every
-  // remittance to that factor uses, so that is what gets saved.
+  // The address belongs to the PAY TO, so it is filed once under that name: the factor for a carrier paid
+  // through one (every carrier it funds and the automatic remittance read it), otherwise the payee itself.
   if (paysThroughFactor(method)) {
     const saved = await writeFactorRemitEmail(String(method.factorName), email, caller)
-    return { paymentMethodId: method.id, carrierId, email: saved.email, factorName: saved.name }
+    return { paymentMethodId: method.id, carrierId, email: saved.email, factorName: saved.name, payeeName: saved.name }
   }
+  const carrierRow = await getById(CARRIER_TABLE_NAME, carrierId)
+  const payTo = (bill?.payeeKind === 'FACTOR' ? '' : (bill?.remitTo as { name?: string | null } | null | undefined)?.name)
+    || String(bill?.carrierName ?? '') || String(carrierRow?.name ?? '')
+  const saved = await writeFactorRemitEmail(payTo.trim(), email, caller)
 
+  // The carrier's own copy follows, so the carrier profile shows the same address as the Remit to column.
   const now = nowIso()
   await transact(
     [updateTx(CARRIER_PAYMENT_METHOD_TABLE_NAME, method.id, { payeeEmail: email, updatedAt: now, updatedBy: caller.email })],
@@ -807,15 +832,17 @@ export async function setPayeeRemitEmail(input: Row, caller: Caller): Promise<Ro
   await writeAudit('CARRIER_PAYMENT_METHOD', method.id, 'SET_REMIT_EMAIL', caller, {
     carrierId,
     billId,
+    payTo: saved.name,
     previous: method.payeeEmail ?? null,
     email,
   })
-  return { paymentMethodId: method.id, carrierId, email }
+  return { paymentMethodId: method.id, carrierId, email, payeeName: saved.name }
 }
 
 /**
- * Set (or clear, with an empty address) the one remittance e-mail a factoring company is paid at. It is kept
- * on the settings row, keyed by the factor's normalized name, and read in front of every carrier's own copy.
+ * Set (or clear, with an empty address) the one remittance e-mail a PAY TO is paid at: a factoring company or a
+ * direct payee. It is kept on the settings row, keyed by the normalized pay-to name, and read in front of every
+ * carrier's own copy.
  * Written against the map as it was read, so two people saving different factors at once cannot lose one.
  */
 async function writeFactorRemitEmail(
@@ -824,7 +851,7 @@ async function writeFactorRemitEmail(
   caller: Caller,
 ): Promise<{ key: string; name: string; email: string }> {
   const key = factorKeyOf(factorName)
-  if (!key) throw new Error('Name the factoring company')
+  if (!key) throw new Error('Name who is paid')
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const settings = await getSettings()
     const current = parseFactorRemitMap(settings.factorRemitEmails)
@@ -862,9 +889,9 @@ async function writeFactorRemitEmail(
   throw new Error('Could not save: the factor list changed while saving. Try again.')
 }
 
-/** Save a factoring company's remittance e-mail from the Profiles list. An empty address clears it. */
+/** Save a pay-to's remittance e-mail (a factoring company's, or a direct payee's) from the Remit e-mails list. An empty address clears it. */
 export async function setFactorRemitEmail(input: Row, caller: Caller): Promise<Row> {
-  const factorName = assertString(input.factorName, 'factorName').trim()
+  const factorName = assertString(input.payeeName ?? input.factorName, 'payeeName').trim()
   const raw = typeof input.email === 'string' ? input.email.trim() : ''
   if (raw && !isRemitEmail(raw)) throw new Error('Enter one valid e-mail address')
   const saved = await writeFactorRemitEmail(factorName, raw, caller)
