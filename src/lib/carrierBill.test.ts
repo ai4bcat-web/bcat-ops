@@ -11,6 +11,7 @@ import {
   billTotals,
   billData,
   rateConChargesFor,
+  effectiveBillPayee,
 } from './carrierBill'
 import type { ApprovalReadinessInput, BillReadinessInput } from './carrierBill'
 import type {
@@ -566,5 +567,29 @@ describe('rateConChargesFor', () => {
     const two = [...carriers, { id: 'lc-2', loadId: 'ld-1', status: 'ACTIVE', sequence: 2 }] as unknown as Parameters<typeof rateConChargesFor>[1]
     const charges = [line({ id: 'a', amountCents: 100 }), line({ id: 'b', loadCarrierId: 'lc-2', code: 'LUMPER', amountCents: 50 })]
     expect(rateConChargesFor(charges, two, { id: 'lc-1', loadId: 'ld-1' })).toEqual([{ label: 'LINEHAUL', amountCents: 100 }])
+  })
+})
+
+describe('effectiveBillPayee', () => {
+  const carrier = { name: 'W Guzy Trucking Inc', address: null, email: null, factorPaymentMethodId: null } as never
+  const ach = { id: 'pm-1', carrierId: 'car-1', method: 'ACH', recipientType: 'CARRIER', status: 'ACTIVE', payeeEmail: 'remit@guzy.test' } as never
+
+  it('keeps the payee a bill already names, whatever the carrier has on file now', () => {
+    const named = { payeeKind: 'CARRIER', paymentMethodId: 'pm-old', remitTo: { name: 'Old Payee', method: 'CHECK' } } as never
+    const out = effectiveBillPayee(named, carrier, [ach])
+    expect(out.adopted).toBe(false)
+    expect(out.payee.paymentMethodId).toBe('pm-old')
+  })
+
+  it('takes the carrier’s only payment method for a bill with no payee', () => {
+    const out = effectiveBillPayee({ payeeKind: 'CARRIER', paymentMethodId: null, remitTo: null } as never, carrier, [ach])
+    expect(out.adopted).toBe(true)
+    expect(out.payee).toMatchObject({ kind: 'CARRIER', paymentMethodId: 'pm-1', remitTo: { method: 'ACH', payeeEmail: 'remit@guzy.test' } })
+  })
+
+  it('adopts nothing when the carrier has no method, or several with none chosen', () => {
+    const empty = { payeeKind: 'CARRIER', paymentMethodId: null, remitTo: null } as never
+    expect(effectiveBillPayee(empty, carrier, []).adopted).toBe(false)
+    expect(effectiveBillPayee(empty, carrier, [ach, { ...(ach as object), id: 'pm-2' } as never]).adopted).toBe(false)
   })
 })

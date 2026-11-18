@@ -3873,3 +3873,78 @@ describe('MOVE_TO_MANUAL_INVOICE (OTR rejected)', () => {
     expect(table(TABLES.customer).get(CUSTOMER_ID)!.billingMethod).toBe('FACTOR')
   })
 })
+
+describe('APPROVE_BILL on a bill that carries no payee (the Aljex and AR-sheet imports)', () => {
+  /** A recorded bill made to look like an imported one: nothing frozen about where the money goes. */
+  async function importedBill(over: Row = {}): Promise<Row> {
+    const bill = await recordBill({})
+    const row = table(TABLES.carrierBill).get(String(bill.id))!
+    table(TABLES.carrierBill).set(String(bill.id), { ...row, payeeKind: 'CARRIER', paymentMethodId: null, remitTo: null, ...over })
+    return bill
+  }
+
+  it('approves it under the carrier’s payment method as it stands and writes that payee onto the bill', async () => {
+    seedAssignment()
+    const bill = await importedBill()
+    const approved = (await call('APPROVE_BILL', { billId: bill.id })) as { bill: Row }
+    expect(approved.bill.status).toBe('TO_BE_PAID')
+    expect(approved.bill.paymentMethodId).toBe('cpm-1')
+    expect(approved.bill.payeeKind).toBe('CARRIER')
+    expect(approved.bill.remitTo).toMatchObject({ name: 'Wheeler Trucking', method: 'ACH', payeeEmail: 'remit@wheeler.test' })
+    expect(JSON.stringify(approved.bill.remitTo)).not.toContain('bankDetailsKey')
+    const audit = [...table(TABLES.audit).values()].find((row) => row.action === 'APPROVE_BILL')
+    expect(JSON.stringify(audit)).toContain('payeeAdopted')
+  })
+
+  it('keeps the payee a bill already names, even when the carrier has since changed its method', async () => {
+    seedAssignment()
+    const bill = await recordBill({})
+    table(TABLES.carrierMethod).set('cpm-1', { ...table(TABLES.carrierMethod).get('cpm-1')!, payeeEmail: 'new@wheeler.test' })
+    const approved = (await call('APPROVE_BILL', { billId: bill.id })) as { bill: Row }
+    expect(approved.bill.remitTo).toMatchObject({ payeeEmail: 'remit@wheeler.test' })
+  })
+
+  it('still refuses with no payee when the carrier has no payment method', async () => {
+    seedAssignment()
+    const bill = await importedBill()
+    table(TABLES.carrierMethod).delete('cpm-1')
+    await expect(call('APPROVE_BILL', { billId: bill.id })).rejects.toThrow(/no payee/)
+    expect(table(TABLES.carrierBill).get(String(bill.id))!.status).toBe('IN_REVIEW')
+  })
+
+  it('still refuses when several methods are on file and none is chosen: it never guesses', async () => {
+    seedAssignment({ method: { isPreferred: false } })
+    const bill = await importedBill()
+    table(TABLES.carrierMethod).set('cpm-2', { ...table(TABLES.carrierMethod).get('cpm-1')!, id: 'cpm-2', method: 'CHECK' })
+    await expect(call('APPROVE_BILL', { billId: bill.id })).rejects.toThrow(/no payee/)
+  })
+
+  it('takes the quick-pay fee back off when the payee turns out to be a factor', async () => {
+    seedAssignment({
+      loadCarrier: { quickPay: true, quickPayDays: 2, quickPayFeeBps: 300, quickPayFeeCents: 5_400 },
+      method: { recipientType: 'FACTOR', factorName: 'Apex Capital' },
+    })
+    const bill = await recordBill({})
+    // As imported: no payee, and a fee taken as if the carrier were paid direct.
+    const row = table(TABLES.carrierBill).get(String(bill.id))!
+    table(TABLES.carrierBill).set(String(bill.id), {
+      ...row, payeeKind: 'CARRIER', paymentMethodId: null, remitTo: null, quickPay: true, quickPayFeeBps: 300, quickPayFeeCents: 5_400, netCents: 174_600, balanceCents: 174_600,
+    })
+    const approved = (await call('APPROVE_BILL', { billId: bill.id })) as { bill: Row }
+    expect(approved.bill.payeeKind).toBe('FACTOR')
+    expect((approved.bill.remitTo as Row).name).toBe('Apex Capital')
+    expect(approved.bill.quickPayFeeCents).toBe(0)
+    expect(approved.bill.netCents).toBe(180_000)
+    expect(approved.bill.balanceCents).toBe(180_000)
+  })
+
+  it('lets an admin (Jenny, Ryne) approve it past missing paperwork with a note, but never past a missing payee', async () => {
+    seedAssignment()
+    table(TABLES.document).delete('doc-pod')
+    const bill = await importedBill()
+    await expect(call('APPROVE_BILL', { billId: bill.id })).rejects.toThrow(/paperwork is missing/i)
+    const approved = (await call('APPROVE_BILL', { billId: bill.id, docsOverrideNote: 'good to go' })) as { bill: Row }
+    expect(approved.bill.status).toBe('TO_BE_PAID')
+    expect(approved.bill.docsOverrideNote).toBe('good to go')
+  })
+})

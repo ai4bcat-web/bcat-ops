@@ -5,6 +5,7 @@ import type { CarrierBillRecord } from '@/types/tms'
 import {
   billsInReview, sharedProIndex, sharedProLabel, siblingCarriers, awaitingInvoiceTotals,
   billsExpected, billsAging, billsSelected, canSelectForPayment, invoiceAgeBuckets, payToLabel, paymentInfoFor, remitEmailOf, remittanceStatusOf, AP_TABS,
+  billGates,
 } from './apViews'
 
 const lc = (id: string, over: Record<string, unknown> = {}) => ({
@@ -155,5 +156,25 @@ describe('Payable tab order and remittance status', () => {
     expect(remittanceStatusOf({ remittanceAttempts: 1 }, 'ap@x.com')).toMatchObject({ label: 'Email failed', tone: 'red' })
     expect(remittanceStatusOf({ remittanceAttempts: 0 }, '')).toMatchObject({ label: 'No remit e-mail', needsEmail: true })
     expect(remittanceStatusOf(undefined, 'ap@x.com')).toMatchObject({ label: 'Not sent', needsEmail: false })
+  })
+})
+
+describe('billGates on a bill with no payee of its own', () => {
+  const bill = { id: 'b1', carrierId: 'car-1', loadId: 'l1', loadCarrierId: 'lc1', status: 'IN_REVIEW', payeeKind: 'CARRIER', paymentMethodId: null, remitTo: null, varianceCents: 0, billedCents: 100, grossCents: 100, datesPending: false } as unknown as CarrierBillRecord
+  const row = { assignment: { status: 'ACTIVE', rateConStatus: 'SIGNED', docsMissing: [] }, shipment: { deliveredAt: '2026-11-01T00:00:00Z' }, shipmentNumber: 'S1' } as never
+  const settings = { apRequireSignedRateCon: true }
+  const ach = { id: 'pm-1', carrierId: 'car-1', method: 'ACH', recipientType: 'CARRIER', status: 'ACTIVE', payeeEmail: 'r@x.test' }
+
+  it('reads "no payee" with no payment methods in hand, as it always did', () => {
+    expect(billGates({ bill, row, settings, isAdmin: true }).blocks.join(' ')).toMatch(/no payee/)
+  })
+
+  it('does not block when the carrier has one payment method on file, the way approving judges it', () => {
+    expect(billGates({ bill, row, settings, isAdmin: true, infos: [ach] }).blocks.join(' ')).not.toMatch(/no payee/)
+  })
+
+  it('still blocks with several methods and none chosen, or none at all', () => {
+    expect(billGates({ bill, row, settings, isAdmin: true, infos: [ach, { ...ach, id: 'pm-2' }] }).blocks.join(' ')).toMatch(/no payee/)
+    expect(billGates({ bill, row, settings, isAdmin: true, infos: [{ ...ach, carrierId: 'someone-else' }] }).blocks.join(' ')).toMatch(/no payee/)
   })
 })

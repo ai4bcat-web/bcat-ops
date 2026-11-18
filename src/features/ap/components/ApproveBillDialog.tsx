@@ -17,12 +17,14 @@
  * could never clear the block it exists for.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AlertTriangle, Loader2, ShieldAlert } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsButton, TmsDialog, TmsField, TmsTextarea } from '@/features/tms/kit'
 import { useAuth } from '@/hooks/useAuth'
 import { approveBill, getCarrier, getShipmentBundle, getTmsSettings, graphqlErrorText, previewBill } from '@/lib/apiClient'
 import { approvalReadiness } from '@/lib/carrierBill'
+import type { ApRemitTo } from '@/types/tms'
 import { formatCents } from '@/lib/invoiceBuild'
 import type {
   CarrierBillRecord, CarrierRecord, DocGateResult, ShipmentBundle, TmsSettings,
@@ -37,6 +39,8 @@ export function ApproveBillDialog({ bill, open, onOpenChange, onDone }: {
   const { isAdmin } = useAuth()
   const [bundle, setBundle] = useState<ShipmentBundle | null>(null)
   const [gate, setGate] = useState<DocGateResult | null>(null)
+  // The payee the carrier's payment method gives today. A bill the imports wrote has none of its own.
+  const [livePayee, setLivePayee] = useState<{ paymentMethodId: string | null; kind: CarrierBillRecord['payeeKind']; remitTo: ApRemitTo | null } | null>(null)
   const [carrier, setCarrier] = useState<CarrierRecord | null>(null)
   const [settings, setSettings] = useState<TmsSettings | null>(null)
   const [acked, setAcked] = useState<string[]>([])
@@ -61,6 +65,7 @@ export function ApproveBillDialog({ bill, open, onOpenChange, onDone }: {
       .then(([shipmentBundle, preview, carrierRow, tmsSettings]) => {
         setBundle(shipmentBundle)
         setGate(preview.gate)
+        setLivePayee(preview.payee)
         setCarrier(carrierRow)
         setSettings(tmsSettings)
         setError(null)
@@ -74,6 +79,13 @@ export function ApproveBillDialog({ bill, open, onOpenChange, onDone }: {
   const assignment = bundle?.loadCarriers.find((row) => row.id === loadCarrierId) ?? null
   const leg = bundle?.loads.find((row) => row.id === bill.loadId) ?? null
   const missing = gate?.missing ?? []
+  // A bill that names its payee keeps it. One that does not (the imports) is judged under the carrier's payment
+  // method as it stands, and approving writes that payee onto the bill, the way the Lambda does.
+  const payee = useMemo(() => (bill.remitTo
+    ? { kind: bill.payeeKind, paymentMethodId: bill.paymentMethodId ?? null, remitTo: bill.remitTo }
+    : { kind: livePayee?.kind ?? bill.payeeKind, paymentMethodId: livePayee?.paymentMethodId ?? null, remitTo: livePayee?.remitTo ?? null }),
+  [bill, livePayee])
+  const adoptingPayee = !bill.remitTo && payee.remitTo != null
   const note = overrideNote.trim()
   const overriding = isAdmin && note.length > 0 && missing.length > 0
 
@@ -86,12 +98,12 @@ export function ApproveBillDialog({ bill, open, onOpenChange, onDone }: {
       loadCarrier: assignment,
       load: leg,
       gate,
-      payee: { kind: bill.payeeKind, paymentMethodId: bill.paymentMethodId ?? null, remitTo: bill.remitTo ?? null },
+      payee,
       carrier,
       settings,
       isAdmin,
     })
-  }, [assignment, leg, gate, bill, carrier, settings, isAdmin, overriding])
+  }, [assignment, leg, gate, bill, payee, carrier, settings, isAdmin, overriding])
 
   const unacknowledged = readiness.warnings.filter((warning) => !acked.includes(warning.key))
   const disabled = saving || loading
@@ -154,6 +166,14 @@ export function ApproveBillDialog({ bill, open, onOpenChange, onDone }: {
             </p>
           )}
 
+          {adoptingPayee && payee.remitTo && (
+            <p className="text-xs tms-muted" data-testid="approve-payee-note">
+              This bill came in without a payee. Approving pays it to {payee.remitTo.name || bill.carrierName}
+              {payee.remitTo.method ? ` by ${String(payee.remitTo.method).replace(/_/g, ' ').toLowerCase()}` : ''}
+              {payee.remitTo.payeeEmail ? `, remittance to ${payee.remitTo.payeeEmail}` : ''}, from the carrier&apos;s payment method.
+            </p>
+          )}
+
           {readiness.blocks.length > 0 && (
             <div className="p-2 tms-tint tms-tint-red">
               <p className="flex items-start gap-2 text-xs font-medium">
@@ -163,6 +183,16 @@ export function ApproveBillDialog({ bill, open, onOpenChange, onDone }: {
               <ul className="mt-1 flex flex-col gap-1 text-xs" style={{ color: 'var(--tms-badge-red)' }}>
                 {readiness.blocks.map((reason) => <li key={reason}>{reason}</li>)}
               </ul>
+              {payee.remitTo == null && (
+                <p className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                  <Link to={`/tms/carriers/${carrierId}`} target="_blank" rel="noreferrer" className="underline">
+                    Add the payment method on the carrier profile
+                  </Link>
+                  <TmsButton variant="ghost" size="sm" disabled={disabled} onClick={() => { setLoading(true); load() }}>
+                    Check again
+                  </TmsButton>
+                </p>
+              )}
             </div>
           )}
 
