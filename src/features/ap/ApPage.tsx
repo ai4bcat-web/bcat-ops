@@ -1414,18 +1414,6 @@ function payableView({
     ...payColumns(),
     dayCol<CarrierBillRecord>('billDate', 'INVOICE DATE', (bill) => bill.billDate),
     dayCol<CarrierBillRecord>('due', 'DUE', (bill) => bill.dueAt),
-    {
-      key: 'age',
-      header: 'AGE',
-      text: (bill) => agingChipFor(bill.dueAt, asOf).label,
-      sortValue: (bill) => agingChipFor(bill.dueAt, asOf).days,
-      filter: 'multi',
-      extraPx: 24,
-      render: (bill) => {
-        const chip = agingChipFor(bill.dueAt, asOf)
-        return <TmsBadge tone={chip.late ? 'red' : 'gray'}>{chip.label}</TmsBadge>
-      },
-    },
     daysPastDueColumn(asOf),
     facetCol<CarrierBillRecord>('status', 'STATUS', (bill) => statusChip(bill).label, (bill) => {
       const chip = statusChip(bill)
