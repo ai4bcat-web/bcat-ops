@@ -16,6 +16,7 @@ import type { ApWorklistRow } from '@/hooks/useApWorklist'
 import type { CarrierBillRecord, LoadCarrierRecord, ShipmentRecord } from '@/types/tms'
 import { ageOpenItems } from '@/lib/arAging'
 import { chicagoDateStr } from '@/lib/date'
+import { listCarrierPaymentInfo } from '@/lib/apiClient'
 import { ApPage } from './ApPage'
 
 const worklistMock = vi.hoisted(() => vi.fn())
@@ -568,6 +569,28 @@ describe('the AP board', () => {
       expect(screen.getByText('Triumph')).toBeTruthy()
       expect(screen.getByText('ap@triumph.test')).toBeTruthy()
       expect(screen.getByRole('button', { name: 'Payment info for bill BL-1' })).toBeTruthy()
+    })
+
+    it('puts the factor in Pay to for a factored carrier whose bill froze no payee, and keeps the carrier in Carrier', async () => {
+      vi.mocked(listCarrierPaymentInfo).mockResolvedValue([
+        { id: 'pmF', carrierId: 'car1', recipientType: 'FACTOR', factorName: 'Triumph Capital', payeeEmail: 'ap@triumph.test', isPreferred: true, status: 'ACTIVE' },
+        { id: 'pmD', carrierId: 'car2', recipientType: 'CARRIER', bankName: 'Chase Bank', accountLast4: '9545', isPreferred: true, status: 'ACTIVE' },
+      ] as never)
+      try {
+        await setup({ bills: [
+          bill({ id: 'b-f', billNumber: 'BL-1', selectedForPayment: true, payeeKind: 'CARRIER', remitTo: null }),
+          bill({ id: 'b-d', billNumber: 'AH-1', selectedForPayment: true, carrierId: 'car2', carrierName: 'Arctic Horizon Inc', payeeKind: 'CARRIER', remitTo: null }),
+        ] })
+        fireEvent.click(screen.getByRole('tab', { name: /^Selected/ }))
+        const factored = screen.getByLabelText('Select bill BL-1').closest('tr') as HTMLElement
+        expect(within(factored).getByText('Blue Line Trucking')).toBeTruthy()
+        expect(within(factored).getByText('Triumph Capital')).toBeTruthy()
+        const direct = screen.getByLabelText('Select bill AH-1').closest('tr') as HTMLElement
+        expect(within(direct).getAllByText('Arctic Horizon Inc').length).toBe(2)
+        expect(within(direct).queryByText('Triumph Capital')).toBeNull()
+      } finally {
+        vi.mocked(listCarrierPaymentInfo).mockResolvedValue([])
+      }
     })
 
     describe('export', () => {

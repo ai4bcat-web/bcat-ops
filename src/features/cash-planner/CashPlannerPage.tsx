@@ -11,11 +11,11 @@ import { TmsAlert, TmsBadge, TmsButton, TmsCard, TmsField, TmsInput, TmsPage } f
 import { useAuth } from '@/hooks/useAuth'
 import { useOpenBills } from '@/hooks/useOpenBills'
 import { useVendorPayables } from '@/hooks/useVendorPayables'
-import { getFactorRemitEmails, graphqlErrorText, listCarrierPaymentInfo, selectBillsForPayment } from '@/lib/apiClient'
+import { getFactorRemitEmails, graphqlErrorText, listCarrierPaymentInfo, selectBillsForPayment, type CarrierPaymentInfo } from '@/lib/apiClient'
 import { chicagoDateStr } from '@/lib/date'
 import { applyFactorRemit, factorNameIndex, summarizeFactors } from '@/lib/factorRemit'
 import { formatCents } from '@/lib/invoiceBuild'
-import { payeeLabel, setFactorNamesForLabels } from '@/features/ap/apViews'
+import { payeeNameFor, setFactorNamesForLabels } from '@/features/ap/apViews'
 import {
   buildCashPlan, cents, DEFAULT_PLANNER_INPUTS, PLANNER_FIELD_KEYS, readAmount, readInputs,
   type PlanBillRow, type PlannerBill, type PlannerFields, type PlannerInputs,
@@ -93,6 +93,8 @@ export function CashPlannerPage() {
   const vendor = useVendorPayables()
   // Bumped when the factor names load, so the Pay to labels below are drawn again with the table's spelling.
   const [, setNamesVersion] = useState(0)
+  // The payment methods behind the bills, so a factored carrier's Pay to reads the factor and not the carrier.
+  const [infos, setInfos] = useState<CarrierPaymentInfo[]>([])
 
   // Name each factor as the Factoring companies table does, the same as the Payable page.
   useEffect(() => {
@@ -101,7 +103,7 @@ export function CashPlannerPage() {
       .then(([rows, emails]) => {
         if (!alive) return
         setFactorNamesForLabels(factorNameIndex(summarizeFactors(rows, emails)))
-        applyFactorRemit(rows, emails)
+        setInfos(applyFactorRemit(rows, emails))
         setNamesVersion((n) => n + 1)
       })
       .catch(() => { /* the bills still list, under the name on each bill */ })
@@ -114,7 +116,7 @@ export function CashPlannerPage() {
     id: b.id,
     pro: b.shipmentNumber || b.loadNumber || b.billNumber || b.id.slice(0, 8),
     carrier: b.carrierName || 'Carrier',
-    payee: payeeLabel(b),
+    payee: payeeNameFor(b, infos),
     dueAt: (b.dueAt || '').slice(0, 10),
     balanceCents: b.balanceCents,
     status: b.status as PlannerBill['status'],

@@ -65,6 +65,19 @@ describe('selectedExportRows', () => {
     expect(JSON.stringify(row)).not.toContain('1234')
   })
 
+  it('names the factor, not the carrier, for a factored carrier whose bill froze no payee (an imported bill)', () => {
+    const infos = [{ id: 'pmF', carrierId: 'car1', recipientType: 'FACTOR', factorName: 'Triumph Capital', method: 'WIRE', payeeEmail: 'remit@triumph.test', isPreferred: true, status: 'ACTIVE' }] as unknown as CarrierPaymentInfo[]
+    const [row] = selectedExportRows(run([bill({ payeeKind: 'CARRIER', remitTo: null })], { infos }))
+    expect(row.payee).toBe('Triumph Capital')
+    expect(row.carrier).toBe('Blue Line Trucking')
+    expect(row.factorName).toBe('Triumph Capital')
+    const [direct] = selectedExportRows(run([bill({ payeeKind: 'CARRIER', remitTo: null })], {
+      infos: [{ id: 'pmD', carrierId: 'car1', recipientType: 'CARRIER', method: 'ACH', isPreferred: true, status: 'ACTIVE' }] as unknown as CarrierPaymentInfo[],
+    }))
+    expect(direct.payee).toBe('Blue Line Trucking')
+    expect(direct.factorName).toBe('')
+  })
+
   it('puts the Needs review text and the quick pay flag on the bill', () => {
     const [row] = selectedExportRows(run([bill({ quickPay: true, quickPayDays: 2, quickPayFeeBps: 600 })], {
       review: new Map([['s1', { financeReviewReason: 'Missing delivered date', financeReviewApNote: 'Carrier says Nov 2' }]]),

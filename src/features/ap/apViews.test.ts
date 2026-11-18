@@ -1,11 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { ageOpenItems } from '@/lib/arAging'
-import { applyFactorRemit } from '@/lib/factorRemit'
+import { applyFactorRemit, factorNameIndex, factorKeyOf } from '@/lib/factorRemit'
 import type { CarrierBillRecord } from '@/types/tms'
 import {
   billsInReview, sharedProIndex, sharedProLabel, siblingCarriers, awaitingInvoiceTotals,
   billsExpected, billsAging, billsSelected, canSelectForPayment, invoiceAgeBuckets, payToLabel, paymentInfoFor, remitEmailOf, remittanceStatusOf, AP_TABS,
-  billGates,
+  billGates, applyToBePaidFilters, EMPTY_TO_BE_PAID_FILTERS, factorNameFor, isFactorPaid, payeeNameFor, payToLabelFor, setFactorNamesForLabels,
 } from './apViews'
 
 const lc = (id: string, over: Record<string, unknown> = {}) => ({
@@ -176,5 +176,56 @@ describe('billGates on a bill with no payee of its own', () => {
   it('still blocks with several methods and none chosen, or none at all', () => {
     expect(billGates({ bill, row, settings, isAdmin: true, infos: [ach, { ...ach, id: 'pm-2' }] }).blocks.join(' ')).toMatch(/no payee/)
     expect(billGates({ bill, row, settings, isAdmin: true, infos: [{ ...ach, carrierId: 'someone-else' }] }).blocks.join(' ')).toMatch(/no payee/)
+  })
+})
+
+describe('Pay to names the factor when the carrier has one (Ryne 2026-11-18)', () => {
+  // Bills the Aljex and AR-sheet imports wrote froze no payee, so only the carrier's live payment method knows.
+  const infos = [
+    { id: 'pmF', carrierId: 'biska', recipientType: 'FACTOR', factorName: 'triumph capital', payeeEmail: 'remit@triumph.test', isPreferred: true, status: 'ACTIVE' },
+    { id: 'pmD', carrierId: 'arctic', recipientType: 'CARRIER', bankName: 'Chase Bank', accountLast4: '9545', isPreferred: true, status: 'ACTIVE' },
+  ] as never
+  const unfrozen = (carrierId: string, carrierName: string) =>
+    ({ id: `b-${carrierId}`, carrierId, carrierName, payeeKind: 'CARRIER', paymentMethodId: null, remitTo: null }) as unknown as CarrierBillRecord
+
+  afterEach(() => setFactorNamesForLabels(null))
+
+  it('shows the factor for a factored carrier whose bill froze no payee, and the carrier\'s own name for a direct one', () => {
+    expect(payeeNameFor(unfrozen('biska', 'BISKA INC'), infos)).toBe('triumph capital')
+    expect(isFactorPaid(unfrozen('biska', 'BISKA INC'), infos)).toBe(true)
+    expect(payeeNameFor(unfrozen('arctic', 'ARCTIC HORIZON INC'), infos)).toBe('ARCTIC HORIZON INC')
+    expect(isFactorPaid(unfrozen('arctic', 'ARCTIC HORIZON INC'), infos)).toBe(false)
+    expect(payToLabelFor(unfrozen('biska', 'BISKA INC'), infos)).toBe('triumph capital')
+    expect(payToLabelFor(unfrozen('arctic', 'ARCTIC HORIZON INC'), infos)).toBe('Direct')
+  })
+
+  it('spells the factor exactly as the Factoring companies table does', () => {
+    setFactorNamesForLabels(factorNameIndex([{ key: factorKeyOf('Triumph Capital'), name: 'TBK Bank, SSB DBA Triumph' }]))
+    expect(payeeNameFor(unfrozen('biska', 'BISKA INC'), infos)).toBe('TBK Bank, SSB DBA Triumph')
+    expect(factorNameFor(unfrozen('biska', 'BISKA INC'), infos)).toBe('TBK Bank, SSB DBA Triumph')
+  })
+
+  it('keeps a frozen factor payee a factor bill when no live method says so, and never prints the carrier for it', () => {
+    const frozen = { ...unfrozen('gone', 'DAD GANG TRUCKING LL'), payeeKind: 'FACTOR', remitTo: { name: 'Blue Line', factorName: 'Triumph' } } as unknown as CarrierBillRecord
+    expect(payeeNameFor(frozen, [])).toBe('Triumph')
+    expect(payeeNameFor(frozen, undefined)).toBe('Triumph')
+    expect(isFactorPaid(frozen, [])).toBe(true)
+  })
+
+  it('falls back to the bill\'s own payee with no payment methods loaded yet', () => {
+    expect(payeeNameFor(unfrozen('biska', 'BISKA INC'), [])).toBe('BISKA INC')
+    expect(payeeNameFor(unfrozen('biska', 'BISKA INC'), undefined)).toBe('BISKA INC')
+  })
+
+  it('sorts and filters on the shown name, so factored carriers group under their factor', () => {
+    setFactorNamesForLabels(factorNameIndex([{ key: factorKeyOf('Triumph Capital'), name: 'TBK Bank, SSB DBA Triumph' }]))
+    const bills = [unfrozen('biska', 'BISKA INC'), unfrozen('arctic', 'ARCTIC HORIZON INC'), unfrozen('biska', 'BLUE STAR EXPRESS IN')]
+    expect(bills.map((b) => payeeNameFor(b, infos)).sort()).toEqual(['ARCTIC HORIZON INC', 'TBK Bank, SSB DBA Triumph', 'TBK Bank, SSB DBA Triumph'])
+    const factored = applyToBePaidFilters(bills, { ...EMPTY_TO_BE_PAID_FILTERS, payeeKind: 'FACTOR' }, '2026-11-18', infos)
+    expect(factored.map((b) => b.carrierName)).toEqual(['BISKA INC', 'BLUE STAR EXPRESS IN'])
+    const direct = applyToBePaidFilters(bills, { ...EMPTY_TO_BE_PAID_FILTERS, payeeKind: 'CARRIER' }, '2026-11-18', infos)
+    expect(direct.map((b) => b.carrierName)).toEqual(['ARCTIC HORIZON INC'])
+    // With no methods handed in the filter reads the bill alone, as it did before.
+    expect(applyToBePaidFilters(bills, { ...EMPTY_TO_BE_PAID_FILTERS, payeeKind: 'FACTOR' }, '2026-11-18')).toEqual([])
   })
 })

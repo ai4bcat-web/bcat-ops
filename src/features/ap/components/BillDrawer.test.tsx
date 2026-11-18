@@ -50,6 +50,21 @@ describe('BillDrawer', () => {
     expect(onAdjustPay).toHaveBeenCalled()
   })
 
+  it('names the factor on the Pay to line for a factored carrier whose bill froze no payee, and Direct for one paid directly', () => {
+    const factored = [{ id: 'pmF', carrierId: 'c1', recipientType: 'FACTOR', factorName: 'Triumph Capital', payeeEmail: 'remit@triumph.test', isPreferred: true, status: 'ACTIVE' }] as never
+    const { unmount } = render(
+      <MemoryRouter>
+        <BillDrawer bill={bill({ datesPending: false })} facts={facts} infos={factored} onClose={vi.fn()} onChanged={vi.fn()}
+          onAdjustPay={vi.fn()} onSetDates={vi.fn()} onPaymentInfo={vi.fn()} />
+      </MemoryRouter>,
+    )
+    expect(screen.getByText('Triumph Capital')).toBeTruthy()
+    expect(screen.queryByText('Direct')).toBeNull()
+    unmount()
+    draw(bill({ datesPending: false }))
+    expect(screen.getByText('Direct')).toBeTruthy()
+  })
+
   it('shows a Needs review flag with its reasons and a Mark reviewed button; no flag, no section', () => {
     const onClearReview = vi.fn()
     draw(bill(), { onClearReview }, { financeReviewReason: 'Rate differs', financeReviewApNote: 'Carrier billed 1,100' })

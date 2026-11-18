@@ -10,7 +10,7 @@ import { Link } from 'react-router-dom'
 import { TmsButton, TmsDialog } from '@/features/tms/kit'
 import type { CarrierPaymentInfo } from '@/lib/apiClient'
 import type { CarrierBillRecord } from '@/types/tms'
-import { payToLabel, remitEmailOf } from '../apViews'
+import { payToLabelFor, remitEmailOf } from '../apViews'
 
 const METHOD_LABEL: Record<string, string> = {
   ACH: 'ACH', WIRE: 'Wire', CHECK: 'Check', ZELLE: 'Zelle', VENMO: 'Venmo', EFT: 'EFT', CARD: 'Credit card (Amex)', OTHER: 'Other',
@@ -28,7 +28,7 @@ export function PaymentInfoDialog({ bill, info, infos, open, onOpenChange }: {
   const address = bill.remitTo?.address
   const email = remitEmailOf(bill, infos)
   const rows: [string, string | null][] = [
-    ['Pay to', payToLabel(bill)],
+    ['Pay to', payToLabelFor(bill, infos)],
     ['Carrier', bill.carrierName ?? null],
     ['Payment method', info?.method ? (METHOD_LABEL[info.method] ?? info.method) : (bill.remitTo?.method ? (METHOD_LABEL[bill.remitTo.method] ?? bill.remitTo.method) : null)],
     ['Bank', info?.bankName ?? null],

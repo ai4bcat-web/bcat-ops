@@ -10,7 +10,7 @@
  */
 import { daysLate } from '@/lib/arAging'
 import { billDueDate } from '@/lib/carrierBill'
-import { payToLabel, remitEmailOf } from './apViews'
+import { payToLabelFor, remitEmailOf } from './apViews'
 import type { CarrierPaymentInfo } from '@/lib/apiClient'
 import type { CarrierBillRecord, OrderRecord, ShipmentRecord } from '@/types/tms'
 import { deliveredTimeOf } from '@/lib/deliveredAt'
@@ -183,7 +183,7 @@ export function apReportRows(
       pro: proOf(bill, facts),
       po: facts.get(bill.shipmentId)?.po ?? '',
       carrier: bill.carrierName ?? '',
-      payTo: payToLabel(bill),
+      payTo: payToLabelFor(bill, infos),
       remitEmail: remitEmailOf(bill, infos),
       deliveredAt: facts.get(bill.shipmentId)?.deliveredAt ?? null,
       invoiceNumber: bill.billNumber ?? '',
