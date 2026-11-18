@@ -38,6 +38,7 @@ import { teamMembership, validateTeams } from '../../../src/lib/teams'
 import { REVIEW_REQUIREMENTS, customerApEmailRequired, normalizeReviewRequirements } from '../../../src/lib/reviewRequirements'
 import { SEED_DIVISIONS, SEED_RULES, validateDivisions, validateRules } from '../../../src/lib/ownership'
 import { checkIntakeEmail, normalizeIntakeEmail } from '../../../src/lib/intakeMail'
+import { isOwnPersonalTemplateId, isPersonalTemplateId } from '../../../src/lib/personalColumnLayout'
 import { RETIRED_SEED_VIEWS, SEED_VIEWS, slugify, validateView, BOARD_COLUMN_KEYS } from '../../../src/lib/shipmentViewDefs'
 import { validateAiAgents, validatePartyMemory } from '../../../src/lib/workflows/memory'
 import { BILLING_METHODS, validateBillingFields, type BillingMethod } from '../../../src/lib/billingMethod'
@@ -3480,7 +3481,18 @@ function isColumnLayoutAdmin(caller: Caller): boolean {
   return caller.email === OWNER_EMAIL || (caller.groups ?? []).includes(ADMIN_GROUP)
 }
 
+/**
+ * A person's own Shipments layout (src/lib/personalColumnLayout.ts) lives under an id built from their
+ * login, so it can only be written, changed or deleted by that login: an id that names anybody else is refused.
+ */
+function assertOwnPersonalTemplate(id: string, caller: Caller): void {
+  if (isPersonalTemplateId(id) && !isOwnPersonalTemplateId(id, caller.email)) {
+    throw new Error('Forbidden: a personal column layout can only be saved by its owner')
+  }
+}
+
 function assertCanWriteTeamDefault(id: string, caller: Caller): void {
+  assertOwnPersonalTemplate(id, caller)
   if (isGridDefaultTemplate(id) && caller.email !== OWNER_EMAIL) {
     throw new Error('Forbidden: only the owner sets the shared column layout')
   }
@@ -3546,8 +3558,8 @@ async function saveColumnTemplate(
   }
   const id = optionalString(input.id, gridDefault ? 120 : 64) ?? newId()
   assertCanWriteTeamDefault(id, caller)
-  // The team default is read by everyone by definition.
-  const shared = isTeamDefaultTemplate(id) ? true : optionalBoolean(input.shared) ?? false
+  // The team default is read by everyone by definition; a personal layout is never shared.
+  const shared = isTeamDefaultTemplate(id) ? true : isPersonalTemplateId(id) ? false : optionalBoolean(input.shared) ?? false
 
   const tableName = SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME
   const existing = await getById(tableName, id)
