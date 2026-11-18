@@ -47,6 +47,8 @@ export const RECENT_EMPTY_DAYS = 3
 export const ROAD_FACTOR = 1.15
 /** An empty run longer than this (road miles) is flagged. */
 export const LONG_DEADHEAD_MILES = 150
+/** An empty run up to this (road miles) is a short one: the map draws it green. */
+export const SHORT_DEADHEAD_MILES = 75
 /** Offered per truck. */
 export const MAX_MATCHES = 3
 
@@ -72,6 +74,8 @@ export interface OpenLoadMatch {
   pro: string
   lane: string
   pickupPlace: string | null
+  /** Where the pickup is on the map; lat and lng are null when the stop cannot be placed. */
+  pickupPoint: EmptyPoint
   pickupAt: number
   pickupTimeKnown: boolean
   customer: string | null
@@ -109,6 +113,8 @@ export interface EmptyTruckRow {
   /** Past the appointment and the driver has not marked the stop departed. */
   late: boolean
   point: EmptyPoint
+  /** Where the block of work started: its first stop. The map draws the run from here to `point`. */
+  from: EmptyPoint
   kind: 'IDLE' | 'BACK_TO_BACK'
   next: NextLoad | null
   /** Days from empty to the next booked pickup; with nothing booked, to the end of the window. */
@@ -121,15 +127,31 @@ export interface EmptyTruckRow {
 
 export interface EmptyTrucksSummary {
   trucks: number
+  /** Idle rows whose truck is already empty (delivered, or past its appointment). */
+  emptyNow: number
   idleTruckDays: number
+  /** Distinct open loads offered to at least one idle truck. */
+  openLoadsCovering: number
   /** Null until a daily value is set (and for viewers without money access). */
   valueCents: number | null
+}
+
+/** An open load an own truck could take, for the map's faint pickup markers. */
+export interface EmptyOpenLoad {
+  loadId: string
+  pro: string
+  lane: string
+  point: EmptyPoint
+  pickupAt: number
+  pickupTimeKnown: boolean
 }
 
 export interface EmptyTrucksResult {
   rows: EmptyTruckRow[]
   summary: EmptyTrucksSummary
   horizonEnd: number
+  /** Open loads picking up from now to a few days past the window, whether or not a truck was matched to them. */
+  openLoads: EmptyOpenLoad[]
 }
 
 export interface EmptyTrucksInput {
@@ -310,6 +332,7 @@ function matchesFor(point: EmptyPoint, from: number, until: number, open: readon
       pro: proOf(o.load),
       lane: laneLabel(o.load),
       pickupPlace: o.point.place,
+      pickupPoint: o.point,
       pickupAt: o.at,
       pickupTimeKnown: o.known,
       customer: o.load.customer?.trim() || null,
@@ -366,6 +389,7 @@ export function computeEmptyTrucks(input: EmptyTrucksInput): EmptyTrucksResult {
         alreadyEmpty: emptyAt <= now,
         late: !block.departed && emptyAt < now,
         point,
+        from: pointOfStop(block.startStop),
         kind,
         next: next ? {
           loadId: next.startLoad.id,
@@ -389,10 +413,16 @@ export function computeEmptyTrucks(input: EmptyTrucksInput): EmptyTrucksResult {
   const idle = rows.filter((r) => r.kind === 'IDLE')
   const summary: EmptyTrucksSummary = {
     trucks: new Set(idle.map((r) => r.driverId)).size,
+    emptyNow: new Set(idle.filter((r) => r.alreadyEmpty).map((r) => r.driverId)).size,
+    openLoadsCovering: new Set(idle.flatMap((r) => r.matches.map((m) => m.loadId))).size,
     idleTruckDays: Math.round(idle.reduce((n, r) => n + r.idleDays, 0) * 10) / 10,
     valueCents: dailyValue != null ? idle.reduce((n, r) => n + (r.idleValueCents ?? 0), 0) : null,
   }
-  return { rows, summary, horizonEnd }
+  const openLoads: EmptyOpenLoad[] = open
+    .filter((o) => o.at <= horizonEnd + OPEN_LOAD_WINDOW_DAYS * DAY)
+    .map((o) => ({ loadId: o.load.id, pro: proOf(o.load), lane: laneLabel(o.load), point: o.point, pickupAt: o.at, pickupTimeKnown: o.known }))
+    .sort((a, b) => a.pickupAt - b.pickupAt)
+  return { rows, summary, horizonEnd, openLoads }
 }
 
 export type EmptyTone = 'now' | 'soon' | 'later'
@@ -401,4 +431,23 @@ export type EmptyTone = 'now' | 'soon' | 'later'
 export function toneOf(row: Pick<EmptyTruckRow, 'alreadyEmpty' | 'emptyAt'>, now: number): EmptyTone {
   if (row.alreadyEmpty) return 'now'
   return row.emptyAt - now <= DAY ? 'soon' : 'later'
+}
+
+export type EmptyUrgency = 'now' | 'soon' | 'week' | 'beyond'
+
+/** The map's pin colour: red for a truck already empty, amber within a day, blue within the week, gray after. */
+export function urgencyOf(row: Pick<EmptyTruckRow, 'alreadyEmpty' | 'emptyAt'>, now: number): EmptyUrgency {
+  if (row.alreadyEmpty) return 'now'
+  const away = row.emptyAt - now
+  if (away <= DAY) return 'soon'
+  return away <= 7 * DAY ? 'week' : 'beyond'
+}
+
+export type DeadheadTier = 'short' | 'medium' | 'long' | 'unknown'
+
+/** The map's colour for the empty run to an open load: green up to 75 road miles, amber to 150, red beyond. */
+export function deadheadTier(miles: number | null | undefined): DeadheadTier {
+  if (miles == null) return 'unknown'
+  if (miles <= SHORT_DEADHEAD_MILES) return 'short'
+  return miles <= LONG_DEADHEAD_MILES ? 'medium' : 'long'
 }

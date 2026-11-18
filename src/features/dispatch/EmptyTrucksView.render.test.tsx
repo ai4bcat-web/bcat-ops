@@ -65,8 +65,14 @@ vi.mock('@/lib/apiClient', () => ({
   assignAsset: (...a: unknown[]) => assignAsset(...a),
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
-vi.mock('@/features/dashboard/FleetMiniMap', () => ({
-  FleetMiniMap: ({ markers }: { markers?: { id: string }[] }) => <div data-testid="map">{(markers ?? []).length} pins</div>,
+vi.mock('./EmptyTrucksMap', () => ({
+  EmptyTrucksMap: ({ rows, selectedKey, onSelect }: { rows: { key: string; point: { lat: number | null } }[]; selectedKey: string | null; onSelect: (k: string) => void }) => (
+    <div data-testid="map" data-selected={selectedKey ?? ''}>
+      {rows.filter((r) => r.point.lat != null).length} pins
+      {rows.map((r) => <button key={r.key} type="button" data-testid={`pin-${r.key}`} aria-label="pin" onClick={() => onSelect(r.key)} />)}
+    </div>
+  ),
+  EmptyTrucksLegend: () => <div data-testid="legend" />,
 }))
 let dialogProps: { initialDriverId?: string; onConfirm: (i: { driverId: string; truckId?: string }) => Promise<void>; load: { id: string } } | null = null
 vi.mock('@/features/shipments/components/AssignDriverDialog', () => ({
@@ -164,5 +170,63 @@ describe('EmptyTrucksView', () => {
     loadList = []
     renderView()
     expect(await screen.findByText(/No own-fleet truck goes empty/)).toBeTruthy()
+  })
+
+  it('puts the truck on a numbered card beside the map, with its status, its best open load and a footer', async () => {
+    renderView()
+    const card = await screen.findByTestId('empty-truck-card')
+    expect(within(card).getByText('Joshua Kly')).toBeTruthy()
+    expect(within(card).getByText('1')).toBeTruthy()
+    expect(within(card).getByText(/Empty (since|now|Wed|Thu)/i)).toBeTruthy()
+    expect(within(card).getByText('PRO 20033')).toBeTruthy()
+    expect(within(card).getByText(/mi empty/)).toBeTruthy()
+    expect(within(card).getByText('Load matched')).toBeTruthy()
+    // Assign stays on the list row only, so the card never books anything.
+    expect(within(card).queryByRole('button', { name: 'Assign' })).toBeNull()
+  })
+
+  it('shows the numbers strip: trucks, empty now, idle days and the open loads that fit', async () => {
+    renderView()
+    const strip = await screen.findByTestId('empty-trucks-summary')
+    expect(within(strip).getByText('Trucks going empty').parentElement?.textContent).toMatch(/1$/)
+    expect(within(strip).getByText('Open loads that fit').parentElement?.textContent).toMatch(/1\s*of 1/)
+    expect(within(strip).queryByText('Idle value')).toBeNull()
+  })
+
+  it('selects a truck from its card, from its pin, and clears it on a second click', async () => {
+    renderView()
+    const card = await screen.findByTestId('empty-truck-card')
+    const row = screen.getByTestId('empty-truck-row')
+    expect(card.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(card)
+    expect(card.getAttribute('aria-pressed')).toBe('true')
+    expect(row.getAttribute('data-selected')).toBe('true')
+    expect(screen.getByTestId('map').getAttribute('data-selected')).not.toBe('')
+    fireEvent.click(card)
+    expect(card.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(screen.getByTestId(/^pin-/))
+    expect(card.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('selects a card from the keyboard', async () => {
+    renderView()
+    const card = await screen.findByTestId('empty-truck-card')
+    fireEvent.keyDown(card, { key: 'Enter' })
+    expect(card.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.keyDown(card, { key: ' ' })
+    expect(card.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('keeps rates and dollars off the card for someone without money access, and shows them with it', async () => {
+    const { unmount } = renderView()
+    let card = await screen.findByTestId('empty-truck-card')
+    expect(within(card).queryByText(/\$1,800/)).toBeNull()
+    expect(within(card).queryByText(/idle$/)).toBeNull()
+    expect(within(card).queryByText(/Set a daily value/)).toBeNull()
+    unmount()
+    auth.pages = new Set(['dispatch', 'invoicing'])
+    renderView()
+    card = await screen.findByTestId('empty-truck-card')
+    expect(within(card).getByText('$1,800 load')).toBeTruthy()
   })
 })
