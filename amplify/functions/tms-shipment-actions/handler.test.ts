@@ -63,6 +63,7 @@ const TABLES = {
   message: 'ShipmentMessage-test',
   intakeLoad: 'IntakeLoad-test',
   boxTrip: 'BoxTruckTrip-test',
+  invoice: 'Invoice-test',
 }
 
 const store = vi.hoisted(() => {
@@ -100,6 +101,7 @@ const store = vi.hoisted(() => {
   process.env.ALJEX_CODE_MAP_TABLE_NAME = 'AljexCodeMap-test'
   process.env.PORTAL_ORIGIN = 'https://portal.test'
   process.env.BOX_TRUCK_TRIP_TABLE_NAME = 'BoxTruckTrip-test'
+  process.env.INVOICE_TABLE_NAME = 'Invoice-test'
   process.env.AMPLIFY_DATA_DEFAULT_NAME = 'amplifyData'
   return new Map<string, Map<string, Record<string, unknown>>>()
 })
@@ -4748,6 +4750,90 @@ describe('documents', () => {
     // `content-type` is unsignable by default, so naming it here is the whole reason
     // the URL cannot be reused to drop something else in the bucket.
     expect(options).toEqual({ expiresIn: 300, signableHeaders: new Set(['content-type']) })
+  })
+
+  // ── Replace a POD or the customer rate confirmation from the draft invoice (Ryne 2026-11-18) ──
+  describe('a replacing upload retires the old file as SUPERSEDED, in one transaction', () => {
+    async function filed(ids: DocIds, overrides: Row = {}, name = 'pod-old.pdf'): Promise<string> {
+      const prepared = await prepare(ids.shipmentId, { name, ...(overrides.type ? { type: overrides.type } : {}) })
+      putS3Object(prepared.s3Key, { ContentLength: 1024, ContentType: 'application/pdf' })
+      await commit(ids, prepared, { name, ...overrides })
+      return prepared.documentId
+    }
+    async function replacement(ids: DocIds, extra: Row, name = 'pod-new.pdf'): Promise<Row> {
+      const prepared = await prepare(ids.shipmentId, { name, ...(extra.type ? { type: extra.type } : {}) })
+      putS3Object(prepared.s3Key, { ContentLength: 1024, ContentType: 'application/pdf' })
+      return commit(ids, prepared, { name, ...extra })
+    }
+    const auditOf = (action: string): Row | undefined => [...table(TABLES.audit).values()].find((row) => row.action === action)
+
+    it('files the new POD, keeps the old one as SUPERSEDED with its bytes, and audits the swap on the shipment', async () => {
+      const ids = await delivered()
+      const oldId = await filed(ids)
+      const out = (await replacement(ids, { replacesDocumentId: oldId, replaceReason: 'Customer sent a clearer copy' })) as { document: Row }
+      expect(out.document).toMatchObject({ status: 'ACTIVE', supersedesId: oldId, name: 'pod-new.pdf' })
+      const old = table(TABLES.shipmentDocument).get(oldId)!
+      expect(old.status).toBe('SUPERSEDED')
+      expect(old.s3Key).toBeTruthy()
+      const swap = auditOf('REPLACE_DOCUMENT')!
+      expect(swap).toMatchObject({ entityType: 'SHIPMENT', entityId: ids.shipmentId })
+      const detail = String(swap.changes)
+      expect(detail).toContain('pod-old.pdf')
+      expect(detail).toContain('pod-new.pdf')
+      expect(detail).toContain('Customer sent a clearer copy')
+      // The required POD is covered the whole time: never uncovered between the two writes.
+      expect(table(TABLES.order).get(ids.orderId)!.docsMissing).not.toContain('POD')
+    })
+
+    it('refuses something that is not active, a different kind of document and an unknown id', async () => {
+      const ids = await delivered()
+      const oldId = await filed(ids)
+      await replacement(ids, { replacesDocumentId: oldId })
+      await expect(replacement(ids, { replacesDocumentId: oldId }, 'pod-third.pdf')).rejects.toThrow(/no longer the active one/)
+      const second = await filed(ids, {}, 'pod-b.pdf')
+      await expect(replacement(ids, { type: 'BOL', replacesDocumentId: second }, 'bol.pdf')).rejects.toThrow(/same kind of document/)
+      await expect(replacement(ids, { replacesDocumentId: 'sdoc-nope' }, 'pod-x.pdf')).rejects.toThrow(/not on this shipment/)
+    })
+
+    it('never replaces BCAT rate confirmation (it holds carrier pay) or a bill of lading this way', async () => {
+      const ids = await delivered()
+      table(TABLES.shipmentDocument).set('sdoc-bcat', {
+        id: 'sdoc-bcat', __typename: 'ShipmentDocument', shipmentId: ids.shipmentId, loadCarrierId: 'lc-1', type: 'BCAT_RATE_CON', name: 'BCAT Rate Confirmation.pdf',
+        s3Key: `shipment-docs/${ids.shipmentId}/sdoc-bcat.pdf`, contentType: 'application/pdf', sizeBytes: 10, source: 'GENERATED', audience: 'CARRIER', status: 'ACTIVE', version: 1,
+        uploadedBy: 'x', uploadedAt: '2026-03-04T00:00:00.000Z', createdBy: 'x',
+      })
+      await expect(replacement(ids, { type: 'BCAT_RATE_CON', replacesDocumentId: 'sdoc-bcat' }, 'rc.pdf')).rejects.toThrow(/Only a POD or the customer rate confirmation/)
+      expect(table(TABLES.shipmentDocument).get('sdoc-bcat')!.status).toBe('ACTIVE')
+      const bol = await filed(ids, { type: 'BOL' }, 'bol-old.pdf')
+      await expect(replacement(ids, { type: 'BOL', replacesDocumentId: bol }, 'bol-new.pdf')).rejects.toThrow(/Only a POD or the customer rate confirmation/)
+    })
+
+    it('replaces the customer rate confirmation filed on the order', async () => {
+      const ids = await delivered()
+      const oldId = await filed(ids, { type: 'RATE_CON' }, 'rc-old.pdf')
+      const out = (await replacement(ids, { type: 'RATE_CON', replacesDocumentId: oldId }, 'rc-new.pdf')) as { document: Row }
+      expect(out.document).toMatchObject({ type: 'RATE_CON', supersedesId: oldId, status: 'ACTIVE' })
+      expect(table(TABLES.shipmentDocument).get(oldId)!.status).toBe('SUPERSEDED')
+    })
+
+    it('still replaces while the invoice behind the shipment is a draft (made, not sent, nothing paid, nothing at OTR)', async () => {
+      const ids = await delivered()
+      const oldId = await filed(ids)
+      table(TABLES.order).set(ids.orderId, { ...table(TABLES.order).get(ids.orderId)!, invoiceId: 'inv-1', arStatus: 'UNPAID' })
+      table(TABLES.invoice).set('inv-1', { id: 'inv-1', status: 'ISSUED', sentCount: 0, paidCents: 0 })
+      const out = (await replacement(ids, { replacesDocumentId: oldId })) as { document: Row }
+      expect(out.document.supersedesId).toBe(oldId)
+      expect(table(TABLES.shipmentDocument).get(oldId)!.status).toBe('SUPERSEDED')
+    })
+
+    it('refuses once the invoice behind the shipment has gone out, and leaves the old file active', async () => {
+      const ids = await delivered()
+      const oldId = await filed(ids)
+      table(TABLES.order).set(ids.orderId, { ...table(TABLES.order).get(ids.orderId)!, invoiceId: 'inv-1', arStatus: 'UNPAID' })
+      table(TABLES.invoice).set('inv-1', { id: 'inv-1', status: 'ISSUED', sentCount: 1, sentAt: '2026-11-18T13:00:00Z', paidCents: 0 })
+      await expect(replacement(ids, { replacesDocumentId: oldId })).rejects.toThrow(/already gone out/)
+      expect(table(TABLES.shipmentDocument).get(oldId)!.status).toBe('ACTIVE')
+    })
   })
 
   // ── A POD delivers an own-fleet load (Ryne 2026-11-16) ─────────────────────

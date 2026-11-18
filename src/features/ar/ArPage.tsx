@@ -28,6 +28,8 @@ import {
   readOwedFilter, summarizeOwed, writeOwedFilter, type OwedFilter, type OwedOption,
 } from './owedFilters'
 import { SendReviewCarousel } from './components/SendReviewCarousel'
+import { EditInvoiceRateDialog } from './components/EditInvoiceRateDialog'
+import { rateEditBlock } from './invoiceRateEdit'
 import { AgingStatementDialog } from './components/AgingStatementDialog'
 import { BulkAgingStatementDialog, type BulkStatementCustomer } from './components/BulkAgingStatementDialog'
 import { PastDueReminderDialog, type PastDueGroup } from './components/PastDueReminderDialog'
@@ -114,6 +116,7 @@ type ArDialog =
   | { kind: 'void'; invoice: InvoiceRecord }
   | { kind: 'changeCustomer'; invoice: InvoiceRecord }
   | { kind: 'changeMethod'; invoice: InvoiceRecord }
+  | { kind: 'editAmount'; invoice: InvoiceRecord }
   | { kind: 'why'; pro: string; reason: string; customerId?: string | null; shipmentId?: string | null; row?: ArQueueRow }
   | { kind: 'docs'; row: ArQueueRow }
   | { kind: 'editCustomer'; customerId: string }
@@ -196,6 +199,9 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const [tab, setTab] = useState<ArPageTab>(() => tabFromUrl(AR_PAGE_TABS, 'ready'))
   const needsReview = useNeedsReview()
   const [dialog, setDialog] = useState<ArDialog | null>(null)
+  /** Invoices whose amount was changed this session, so the review-and-send batch can mark them 'Edited' (Ryne 2026-11-18). */
+  const [editedIds, setEditedIds] = useState<ReadonlySet<string>>(() => new Set())
+  const markEdited = (invoiceId: string) => setEditedIds((prev) => new Set(prev).add(invoiceId))
   const [reportsOpen, setReportsOpen] = useState<AccountingReportKind | 'menu' | null>(null)
   const [busy, setBusy] = useState(false)
   const canRelease = useBillingGrant()
@@ -563,6 +569,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onDocs: (row: ArQueueRow) => setDialog({ kind: 'docs', row }),
       onEditCustomer: (customerId: string) => setDialog({ kind: 'editCustomer', customerId }),
       onChangeMethod: (inv) => setDialog({ kind: 'changeMethod', invoice: inv }),
+      onEditAmount: (inv) => setDialog({ kind: 'editAmount', invoice: inv }),
+      editedIds,
       onReview: (invs) => setDialog({ kind: 'review', invoices: invs }),
       onEdit: (inv) => setDialog({ kind: 'edit', invoice: inv }),
       onStatement: (customerId, customerName) => setDialog({ kind: 'statement', customerId, customerName }),
@@ -731,6 +739,16 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           onChanged={() => { void refreshDirectory(); setFactorVersion((v) => v + 1); void refreshAll() }}
         />
       )}
+      {dialog?.kind === 'editAmount' && (
+        <EditInvoiceRateDialog
+          invoice={dialog.invoice}
+          factoringItem={dialog.invoice.factoringItemId ? factorByItemId.get(dialog.invoice.factoringItemId) ?? null : null}
+          plan={attachmentPlans.get(dialog.invoice.id)}
+          onClose={() => setDialog(null)}
+          onSaved={(fresh) => { markEdited(fresh.id); setDialog(null); void refreshAll() }}
+          onFilesChanged={() => { void docsChanged() }}
+        />
+      )}
       {dialog?.kind === 'changeCustomer' && (
         <ChangeInvoiceCustomerDialog
           invoice={dialog.invoice}
@@ -748,6 +766,10 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           customerById={customerById}
           shipmentsById={lookups.shipmentsById}
           isAdmin={canVoid}
+          canEditAmount={canRelease}
+          factorByItemId={factorByItemId}
+          editedIds={editedIds}
+          onEdited={markEdited}
           onClose={() => setDialog(null)}
           onDone={() => { setSelected([]); void refreshAll() }}
         />
@@ -916,7 +938,7 @@ function queueView({
   status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, factorByItemId, customerById,
   attachmentPlans, boardById, shipmentsById, months, month, paidLoading, onMonth, onSelect, invoiceErrors, invoicesRunning, onRetryInvoice, onBatchGenerate, onReview, onEdit,
   onStatement, onPastDue, paymentFacts,
-  factorReadiness, onBatchFactor, onWhy, onDocs, onEditCustomer, onChangeMethod,
+  factorReadiness, onBatchFactor, onWhy, onDocs, onEditCustomer, onChangeMethod, onEditAmount, editedIds,
 }: {
   status: ArQueueStatus
   rows: ArQueueRow[]
@@ -954,6 +976,10 @@ function queueView({
   onEditCustomer: (customerId: string) => void
   /** Ready to invoice: bill an unsent draft through the factor or by hand ("Change method"). */
   onChangeMethod: (invoice: InvoiceRecord) => void
+  /** Ready to invoice: change the draft's amount before it goes out. */
+  onEditAmount: (invoice: InvoiceRecord) => void
+  /** Invoices whose amount was changed this session. */
+  editedIds: ReadonlySet<string>
   onReview: (invoices: InvoiceRecord[]) => void
   onEdit: (invoice: InvoiceRecord) => void
   /** Invoiced, grouped by customer: e-mail that customer's aging report from the group header. */
@@ -1237,6 +1263,18 @@ function queueView({
                   Change method
                 </button>
               )}
+              {inv && canRelease && !rateEditBlock(inv, item ?? null) && (
+                <button
+                  type="button"
+                  className="tms-link"
+                  data-testid="ar-edit-amount"
+                  title="Change what the customer is charged before this goes out"
+                  onClick={(e) => { e.stopPropagation(); onEditAmount(inv) }}
+                >
+                  Edit amount
+                </button>
+              )}
+              {inv && editedIds.has(inv.id) && <TmsBadge tone="gray" title="The amount was changed before sending">Edited</TmsBadge>}
             </span>
           )
         }

@@ -3524,6 +3524,8 @@ export interface RecalcChargesInput {
   shipmentId: string
   expectedVersion: number
   charges: LoadChargeInput[]
+  /** Required (5+ characters) once the shipment has an invoice: the post-invoice change rule audits it. */
+  changeReason?: string
 }
 export async function recalcCharges(input: RecalcChargesInput): Promise<ShipmentBundle> {
   return shipmentAction<ShipmentBundle>('RECALC_CHARGES', input)
@@ -5105,6 +5107,12 @@ export interface CommitDocumentInput {
   stopId?: string | null
   /** Defaults to the type's own audience; INTERNAL keeps a file in the building. */
   audience?: ShipmentDocumentAudience | null
+  /**
+   * Replace: the ACTIVE POD or customer rate confirmation this file takes over. It is retired as SUPERSEDED (kept, bytes and all)
+   * in the same transaction, and the swap is audited on the shipment. Refused once the invoice has gone out.
+   */
+  replacesDocumentId?: string | null
+  replaceReason?: string | null
 }
 export async function commitDocument(input: CommitDocumentInput): Promise<DocumentResult> {
   return shipmentAction<DocumentResult>('COMMIT_DOCUMENT', input)

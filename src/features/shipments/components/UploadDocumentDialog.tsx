@@ -52,7 +52,7 @@ function fileProblem(file: File): string | null {
   return null
 }
 
-export function UploadDocumentDialog({ bundle, onClose, onSaved, initialType, replaces }: {
+export function UploadDocumentDialog({ bundle, onClose, onSaved, initialType, replaces, supersede = false, lockType = false }: {
   bundle: ShipmentBundle
   onClose: () => void
   /** The row landed: the tab re-reads its documents and the order's gate. */
@@ -64,6 +64,13 @@ export function UploadDocumentDialog({ bundle, onClose, onSaved, initialType, re
    * The upload lands first, so the required type is never uncovered in between.
    */
   replaces?: ShipmentDocumentRecord | null
+  /**
+   * With `replaces`: the server retires the old file as SUPERSEDED in the same write that files the new one (kept as history, and
+   * audited on the shipment with the reason below), instead of the follow-up void. Used from the draft invoice (Ryne 2026-11-18).
+   */
+  supersede?: boolean
+  /** The type is fixed to `initialType` (the draft invoice adds only a POD or the customer rate confirmation). */
+  lockType?: boolean
 }) {
   const order = bundle.orders[0] ?? null
   const assignments = bundle.loadCarriers
@@ -81,6 +88,7 @@ export function UploadDocumentDialog({ bundle, onClose, onSaved, initialType, re
   // default instead of freezing whatever the first type happened to suggest.
   const [audience, setAudience] = useState<ShipmentDocumentAudience | null>(replaces?.audience ?? null)
   const [dragging, setDragging] = useState(false)
+  const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const picker = useRef<HTMLInputElement>(null)
@@ -127,6 +135,7 @@ export function UploadDocumentDialog({ bundle, onClose, onSaved, initialType, re
         loadId: target?.loadId ?? null,
         loadCarrierId: target?.id ?? null,
         audience: effectiveAudience,
+        ...(replaces && supersede ? { replacesDocumentId: replaces.id, replaceReason: reason.trim() || null } : {}),
       })
 
       try {
@@ -141,7 +150,9 @@ export function UploadDocumentDialog({ bundle, onClose, onSaved, initialType, re
         await commit()
       }
 
-      if (replaces) {
+      if (replaces && supersede) {
+        toast.success(`${DOCUMENT_TYPE_LABELS[type]} replaced`)
+      } else if (replaces) {
         // Void the file this one replaces. Voiding is the filer's or an admin's call, so a refusal is said plainly
         // and the new file stays: nothing is lost either way.
         try {
@@ -208,7 +219,7 @@ export function UploadDocumentDialog({ bundle, onClose, onSaved, initialType, re
               aria-label="Document type"
               value={type}
               onChange={(e) => setType(e.target.value as ShipmentDocumentType)}
-              disabled={busy || !!replaces}
+              disabled={busy || !!replaces || lockType}
               className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
             >
               {SHIPMENT_DOCUMENT_TYPES.map((t) => (
@@ -256,6 +267,21 @@ export function UploadDocumentDialog({ bundle, onClose, onSaved, initialType, re
               </p>
             )}
           </div>
+
+          {replaces && supersede && (
+            <div className="sm:col-span-2">
+              <Label className="tms-field-label">Why it is being replaced (optional)</Label>
+              <input
+                aria-label="Reason for replacing"
+                className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
+                value={reason}
+                maxLength={200}
+                disabled={busy}
+                onChange={(e) => setReason(e.target.value)}
+              />
+              <p className="mt-1 text-[11px] tms-muted">The old file stays on the shipment as history. This is kept with the change.</p>
+            </div>
+          )}
         </div>
 
         {error && <TmsAlert tone="red">{error}</TmsAlert>}
