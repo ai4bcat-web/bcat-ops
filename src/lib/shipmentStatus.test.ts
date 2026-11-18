@@ -150,6 +150,34 @@ describe('shipmentStatusFromLoads', () => {
     expect(shipmentStatusFromLoads([{ status: 'BOOKED', carrierStatuses: ['TONU', 'ACTIVE'] }])).toBe('BOOKED')
   })
 
+  it('keeps a staff-stamped Delivered when TONU is the only carrier row (20037)', () => {
+    expect(shipmentStatusFromLoads([{ status: 'DELIVERED', carrierStatuses: ['TONU'] }], 'OPEN')).toBe('DELIVERED')
+    expect(shipmentStatusFromLoads([{ status: 'INVOICING', carrierStatuses: ['TONU'] }], 'OPEN')).toBe('DELIVERED')
+    expect(shipmentStatusFromLoads([{ status: 'DELIVERED', carrierStatuses: ['TONU', 'TONU'] }], 'OPEN')).toBe('DELIVERED')
+    // not delivered: the TONU still sends the load back to sourcing
+    expect(shipmentStatusFromLoads([{ status: 'IN_TRANSIT', carrierStatuses: ['TONU'] }], 'IN_TRANSIT')).toBe('OPEN')
+    expect(shipmentStatusFromLoads([{ status: 'UNLOADING', carrierStatuses: ['TONU'] }])).toBe('OPEN')
+    // a bounce in the mix, or a delivered load with only bounced carriers, is not the TONU case
+    expect(shipmentStatusFromLoads([{ status: 'DELIVERED', carrierStatuses: ['BOUNCED', 'TONU'] }])).toBe('OPEN')
+    expect(shipmentStatusFromLoads([{ status: 'DELIVERED', carrierStatuses: ['BOUNCED'] }])).toBe('OPEN')
+    // an active carrier decides as it always did
+    expect(shipmentStatusFromLoads([{ status: 'DELIVERED', carrierStatuses: ['TONU', 'ACTIVE'] }])).toBe('DELIVERED')
+    expect(shipmentStatusFromLoads([{ status: 'BOOKED', carrierStatuses: ['TONU', 'ACTIVE'] }])).toBe('BOOKED')
+  })
+
+  it('rolls a delivered TONU leg up with the other legs', () => {
+    expect(shipmentStatusFromLoads([
+      { status: 'DELIVERED', carrierStatuses: ['TONU'] },
+      { status: 'IN_TRANSIT', carrierStatuses: ['ACTIVE'] },
+    ], 'OPEN')).toBe('IN_TRANSIT')
+    expect(shipmentStatusFromLoads([
+      { status: 'DELIVERED', carrierStatuses: ['TONU'] },
+      { status: 'DELIVERED', carrierStatuses: ['ACTIVE'] },
+    ], 'OPEN')).toBe('DELIVERED')
+    // a sticky hold still wins over a delivered TONU
+    expect(shipmentStatusFromLoads([{ status: 'DELIVERED', carrierStatuses: ['TONU'] }], 'ON_HOLD')).toBe('ON_HOLD')
+  })
+
   it('keeps a status a person set, whatever the trucks are doing', () => {
     expect(shipmentStatusFromLoads([{ status: 'IN_TRANSIT' }], 'ON_HOLD')).toBe('ON_HOLD')
     expect(shipmentStatusFromLoads([{ status: 'IN_TRANSIT' }], 'CANCELED')).toBe('CANCELED')
