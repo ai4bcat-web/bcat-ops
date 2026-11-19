@@ -6,8 +6,9 @@
  */
 import type { ToolDef, AssistantBlock, AssistantModel, AssistantMessage } from './assistantModel'
 import { QUERY_IDS } from '../../../src/lib/dashboards/catalog'
+import { DATASET_IDS } from './askData'
 
-export const ASSISTANT_LIMITS = { maxMessages: 20, maxChars: 2000, maxRounds: 5, toolResultChars: 7000 } as const
+export const ASSISTANT_LIMITS = { maxMessages: 20, maxChars: 2000, maxRounds: 6, toolResultChars: 9000 } as const
 /** AppSync cuts a resolver at 30 s; the loop stops asking the model for more at this mark. */
 export const ASSISTANT_BUDGET_MS = 24_000
 /** A further model round needs at least this long left. */
@@ -50,6 +51,10 @@ export function parseAssistantInput(raw: unknown): ParsedInput {
 export interface AssistantTools {
   runQuery(input: Record<string, unknown>): Promise<string>
   findShipment(input: Record<string, unknown>): Promise<string>
+  /** The governed data layer (askData.ts). Optional so a caller without it still gets the first two tools. */
+  describeData?(input: Record<string, unknown>): Promise<string> | string
+  queryData?(input: Record<string, unknown>): Promise<string>
+  fleetPnl?(input: Record<string, unknown>): Promise<string>
 }
 
 const str = { type: 'string' } as const
@@ -93,6 +98,59 @@ export const TOOL_DEFS: ToolDef[] = [
       properties: { number: { ...str, description: 'The shipment / PRO number exactly as the user gave it.' } },
     },
   },
+  {
+    name: 'describe_data',
+    description:
+      'List the datasets you may query with query_data, with their dimensions (what you can group or filter by), metrics, date fields and notes. Call it first when you are not sure a question can be answered, and again with a dataset name to see its fields. Only datasets this user may use are listed.',
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { dataset: { ...str, description: 'One dataset id, to see just that one. Omit to list all.' } },
+    },
+  },
+  {
+    name: 'query_data',
+    description:
+      'Ask a governed question of one dataset: choose metrics, group by up to two dimensions (including day, week or month), filter dimensions, and set a window. Use it for any "how many / how much / by customer, carrier, rep, truck, vendor, month..." question about delivered loads, carrier bills, vendor bills, maintenance, fuel or driver pay. Money is in cents. Totals are returned with the groups.',
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['dataset'],
+      properties: {
+        dataset: { type: 'string', enum: [...DATASET_IDS] },
+        metrics: { ...strList, description: 'Metric names from describe_data. Omit for the dataset default.' },
+        groupBy: { ...strList, description: 'Up to 2 dimension names (or day / week / month).' },
+        filters: {
+          type: 'array',
+          items: { type: 'object', additionalProperties: false, required: ['dim', 'values'], properties: { dim: str, values: strList } },
+          description: 'Each filter keeps rows whose dimension equals or contains any of the values, as the user wrote them.',
+        },
+        window: { ...str, description: 'THIS_MONTH, LAST_MONTH, THIS_QUARTER, LAST_QUARTER, LAST_30_DAYS, LAST_90_DAYS or YEAR_TO_DATE. Leave empty to use from/to. Default THIS_MONTH.' },
+        from: { ...str, description: 'YYYY-MM-DD, with `to`.' },
+        to: { ...str, description: 'YYYY-MM-DD.' },
+        dateField: { ...str, description: 'Which date of the dataset the window and day/week/month use (see describe_data).' },
+        sort: { ...str, description: 'Metric to sort groups by. Default: the first metric (time groupings sort by date).' },
+        order: { ...str, description: 'desc (default) or asc.' },
+        limit: { type: 'number', description: 'Groups to return, 1-50. Default 25.' },
+      },
+    },
+  },
+  {
+    name: 'fleet_pnl',
+    description:
+      'The fleet profit and loss for LOCAL (the Ivan local drivers, box truck included), BOX_TRUCK or AMAZON: revenue, expenses (driver pay, fuel, insurance, truck loans, maintenance, other), net and profit margin, per truck, for a window. Use it for "monthly expenses for local drivers", "what is the margin on the local fleet", "is the fleet profitable". Owner and admin only. It reports where driver pay has not been entered yet.',
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        fleet: { ...str, description: 'LOCAL (default), BOX_TRUCK or AMAZON.' },
+        window: { ...str, description: 'THIS_MONTH, LAST_MONTH, THIS_QUARTER, LAST_QUARTER, LAST_30_DAYS, LAST_90_DAYS or YEAR_TO_DATE. Default THIS_MONTH (cut at today).' },
+        from: { ...str, description: 'YYYY-MM-DD, with `to`, when no preset fits.' },
+        to: { ...str, description: 'YYYY-MM-DD.' },
+        byTruck: { type: 'boolean', description: 'Include the per-truck rows (default true).' },
+      },
+    },
+  },
 ]
 
 export const SYSTEM_PROMPT = `You are the BCAT Ops assistant, built into the dashboard of a freight brokerage and trucking TMS. People ask what is going on in the business and you answer from the data your tools return.
@@ -102,7 +160,10 @@ Rules:
 - You are read-only. You cannot change, send, book, invoice or delete anything; if asked, say so and point to where in the app it is done.
 - Your tools only return what this user is allowed to see. If something is missing or empty, do not claim it does not exist; say you cannot see it with their access.
 - Money in tool results is in cents: show dollars with thousands separators. Show dates as written in the data.
-- Currently you can look up: financial totals and breakdowns, shipment counts and the latest shipments, open receivables and aging, quotes, and a single shipment by number. You cannot yet see carrier details, tracking pings, e-mails, the factoring queue or the intake queue. Say so if asked.
+- You can look up: financial totals and breakdowns, shipment counts and the latest shipments, open receivables and aging, quotes, a single shipment by number (run_query, find_shipment), and a governed data layer: describe_data lists the datasets, query_data asks one of them anything it holds (delivered loads with revenue, cost, profit, miles; carrier bills; vendor bills; maintenance; fuel; driver pay), and fleet_pnl gives the fleet profit and loss. You cannot see tracking pings, e-mails, the factoring queue or the intake queue. Say so if asked.
+- For a question about margin or expenses of the local drivers or any fleet, call fleet_pnl. For any other "by customer / carrier / rep / truck / vendor / month" question, call query_data; if you are unsure what a dataset holds, call describe_data first.
+- State the window and the date basis you used (delivered day, bill date...) in one short clause. When fleet_pnl lists gaps (driver pay not entered, trucks without a fuel card), say so and give the estimate it supplies as an estimate, never as a fact.
+- A tool that says your access does not include something is final: tell the user plainly and do not try to answer it another way.
 - When a name could match more than one customer, rep or business, ask which one.
 - Keep answers short and plain: lead with the answer, then the few numbers that support it. Use a short list or a small table when comparing several rows. No filler, no restating the question.`
 
@@ -161,6 +222,9 @@ export async function assistantTurn(input: AssistantInput, env: AssistantEnv): P
           const args = use.input && typeof use.input === 'object' ? (use.input as Record<string, unknown>) : {}
           if (use.name === 'run_query') out = await env.tools.runQuery(args)
           else if (use.name === 'find_shipment') out = await env.tools.findShipment(args)
+          else if (use.name === 'describe_data' && env.tools.describeData) out = await env.tools.describeData(args)
+          else if (use.name === 'query_data' && env.tools.queryData) out = await env.tools.queryData(args)
+          else if (use.name === 'fleet_pnl' && env.tools.fleetPnl) out = await env.tools.fleetPnl(args)
           else out = `Unknown tool ${use.name}`
         } catch (err) {
           out = `The lookup failed: ${errorText(err, false)}`

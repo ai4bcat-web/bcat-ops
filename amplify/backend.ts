@@ -4462,6 +4462,17 @@ crmFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:PutItem'],
   resources: [abAuditTable.tableArn],
 }))
+// Ask BCAT data tools (query_data / fleet_pnl): Scan-only reads of small tables, never written. Table ARNs only
+// (no /index/*): the role's inline policy has a hard size cap and these reads use no index.
+crmFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:Scan'],
+  resources: [
+    'CarrierBill', 'VendorPayable', 'MaintenanceInvoice', 'FuelTransaction', 'Driver', 'Equipment', 'DriverPayPeriod', 'DriverPayCredit',
+    'DriverPayDeduction', 'DriverPaySetting', 'RecurringExpense', 'ExpenseRecord', 'ExpenseType', 'TruckExpenseAllocation', 'TruckMileage',
+    'InsurancePeriod', 'InsuranceLineItem', 'Load',
+  ].map((m) => stageTables[m].tableArn),
+}))
+
 // CRM_ASSIGN_OWNER's one Customer write (accountOwnerIds only; the Lambda code enforces
 // the attribute). Nothing else on Customer is writable from here.
 crmFn.addToRolePolicy(new PolicyStatement({

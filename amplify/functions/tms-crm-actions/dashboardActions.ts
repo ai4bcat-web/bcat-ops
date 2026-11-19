@@ -35,6 +35,9 @@ import type { Db, Row } from '../_shared/crmStore'
 import { chatTurn, resolveNames } from './dashChat'
 import { assistantTurn, parseAssistantInput, type AssistantTools } from './assistant'
 import { anthropicAssistantModel, type AssistantModel } from './assistantModel'
+import { describeData, queryData, type AskEnv } from './askData'
+import { fleetPnl } from './askFleet'
+import { askSource, type AskSource } from './askSources'
 import { buildSpecFromModel, type ModelOut } from '../../../src/lib/dashboards/modelSchema'
 import { canSeeRow } from '../../../src/lib/dataVisibility'
 import { QueryCommand } from '@aws-sdk/lib-dynamodb'
@@ -86,6 +89,8 @@ export interface DashDeps {
   model: ModelPort
   /** The ops assistant's tool-use model (separate port: it takes tools and returns blocks). */
   assistantModel?: AssistantModel
+  /** Extra raw reads for the assistant's data tools (query_data / fleet_pnl); absent in tests that do not use them. */
+  ask?: AskSource
   /** One shipment row by its PRO number (raw, unfiltered: the caller's visibility is applied by the tool). */
   shipmentByNumber?: (number: string) => Promise<Row | null>
   nowMs: () => number
@@ -102,6 +107,7 @@ export function defaultDashDeps(db: Db): DashDeps {
     store: dashStore(db, table),
     model: anthropicModel(),
     assistantModel: anthropicAssistantModel(),
+    ask: askSource(db),
     shipmentByNumber: async (number) => {
       const shipmentTable = process.env.SHIPMENT_TABLE_NAME
       if (!shipmentTable) throw new Error('SHIPMENT_TABLE_NAME is not configured')
@@ -280,8 +286,32 @@ const SHIPMENT_FACTS = [
   'voidedAt', 'voidReason', 'source', 'revDivision', 'datPostedAt', 'lastNoticeStatus',
 ] as const
 
+/** The governed data layer's environment: the caller's own visibility, plus the small directories. */
+async function askEnv(ctx: Ctx): Promise<AskEnv | null> {
+  const { ask, source } = ctx.deps
+  if (!ask) return null
+  const [customers, divisions, staff] = await Promise.all([source.customers(), source.divisions(), source.staff()])
+  return {
+    ask, viewer: ctx.viewer, customers: new Map(customers.map((c) => [c.id, c])), divisions, staff,
+    today: new Date(ctx.deps.nowMs()).toISOString().slice(0, 10),
+  }
+}
+const ASK_OFF = 'The data tools are not available right now.'
+
 function assistantTools(ctx: Ctx): AssistantTools {
   return {
+    async describeData(input) {
+      const env = await askEnv(ctx)
+      return env ? describeData(env, input) : ASK_OFF
+    },
+    async queryData(input) {
+      const env = await askEnv(ctx)
+      return env ? queryData(env, input) : ASK_OFF
+    },
+    async fleetPnl(input) {
+      const env = await askEnv(ctx)
+      return env ? fleetPnl(env, input) : ASK_OFF
+    },
     async runQuery(input) {
       const { source } = ctx.deps
       const [customers, divisions, staff] = await Promise.all([source.customers(), source.divisions(), source.staff()])
