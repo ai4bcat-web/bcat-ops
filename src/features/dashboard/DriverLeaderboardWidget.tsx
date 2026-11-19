@@ -3,7 +3,7 @@ import { Trophy, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useIsMobile } from '@/hooks/useIsMobile'
-import { listTimeClockEntries, listDispatchConversations } from '@/lib/apiClient'
+import { listTimeClockEntries, listDispatchConversations, listTruckLocations, type TruckLocation } from '@/lib/apiClient'
 import type { DispatchConversation } from '@/lib/dispatch'
 import { whereaboutsOf } from '@/features/dispatch/driverWhereabouts'
 import { weekStartOf, weekEndOf, type TimeClockRow } from '@/lib/timeClock'
@@ -17,7 +17,9 @@ import { errorText } from '@/lib/errorText'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads, useEnsureLoadRange } from '@/hooks/useLoads'
 import { formatApptTime } from '@/lib/date'
+import { driverLocationOf, type DriverLocation } from '@/lib/driverLocation'
 import { PerMileKpis } from './PerMileKpis'
+import { DriverLocationCell } from './DriverLocationCell'
 
 /** "Thu 10/16 · 14:30 · Indianapolis, IN" — when and where the truck goes empty. */
 function emptyLabel(a: LastAppointment): string {
@@ -129,6 +131,28 @@ export function DriverLeaderboardWidget() {
     return m
   }, [convos, drivers, loads, equipment, nowMs])
 
+  // Where each driver is right now, from the truck's ELD fix (else the last stop they reported).
+  // Always "now": it does not follow the week the arrows have stepped to. Refreshed every minute
+  // while the tab is visible, like Dispatch.
+  const [truckLocations, setTruckLocations] = useState<TruckLocation[]>([])
+  // The clock the ages are judged against: stamped when a read lands, never read in render.
+  const [locNow, setLocNow] = useState(() => Date.now())
+  useEffect(() => {
+    let alive = true
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return
+      listTruckLocations().then((rows) => { if (alive) { setTruckLocations(rows); setLocNow(Date.now()) } }).catch(() => undefined)
+    }
+    tick()
+    const t = setInterval(tick, 60_000)
+    return () => { alive = false; clearInterval(t) }
+  }, [])
+  const locationOf = useMemo(() => {
+    const byId = new Map(drivers.map((d) => [d.id, d]))
+    return (driverId: string): DriverLocation | null =>
+      driverLocationOf(byId.get(driverId), loads, equipment, truckLocations, locNow)
+  }, [drivers, loads, equipment, truckLocations, locNow])
+
   // Owner-operators: their last booked stop tells dispatch when and where each goes empty.
   const emptyAt = useMemo(() => {
     const m = new Map<string, LastAppointment>()
@@ -192,7 +216,7 @@ export function DriverLeaderboardWidget() {
             ) : b.rows.length === 0 ? (
               <div style={{ padding: '18px 0', textAlign: 'center', fontSize: 12, color: 'var(--tms-muted)' }}>{b.empty}</div>
             ) : (
-              <Board rows={b.rows} unit={b.unit} detail={
+              <Board rows={b.rows} unit={b.unit} isMobile={isMobile} location={locationOf} detail={
                 b.key === 'oo' ? (r) => { const a = emptyAt.get(r.driverId); return a ? `Empty ${emptyLabel(a)}` : 'No appointment booked' }
                 : b.key === 'local' ? (r) => lastStatus.get(r.driverId) ?? (r.liveSince ? `Clocked in · ${new Date(r.liveSince).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' })}` : 'No check-in from the app yet')
                 : undefined
@@ -208,18 +232,27 @@ export function DriverLeaderboardWidget() {
   )
 }
 
-function Board({ rows, unit, detail }: { rows: LeaderRow[]; unit: 'hours' | 'gross'; detail?: (r: LeaderRow) => string }) {
+function Board({ rows, unit, detail, location, isMobile }: { rows: LeaderRow[]; unit: 'hours' | 'gross'; detail?: (r: LeaderRow) => string; location?: (driverId: string) => DriverLocation | null; isMobile?: boolean }) {
   const top = rows.slice(0, MAX_ROWS)
   const max = top[0]?.value ?? 0
   const fmt = unit === 'hours' ? hours1 : money0
+  // Wide screens: a "Current location" column between the driver and hours / gross.
+  // Narrow screens: the same facts on a line under the driver's name instead.
+  const column = !!location && !isMobile
+  const template = column ? '18px 28px minmax(0, 1fr) minmax(0, 0.8fr) auto' : '18px 28px minmax(0, 1fr) auto'
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {column && (
+        <div style={{ display: 'grid', gridTemplateColumns: template, gap: 8, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>
+          <span /><span /><span>Driver</span><span>Current location</span><span style={{ textAlign: 'right' }}>{unit === 'hours' ? 'Hours' : 'Gross'}</span>
+        </div>
+      )}
       {top.map((r, i) => {
         const medal = i < 3 && r.value > 0
         const color = r.colorKey ? getColor(r.colorKey as never) : undefined
         const initials = r.name.split(/\s+/).map((p) => p[0] ?? '').join('').slice(0, 2).toUpperCase()
         return (
-          <div key={r.driverId} style={{ display: 'grid', gridTemplateColumns: '18px 28px minmax(0, 1fr) auto', alignItems: 'center', gap: 8 }}>
+          <div key={r.driverId} style={{ display: 'grid', gridTemplateColumns: template, alignItems: 'center', gap: 8 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: medal ? MEDALS[i] : 'var(--tms-muted)', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.value > 0 ? i + 1 : '–'}</div>
             <Avatar initials={initials} size="xs" style={color ? { background: color.avatarBg, color: 'var(--tms-on-primary)' } : undefined} />
             <div style={{ minWidth: 0 }}>
@@ -230,10 +263,14 @@ function Board({ rows, unit, detail }: { rows: LeaderRow[]; unit: 'hours' | 'gro
               {detail && (
                 <div style={{ fontSize: 11, color: 'var(--tms-text-2)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail(r)}</div>
               )}
+              {location && isMobile && (
+                <div style={{ marginTop: 1 }}><DriverLocationCell location={location(r.driverId)} variant="line" /></div>
+              )}
               <div style={{ height: 4, borderRadius: 2, background: 'var(--tms-bg)', marginTop: 3, overflow: 'hidden' }}>
                 <div style={{ width: `${max > 0 && r.value > 0 ? Math.max(4, (r.value / max) * 100) : 0}%`, height: '100%', borderRadius: 2, background: medal ? MEDALS[i] : 'var(--tms-primary)', opacity: medal ? 1 : 0.55 }} />
               </div>
             </div>
+            {column && <DriverLocationCell location={location(r.driverId)} variant="column" />}
             <div style={{ fontSize: 13, fontWeight: 700, color: r.value > 0 ? 'var(--tms-text)' : 'var(--tms-muted)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmt(r.value)}</div>
           </div>
         )
