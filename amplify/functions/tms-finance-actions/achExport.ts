@@ -18,6 +18,7 @@ import {
   decryptBankDetails,
   type BankVaultDeps,
 } from '../_shared/bankVault'
+import { buildChaseCsv } from '../_shared/chaseCsv'
 import {
   buildNachaFile,
   isBankBusinessDay,
@@ -276,18 +277,20 @@ export async function exportChaseAch(input: Row, caller: Caller): Promise<Row> {
 
   const { date: fileDate, hhmm } = chicagoNow()
   const { modifier, next } = modifierFor(r.settings.fileSeq, fileDate)
-  const file = buildNachaFile({
+  const fileInput = {
     origin: originOf(r.settings),
     entries: marked.map((row) => row.entry),
     fileDate,
     fileTime: hhmm,
     effectiveDate: r.effectiveDate,
     fileIdModifier: modifier,
-  })
+  }
+  const format: 'NACHA' | 'CSV' = input.format === 'CSV' ? 'CSV' : 'NACHA'
+  const file = format === 'CSV' ? buildChaseCsv(fileInput) : buildNachaFile(fileInput)
   await transact([updateTx(SETTINGS_TABLE_NAME, SETTINGS_ID, { __typename: 'TmsSettings', chaseAch: { ...r.settings, fileSeq: next }, updatedAt: now, updatedBy: caller.email })], 'Chase ACH file counter')
 
   await writeAudit('TmsSettings', SETTINGS_ID, 'EXPORT_CHASE_ACH', caller, {
-    exportId, fileName: file.fileName, entryCount: file.entryCount, totalCents: file.totalCreditCents, effectiveDate: r.effectiveDate,
+    exportId, format, fileName: file.fileName, entryCount: file.entryCount, totalCents: file.totalCreditCents, effectiveDate: r.effectiveDate,
     bills: marked.map((row) => ({ billId: row.billId, pro: row.preview.pro, payee: row.preview.payeeName, last4: row.preview.last4, amountCents: row.entry.amountCents })),
   })
   for (const row of marked) {
@@ -296,6 +299,7 @@ export async function exportChaseAch(input: Row, caller: Caller): Promise<Row> {
 
   return {
     exportId,
+    format,
     fileName: file.fileName,
     fileText: file.text,
     entryCount: file.entryCount,

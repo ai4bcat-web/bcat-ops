@@ -8633,8 +8633,11 @@ export interface ChaseAchPreview {
 export async function previewChaseAch(input: { billIds: string[]; effectiveDate?: string }): Promise<ChaseAchPreview> {
   return financeAction<ChaseAchPreview>('PREVIEW_CHASE_ACH', input)
 }
+/** NACHA is the fixed-width .ach file; CSV is Chase's spreadsheet template for the same payments. */
+export type ChaseAchFormat = 'NACHA' | 'CSV'
 export interface ChaseAchExport {
   exportId: string
+  format?: ChaseAchFormat
   fileName: string
   fileText: string
   entryCount: number
@@ -8643,7 +8646,7 @@ export interface ChaseAchExport {
   exportedBillIds: string[]
   notExported: { billId: string; reason: string }[]
 }
-export async function exportChaseAch(input: { billIds: string[]; effectiveDate?: string; includeAlreadyExported?: boolean }): Promise<ChaseAchExport> {
+export async function exportChaseAch(input: { billIds: string[]; effectiveDate?: string; includeAlreadyExported?: boolean; format?: ChaseAchFormat }): Promise<ChaseAchExport> {
   return financeAction<ChaseAchExport>('EXPORT_CHASE_ACH', input)
 }
 export async function clearChaseAchMark(input: { billIds: string[] }): Promise<{ cleared: string[] }> {
