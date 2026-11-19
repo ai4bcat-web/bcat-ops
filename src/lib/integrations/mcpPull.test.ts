@@ -209,6 +209,41 @@ describe('runBackfillSlice', () => {
     expect(w.audits.some((a) => a.action === 'MCP_CREATE')).toBe(true)
   })
 
+  describe('bank details import (backend-only, off unless the deps supply it)', () => {
+    it('hands the numbers to setBankDetails, once per ACH method, and keeps them out of rows and audit', async () => {
+      const w = world(fleet())
+      const seen: Array<{ carrierId: string; methodId: string; routing: string; account: string }> = []
+      w.deps.setBankDetails = async (carrierId, methodId, bank) => {
+        seen.push({ carrierId, methodId, routing: bank.routingNumber, account: bank.accountNumber })
+        return 'SET'
+      }
+      await runBackfillSlice(w.deps, newPullState('run-b', 'ryne@example.com', '2026-11-03T12:00:00.000Z'), { createUnmatched: true })
+      expect(seen.length).toBeGreaterThan(0)
+      expect(seen.every((s) => s.routing === '999988887777' && s.account === '000011112222')).toBe(true)
+      const methodIds = new Set(w.payments.map((p) => String(p.id)))
+      expect(seen.every((s) => methodIds.has(s.methodId))).toBe(true)
+      // the stored rows and every audit row still carry no number, only the outcome
+      expect(JSON.stringify([...w.payments, ...w.audits, ...w.carriers.values()])).not.toMatch(/000011112222|999988887777/)
+      expect(w.payments.every((p) => !('bank' in p))).toBe(true)
+      expect(JSON.stringify(w.audits)).toContain('"bankDetails":"SET"')
+    })
+
+    it('does nothing when the deps do not supply the import', async () => {
+      const w = world(fleet())
+      expect(w.deps.setBankDetails).toBeUndefined()
+      await runBackfillSlice(w.deps, newPullState('run-c', 'ryne@example.com', '2026-11-03T12:00:00.000Z'), { createUnmatched: true })
+      expect(JSON.stringify(w.audits)).not.toContain('bankDetails')
+    })
+
+    it('reports FAILED, never the error text, when the import throws', async () => {
+      const w = world(fleet())
+      w.deps.setBankDetails = async () => { throw new Error('boom 000011112222') }
+      await runBackfillSlice(w.deps, newPullState('run-d', 'ryne@example.com', '2026-11-03T12:00:00.000Z'), { createUnmatched: true })
+      expect(JSON.stringify(w.audits)).not.toMatch(/000011112222|boom/)
+      expect(JSON.stringify(w.audits)).toContain('"bankDetails":"FAILED"')
+    })
+  })
+
   it('lists instead of creating when creation is off', async () => {
     const w = world(fleet())
     const state = await runBackfillSlice(w.deps, start(), { createUnmatched: false })

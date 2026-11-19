@@ -406,6 +406,8 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
                     methods={bundle.paymentMethods}
                     carrierName={bundle.carrier.name}
                     awaitingPayment={awaitingPayment}
+                    isAdmin={isAdmin}
+                    onBankChanged={async () => { onPaymentMethodsChanged?.(); await refresh() }}
                     onSave={savePaymentMethod}
                     onArchive={async (method) => {
                       try {

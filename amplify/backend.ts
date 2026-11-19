@@ -2957,11 +2957,19 @@ if (SCHEMA_STAGE >= TAX_VAULT_STAGE) {
   const vaultCarrierRole = carrierActionsFn.role!.roleArn
   const vaultMcpRole = (backend.mcpSync.resources.lambda as LambdaFunction).role!.roleArn
   const vaultRoles = [vaultCarrierRole, vaultMcpRole].map((arn) => new ArnPrincipal(arn))
+  // Bank details for the Chase ACH export share this key (field `bankAccount`): carrier-actions and mcp-sync may
+  // Encrypt, only finance-actions may Decrypt, and finance-actions can not touch the `taxId` field.
+  const vaultFinanceRole = (backend.tmsFinanceActions.resources.lambda as LambdaFunction).role!.roleArn
 
   // The encryption context binds a ciphertext to its carrier and its stack: moved to another carrier or another
   // API, Decrypt fails. Every usage statement requires it (field + api pinned, carrierId present, nothing else).
   const contextRequired = {
     StringEquals: { 'kms:EncryptionContext:field': 'taxId', 'kms:EncryptionContext:api': vaultApiId },
+    'ForAllValues:StringEquals': { 'kms:EncryptionContextKeys': ['carrierId', 'field', 'api'] },
+    Null: { 'kms:EncryptionContext:carrierId': 'false' },
+  }
+  const bankContextRequired = {
+    StringEquals: { 'kms:EncryptionContext:field': 'bankAccount', 'kms:EncryptionContext:api': vaultApiId },
     'ForAllValues:StringEquals': { 'kms:EncryptionContextKeys': ['carrierId', 'field', 'api'] },
     Null: { 'kms:EncryptionContext:carrierId': 'false' },
   }
@@ -2987,10 +2995,13 @@ if (SCHEMA_STAGE >= TAX_VAULT_STAGE) {
         adminStatement(),
         new PolicyStatement({ sid: 'EncryptCarrierActionsAndMcpSync', principals: vaultRoles, actions: ['kms:Encrypt'], resources: ['*'], conditions: contextRequired }),
         new PolicyStatement({ sid: 'DecryptCarrierActionsOnly', principals: [vaultRoles[0]], actions: ['kms:Decrypt'], resources: ['*'], conditions: contextRequired }),
-        // An IAM policy elsewhere in the account cannot grant Decrypt: nobody but the one role gets it.
+        new PolicyStatement({ sid: 'EncryptBankDetails', principals: [vaultRoles[0], vaultRoles[1]], actions: ['kms:Encrypt'], resources: ['*'], conditions: bankContextRequired }),
+        new PolicyStatement({ sid: 'DecryptBankDetailsForExport', principals: [new ArnPrincipal(vaultFinanceRole)], actions: ['kms:Decrypt'], resources: ['*'], conditions: bankContextRequired }),
+        // An IAM policy elsewhere in the account cannot grant Decrypt: only these two roles get it, each for its own
+        // field (the Allow statements above pin the field: carrier-actions taxId, finance-actions bankAccount).
         new PolicyStatement({
           sid: 'DenyDecryptExceptCarrierActions', effect: Effect.DENY, principals: [new AnyPrincipal()], actions: ['kms:Decrypt'], resources: ['*'],
-          conditions: { ArnNotEquals: { 'aws:PrincipalArn': vaultCarrierRole } },
+          conditions: { ArnNotEquals: { 'aws:PrincipalArn': [vaultCarrierRole, vaultFinanceRole] } },
         }),
       ],
     }),

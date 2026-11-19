@@ -68,6 +68,7 @@ import { SetBillDatesDialog } from './components/SetBillDatesDialog'
 import { UpdateCarrierChargesDialog } from './components/UpdateCarrierChargesDialog'
 import { BillDrawer } from './components/BillDrawer'
 import { DeleteBillDialog } from './components/DeleteBillDialog'
+import { ChaseAchDialog } from './components/ChaseAchDialog'
 import { ApReportDialog } from './components/ApReportDialogs'
 import { ApAgingReportTable } from './components/ApAgingReportTable'
 import { CashRequirementsTab } from './components/CashRequirementsTab'
@@ -136,6 +137,8 @@ type ApDialog =
   | { kind: 'credit'; carrierId: string }
   | { kind: 'remittance'; payment: ApPaymentRecord }
   | { kind: 'delete'; bill: CarrierBillRecord }
+  /** Owner/ADMIN: the Chase ACH file for these Selected-tab bills. */
+  | { kind: 'chase-ach'; billIds: string[] }
   | { kind: 'unapprove'; bill: CarrierBillRecord }
   | { kind: 'reverse'; payment: ApPaymentRecord }
   | { kind: 'payinfo'; bill: CarrierBillRecord }
@@ -633,6 +636,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         : runSelect([bill.id])),
       onAddRemit: addRemitFor,
       onPayTo: payToFor,
+      onChaseAch: isAdmin ? (ids) => setDialog({ kind: 'chase-ach', billIds: ids }) : null,
     })
     : tab === 'paid' ? paidView({
       banner: errorBanner,
@@ -882,6 +886,13 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           payment={dialog.payment}
           onOpenChange={(o) => { if (!o) setDialog(null) }}
           onDone={closeAndRefresh}
+        />
+      )}
+      {dialog?.kind === 'chase-ach' && isAdmin && (
+        <ChaseAchDialog
+          billIds={dialog.billIds}
+          onClose={() => setDialog(null)}
+          onDone={() => { void refreshAll() }}
         />
       )}
       {dialog?.kind === 'delete' && (
@@ -1221,6 +1232,27 @@ function daysPastDueColumn(asOf: string): ApColumn<CarrierBillRecord> {
 }
 
 /** Carrier pay (gross) and the terms it is paid on — quick pay or standard. */
+/**
+ * Owner/ADMIN only: whether the payee's ACH account is on file for the Chase file, and whether the bill already went
+ * in one. Never a number: only the "on file" mark the carrier's payment method carries.
+ */
+function bankDetailsColumn(infos: readonly CarrierPaymentInfo[]): ApColumn<CarrierBillRecord> {
+  const stateOf = (bill: CarrierBillRecord): string => {
+    const info = paymentInfoFor(bill, infos)
+    if (!info || info.method !== 'ACH') return 'Not ACH'
+    return info.bankDetailsOnFileAt ? 'On file' : 'Missing'
+  }
+  return facetCol<CarrierBillRecord>('bankDetails', 'BANK DETAILS', stateOf, (bill) => {
+    const state = stateOf(bill)
+    return (
+      <span className="whitespace-nowrap">
+        {state === 'On file' ? <TmsBadge tone="green">On file</TmsBadge> : state === 'Missing' ? <TmsBadge tone="orange">Missing</TmsBadge> : <span className="tms-muted">—</span>}
+        {bill.achExportedAt ? <> <TmsBadge tone="gray" title={`Exported to Chase ${bill.achExportedAt.slice(0, 10)}`}>Exported {bill.achExportedAt.slice(5, 10)}</TmsBadge></> : null}
+      </span>
+    )
+  }, { extraPx: 70 })
+}
+
 function payColumns(): ApColumn<CarrierBillRecord>[] {
   return [
     moneyCol<CarrierBillRecord>('carrierPay', 'CARRIER PAY', (bill) => bill.grossCents, (bill) => (
@@ -1473,7 +1505,7 @@ function reviewView({
 function payableView({
   mode, errorBanner, facts, onOpen, bills, allBills, shared, infos, review, gatesOf, filters, showFilters, selected, asOf, busy,
   onToggleFilters, onFilters, onSelect, onInfo, onPay, onPaySelected, onApprove, onDates, onCharges, onDelete, onUnapprove,
-  onSelectForPayment, onUnselect, onReturnToExpected, onMoveToSelected, onAddRemit, onPayTo,
+  onSelectForPayment, onUnselect, onReturnToExpected, onMoveToSelected, onAddRemit, onPayTo, onChaseAch,
 }: {
   mode: 'aging' | 'selected'
   errorBanner: ReactNode
@@ -1508,6 +1540,8 @@ function payableView({
   onMoveToSelected: (bill: CarrierBillRecord) => void
   onAddRemit: (bill: CarrierBillRecord) => void
   onPayTo: (bill: CarrierBillRecord) => void
+  /** Owner/ADMIN only: opens the Chase ACH file dialog for the bills; null hides the button and the bank column. */
+  onChaseAch: ((ids: string[]) => void) | null
 }): ListView {
   // One payment is one carrier's: a selection spanning two of them cannot be posted as
   // one row, and the button says so instead of failing in the dialog.
@@ -1596,6 +1630,7 @@ function payableView({
       <span className={`${RIGHT} font-medium`}>{formatCents(bill.balanceCents)}</span>
     )),
     ...payeeColumns(infos, onInfo, onAddRemit, onPayTo),
+    ...(onChaseAch && mode === 'selected' ? [bankDetailsColumn(infos)] : []),
     {
       key: 'gates',
       header: GATES_HEADER,
@@ -1821,6 +1856,18 @@ function payableView({
             >
               {AP_ACTION_COPY.recordPayment.label}
             </TmsButton>
+            {onChaseAch && (
+              <TmsButton
+                size="sm"
+                variant="ghost"
+                aria-label="Export Chase ACH file"
+                title="A bank file for the ACH carriers on this tab, to upload at chase.com. Ticked bills only if any are ticked, else all."
+                disabled={busy || allBills.length === 0}
+                onClick={() => onChaseAch(selected.length > 0 ? selected : allBills.map((b) => b.id))}
+              >
+                <Download size={14} aria-hidden="true" /> Chase ACH file
+              </TmsButton>
+            )}
             <TmsButton
               size="sm"
               variant="ghost"

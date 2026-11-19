@@ -562,6 +562,8 @@ export interface TmsSettings {
   remittanceCcEmails?: string[] | null
   /** Carrier paperwork a bill needs before approval. Defaults to `requiredCarrierUploadTypes`. */
   apBillDocsRequired?: string[] | null
+  /** Where the Chase ACH file comes from (company name, 10-digit company id, Chase routing number, CCD/PPD). Admin-written. */
+  chaseAch?: { companyName?: string; companyId?: string; odfiRouting?: string; secCode?: 'CCD' | 'PPD'; entryDescription?: string } | null
 
   // ── Quotes & rates (Step H) ────────────────────────────────────────────────
   /** Hours a customer gets to answer a quote, when the customer has not said. Default 24. */
@@ -2600,6 +2602,9 @@ export interface CarrierPaymentMethodRecord {
   accountLast4?: string | null
   routingLast4?: string | null
   bankDetailsKey?: string | null
+  /** Set when the full routing + account numbers are on file (encrypted server-side, never sent to a browser). */
+  bankDetailsOnFileAt?: string | null
+  bankAccountType?: 'CHECKING' | 'SAVINGS' | null
   payeeEmail?: string | null
   remitToAddress?: Record<string, unknown> | null
   isPreferred?: boolean | null
@@ -3446,6 +3451,10 @@ export interface CarrierBillRecord {
   archivedAt?: string | null
   archivedBy?: string | null
   archivedReason?: string | null
+  /** Last time this bill went into a Chase ACH file (a mark, not a payment). */
+  achExportedAt?: string | null
+  achExportedBy?: string | null
+  achExportId?: string | null
   note?: string | null
   createdBy: string
   updatedBy: string

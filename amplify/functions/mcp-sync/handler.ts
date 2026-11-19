@@ -26,15 +26,25 @@ import { fetchMcpCarrierRaw, listCarrierChanges, listCompletedPackets, listMonit
 import { mcpSyncRefusal, mcpUpdateItem } from '../../../src/lib/integrations/mcpBatchSync'
 import { normalizeMcpProfile } from '../../../src/lib/integrations/mcpProfile'
 import { vaultDepsFromEnv, setTaxIdFromMcp, TaxIdError } from '../_shared/taxVault'
+import { bankVaultDepsFromEnv, encryptBankDetails, normalizeBankDetails, BankVaultError, type BankVaultDeps } from '../_shared/bankVault'
 import { advanceAfterCarrierActive, type LadderDeps } from '../../../src/lib/integrations/mcpLadder'
 import {
   addCarrierFromMcp, newPullState, pullOneCarrier, runBackfillSlice, runChangesPoll, MCP_PULL_ACTOR,
-  type McpPullDeps, type McpPullState, type TaxIdOutcome,
+  type BankImportOutcome, type McpPullDeps, type McpPullState, type TaxIdOutcome,
 } from '../../../src/lib/integrations/mcpPull'
 
 const ssm = new SSMClient({})
 const rawDdb = new DynamoDBClient({})
 let mcpVault: ReturnType<typeof vaultDepsFromEnv> | null = null
+let mcpBankVault: BankVaultDeps | null = null
+/**
+ * Bank-details import for the Chase ACH export. OFF unless an operator's invocation says otherwise
+ * (`bankImport: 'DRY'` counts what would be written; `'ON'` writes). The scheduled poll never imports.
+ * The counters hold numbers of rows only; nothing here may log or return an account or routing number.
+ */
+type BankImportMode = 'OFF' | 'DRY' | 'ON'
+let bankImportMode: BankImportMode = 'OFF'
+const bankImportCounts = { wouldSet: 0, set: 0, unchanged: 0, invalid: 0, failed: 0 }
 const ddb = DynamoDBDocumentClient.from(rawDdb, { marshallOptions: { removeUndefinedValues: true } })
 
 const CARRIER_TABLE_NAME = process.env.CARRIER_TABLE_NAME ?? ''
@@ -247,6 +257,39 @@ function pullDeps(credentials: Record<string, string>): McpPullDeps {
         throw err
       }
     },
+    // MCP's routing + account number go to the encrypted bank vault, never onto the item in the clear. Mode OFF leaves
+    // the dep undefined, so the numbers are dropped exactly as before. A number a person typed in is never replaced.
+    ...(bankImportMode === 'OFF' ? {} : {
+      setBankDetails: async (carrierId: string, methodId: string, bank: { routingNumber: string; accountNumber: string }): Promise<BankImportOutcome> => {
+        let details
+        try {
+          details = normalizeBankDetails({ routingNumber: bank.routingNumber, accountNumber: bank.accountNumber, accountType: 'CHECKING' })
+        } catch (err) {
+          if (err instanceof BankVaultError) { bankImportCounts.invalid++; return 'INVALID' }
+          throw err
+        }
+        const got = await ddb.send(new GetCommand({ TableName: PAYMENT_TABLE_NAME, Key: { id: methodId }, ConsistentRead: true }))
+        const row = got.Item as Row | undefined
+        if (row?.bankCipher != null) { bankImportCounts.unchanged++; return 'UNCHANGED' }
+        if (bankImportMode === 'DRY') { bankImportCounts.wouldSet++; return 'WOULD_SET' }
+        const cipher = await encryptBankDetails((mcpBankVault ??= bankVaultDepsFromEnv()), { carrierId, methodId }, details)
+        const now = new Date().toISOString()
+        try {
+          await ddb.send(new UpdateCommand({
+            TableName: PAYMENT_TABLE_NAME,
+            Key: { id: methodId },
+            ConditionExpression: 'attribute_exists(id) AND attribute_not_exists(bankCipher)',
+            UpdateExpression: 'SET bankCipher = :c, bankDetailsOnFileAt = :n, bankAccountType = :t, accountLast4 = :a, routingLast4 = :r, updatedBy = :u, updatedAt = :n',
+            ExpressionAttributeValues: { ':c': cipher, ':n': now, ':t': 'CHECKING', ':a': details.accountLast4, ':r': details.routingLast4, ':u': MCP_PULL_ACTOR },
+          }))
+        } catch (err) {
+          if (err instanceof ConditionalCheckFailedException) { bankImportCounts.unchanged++; return 'UNCHANGED' }
+          throw err
+        }
+        bankImportCounts.set++
+        return 'SET'
+      },
+    }),
     listMonitored: (page, size) => listMonitoredCarriers(page, size, credentials),
     fetchProfile: async (ref) => {
       const raw = await fetchMcpCarrierRaw(ref, credentials)
@@ -288,8 +331,8 @@ async function gate(): Promise<{ credentials: Record<string, string>; createUnma
 
 // ── Invocations ──────────────────────────────────────────────────────────────
 
-interface PullAllEvent { kind: 'PULL_ALL'; startedBy?: string; restart?: boolean }
-interface PullOneEvent { kind: 'PULL_ONE'; carrierId: string }
+interface PullAllEvent { kind: 'PULL_ALL'; startedBy?: string; restart?: boolean; bankImport?: BankImportMode }
+interface PullOneEvent { kind: 'PULL_ONE'; carrierId: string; bankImport?: BankImportMode }
 interface AddCarrierEvent { kind: 'ADD_CARRIER'; mcNumber?: string; dotNumber?: string }
 interface ImportBatchEvent { kind: 'IMPORT_BATCH'; carrierIds?: string[]; maxLookups?: number; cursor?: { lastCarrierId?: string } | null }
 type Event = PullAllEvent | PullOneEvent | AddCarrierEvent | ImportBatchEvent | { kind?: undefined }
@@ -384,6 +427,18 @@ async function importBatch(event: ImportBatchEvent) {
 }
 
 export const handler = async (event?: Event) => {
+  bankImportMode = 'bankImport' in (event ?? {}) && ((event as { bankImport?: BankImportMode }).bankImport === 'DRY' || (event as { bankImport?: BankImportMode }).bankImport === 'ON')
+    ? (event as { bankImport: BankImportMode }).bankImport
+    : 'OFF'
+  Object.assign(bankImportCounts, { wouldSet: 0, set: 0, unchanged: 0, invalid: 0, failed: 0 })
+  try {
+    return await dispatch(event)
+  } finally {
+    if (bankImportMode !== 'OFF') console.log(`[mcp-sync] bank import ${bankImportMode}: ${JSON.stringify(bankImportCounts)}`)
+  }
+}
+
+async function dispatch(event?: Event) {
   switch (event?.kind) {
     case 'IMPORT_BATCH': return importBatch(event)
     case 'PULL_ONE': return pullOne(event)

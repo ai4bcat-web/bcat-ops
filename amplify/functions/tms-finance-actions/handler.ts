@@ -14,6 +14,7 @@
  */
 import './tableEnv'
 import { parseInput, type Caller } from '../_shared/actionInputs'
+import { clearChaseAchMark, exportChaseAch, previewChaseAch, saveChaseAchSettings } from './achExport'
 import {
   batchEmail,
   batchGenerate,
@@ -139,6 +140,10 @@ type Action =
   | 'SAVE_AP_SETTINGS'
   | 'ARCHIVE_AP_PAYMENTS_THROUGH'
   | 'UNARCHIVE_AP_PAYMENTS'
+  | 'SAVE_CHASE_ACH_SETTINGS'
+  | 'PREVIEW_CHASE_ACH'
+  | 'EXPORT_CHASE_ACH'
+  | 'CLEAR_CHASE_ACH_MARK'
   | 'RUN_COMMISSIONS'
   | 'PREVIEW_COMMISSIONS'
   | 'APPROVE_COMMISSION'
@@ -194,6 +199,10 @@ const AP_ACTIONS: Record<string, true> = {
   SAVE_AP_SETTINGS: true,
   ARCHIVE_AP_PAYMENTS_THROUGH: true,
   UNARCHIVE_AP_PAYMENTS: true,
+  SAVE_CHASE_ACH_SETTINGS: true,
+  PREVIEW_CHASE_ACH: true,
+  EXPORT_CHASE_ACH: true,
+  CLEAR_CHASE_ACH_MARK: true,
 }
 
 /** Settings are an admin act in every router here, posting rule or not. */
@@ -205,6 +214,11 @@ const ADMIN_ONLY_ACTIONS: Record<string, true> = {
   // Hiding years of payment history is an admin act, never a page one.
   ARCHIVE_AP_PAYMENTS_THROUGH: true,
   UNARCHIVE_AP_PAYMENTS: true,
+  // A bank file carries every payee's account number: owner or ADMIN only, not the whole AP page.
+  SAVE_CHASE_ACH_SETTINGS: true,
+  PREVIEW_CHASE_ACH: true,
+  EXPORT_CHASE_ACH: true,
+  CLEAR_CHASE_ACH_MARK: true,
 }
 
 /**
@@ -395,6 +409,14 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return markRemittanceSent(input, caller)
     case 'SAVE_AP_SETTINGS':
       return saveApSettings(input, caller)
+    case 'SAVE_CHASE_ACH_SETTINGS':
+      return saveChaseAchSettings(input, caller)
+    case 'PREVIEW_CHASE_ACH':
+      return previewChaseAch(input)
+    case 'EXPORT_CHASE_ACH':
+      return exportChaseAch(input, caller)
+    case 'CLEAR_CHASE_ACH_MARK':
+      return clearChaseAchMark(input, caller)
     case 'ARCHIVE_AP_PAYMENTS_THROUGH':
       return archiveApPaymentsThrough(input, caller)
     case 'UNARCHIVE_AP_PAYMENTS':
