@@ -1,14 +1,17 @@
 /**
  * The files a draft invoice goes out with: its POD and the customer's rate confirmation (Ryne, 2026-11-18). Each shows what is on
- * file with a Replace, or an Add when none is. A replacement is filed and the old file is kept as history (SUPERSEDED, audited on the
+ * file with a Preview (in place, internal viewing only) and a Replace, or an Add when none is. A replacement is filed and the old file is kept as history (SUPERSEDED, audited on the
  * shipment); the invoice preview and the list's POD / RC chips follow. Only these two kinds: BCAT's own rate confirmation to a carrier
  * holds carrier pay, is never part of an invoice and is neither shown nor offered here. Read-only once the invoice has gone out.
  */
 import { useEffect, useState } from 'react'
-import { Plus, RefreshCw } from 'lucide-react'
+import { Eye, Plus, RefreshCw } from 'lucide-react'
+import { toast } from 'sonner'
 import { TmsAlert, TmsBadge, TmsButton } from '@/features/tms/kit'
 import { UploadDocumentDialog } from '@/features/shipments/components/UploadDocumentDialog'
-import { getShipmentBundle, graphqlErrorText } from '@/lib/apiClient'
+import { getShipmentBundle, getShipmentDocumentUrl, graphqlErrorText } from '@/lib/apiClient'
+import { getDriverDocUrl } from '@/lib/driverSubmissionsClient'
+import { DocumentPreview } from '@/features/documents/DocumentPreview'
 import { isCustomerRateCon, type InvoiceAttachmentPlanRow } from '@/lib/invoiceDelivery'
 import { formatDateTime } from '@/lib/date'
 import type { FactoringItem } from '@/types'
@@ -33,6 +36,7 @@ export function InvoiceFilesPanel({ invoice, factoringItem, plan, onChanged }: {
   const [error, setError] = useState<string | null>(null)
   const [dialog, setDialog] = useState<Dialog>(null)
   const [epoch, setEpoch] = useState(0)
+  const [preview, setPreview] = useState<{ doc: ShipmentDocumentRecord; url: string | null } | null>(null)
   const own = useInvoiceAttachmentPlans(plan ? [] : [invoice.id])
   const mine = plan ?? own.plans.get(invoice.id)
   const lockedReason = docsLockedReason(invoice, factoringItem ?? null)
@@ -55,12 +59,27 @@ export function InvoiceFilesPanel({ invoice, factoringItem, plan, onChanged }: {
   const podNeeded = mine?.pod !== 'NOT_INCLUDED'
   const rateConApplies = mine?.rateCon !== 'NOT_INCLUDED'
 
+  // Internal viewing only: opening a file here changes nothing about what the invoice or its e-mail carries.
+  const openPreview = async (doc: ShipmentDocumentRecord) => {
+    setPreview({ doc, url: null })
+    try {
+      const url = doc.source === 'DRIVER_APP' ? await getDriverDocUrl(doc.s3Key) : await getShipmentDocumentUrl(doc.s3Key)
+      setPreview((open) => (open && open.doc.id === doc.id ? { doc, url } : open))
+    } catch (err) {
+      setPreview(null)
+      toast.error(err instanceof Error ? err.message : 'Could not open that file')
+    }
+  }
+
   const saved = () => { setDialog(null); setEpoch((n) => n + 1); if (!plan) own.refresh(); onChanged() }
 
   const row = (doc: ShipmentDocumentRecord) => (
     <li key={doc.id} className="ifp-row" data-testid={`invoice-file-${doc.id}`}>
       <span className="ifp-name" title={doc.name}>{doc.name}</span>
       <span className="tms-muted text-xs">{doc.uploadedBy} · {formatDateTime(doc.uploadedAt)}</span>
+      <TmsButton size="sm" aria-label={`Preview ${doc.name}`} onClick={() => { void openPreview(doc) }}>
+        <Eye size={13} />Preview
+      </TmsButton>
       {!lockedReason && (
         <TmsButton size="sm" aria-label={`Replace ${doc.name}`} onClick={() => setDialog({ type: doc.type, replaces: doc })}>
           <RefreshCw size={13} />Replace
@@ -90,6 +109,17 @@ export function InvoiceFilesPanel({ invoice, factoringItem, plan, onChanged }: {
       {section('POD', 'POD', pods, podNeeded, 'No POD is on file for this load.', 'This customer does not need a POD on its invoices.')}
       {section('Rate confirmation', 'RATE_CON', rateCons, rateConApplies, "No customer rate confirmation is on file for this load.", "The customer's rate confirmation is not attached to this customer's invoices.")}
       {!lockedReason && <p className="tms-muted text-xs">A replaced file stays on the shipment as history. The invoice below and its e-mail use the new one.</p>}
+      {preview && (
+        <DocumentPreview
+          open
+          onClose={() => setPreview(null)}
+          title={preview.doc.name}
+          subtitle={`${preview.doc.uploadedBy} · ${formatDateTime(preview.doc.uploadedAt)}`}
+          url={preview.url}
+          contentType={preview.doc.contentType}
+          downloadName={preview.doc.name}
+        />
+      )}
       {dialog && (
         <UploadDocumentDialog
           bundle={bundle}

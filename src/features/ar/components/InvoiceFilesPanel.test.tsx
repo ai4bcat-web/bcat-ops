@@ -4,12 +4,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import type { InvoiceRecord, ShipmentBundle } from '@/types/tms'
 import type { InvoiceAttachmentPlanRow } from '@/lib/invoiceDelivery'
 
-const mocks = vi.hoisted(() => ({ bundle: vi.fn(), prepare: vi.fn(), put: vi.fn(), commit: vi.fn(), voidDoc: vi.fn(), plans: vi.fn() }))
+const mocks = vi.hoisted(() => ({ bundle: vi.fn(), prepare: vi.fn(), put: vi.fn(), commit: vi.fn(), voidDoc: vi.fn(), plans: vi.fn(), url: vi.fn() }))
 vi.mock('@/lib/apiClient', () => ({
   getShipmentBundle: mocks.bundle, prepareDocumentUpload: mocks.prepare, putPresignedFile: mocks.put, commitDocument: mocks.commit,
-  voidDocument: mocks.voidDoc, getInvoiceAttachmentPlans: mocks.plans, graphqlErrorText: (e: unknown) => String(e),
+  voidDocument: mocks.voidDoc, getShipmentDocumentUrl: mocks.url, getInvoiceAttachmentPlans: mocks.plans, graphqlErrorText: (e: unknown) => String(e),
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() } }))
+vi.mock('@/lib/driverSubmissionsClient', () => ({ getDriverDocUrl: vi.fn() }))
 import { InvoiceFilesPanel } from './InvoiceFilesPanel'
 
 const doc = (over: Record<string, unknown>) => ({
@@ -44,6 +45,24 @@ beforeEach(() => {
 })
 
 describe('InvoiceFilesPanel', () => {
+  it('Preview opens the POD and the rate confirmation in place, with a presigned url, and changes nothing', async () => {
+    mocks.url.mockResolvedValue('https://s3/signed')
+    const onChanged = vi.fn()
+    render(<InvoiceFilesPanel invoice={invoice()} plan={plan()} onChanged={onChanged} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview POD 20073.pdf' }))
+    await waitFor(() => expect(mocks.url).toHaveBeenCalledWith('k'))
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview Customer rate con.pdf' }))
+    await waitFor(() => expect(mocks.url).toHaveBeenCalledTimes(2))
+    expect(mocks.commit).not.toHaveBeenCalled()
+    expect(onChanged).not.toHaveBeenCalled()
+  })
+
+  it('Preview stays available once the invoice has gone out (read-only for Replace only)', async () => {
+    render(<InvoiceFilesPanel invoice={invoice({ status: 'PAID', paidCents: 110000, balanceCents: 0 })} plan={plan()} onChanged={vi.fn()} />)
+    expect(await screen.findByRole('button', { name: 'Preview POD 20073.pdf' })).toBeTruthy()
+  })
+
   it('lists the active POD and the customer rate confirmation only: never BCAT or carrier rate cons, nor retired files', async () => {
     render(<InvoiceFilesPanel invoice={invoice()} plan={plan()} onChanged={vi.fn()} />)
     expect(await screen.findByTestId('invoice-file-pod-1')).toBeTruthy()
