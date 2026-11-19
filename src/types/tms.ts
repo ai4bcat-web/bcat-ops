@@ -2427,7 +2427,7 @@ export type CarrierContactType =
   | 'EMERGENCY'
   | 'MANAGER'
   | 'OWNER'
-export type CarrierPaymentMethodKind = 'ACH' | 'WIRE' | 'CHECK' | 'ZELLE' | 'VENMO' | 'EFT'
+export type CarrierPaymentMethodKind = 'ACH' | 'WIRE' | 'CHECK' | 'ZELLE' | 'VENMO' | 'EFT' | 'CARD'
 export type CarrierPayeeType = 'CARRIER' | 'FACTOR'
 export type CarrierDocumentType =
   | 'AUTHORITY'

@@ -12,10 +12,14 @@ import { CityInput, TmsBadge, TmsButton, TmsField, TmsIconButton, TmsInput, TmsS
 import { useAddressAutofill } from '@/hooks/useAddressAutofill'
 import { getFactorRemitEmails } from '@/lib/apiClient'
 import { canonicalFactorName, factorEmailFor, type FactorRemitMap } from '@/lib/factorRemit'
+import { looksLikeCardNumber } from '@/lib/cardNumber'
 import { formatCents } from '@/lib/invoiceBuild'
 import type { CarrierPayeeType, CarrierPaymentMethodKind, CarrierPaymentMethodRecord } from '@/types/tms'
 
-const METHODS: CarrierPaymentMethodKind[] = ['ACH', 'WIRE', 'CHECK', 'ZELLE', 'VENMO', 'EFT']
+const METHODS: CarrierPaymentMethodKind[] = ['ACH', 'WIRE', 'CHECK', 'ZELLE', 'VENMO', 'EFT', 'CARD']
+const METHOD_LABEL: Record<CarrierPaymentMethodKind, string> = {
+  ACH: 'ACH', WIRE: 'WIRE', CHECK: 'CHECK', ZELLE: 'ZELLE', VENMO: 'VENMO', EFT: 'EFT', CARD: 'Credit card',
+}
 const PAYEE_TYPES: CarrierPayeeType[] = ['CARRIER', 'FACTOR']
 
 export interface CarrierPaymentDraft {
@@ -154,6 +158,10 @@ function PaymentRow({ method, factorEmails, carrierName, disabled, onSave, onArc
       setError('Enter only the last four digits — never the full number.')
       return
     }
+    if (kind === 'CARD' && [bankName, accountName, accountLast4, payeeEmail].some(looksLikeCardNumber)) {
+      setError('That looks like a full card number. Never enter one here — only the last four digits.')
+      return
+    }
     setBusy(true)
     setError(null)
     const hasAddress = Boolean(street || city || state || zip)
@@ -168,7 +176,7 @@ function PaymentRow({ method, factorEmails, carrierName, disabled, onSave, onArc
         bankName: bankName.trim() || null,
         accountName: accountName.trim() || null,
         accountLast4: accountLast4.trim() || null,
-        routingLast4: routingLast4.trim() || null,
+        routingLast4: kind === 'CARD' ? null : routingLast4.trim() || null,
         payeeEmail: payeeEmail.trim() || null,
         remitToAddress: hasAddress
           ? { street: street.trim(), city: city.trim(), state: state.trim(), zip: zip.trim() }
@@ -192,7 +200,7 @@ function PaymentRow({ method, factorEmails, carrierName, disabled, onSave, onArc
             disabled={disabled}
             onChange={(e) => setKind(e.target.value as CarrierPaymentMethodKind)}
           >
-            {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+            {METHODS.map((m) => <option key={m} value={m}>{METHOD_LABEL[m]}</option>)}
           </TmsSelect>
         </TmsField>
         <TmsField label="Pay to">
@@ -224,15 +232,22 @@ function PaymentRow({ method, factorEmails, carrierName, disabled, onSave, onArc
       </div>
 
       <div className="tms-grid tms-grid-4 mt-3">
-        <TmsField label="Bank">
+        {kind === 'CARD' && (
+          <p className="tms-muted" style={{ gridColumn: '1 / -1', fontSize: 12 }} data-testid="card-method-note">
+            Marks that this carrier takes a credit card. Never enter the full card number, expiry or CVV; at most the last four digits.
+          </p>
+        )}
+        <TmsField label={kind === 'CARD' ? 'Card issuer (optional)' : 'Bank'}>
           <TmsInput aria-label="Bank" value={bankName} disabled={disabled} onChange={(e) => setBankName(e.target.value)} />
         </TmsField>
-        <TmsField label="Account last 4">
+        <TmsField label={kind === 'CARD' ? 'Card last 4 (optional)' : 'Account last 4'}>
           <TmsInput aria-label="Account last 4" maxLength={4} value={accountLast4} disabled={disabled} onChange={(e) => setAccountLast4(e.target.value)} />
         </TmsField>
-        <TmsField label="Routing last 4">
-          <TmsInput aria-label="Routing last 4" maxLength={4} value={routingLast4} disabled={disabled} onChange={(e) => setRoutingLast4(e.target.value)} />
-        </TmsField>
+        {kind !== 'CARD' && (
+          <TmsField label="Routing last 4">
+            <TmsInput aria-label="Routing last 4" maxLength={4} value={routingLast4} disabled={disabled} onChange={(e) => setRoutingLast4(e.target.value)} />
+          </TmsField>
+        )}
         <TmsField label="Payee email">
           {inheritedEmail ? (
             <span data-testid="factor-remit-inherited">
