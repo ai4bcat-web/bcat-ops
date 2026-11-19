@@ -260,6 +260,7 @@ export function ApproveBillDialog({ bill, open, onOpenChange, onDone }: {
         open
         onOpenChange={setPayToOpen}
         onChanged={() => { setLoading(true); load() }}
+        canEditBank
       />
     )}
     </>

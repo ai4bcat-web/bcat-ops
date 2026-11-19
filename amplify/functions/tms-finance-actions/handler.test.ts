@@ -4162,3 +4162,23 @@ describe('bills whose assignment carries no invoiceId (Aljex carry-over bills)',
     expect(table(TABLES.apPayment).size).toBe(0)
   })
 })
+
+describe('Chase ACH file access (Ryne 2026-11-19: the Accounts payable page runs it; the company settings stay with the owner)', () => {
+  const forbidden = (p: Promise<unknown>) => p.then(() => false, (e: Error) => /Forbidden/.test(e.message))
+
+  it('opens the preview, export and clear-mark actions to an Accounts payable user', async () => {
+    for (const action of ['PREVIEW_CHASE_ACH', 'EXPORT_CHASE_ACH', 'CLEAR_CHASE_ACH_MARK']) {
+      expect(await forbidden(call(action, { billIds: [] }, AP_USER))).toBe(false)
+    }
+  })
+
+  it('keeps the Chase company settings owner or ADMIN only', async () => {
+    await expect(call('SAVE_CHASE_ACH_SETTINGS', {}, AP_USER)).rejects.toThrow(/requires owner or ADMIN/)
+  })
+
+  it('keeps the bank file away from a user who does not hold the Accounts payable page', async () => {
+    for (const action of ['PREVIEW_CHASE_ACH', 'EXPORT_CHASE_ACH', 'CLEAR_CHASE_ACH_MARK']) {
+      expect(await forbidden(call(action, { billIds: [] }, BILLER))).toBe(true)
+    }
+  })
+})

@@ -62,6 +62,7 @@ import {
   redactBankNumbers,
   type BankVaultDeps,
 } from '../_shared/bankVault'
+import { hasAccountingPage } from '../../../src/lib/accountingAccess'
 
 import {
   CARRIER_STATUSES,
@@ -225,12 +226,17 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
     SET_TAX_ID: true,
     REVEAL_TAX_ID: true,
     CLEAR_TAX_ID: true,
-    // The numbers a bank file is built from: owner or ADMIN only.
-    SET_BANK_DETAILS: true,
-    CLEAR_BANK_DETAILS: true,
   }
 
-  if (adminActions[action]) {
+  // The numbers a bank file is built from: owner, ADMIN or anyone holding the Accounts payable page (Ryne 2026-11-19:
+  // Jenny enters them). Carrier-page and TMS-page holders without that grant do not.
+  const bankActions: Partial<Record<Action, true>> = { SET_BANK_DETAILS: true, CLEAR_BANK_DETAILS: true }
+
+  if (bankActions[action]) {
+    if (!isAdmin && !hasAccountingPage(groups, email, 'carrierPay')) {
+      throw new Error(`Forbidden: ${action} requires owner, ADMIN or the Accounts payable page`)
+    }
+  } else if (adminActions[action]) {
     if (!isAdmin) throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
   } else if (!isAdmin && !groups.includes(CARRIER_PAGE_GROUP) && !groups.includes(TMS_PAGE_GROUP)) {
     // DELETE_DOCUMENT narrows further inside the action: a page-carriers user may

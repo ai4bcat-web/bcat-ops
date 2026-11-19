@@ -214,11 +214,9 @@ const ADMIN_ONLY_ACTIONS: Record<string, true> = {
   // Hiding years of payment history is an admin act, never a page one.
   ARCHIVE_AP_PAYMENTS_THROUGH: true,
   UNARCHIVE_AP_PAYMENTS: true,
-  // A bank file carries every payee's account number: owner or ADMIN only, not the whole AP page.
+  // The Chase company settings (company ID, ODFI routing) stay with the owner. Previewing, exporting and clearing the
+  // mark are AP actions like the rest of the page (Ryne 2026-11-19: Jenny may run the bank file).
   SAVE_CHASE_ACH_SETTINGS: true,
-  PREVIEW_CHASE_ACH: true,
-  EXPORT_CHASE_ACH: true,
-  CLEAR_CHASE_ACH_MARK: true,
 }
 
 /**

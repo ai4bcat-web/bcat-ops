@@ -95,6 +95,8 @@ interface CarrierProfileProps {
   onPaymentMethodsChanged?: () => void
   carrierId: string
   isAdmin: boolean
+  /** Owner, ADMIN or the Accounts payable page: may enter the bank numbers behind an ACH method. */
+  canEditBank?: boolean
   settings: TmsSettings | null
   onClose: () => void
   onChanged: (carrier: CarrierRecord) => void
@@ -104,7 +106,7 @@ function permitLabel(number: string | null | undefined, expiresAt: string | null
   return expiresAt ? `${number} (exp ${expiresAt.slice(0, 10)})` : `${number}`
 }
 
-export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChanged, onPaymentMethodsChanged }: CarrierProfileProps) {
+export function CarrierProfile({ carrierId, isAdmin, canEditBank, settings, onClose, onChanged, onPaymentMethodsChanged }: CarrierProfileProps) {
   const navigate = useNavigate()
   const { bundle, loading, error, refresh, replaceCarrier } = useCarrier(carrierId)
   const [tab, setTab] = useState('profile')
@@ -406,7 +408,7 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
                     methods={bundle.paymentMethods}
                     carrierName={bundle.carrier.name}
                     awaitingPayment={awaitingPayment}
-                    isAdmin={isAdmin}
+                    canEditBank={canEditBank ?? isAdmin}
                     onBankChanged={async () => { onPaymentMethodsChanged?.(); await refresh() }}
                     onSave={savePaymentMethod}
                     onArchive={async (method) => {

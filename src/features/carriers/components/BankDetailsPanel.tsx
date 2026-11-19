@@ -1,7 +1,7 @@
 /**
  * The full routing and account number behind an ACH method, for the Chase bank file.
  *
- * Everyone who can open the payment methods sees a masked line ("on file ••••1234 / ••••5678"). An ADMIN also gets
+ * Everyone who can open the payment methods sees a masked line ("on file ••••1234 / ••••5678"). Owner, ADMIN and anyone with the Accounts payable page also get
  * Enter / Replace / Remove. The numbers are typed into write-only fields: they are held in this component's state
  * only until the request returns, then wiped. The Lambda encrypts them; nothing ever sends them back, so there is
  * no Reveal here.
@@ -14,9 +14,9 @@ import type { CarrierPaymentMethodRecord } from '@/types/tms'
 
 const errorText = (err: unknown, fallback: string): string => (err instanceof Error && err.message ? err.message : fallback)
 
-export function BankDetailsPanel({ method, isAdmin, onChanged }: {
+export function BankDetailsPanel({ method, canEditBank, onChanged }: {
   method: CarrierPaymentMethodRecord
-  isAdmin: boolean
+  canEditBank: boolean
   /** Reload the carrier after a save so the masked line is the stored one. */
   onChanged: () => void | Promise<void>
 }) {
@@ -35,7 +35,7 @@ export function BankDetailsPanel({ method, isAdmin, onChanged }: {
       ) : (
         <TmsBadge tone="orange">not on file</TmsBadge>
       )}
-      {isAdmin && (
+      {canEditBank && (
         <>
           <TmsButton size="sm" variant="ghost" onClick={() => { setNotice(null); setDialog('set') }}>{onFile ? 'Replace' : 'Enter'}</TmsButton>
           {onFile && <TmsButton size="sm" variant="ghost" onClick={() => { setNotice(null); setDialog('clear') }}>Remove</TmsButton>}
@@ -43,14 +43,14 @@ export function BankDetailsPanel({ method, isAdmin, onChanged }: {
       )}
       {notice && <span className="tms-muted text-xs">{notice}</span>}
 
-      {isAdmin && dialog === 'set' && (
+      {canEditBank && dialog === 'set' && (
         <SetBankDialog
           method={method}
           onClose={() => setDialog(null)}
           onDone={async () => { setDialog(null); setNotice('Bank details saved.'); await onChanged() }}
         />
       )}
-      {isAdmin && dialog === 'clear' && (
+      {canEditBank && dialog === 'clear' && (
         <TmsDialog
           open
           onOpenChange={(v) => { if (!v) setDialog(null) }}

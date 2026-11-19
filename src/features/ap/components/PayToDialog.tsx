@@ -11,7 +11,7 @@ import { CarrierPaymentEditor, type CarrierPaymentDraft } from '@/features/carri
 import { archiveCarrierPaymentMethod, getCarrierBundle, graphqlErrorText, upsertCarrierPaymentMethod } from '@/lib/apiClient'
 import type { CarrierPaymentMethodRecord } from '@/types/tms'
 
-export function PayToDialog({ carrierId, carrierName, awaiting, open, onOpenChange, onChanged }: {
+export function PayToDialog({ carrierId, carrierName, awaiting, open, onOpenChange, onChanged, canEditBank }: {
   carrierId: string
   carrierName: string
   /** What the missing pay-to is holding up, for the editor's warning. */
@@ -20,6 +20,8 @@ export function PayToDialog({ carrierId, carrierName, awaiting, open, onOpenChan
   onOpenChange: (open: boolean) => void
   /** A method was saved or retired: the board re-reads its payment infos. */
   onChanged: () => void
+  /** Whether this user may enter the bank numbers behind an ACH method (the Accounts payable page: owner, ADMIN or its grant). */
+  canEditBank?: boolean
 }) {
   const [methods, setMethods] = useState<CarrierPaymentMethodRecord[]>([])
   const [loading, setLoading] = useState(true)
@@ -65,7 +67,15 @@ export function PayToDialog({ carrierId, carrierName, awaiting, open, onOpenChan
       {loading ? (
         <p className="tms-muted">Loading payment methods…</p>
       ) : (
-        <CarrierPaymentEditor methods={methods} awaitingPayment={awaiting} carrierName={carrierName} onSave={save} onArchive={archive} />
+        <CarrierPaymentEditor
+          methods={methods}
+          awaitingPayment={awaiting}
+          carrierName={carrierName}
+          canEditBank={canEditBank}
+          onBankChanged={() => { setReload((n) => n + 1); onChanged() }}
+          onSave={save}
+          onArchive={archive}
+        />
       )}
     </TmsDialog>
   )

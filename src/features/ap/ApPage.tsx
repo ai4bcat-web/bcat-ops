@@ -137,7 +137,7 @@ type ApDialog =
   | { kind: 'credit'; carrierId: string }
   | { kind: 'remittance'; payment: ApPaymentRecord }
   | { kind: 'delete'; bill: CarrierBillRecord }
-  /** Owner/ADMIN: the Chase ACH file for these Selected-tab bills. */
+  /** The Chase ACH file for these Selected-tab bills. */
   | { kind: 'chase-ach'; billIds: string[] }
   | { kind: 'unapprove'; bill: CarrierBillRecord }
   | { kind: 'reverse'; payment: ApPaymentRecord }
@@ -636,7 +636,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         : runSelect([bill.id])),
       onAddRemit: addRemitFor,
       onPayTo: payToFor,
-      onChaseAch: isAdmin ? (ids) => setDialog({ kind: 'chase-ach', billIds: ids }) : null,
+      onChaseAch: (ids) => setDialog({ kind: 'chase-ach', billIds: ids }),
     })
     : tab === 'paid' ? paidView({
       banner: errorBanner,
@@ -888,7 +888,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           onDone={closeAndRefresh}
         />
       )}
-      {dialog?.kind === 'chase-ach' && isAdmin && (
+      {dialog?.kind === 'chase-ach' && (
         <ChaseAchDialog
           billIds={dialog.billIds}
           onClose={() => setDialog(null)}
@@ -934,6 +934,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           open
           onOpenChange={(o) => { if (!o) setDialog(null) }}
           onChanged={() => { setInfosKey((n) => n + 1); setPayRefresh((n) => n + 1) }}
+          canEditBank
         />
       )}
       {dialog?.kind === 'payinfo' && (
@@ -1233,7 +1234,7 @@ function daysPastDueColumn(asOf: string): ApColumn<CarrierBillRecord> {
 
 /** Carrier pay (gross) and the terms it is paid on — quick pay or standard. */
 /**
- * Owner/ADMIN only: whether the payee's ACH account is on file for the Chase file, and whether the bill already went
+ * Whether the payee's ACH account is on file for the Chase file, and whether the bill already went
  * in one. Never a number: only the "on file" mark the carrier's payment method carries.
  */
 function bankDetailsColumn(infos: readonly CarrierPaymentInfo[]): ApColumn<CarrierBillRecord> {
@@ -1540,7 +1541,7 @@ function payableView({
   onMoveToSelected: (bill: CarrierBillRecord) => void
   onAddRemit: (bill: CarrierBillRecord) => void
   onPayTo: (bill: CarrierBillRecord) => void
-  /** Owner/ADMIN only: opens the Chase ACH file dialog for the bills; null hides the button and the bank column. */
+  /** Opens the Chase ACH file dialog for the bills; null hides the button and the bank column. */
   onChaseAch: ((ids: string[]) => void) | null
 }): ListView {
   // One payment is one carrier's: a selection spanning two of them cannot be posted as
