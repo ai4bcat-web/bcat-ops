@@ -24,6 +24,7 @@ vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ hasPageAccess: () => true 
 vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: () => false }))
 vi.mock('./VendorApCard', () => ({ VendorApCard: () => null }))
 vi.mock('./DeliveryToReviewCard', () => ({ DeliveryToReviewCard: () => <div data-testid="widget-DeliveryToReviewCard" /> }))
+vi.mock('./LocalFleetCostShareCard', () => ({ LocalFleetCostShareCard: () => <div data-testid="widget-LocalFleetCostShareCard" /> }))
 vi.mock('./YearProfitWidget', () => { return { YearProfitWidget: () => <div data-testid="widget-YearProfitWidget" /> } })
 vi.mock('./DriverLeaderboardWidget', () => { return { DriverLeaderboardWidget: () => <div data-testid="widget-DriverLeaderboardWidget" /> } })
 vi.mock('./DieselPriceWidget', () => { return { DieselPriceWidget: () => <div data-testid="widget-DieselPriceWidget" /> } })
@@ -269,6 +270,7 @@ describe('DashboardPage', () => {
     expect(screen.getByTestId('legacy-kpis-all')).toHaveAttribute('data-state', 'loading')
     expect(screen.queryByText('Total Loads')).toBeInTheDocument() // skeleton label only
     expect(screen.queryByTestId('widget-YearProfitWidget')).toBeNull()
+    expect(screen.queryByTestId('widget-LocalFleetCostShareCard')).toBeNull()
 
     await act(async () => { resolve(data) })
     expect(screen.getByTestId('legacy-kpis')).toHaveAttribute('data-state', 'ready')
@@ -276,6 +278,7 @@ describe('DashboardPage', () => {
     expect(screen.getByTestId('legacy-kpis').querySelectorAll('[aria-busy="true"]')).toHaveLength(0)
     expect(screen.getByTestId('legacy-kpis-all')).toHaveAttribute('data-state', 'ready')
     expect(screen.getByTestId('widget-YearProfitWidget')).toBeInTheDocument()
+    expect(screen.getByTestId('widget-LocalFleetCostShareCard')).toBeInTheDocument()
     expect(screen.getByTestId('legacy-asof')).toHaveTextContent(/as of/)
   })
 })
