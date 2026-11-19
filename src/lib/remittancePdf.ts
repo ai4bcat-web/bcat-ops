@@ -47,8 +47,9 @@ const RULE = rgb(203 / 255, 213 / 255, 225 / 255)
 /** Column boxes for the bill table. Money columns are named by their right edge. */
 const COL = {
   // The carrier's own invoice number is not printed (Ryne 2026-11-18): the shipment (PRO) leads.
-  shipment: { x: M + 4, w: 96 },
-  load: { x: M + 108, w: 90 },
+  shipment: { x: M + 4, w: 56 },
+  carrier: { x: M + 62, w: 92 },
+  payTo: { x: M + 160, w: 92 },
   gross: { right: 368 },
   fee: { right: 434 },
   credit: { right: 500 },
@@ -172,6 +173,10 @@ export interface RemittanceRow {
   billId: string
   shipmentNumber: string
   loadNumber: string
+  /** The carrier this bill was for; printed so a factor paying several carriers can apply each line. */
+  carrierName: string
+  /** Who the money went to for this bill: the factor, or the carrier itself. */
+  payToName: string
   grossCents: number
   quickPayFeeCents: number
   /** The slice of this row funded by an AP credit rather than by the bank. */
@@ -241,6 +246,7 @@ export function remittanceData(input: RemittanceDataInput): RemittanceData {
   const billById = new Map<string, CarrierBillRecord>()
   for (const bill of input.bills) billById.set(bill.id, bill)
 
+  const fallbackCarrier = input.carrier?.name || input.bills.find((b) => b.carrierName)?.carrierName || ''
   const rows: RemittanceRow[] = []
   const totals: RemittanceTotals = { grossCents: 0, quickPayFeeCents: 0, creditCents: 0, paidCents: 0 }
   for (const application of payment.applications ?? []) {
@@ -250,6 +256,8 @@ export function remittanceData(input: RemittanceDataInput): RemittanceData {
       billId: application.billId,
       shipmentNumber: bill?.shipmentNumber ?? '',
       loadNumber: bill?.loadNumber ?? '',
+      carrierName: bill?.carrierName?.trim() || fallbackCarrier,
+      payToName: bill?.remitTo?.name?.trim() || payment.remitTo?.name?.trim() || bill?.carrierName?.trim() || fallbackCarrier,
       grossCents: bill?.grossCents ?? 0,
       quickPayFeeCents: bill?.quickPayFeeCents ?? 0,
       creditCents,
@@ -395,11 +403,12 @@ function drawMeta(d: Doc, data: RemittanceData): void {
 }
 
 /** Repeated whenever the bill table continues on a new page. */
-function drawTableHead(d: Doc): void {
+function drawTableHead(d: Doc, showPayTo: boolean): void {
   band(d, d.y, 18, BAND)
   const baseline = d.y + 12.5
-  textAt(d, 'SHIPMENT', COL.shipment.x, baseline, ROW_SIZE, d.bold, WHITE)
-  textAt(d, 'LOAD', COL.load.x, baseline, ROW_SIZE, d.bold, WHITE)
+  textAt(d, 'PRO #', COL.shipment.x, baseline, ROW_SIZE, d.bold, WHITE)
+  textAt(d, 'CARRIER', COL.carrier.x, baseline, ROW_SIZE, d.bold, WHITE)
+  if (showPayTo) textAt(d, 'PAY TO', COL.payTo.x, baseline, ROW_SIZE, d.bold, WHITE)
   rightAt(d, 'GROSS', COL.gross.right, baseline, ROW_SIZE, d.bold, WHITE)
   rightAt(d, 'QUICK PAY', COL.fee.right, baseline, ROW_SIZE, d.bold, WHITE)
   rightAt(d, 'CREDIT', COL.credit.right, baseline, ROW_SIZE, d.bold, WHITE)
@@ -408,20 +417,24 @@ function drawTableHead(d: Doc): void {
 }
 
 function drawRows(d: Doc, data: RemittanceData): void {
+  // The header block already names who was paid; a Pay to column is only worth its width when rows differ.
+  const showPayTo = new Set(data.rows.map((row) => row.payToName)).size > 1
+  const carrierW = showPayTo ? COL.carrier.w : COL.payTo.x + COL.payTo.w - COL.carrier.x
   room(d, data, 70)
-  drawTableHead(d)
+  drawTableHead(d, showPayTo)
 
   data.rows.forEach((row, i) => {
     const height = 17
     if (d.y + height > PAGE.h - FOOT_ROOM) {
       newPage(d, data)
-      drawTableHead(d)
+      drawTableHead(d, showPayTo)
     }
     const top = d.y
     if (i % 2 === 1) band(d, top - 4, height, ZEBRA)
     const baseline = top + 8
     textAt(d, fit(d.bold, row.shipmentNumber || row.loadNumber || '-', ROW_SIZE, COL.shipment.w), COL.shipment.x, baseline, ROW_SIZE, d.bold, INK)
-    textAt(d, fit(d.font, row.loadNumber, ROW_SIZE, COL.load.w), COL.load.x, baseline, ROW_SIZE, d.font, BODY)
+    textAt(d, fit(d.font, row.carrierName, ROW_SIZE, carrierW), COL.carrier.x, baseline, ROW_SIZE, d.font, BODY)
+    if (showPayTo) textAt(d, fit(d.font, row.payToName, ROW_SIZE, COL.payTo.w), COL.payTo.x, baseline, ROW_SIZE, d.font, BODY)
     rightAt(d, cents(row.grossCents), COL.gross.right, baseline, ROW_SIZE, d.font, BODY)
     rightAt(d, row.quickPayFeeCents ? `-${cents(row.quickPayFeeCents)}` : '-', COL.fee.right, baseline, ROW_SIZE, d.font, BODY)
     rightAt(d, row.creditCents ? `-${cents(row.creditCents)}` : '-', COL.credit.right, baseline, ROW_SIZE, d.font, BODY)

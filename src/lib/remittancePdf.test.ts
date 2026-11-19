@@ -173,6 +173,16 @@ describe('remittanceData', () => {
   })
 })
 
+describe('buildRemittancePdf pay to column', () => {
+  it('adds a Pay to column only when the rows were paid to different payees', async () => {
+    const mixed = data()
+    mixed.rows = mixed.rows.map((row, i) => ({ ...row, payToName: i === 0 ? 'OTR Capital LLC' : 'Blue Line Trucking' }))
+    const text = (await pageTexts(await buildRemittancePdf(mixed))).join('\n')
+    expect(text).toContain('PAY TO')
+    expect(text).toContain('OTR Capital LLC')
+  })
+})
+
 describe('buildRemittancePdf', () => {
   it('renders a parsable advice carrying the reference, the payee and the total paid', async () => {
     const bytes = await buildRemittancePdf(data())
@@ -189,6 +199,11 @@ describe('buildRemittancePdf', () => {
     expect(text).toContain('BC-1001')
     expect(text).not.toContain('BL-55012')
     expect(text).toContain('BC-1002')
+    expect(text).toContain('PRO #')
+    expect(text).toContain('CARRIER')
+    expect(text).not.toContain('PAY TO')
+    expect(text).not.toMatch(/\bLOAD\b|SHIPMENT/)
+    expect(text).not.toContain('BC-1001-1')
     expect(text).toContain('Feb 10, 2026')
   })
 

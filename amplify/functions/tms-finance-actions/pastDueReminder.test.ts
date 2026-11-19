@@ -97,7 +97,7 @@ describe('PAST_DUE_REMINDER', () => {
   })
 
   it('asks for confirmation when a reminder went out in the last three days, and refuses with no address', async () => {
-    seed({ pastDueReminderSentAt: '2026-11-16T12:00:00.000Z' })
+    seed({ pastDueReminderSentAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() })
     const preview = await pastDueReminder({ invoiceIds: ['i1'] }, caller)
     expect((preview.recent as unknown[]).length).toBe(1)
     await expect(pastDueReminder({ invoiceIds: ['i1'], send: true }, caller)).rejects.toThrow(/confirm to send another/)

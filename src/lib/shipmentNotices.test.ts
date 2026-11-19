@@ -350,17 +350,23 @@ describe('renderRemittanceTableEmail', () => {
     ],
   }
   const bills = [
-    { id: 'b1', billNumber: 'INV-9', billDate: '2026-10-16', shipmentNumber: '14610', loadNumber: null, netCents: 100_000 },
-    { id: 'b2', billNumber: null, billDate: '2026-10-20', shipmentNumber: '14611', loadNumber: null, netCents: 50_000 },
+    { id: 'b1', billNumber: 'INV-9', shipmentNumber: '14610', loadNumber: null, netCents: 100_000, carrierName: 'Blue Line Trucking' },
+    { id: 'b2', billNumber: null, shipmentNumber: '14611', loadNumber: null, netCents: 50_000, carrierName: 'Cardinal Express' },
   ]
 
-  it('opens with the fixed line and tables PRO, invoice date and what was paid, with a total', () => {
+  it('opens with the fixed line and tables PRO #, carrier, pay to and what was paid, with a total and no invoice date', () => {
     const mail = renderRemittanceTableEmail({ payment, bills, brokerName: 'BCAT Logistics' })
     expect(mail.body.startsWith('Please find remittance for the below shipments attached:\n')).toBe(true)
     expect(mail.body).toContain('14610')
     expect(mail.body).not.toContain('INV-9')
     expect(mail.body).not.toContain('Carrier invoice')
-    expect(mail.body).toContain('2026-10-16')
+    expect(mail.body).toContain('PRO #')
+    expect(mail.body).toContain('Pay to')
+    expect(mail.body).toContain('Blue Line Trucking')
+    expect(mail.body).toContain('Cardinal Express')
+    expect(mail.body).not.toMatch(/invoice date|2026-10-1\d|2026-10-20/i)
+    expect(mail.html).not.toMatch(/invoice date/i)
+    expect(mail.html).toContain('Blue Line Trucking')
     expect(mail.body).toContain('$1000.00')
     expect(mail.body).toMatch(/Total\s+\$1500\.00/)
     expect(mail.subject).toBe('Remittance ACH-77 · BCAT Logistics')
@@ -373,6 +379,23 @@ describe('renderRemittanceTableEmail', () => {
     expect(mail.body).toContain('$400.00')
     expect(mail.body).not.toContain('14611')
     expect(mail.body.toLowerCase()).not.toMatch(/margin|customer|rate/)
+  })
+
+  it('names who was paid per bill: the factor on a factored bill, the carrier itself otherwise', () => {
+    const mail = renderRemittanceTableEmail({
+      payment,
+      bills: [{ ...bills[0], remitTo: { name: 'OTR Capital LLC' } }, bills[1]],
+      brokerName: 'BCAT',
+    })
+    expect(mail.body).toMatch(/14610\s+Blue Line Trucking\s+OTR Capital LLC\s+\$1000\.00/)
+    expect(mail.body).toMatch(/14611\s+Cardinal Express\s+Cardinal Express\s+\$500\.00/)
+    expect(mail.html).toContain('OTR Capital LLC')
+  })
+
+  it('falls back to the paid carrier when a bill carries no name, and dashes when there is none', () => {
+    const bare = bills.map((b) => ({ ...b, carrierName: null }))
+    expect(renderRemittanceTableEmail({ payment, bills: bare, brokerName: 'BCAT', carrierName: 'Blue Line Trucking' }).body).toMatch(/14611\s+Blue Line Trucking/)
+    expect(renderRemittanceTableEmail({ payment, bills: bare, brokerName: 'BCAT' }).body).toMatch(/14611\s+—/)
   })
 
   it('prints the base PRO only, with no leg suffix and no carrier invoice number', () => {
