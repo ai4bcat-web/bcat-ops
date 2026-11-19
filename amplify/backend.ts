@@ -5,7 +5,7 @@ import { AttributeType, BillingMode, ProjectionType, Table, TableEncryption } fr
 import { CfnFunction, Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType, HttpMethod, EventSourceMapping, FilterCriteria, FilterRule, StartingPosition } from 'aws-cdk-lib/aws-lambda'
 import { CfnRule, Rule, Schedule, RuleTargetInput } from 'aws-cdk-lib/aws-events'
 import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets'
-import { ArnFormat, Aspects, CfnOutput, Duration, Fn, RemovalPolicy, Stack } from 'aws-cdk-lib'
+import { ArnFormat, Aspects, Aws, CfnOutput, Duration, Fn, RemovalPolicy, Stack } from 'aws-cdk-lib'
 import { StringParameter } from 'aws-cdk-lib/aws-ssm'
 import type { IConstruct } from 'constructs'
 import {
@@ -4462,15 +4462,13 @@ crmFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:PutItem'],
   resources: [abAuditTable.tableArn],
 }))
-// Ask BCAT data tools (query_data / fleet_pnl): Scan-only reads of small tables, never written. Table ARNs only
-// (no /index/*): the role's inline policy has a hard size cap and these reads use no index.
+// Ask BCAT data tools (query_data / fleet_pnl): Scan-only, read-only, on this app's data tables. One pattern
+// (`table/*-<suffix>`), not one ARN per table: the data stack's CloudFormation template is within ~1 KB of the
+// 1,000,000-byte cap and 18 table ARNs (about 230 bytes each) pushed it over (build 1098). The Lambda reads a
+// fixed list of tables in askSources.ts; no table name ever comes from the model.
 crmFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:Scan'],
-  resources: [
-    'CarrierBill', 'VendorPayable', 'MaintenanceInvoice', 'FuelTransaction', 'Driver', 'Equipment', 'DriverPayPeriod', 'DriverPayCredit',
-    'DriverPayDeduction', 'DriverPaySetting', 'RecurringExpense', 'ExpenseRecord', 'ExpenseType', 'TruckExpenseAllocation', 'TruckMileage',
-    'InsurancePeriod', 'InsuranceLineItem', 'Load',
-  ].map((m) => stageTables[m].tableArn),
+  resources: [`arn:aws:dynamodb:${Aws.REGION}:${Aws.ACCOUNT_ID}:table/*-${Fn.select(1, Fn.split('-', stageTables['Driver'].tableName))}-NONE`],
 }))
 
 // CRM_ASSIGN_OWNER's one Customer write (accountOwnerIds only; the Lambda code enforces
