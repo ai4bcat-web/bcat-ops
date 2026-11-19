@@ -19,18 +19,18 @@ export function PayToWorklistDialog({ rows, open, onOpenChange, onAdd }: {
     <TmsDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Payees that need a pay-to"
+      title="Payees missing payment info"
       footer={<TmsButton variant="ghost" onClick={() => onOpenChange(false)}>Close</TmsButton>}
     >
       {rows.length === 0 ? (
-        <p className="tms-muted">Every open bill has a payee. Nothing is waiting on a pay-to.</p>
+        <p className="tms-muted">Every open bill has a payee with what it needs to be paid.</p>
       ) : (
         <>
           <p className="tms-muted">
             {rows.length} {rows.length === 1 ? 'payee' : 'payees'}, {bills} open {bills === 1 ? 'bill' : 'bills'},{' '}
-            {formatCents(cents)} that cannot be approved or paid until each has a pay-to. Add it here and the flag clears.
+            {formatCents(cents)} that cannot be paid until each payee has a pay-to and the bank info (or address) its method needs. Fix it here and the flag clears.
           </p>
-          <table className="tms-aging-inv" aria-label="Payees that need a pay-to">
+          <table className="tms-aging-inv" aria-label="Payees missing payment info">
             <thead>
               <tr>
                 <th scope="col">Carrier</th>
@@ -48,8 +48,8 @@ export function PayToWorklistDialog({ rows, open, onOpenChange, onAdd }: {
                   <td className="tms-dg-right">{row.bills}</td>
                   <td className="tms-dg-right"><strong>{formatCents(row.cents)}</strong></td>
                   <td>
-                    <button type="button" className="tms-link whitespace-nowrap" aria-label={`Add pay-to for ${row.carrierName}`} onClick={() => onAdd(row)}>
-                      {row.status === 'NEEDED' ? 'Add pay-to' : 'Choose pay-to'}
+                    <button type="button" className="tms-link whitespace-nowrap" aria-label={`${row.status === 'NEEDED' || row.status === 'CHOOSE' ? 'Add pay-to' : 'Fix payment info'} for ${row.carrierName}`} onClick={() => onAdd(row)}>
+                      {row.status === 'NEEDED' ? 'Add pay-to' : row.status === 'CHOOSE' ? 'Choose pay-to' : 'Fix payment info'}
                     </button>
                   </td>
                 </tr>

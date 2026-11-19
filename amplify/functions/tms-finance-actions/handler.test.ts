@@ -2020,6 +2020,8 @@ function seedAssignment(over: { loadCarrier?: Row; carrier?: Row; method?: Row; 
     isPreferred: true,
     accountLast4: '4321',
     bankDetailsKey: 'carrier-docs/car-1/private/ach.pdf',
+    // The bank numbers are on file (the encrypted value, never read here): Record payment is refused without it.
+    bankCipher: new Uint8Array([1, 2, 3]),
     payeeEmail: 'remit@wheeler.test',
     ...over.method,
   })
@@ -2177,7 +2179,7 @@ describe('two carriers on one load (Step AT)', () => {
     })
     table(TABLES.carrierMethod).set('cpm-2', {
       id: 'cpm-2', carrierId: SECOND_CARRIER, method: 'ACH', recipientType: 'CARRIER', status: 'ACTIVE', isPreferred: true,
-      accountLast4: '9876', bankDetailsKey: 'carrier-docs/car-2/private/ach.pdf', payeeEmail: 'remit@second.test',
+      accountLast4: '9876', bankDetailsKey: 'carrier-docs/car-2/private/ach.pdf', bankCipher: new Uint8Array([4, 5, 6]), payeeEmail: 'remit@second.test',
     })
     table(TABLES.loadCarrier).set(SECOND_LC, {
       ...table(TABLES.loadCarrier).get(LOAD_CARRIER_ID)!,
@@ -2569,6 +2571,56 @@ describe('RECORD_AP_PAYMENT', () => {
     expect(assignment.apStatus).toBe('PAID')
     expect(assignment.apOpen).toBeUndefined()
     expect(assignment.apPaidAt).toBeTruthy()
+  })
+
+  describe('payment info gate (nobody pays a payee that has no bank info)', () => {
+    const pay = (billId: unknown, cents = 180_000): Promise<unknown> => call('RECORD_AP_PAYMENT', {
+      carrierId: CARRIER_ID, paidAt: '2026-10-25', method: 'ACH', amountCents: cents, applications: [{ billId, amountCents: cents }],
+    })
+
+    it('refuses an ACH payee whose bank details are not on file, and moves nothing', async () => {
+      const bill = await approvedBill()
+      table(TABLES.carrierMethod).set('cpm-1', { ...table(TABLES.carrierMethod).get('cpm-1')!, bankCipher: undefined })
+      await expect(pay(bill.id)).rejects.toThrow(/Wheeler Trucking has no bank details on file for ACH/)
+      expect((table(TABLES.carrierBill).get(String(bill.id)) as Row).status).toBe('TO_BE_PAID')
+      expect([...table(TABLES.apPayment).values()]).toHaveLength(0)
+    })
+
+    it('lets it through once the bank details are on file', async () => {
+      const bill = await approvedBill()
+      table(TABLES.carrierMethod).set('cpm-1', { ...table(TABLES.carrierMethod).get('cpm-1')!, bankCipher: undefined })
+      await expect(pay(bill.id)).rejects.toThrow(/no bank details/)
+      table(TABLES.carrierMethod).set('cpm-1', { ...table(TABLES.carrierMethod).get('cpm-1')!, bankCipher: new Uint8Array([9]) })
+      const paid = (await pay(bill.id)) as { bills: Row[] }
+      expect(paid.bills[0].status).toBe('PAID')
+    })
+
+    it('needs a complete remit address for a check, and the contact for Zelle', async () => {
+      const bill = await approvedBill()
+      table(TABLES.carrierMethod).set('cpm-1', { ...table(TABLES.carrierMethod).get('cpm-1')!, method: 'CHECK', bankCipher: undefined })
+      await expect(pay(bill.id)).rejects.toThrow(/no remit-to address on file for a check/)
+      table(TABLES.carrierMethod).set('cpm-1', {
+        ...table(TABLES.carrierMethod).get('cpm-1')!,
+        remitToAddress: { street: '1 Main St', city: 'Joliet', state: 'IL', zip: '60431' },
+      })
+      const paid = (await pay(bill.id)) as { bills: Row[] }
+      expect(paid.bills[0].status).toBe('PAID')
+    })
+
+    it('needs the Zelle contact', async () => {
+      const bill = await approvedBill()
+      table(TABLES.carrierMethod).set('cpm-1', { ...table(TABLES.carrierMethod).get('cpm-1')!, method: 'ZELLE', payeeEmail: undefined, bankCipher: undefined })
+      table(TABLES.carrier).set(CARRIER_ID, { ...table(TABLES.carrier).get(CARRIER_ID)!, email: undefined })
+      // The bill froze the payee when it was approved, so judge the live method: the contact there is gone.
+      table(TABLES.carrierBill).set(String(bill.id), { ...table(TABLES.carrierBill).get(String(bill.id))!, remitTo: { name: 'Wheeler Trucking', method: 'ZELLE' } })
+      await expect(pay(bill.id)).rejects.toThrow(/no Zelle contact on file/)
+    })
+
+    it('does not hold a credit-only application, which moves no money', async () => {
+      const bill = await approvedBill()
+      table(TABLES.carrierMethod).set('cpm-1', { ...table(TABLES.carrierMethod).get('cpm-1')!, bankCipher: undefined })
+      await expect(pay(bill.id, 0)).rejects.not.toThrow(/no bank details/)
+    })
   })
 
   it('refuses cash it cannot allocate', async () => {

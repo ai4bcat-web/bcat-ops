@@ -11,6 +11,7 @@
 import { isVerifyPaymentBill } from '@/lib/verifyPayment'
 import { approvalReadiness, billPayee, PENDING_DATES_BLOCK, type ApprovalWarning, type BillPayee } from '@/lib/carrierBill'
 import { daysLate } from '@/lib/arAging'
+import { PAYMENT_GAP_LABEL, paymentInfoGap, type PaymentInfoGap } from '@/lib/paymentInfo'
 import { chicagoDateStr } from '@/lib/date'
 import { canonicalFactorName, factorKeyOf, payeeEmailFor, paysThroughFactor, type FactorNameIndex, type FactorRemitMap } from '@/lib/factorRemit'
 import type { ApWorklistRow } from '@/hooks/useApWorklist'
@@ -156,34 +157,91 @@ export function payeeNameFor(
  * flagged, and a carrier whose factor method is not known yet (`carrierFactorMethodId` unset) is never
  * called `CHOOSE`, so the flag does not flash while the carrier list is still coming in.
  */
-export type PayToStatus = 'OK' | 'NEEDED' | 'CHOOSE'
+export type PayToStatus = 'OK' | 'NEEDED' | 'CHOOSE' | Exclude<PaymentInfoGap, 'NO_PAYEE'>
 
 export const PAY_TO_STATUS_LABEL: Record<PayToStatus, string> = {
   OK: 'Pay-to set',
   NEEDED: 'Pay-to needed',
   CHOOSE: 'Choose pay-to',
+  NO_BANK: PAYMENT_GAP_LABEL.NO_BANK,
+  NO_ACCOUNT: PAYMENT_GAP_LABEL.NO_ACCOUNT,
+  NO_ADDRESS: PAYMENT_GAP_LABEL.NO_ADDRESS,
+  NO_CONTACT: PAYMENT_GAP_LABEL.NO_CONTACT,
 }
 
 export const PAY_TO_STATUS_TITLE: Record<Exclude<PayToStatus, 'OK'>, string> = {
   NEEDED: 'This carrier has no payment method on file, so the bill has no payee. Add the carrier\u2019s pay-to to approve or pay it.',
   CHOOSE: 'This carrier has more than one payment method and none is the preferred one, so the bill has no payee. Mark one as preferred to approve or pay it.',
+  NO_BANK: 'The payee is paid by ACH but has no bank details on file. Enter the routing and account numbers on the carrier\u2019s Payment methods tab. The bill cannot be paid until then.',
+  NO_ACCOUNT: 'The payee is paid by wire or EFT but has no account on file. Add it on the carrier\u2019s Payment methods tab. The bill cannot be paid until then.',
+  NO_ADDRESS: 'The payee is paid by check but has no complete remit-to address on file. Add it on the carrier\u2019s Payment methods tab. The bill cannot be paid until then.',
+  NO_CONTACT: 'The payee is paid by Zelle or Venmo but has no contact on file. Add the payee e-mail on the carrier\u2019s Payment methods tab. The bill cannot be paid until then.',
+}
+
+/**
+ * The method behind a bill's payee, chosen the way approval chooses it: the method the bill froze, else the carrier's
+ * preferred one, else the factor method the carrier names, else the only one. Null when nothing is chosen.
+ */
+function chosenInfoFor(
+  bill: Pick<CarrierBillRecord, 'carrierId' | 'paymentMethodId'>,
+  infos: readonly CarrierPaymentInfo[],
+): CarrierPaymentInfo | null {
+  if (bill.paymentMethodId) {
+    const exact = infos.find((info) => info.id === bill.paymentMethodId)
+    if (exact) return exact
+  }
+  const mine = infos.filter((info) => info.carrierId === bill.carrierId && info.status !== 'INACTIVE')
+  if (mine.length === 0) return null
+  const factorId = mine[0]!.carrierFactorMethodId
+  return (
+    mine.find((info) => info.isPreferred === true) ??
+    (factorId ? mine.find((info) => info.id === factorId) : undefined) ??
+    (mine.length === 1 ? mine[0] : undefined) ??
+    null
+  )
+}
+
+/**
+ * What stops this bill's payee from being paid even though it has one (Ryne 2026-11-19): an ACH payee with no bank
+ * details on file, a check payee with no address, and so on (`paymentInfoGap`). Null when it can be paid, or
+ * while the payment methods are still loading. The server refuses the same bills in Record payment.
+ */
+export function paymentGapFor(
+  bill: Pick<CarrierBillRecord, 'carrierId' | 'paymentMethodId' | 'remitTo'>,
+  infos: readonly CarrierPaymentInfo[] | null | undefined,
+): PaymentInfoGap | null {
+  if (!infos || infos.length === 0) return null
+  const chosen = chosenInfoFor(bill, infos)
+  const frozen = bill.remitTo
+  if (!chosen && !frozen) return null
+  const factor = chosen ? chosen.recipientType === 'FACTOR' : false
+  const liveAddress = chosen ? (factor ? chosen.factorAddress ?? chosen.remitToAddress : chosen.remitToAddress) : null
+  return paymentInfoGap({
+    method: chosen?.method ?? frozen?.method ?? null,
+    bankOnFile: !!chosen?.bankDetailsOnFileAt,
+    accountLast4: chosen?.accountLast4 || frozen?.accountLast4 || null,
+    address: liveAddress ?? frozen?.address ?? (factor ? null : chosen?.carrierAddress) ?? null,
+    contact: chosen?.payeeEmail || frozen?.payeeEmail || null,
+  })
 }
 
 export function payToStatusFor(
-  bill: Pick<CarrierBillRecord, 'carrierId' | 'remitTo'>,
+  bill: Pick<CarrierBillRecord, 'carrierId' | 'paymentMethodId' | 'remitTo'>,
   infos: readonly CarrierPaymentInfo[] | null | undefined,
 ): PayToStatus {
-  if (bill.remitTo) return 'OK'
   if (!infos || infos.length === 0) return 'OK'
-  const mine = infos.filter((info) => info.carrierId === bill.carrierId && info.status !== 'INACTIVE')
-  if (mine.length === 0) return 'NEEDED'
-  const factorId = mine[0]!.carrierFactorMethodId
-  const chosen =
-    mine.find((info) => info.isPreferred === true) ??
-    (factorId ? mine.find((info) => info.id === factorId) : undefined) ??
-    (mine.length === 1 ? mine[0] : undefined)
-  if (chosen) return 'OK'
-  return factorId === undefined ? 'OK' : 'CHOOSE'
+  if (!bill.remitTo) {
+    const mine = infos.filter((info) => info.carrierId === bill.carrierId && info.status !== 'INACTIVE')
+    if (mine.length === 0) return 'NEEDED'
+    if (!chosenInfoFor(bill, infos)) return mine[0]!.carrierFactorMethodId === undefined ? 'OK' : 'CHOOSE'
+  }
+  const gap = paymentGapFor(bill, infos)
+  return gap && gap !== 'NO_PAYEE' ? gap : 'OK'
+}
+
+/** True for the statuses that mean the payee exists but lacks what its method needs (bank info, address…). */
+export function isPaymentGap(status: PayToStatus): boolean {
+  return status !== 'OK' && status !== 'NEEDED' && status !== 'CHOOSE'
 }
 
 export interface PayToWorkRow {

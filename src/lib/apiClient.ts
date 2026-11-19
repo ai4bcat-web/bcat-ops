@@ -4290,8 +4290,14 @@ export interface CarrierPaymentInfo {
   /** Set when the full routing + account numbers are on file for the Chase ACH file. */
   bankDetailsOnFileAt?: string | null
   payeeEmail?: string | null
+  /** The method's own remit-to address: where a check is mailed. */
+  remitToAddress?: { street?: string | null; city?: string | null; state?: string | null; zip?: string | null } | null
+  /** A factor method's address, where a check to the factor is mailed. */
+  factorAddress?: { street?: string | null; city?: string | null; state?: string | null; zip?: string | null } | null
   isPreferred?: boolean | null
   status?: string | null
+  /** The carrier's own address, stamped on by the board once the carriers have loaded: a check's fallback address. */
+  carrierAddress?: { street?: string | null; city?: string | null; state?: string | null; zip?: string | null } | null
   /**
    * The carrier's own `factorPaymentMethodId`, stamped on by the board once the carriers have loaded (it lives on the
    * carrier, not on the method). Unset means "not known yet"; null means the carrier names none.
@@ -4300,7 +4306,8 @@ export interface CarrierPaymentInfo {
 }
 export async function listCarrierPaymentInfo(): Promise<CarrierPaymentInfo[]> {
   if (!modelAvailable('CarrierPaymentMethod')) throw new Error('Carrier payment methods are unavailable')
-  return listAll('listCarrierPaymentMethods', 'id carrierId method recipientType factorName bankName accountName accountLast4 routingLast4 bankDetailsOnFileAt payeeEmail isPreferred status', 1000)
+  const rows = await listAll<CarrierPaymentInfo>('listCarrierPaymentMethods', 'id carrierId method recipientType factorName bankName accountName accountLast4 routingLast4 bankDetailsOnFileAt payeeEmail remitToAddress factorAddress isPreferred status', 1000)
+  return rows.map((row) => unwrapJsonFields(row, ['remitToAddress', 'factorAddress'] as (keyof CarrierPaymentInfo)[]))
 }
 
 /** Everything one carrier profile renders, in one round trip's worth of parallel reads. */

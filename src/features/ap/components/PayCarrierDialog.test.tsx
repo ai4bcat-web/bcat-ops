@@ -165,6 +165,24 @@ describe('PayCarrierDialog', () => {
     expect(onFix).toHaveBeenCalledTimes(1)
   })
 
+  it('will not post money against a bill whose payee has no bank info, and says why (Ryne 2026-11-19)', async () => {
+    render(
+      <PayCarrierDialog
+        carrierId="car-1"
+        payBlocks={{ [BILLS[0].id]: 'Blue Line Trucking has no bank details on file for ACH.' }}
+        open
+        onOpenChange={vi.fn()}
+        onDone={vi.fn()}
+      />,
+    )
+    await screen.findByLabelText('Payment amount')
+    type('Payment amount', '1000.00')
+    type('Apply to bill BLT-1001', '1000.00')
+    await waitFor(() => expect(total('Applied total')).toBe('$1,000.00'))
+    expect(screen.getByTestId('pay-dialog-payment-info-blocked').textContent).toMatch(/no bank details on file for ACH/)
+    expect(postButton().disabled).toBe(true)
+  })
+
   it('shows no pay-to notice when the carrier has one', async () => {
     await openForm()
     expect(screen.queryByTestId('pay-dialog-payto-needed')).toBeNull()
