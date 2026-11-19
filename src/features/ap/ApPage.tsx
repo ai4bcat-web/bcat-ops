@@ -724,7 +724,6 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           compact={<TmsSummaryChips aria-label="Payables at a glance" testId="ap-summary-compact" items={apCompactItems(summary)} />}
           filters={<OwedFilterBar partyLabel="Carrier" parties={carrierOptions} divisions={divisionOptions} filter={owed} onChange={setOwed} testId="ap-owed-filters" />}
           summary={(
-            <>
             <ApSummaryStrip
               summary={summary}
               divisionName={divisionName}
@@ -732,20 +731,20 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
               onDivision={(key) => setOwed({ ...owed, divisions: key ? [key] : [] })}
               onCashRequirements={() => setTab('cash')}
               onTab={setTab}
-            />
-            {apTabCard}
-            <ProfitCheckCard asOf={asOf} onOpenReport={setReportsOpen} testId="ap-profit-check" />
-            {owedFilterActive(owed) && (
-              <OwedSummary
-                title={owedSelectionLabel(owed, carrierLabel, divisionLabel)}
-                summary={owedSummary}
-                unit="bill"
-                due={owed.due}
-                onDue={(due) => setOwed({ ...owed, due })}
-                testId="ap-owed-summary"
-              />
-            )}
-            </>
+            >
+              {apTabCard}
+              <ProfitCheckCard asOf={asOf} onOpenReport={setReportsOpen} testId="ap-profit-check" />
+              {owedFilterActive(owed) && (
+                <OwedSummary
+                  title={owedSelectionLabel(owed, carrierLabel, divisionLabel)}
+                  summary={owedSummary}
+                  unit="bill"
+                  due={owed.due}
+                  onDue={(due) => setOwed({ ...owed, due })}
+                  testId="ap-owed-summary"
+                />
+              )}
+            </ApSummaryStrip>
           )}
           actions={(
             <>

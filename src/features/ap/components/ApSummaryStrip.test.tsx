@@ -16,16 +16,26 @@ const summary = (over: Partial<ApSummary> = {}): ApSummary => ({
 })
 
 describe('ApSummaryStrip', () => {
-  it('lays the Payables card out like the Receivables card: Aljex under Open AP as a sub row, factor then direct, then the ladder, then days', () => {
+  it('shows the headline tiles in one row and the paid, paid-to and speed cards in a second row', () => {
     render(<ApSummaryStrip summary={summary()} divisionName={(c) => c ?? 'None'} division={null} onDivision={vi.fn()} onCashRequirements={vi.fn()} onTab={vi.fn()} />)
-    const card = screen.getByTestId('ap-summary')
-    const labels = within(card).getAllByRole('listitem').map((li) => li.textContent ?? '')
-    const order = ['Open AP', 'From Aljex', 'Pay to factor', 'Pay direct', 'Expected', 'Aging', 'Selected', 'Past due', 'Due next 7 days', 'Paid this week', 'Paid this month', 'Quick pay this month', 'Days to pay · carriers', 'Days to invoice · carriers']
+    const tiles = within(screen.getByRole('group', { name: 'Open payables and the payment ladder' })).getAllByRole('button').length
+    expect(tiles).toBe(5)
+    expect(screen.getByText('Open AP')).toBeTruthy()
+    const row2 = screen.getByTestId('ap-summary-cards')
+    const labels = within(row2).getAllByRole('listitem').map((li) => li.textContent ?? '')
+    const order = ['Paid this week', 'Paid this month', 'Quick pay this month', 'Pay to factor', 'Pay direct', 'From Aljex', 'Days to pay \u00b7 carriers', 'Days to invoice \u00b7 carriers']
     const at = order.map((label) => labels.findIndex((t) => t.startsWith(label)))
     expect(at.every((i) => i >= 0)).toBe(true)
     expect([...at].sort((a, b) => a - b)).toEqual(at)
-    const subRows = Array.from(card.querySelectorAll('.tms-list-row-sub')).map((el) => el.textContent ?? '')
-    expect(subRows.some((t) => t.startsWith('From Aljex'))).toBe(true)
+  })
+
+  it('keeps the second row at three rows or fewer per card and renders extra cards after the division card', () => {
+    render(<ApSummaryStrip summary={summary()} divisionName={(c) => c ?? 'None'} division={null} onDivision={vi.fn()} onCashRequirements={vi.fn()} onTab={vi.fn()}><section data-testid="extra">x</section></ApSummaryStrip>)
+    for (const id of ['ap-paid-card', 'ap-payto-card', 'ap-speed-card']) {
+      expect(within(screen.getByTestId(id)).getAllByRole('listitem').length).toBeLessThanOrEqual(3)
+    }
+    const row2 = screen.getByTestId('ap-summary-cards')
+    expect(row2.lastElementChild).toBe(screen.getByTestId('extra'))
   })
 
   it('still jumps to the tab when a ladder row is clicked, and opens cash requirements from Past due', () => {

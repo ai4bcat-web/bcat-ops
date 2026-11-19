@@ -363,7 +363,7 @@ describe('the AP board', () => {
     expect(screen.getByRole('tab', { name: /^Expected/ }).getAttribute('aria-selected')).toBe('true')
     expect(screen.queryByRole('button', { name: /^Record bill/ })).toBeNull()
     // The totals strip sits above the tabs on every tab.
-    expect(screen.getByRole('region', { name: 'Open payables' })).toBeTruthy()
+    expect(screen.getByRole('group', { name: 'Open payables and the payment ladder' })).toBeTruthy()
     expect(screen.getByText('Due next 7 days')).toBeTruthy()
   })
 
