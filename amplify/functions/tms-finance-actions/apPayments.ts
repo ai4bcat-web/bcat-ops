@@ -929,6 +929,7 @@ export async function sendRemittance(input: Row, caller: Caller): Promise<Row> {
         payment: context.payment as unknown as Parameters<typeof renderRemittanceTableEmail>[0]['payment'],
         bills: context.bills,
         brokerName,
+        carrierName: context.carrier?.name ?? null,
       })
     : null
   const rendered = table ?? renderRemittanceEmail({

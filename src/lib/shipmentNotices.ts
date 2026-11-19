@@ -454,18 +454,22 @@ export function renderRemittanceEmail(input: RemittanceEmailInput): { subject: s
 export const AUTO_REMITTANCE_INTRO = 'Please find remittance for the below shipments attached:'
 
 export interface RemittanceTableInput {
-  payment: Pick<ApPaymentRecord, 'id' | 'reference' | 'paidAt' | 'amountCents' | 'applications'>
-  bills: Pick<CarrierBillRecord, 'id' | 'billNumber' | 'billDate' | 'shipmentNumber' | 'loadNumber' | 'netCents'>[]
+  payment: Pick<ApPaymentRecord, 'id' | 'reference' | 'paidAt' | 'amountCents' | 'applications'> & { remitTo?: { name?: string | null } | null }
+  bills: (Pick<CarrierBillRecord, 'id' | 'billNumber' | 'shipmentNumber' | 'loadNumber' | 'netCents' | 'carrierName'> & { remitTo?: { name?: string | null } | null })[]
   brokerName: string
+  /** The paid carrier's name, for a bill that does not carry its own. */
+  carrierName?: string | null
 }
 
 export interface RemittanceTableRow {
   pro: string
-  invoiceDate: string
+  carrier: string
+  /** Who the money went to: the factor, or the carrier itself. */
+  payTo: string
   amountCents: number
 }
 
-/** One line per bill the payment settled: the base PRO, the carrier's invoice date and what was paid on it. */
+/** One line per bill the payment settled: the base PRO, the carrier it was for, who was paid and what was paid on it. */
 export function remittanceTableRows(input: RemittanceTableInput): { rows: RemittanceTableRow[]; totalCents: number } {
   const byId = new Map(input.bills.map((bill) => [bill.id, bill]))
   const paid: Record<string, number> = {}
@@ -478,7 +482,8 @@ export function remittanceTableRows(input: RemittanceTableInput): { rows: Remitt
     const bill = byId.get(billId)
     rows.push({
       pro: bill?.shipmentNumber || bill?.loadNumber || '',
-      invoiceDate: bill?.billDate ?? '',
+      carrier: bill?.carrierName?.trim() || input.carrierName?.trim() || '',
+      payTo: bill?.remitTo?.name?.trim() || input.payment.remitTo?.name?.trim() || bill?.carrierName?.trim() || input.carrierName?.trim() || '',
       amountCents,
     })
     totalCents += amountCents
@@ -501,11 +506,12 @@ export function renderRemittanceTableEmail(input: RemittanceTableInput): { subje
   const subject = `Remittance ${reference} · ${input.brokerName}`
   const money = (cents: number) => `$${formatCents(cents)}`
   // The carrier's own invoice number is not printed (Ryne 2026-11-18). The PRO is always the base shipment number.
-  const headers = ['PRO #', 'Invoice date', 'Amount paid']
-  const cells = rows.map((r) => [r.pro || '—', r.invoiceDate || '—', money(r.amountCents)])
-  const totalRow = ['Total', '', money(totalCents)]
+  // The invoice date is left off (Ryne 2026-11-19): PRO #, the carrier, who was paid, what was paid.
+  const headers = ['PRO #', 'Carrier', 'Pay to', 'Amount paid']
+  const cells = rows.map((r) => [r.pro || '—', r.carrier || '—', r.payTo || '—', money(r.amountCents)])
+  const totalRow = ['Total', '', '', money(totalCents)]
   const widths = headers.map((h, i) => Math.max(h.length, ...[...cells, totalRow].map((row) => row[i].length)))
-  const pad = (row: string[]) => row.map((cell, i) => (i === 2 ? cell.padStart(widths[i]) : cell.padEnd(widths[i]))).join('  ')
+  const pad = (row: string[]) => row.map((cell, i) => (i === 3 ? cell.padStart(widths[i]) : cell.padEnd(widths[i]))).join('  ')
   const body = [
     AUTO_REMITTANCE_INTRO,
     '',
@@ -525,9 +531,9 @@ export function renderRemittanceTableEmail(input: RemittanceTableInput): { subje
   const html =
     `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222;">` +
     `<p>${htmlEscape(AUTO_REMITTANCE_INTRO)}</p>` +
-    `<table style="border-collapse:collapse;"><thead><tr>${headers.map((h, i) => th(h, i === 2)).join('')}</tr></thead><tbody>` +
-    cells.map((row) => `<tr>${row.map((c, i) => td(c, i === 2)).join('')}</tr>`).join('') +
-    `<tr>${totalRow.map((c, i) => td(c, i === 2, true)).join('')}</tr></tbody></table>` +
+    `<table style="border-collapse:collapse;"><thead><tr>${headers.map((h, i) => th(h, i === 3)).join('')}</tr></thead><tbody>` +
+    cells.map((row) => `<tr>${row.map((c, i) => td(c, i === 3)).join('')}</tr>`).join('') +
+    `<tr>${totalRow.map((c, i) => td(c, i === 3, true)).join('')}</tr></tbody></table>` +
     `<p>${htmlEscape(input.brokerName)}</p></div>`
   return { subject, body, html }
 }
