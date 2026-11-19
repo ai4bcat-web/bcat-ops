@@ -47,6 +47,17 @@ export function resolveLoad(id: string): Promise<{ loadId: string; customer?: st
   return otrAction('resolve', { id })
 }
 
+/** One reviewable document: its name and a short-lived link (about ten minutes). */
+export interface OtrDocLink { name: string; url: string }
+
+/**
+ * The POD and customer rate confirmation OTR would receive for a load, for the review step before Factor.
+ * Pass the queue row's id, or the load's PRO when it has no queue row yet. Read-only.
+ */
+export function previewOtrDocs(ref: { id?: string; pro?: string }): Promise<{ pro: string; found: boolean; pod: OtrDocLink | null; rateCon: OtrDocLink | null }> {
+  return otrAction('previewDocs', ref)
+}
+
 /** Rebuild readiness: what's filled, where it came from, what's missing. */
 export function assembleInvoice(id: string): Promise<OtrReadiness> {
   return otrAction('assemble', { id })
