@@ -16,17 +16,26 @@
  * The exception is a bill still in review that no money and no pay run has touched — the bills Move to
  * billing creates. AP corrects the carrier pay there, and the Lambda re-snapshots the bill (gross,
  * quick-pay fee, net) in the same write, so the shipment and the bill still agree.
+ *
+ * Once the customer has been invoiced the Lambda wants a reason for any change; the box for it is on the form
+ * from the start, and Save waits for it. Closing with edits that are not saved asks first.
  */
 import { useCallback, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsButton, TmsDialog } from '@/features/tms/kit'
+import { TmsButton, TmsDialog, TmsField, TmsInput } from '@/features/tms/kit'
 import { FinancialLines } from '@/features/shipments/components/FinancialLines'
 import {
   getShipmentBundle, getTmsSettings, graphqlErrorText, listCustomers, updateCarrierCharges,
 } from '@/lib/apiClient'
 import { billMoneyLockReason } from '@/lib/carrierBill'
-import type { CarrierBillRecord, LoadChargeInput, PricingDefaults, ShipmentBundle, TmsSettings } from '@/types/tms'
+import type { CarrierBillRecord, LoadChargeInput, OrderRecord, PricingDefaults, ShipmentBundle, TmsSettings } from '@/types/tms'
+
+/** The server asks for a reason once the order carries an invoice (or has been billed or paid). */
+const REASON_MIN = 5
+const INVOICED_AR: readonly string[] = ['UNPAID', 'PAID', 'PARTIAL']
+const orderIsInvoiced = (order: OrderRecord | undefined): boolean =>
+  !!order && (!!order.invoiceId || INVOICED_AR.includes(order.arStatus ?? ''))
 
 export function UpdateCarrierChargesDialog({ loadCarrierId, shipmentId, bill, open, onOpenChange, onDone }: {
   loadCarrierId: string
@@ -42,6 +51,9 @@ export function UpdateCarrierChargesDialog({ loadCarrierId, shipmentId, bill, op
   const [pricing, setPricing] = useState<PricingDefaults | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [reason, setReason] = useState('')
+  const [dirty, setDirty] = useState(false)
+  const [confirmingClose, setConfirmingClose] = useState(false)
 
   // Non-async on purpose: `react-hooks/set-state-in-effect` cannot see through an
   // `async` function, so every state write lives in an explicit promise chain.
@@ -77,11 +89,22 @@ export function UpdateCarrierChargesDialog({ loadCarrierId, shipmentId, bill, op
       loadCarrierId,
       expectedVersion: bundle.shipment.version ?? 1,
       charges: charges.map((line) => ({ ...line, loadCarrierId, loadId: assignment?.loadId ?? line.loadId ?? null })),
+      ...(invoiced ? { changeReason: reason.trim() } : {}),
     })
     toast.success('Carrier charges saved')
+    setDirty(false)
     onDone()
   }
 
+  // Closing with unsaved edits asks first, so a stray click on Close or the X never throws them away unseen.
+  const requestClose = (nextOpen: boolean) => {
+    if (nextOpen) return
+    if (dirty) setConfirmingClose(true)
+    else onOpenChange(false)
+  }
+
+  const invoiced = orderIsInvoiced(bundle?.orders[0])
+  const reasonShort = invoiced && reason.trim().length < REASON_MIN
   const recorded = assignment?.invoiceId != null || assignment?.chargesFinalizedAt != null
   // A bill still in review with nothing applied to it can be corrected in place.
   const lock = bill ? billMoneyLockReason(bill, { allowApproved: false }) : null
@@ -91,10 +114,16 @@ export function UpdateCarrierChargesDialog({ loadCarrierId, shipmentId, bill, op
   return (
     <TmsDialog
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={requestClose}
       title={`Carrier charges${assignment?.carrierName ? ` — ${assignment.carrierName}` : ''}`}
       className="tms-dialog-xl"
-      footer={<TmsButton variant="ghost" onClick={() => onOpenChange(false)}>Close</TmsButton>}
+      footer={confirmingClose ? (
+        <>
+          <span className="mr-auto text-sm">You have changes that are not saved.</span>
+          <TmsButton variant="ghost" onClick={() => setConfirmingClose(false)}>Keep editing</TmsButton>
+          <TmsButton variant="destructive" onClick={() => onOpenChange(false)}>Discard and close</TmsButton>
+        </>
+      ) : <TmsButton variant="ghost" onClick={() => requestClose(false)}>Close</TmsButton>}
     >
       {loading && (
         <p className="flex items-center gap-2 tms-muted">
@@ -136,6 +165,19 @@ export function UpdateCarrierChargesDialog({ loadCarrierId, shipmentId, bill, op
             context={{ miles: leg?.miles ?? null }}
             pricing={pricing}
             marginFloorBps={settings?.marginFloorBps ?? null}
+            dropZeroLines
+            onDirtyChange={setDirty}
+            saveBlocked={reasonShort ? 'Add the reason for the change to save.' : null}
+            beforeSave={invoiced ? (
+              <TmsField label="Reason for change (required)">
+                <TmsInput
+                  aria-label="Reason for change"
+                  value={reason}
+                  placeholder="This shipment is already invoiced; say why the carrier pay is changing"
+                  onChange={(e) => setReason(e.target.value)}
+                />
+              </TmsField>
+            ) : undefined}
             onSave={save}
           />
           {error && <p className="mt-2 text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}

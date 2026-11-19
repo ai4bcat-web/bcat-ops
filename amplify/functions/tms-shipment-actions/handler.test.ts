@@ -3871,6 +3871,50 @@ describe('UPDATE_CARRIER_CHARGES', () => {
     expect(table(TABLES.carrier).get(loadCarrierId)!.costCents).toBe(150_000)
   })
 
+  it('leaves the shipment its own record when AP moves a bill\'s amount: who, from, to and why', async () => {
+    const { shipmentId, loadCarrierId } = await assignedLoad()
+    const lineId = String(carrierLines(loadCarrierId)[0].id)
+    table(TABLES.carrierBill).set('cb-amt', {
+      id: 'cb-amt', loadCarrierId, shipmentId, shipmentNumber: '20055', billNumber: 'W-77', status: 'IN_REVIEW', version: 1, datesPending: true,
+      payeeKind: 'CARRIER', grossCents: 180_000, billedCents: 180_000, varianceCents: 0, quickPay: false, quickPayFeeCents: 0,
+      netCents: 180_000, balanceCents: 180_000, paidCents: 0, creditedCents: 0,
+    })
+    table(TABLES.carrier).set(loadCarrierId, {
+      ...table(TABLES.carrier).get(loadCarrierId)!, chargesFinalizedAt: '2026-11-12T00:00:00.000Z', invoiceId: 'cb-amt',
+    })
+
+    await call('UPDATE_CARRIER_CHARGES', {
+      loadCarrierId,
+      expectedVersion: Number(table(TABLES.shipment).get(shipmentId)!.version),
+      charges: [{ id: lineId, side: 'CARRIER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: 175_000, sortOrder: 0 }],
+      amountReason: 'Carrier invoice differs: carrier invoice $1,750.00, was $1,800.00',
+    })
+
+    const entry = [...table(TABLES.audit).values()].find((row) => row.action === 'CARRIER_BILL_AMOUNT_CHANGED' && row.entityId === shipmentId)
+    expect(entry).toBeTruthy()
+    expect(entry!.entityType).toBe('SHIPMENT')
+    expect(typeof entry!.user).toBe('string')
+    expect(String(entry!.user).length).toBeGreaterThan(0)
+    const changes = JSON.parse(String(entry!.changes))
+    expect(changes).toMatchObject({
+      bill: 'W-77', billId: 'cb-amt', fromCents: 180_000, toCents: 175_000, why: 'Carrier invoice differs: carrier invoice $1,750.00, was $1,800.00',
+    })
+  })
+
+  it('writes no amount entry when the bill\'s total did not move', async () => {
+    const { shipmentId, loadCarrierId } = await assignedLoad()
+    const lineId = String(carrierLines(loadCarrierId)[0].id)
+    table(TABLES.carrierBill).set('cb-same', {
+      id: 'cb-same', loadCarrierId, shipmentId, status: 'IN_REVIEW', version: 1, payeeKind: 'CARRIER', grossCents: 180_000, billedCents: 180_000,
+      varianceCents: 0, quickPay: false, quickPayFeeCents: 0, netCents: 180_000, balanceCents: 180_000, paidCents: 0, creditedCents: 0,
+    })
+    table(TABLES.carrier).set(loadCarrierId, {
+      ...table(TABLES.carrier).get(loadCarrierId)!, chargesFinalizedAt: '2026-11-12T00:00:00.000Z', invoiceId: 'cb-same',
+    })
+    await update(loadCarrierId, shipmentId, [{ id: lineId, side: 'CARRIER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: 180_000, sortOrder: 0 }])
+    expect([...table(TABLES.audit).values()].some((row) => row.action === 'CARRIER_BILL_AMOUNT_CHANGED')).toBe(false)
+  })
+
   it('refuses a customer line and a line belonging to somebody else', async () => {
     const { shipmentId, loadCarrierId } = await assignedLoad()
     const customerId = String(customerLines()[0].id)

@@ -109,6 +109,7 @@ export const ACTION_SENTENCE: Record<string, string> = {
   // Accounts payable (the shipment's own record of a bill leaving Payable)
   CARRIER_BILL_DELETED: 'deleted a carrier bill',
   CARRIER_BILL_VOIDED: 'voided a carrier bill',
+  CARRIER_BILL_AMOUNT_CHANGED: 'changed the amount on a carrier bill',
   // Intake
   INTAKE_EXTRACTED: 'extracted the fields from the e-mail',
   INTAKE_SAVE_DRAFT: 'saved the intake draft',

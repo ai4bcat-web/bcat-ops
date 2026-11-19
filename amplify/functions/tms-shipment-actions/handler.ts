@@ -8153,6 +8153,22 @@ async function updateCarrierCharges(input: Row, caller: Caller): Promise<Row> {
     costCents: carrierOwnCostCents(chargeRows, loadCarrierId),
     loadCostCents: totals.costCents,
   })
+  // The shipment keeps its own record of a carrier bill's amount moving: who, from what to what, and why.
+  if (openBill) {
+    const fromCents = numberOrNull(openBill.grossCents)
+    const toCents = carrierOwnCostCents(chargeRows, loadCarrierId)
+    if (fromCents != null && fromCents !== toCents) {
+      await writeAudit('SHIPMENT', shipmentId, 'CARRIER_BILL_AMOUNT_CHANGED', caller, {
+        bill: optionalString(openBill.billNumber, 64) ?? String(openBill.id),
+        billId: String(openBill.id),
+        carrier: optionalString(assignment.carrierName, 200),
+        pro: optionalString(openBill.shipmentNumber, 40) ?? optionalString(shipment.number, 40),
+        fromCents,
+        toCents,
+        why: optionalString(input.amountReason, 200),
+      })
+    }
+  }
   // Step H. Cost moves until the carrier's bill is recorded; same refresh.
   if (isDeliveredOrLater(bundle.loads.find((row) => String(row.id) === loadId)?.status)) {
     await writeLaneSample(quoteDeps, loadId)

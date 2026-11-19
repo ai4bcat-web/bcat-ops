@@ -6,6 +6,7 @@
  * same payload, so the copies are folded into one event; everything else shows once per audit row.
  */
 import type { AuditLogEntry } from '@/types'
+import { formatCents } from '@/lib/invoiceBuild'
 
 export type TimelineTone = 'gray' | 'green' | 'amber' | 'red' | 'blue'
 
@@ -37,6 +38,7 @@ const EVENT_LABEL: Record<string, { title: string; tone: TimelineTone }> = {
   VOID_INVOICE: { title: 'Invoice voided', tone: 'red' },
   CARRIER_BILL_DELETED: { title: 'Carrier bill deleted', tone: 'red' },
   CARRIER_BILL_VOIDED: { title: 'Carrier bill voided', tone: 'red' },
+  CARRIER_BILL_AMOUNT_CHANGED: { title: 'Carrier bill amount changed', tone: 'amber' },
   OVER_CREDIT_LIMIT: { title: 'Over the credit limit at release', tone: 'amber' },
   REPOINT_INVOICED_CUSTOMER: { title: 'Customer re-pointed', tone: 'amber' },
 }
@@ -74,7 +76,11 @@ export function changeDetails(payload: Record<string, unknown>): string[] {
 /** `Bill BL-7788 · Blue Line Trucking`: which payable left Payable, from a CARRIER_BILL_* entry's payload. */
 function billDetails(payload: Record<string, unknown>): string[] {
   const parts = [payload.bill ? `Bill ${show(payload.bill)}` : '', typeof payload.carrier === 'string' ? payload.carrier : ''].filter(Boolean)
-  return parts.length ? [parts.join(' · ')] : []
+  const lines = parts.length ? [parts.join(' · ')] : []
+  if (typeof payload.fromCents === 'number' && typeof payload.toCents === 'number') {
+    lines.push(`${formatCents(payload.fromCents)} → ${formatCents(payload.toCents)}`)
+  }
+  return lines
 }
 
 /** Oldest first, copies of one post-invoice change folded, unrecognised audit actions left out. */

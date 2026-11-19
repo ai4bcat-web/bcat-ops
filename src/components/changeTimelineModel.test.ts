@@ -45,4 +45,13 @@ describe('timelineEvents', () => {
     expect(event).toMatchObject({ title: 'Carrier bill deleted', tone: 'red', reason: 'Duplicate: sent twice' })
     expect(event!.details).toEqual(['Bill BL-7788 · Blue Line Trucking'])
   })
+
+  it('shows a carrier bill whose amount was changed: which bill, from what to what, and why', () => {
+    const [event] = timelineEvents([
+      row('a', 'SHIPMENT', 'CARRIER_BILL_AMOUNT_CHANGED', '2026-11-19T15:00:00.000Z',
+        { bill: 'W-77', billId: 'cb:lc1:1', carrier: 'BISKA INC', fromCents: 512500, toCents: 500000, why: 'Carrier invoice differs' }),
+    ])
+    expect(event).toMatchObject({ title: 'Carrier bill amount changed', tone: 'amber', reason: 'Carrier invoice differs' })
+    expect(event!.details).toEqual(['Bill W-77 · BISKA INC', '$5,125.00 → $5,000.00'])
+  })
 })
