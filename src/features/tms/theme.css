@@ -137,6 +137,8 @@
   --tms-chart-10: #8fd0f7;
   --tms-chart-11: #d97706;
   --tms-chart-12: #2563eb;
+  /* Text printed on a chart segment: near-black reads on every segment fill in both themes. */
+  --tms-chart-label: #111827;
   --tms-chart-axis: var(--tms-muted);
   --tms-chart-grid: var(--tms-border);
 }
@@ -242,6 +244,7 @@
   --tms-chart-10: #7cc9f5;
   --tms-chart-11: #f59e0b;
   --tms-chart-12: #93c5fd;
+  --tms-chart-label: #111827;
 }
 
 /* ── shadcn bridge: ui/* utilities (bg-popover, text-muted-foreground, …) follow the TMS tokens ── */

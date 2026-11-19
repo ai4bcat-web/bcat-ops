@@ -39,4 +39,16 @@ describe('buildCostShare', () => {
     const zero = buildCostShare([month({ fuel: 0 })])
     expect(zero[0].lowEntry).toEqual(['fuel'])
   })
+
+  it('works out what is left of the revenue after the four costs, and never stacks a negative', () => {
+    const [r, over, none] = buildCostShare([month({}), month({ key: '2026-08', label: 'Aug 2026', fuel: 9000 }), month({ key: '2026-05', label: 'May 2026', incomplete: true })])
+    expect(r.leftover).toBe(3700)
+    expect(r.leftoverPct).toBe(37)
+    expect(r.overRevenue).toBe(false)
+    expect(over.leftover).toBe(0)
+    expect(over.leftoverPct).toBeCloseTo(-33, 0)
+    expect(over.overRevenue).toBe(true)
+    expect(none.leftover).toBe(0)
+    expect(none.leftoverPct).toBeNull()
+  })
 })
