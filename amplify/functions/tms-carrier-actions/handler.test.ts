@@ -330,6 +330,11 @@ const ADMIN = {
   username: 'admin',
   claims: { email: 'admin@bcatcorp.com', 'cognito:groups': ['ADMIN'] },
 }
+const AP_USER = {
+  sub: 'sub-ap',
+  username: 'ap',
+  claims: { email: 'jenny@bcatcorp.com', 'cognito:groups': ['page-carrierPay'] },
+}
 const OUTSIDER = {
   sub: 'sub-out',
   username: 'out',
@@ -831,11 +836,24 @@ describe('SET_BANK_DETAILS / CLEAR_BANK_DETAILS', () => {
     expect(table(TABLES.payment).get(String(method.id))!.bankCipher).toBeInstanceOf(Uint8Array)
   })
 
-  it('is owner or ADMIN only', async () => {
+  it('is for the owner, ADMIN and the Accounts payable page only', async () => {
     const method = await achMethod()
-    await expect(call('SET_BANK_DETAILS', bank(method), CARRIER_USER)).rejects.toThrow('Forbidden: SET_BANK_DETAILS requires owner or ADMIN')
-    await expect(call('CLEAR_BANK_DETAILS', { methodId: method.id, expectedUpdatedAt: method.updatedAt }, CARRIER_USER)).rejects.toThrow('requires owner or ADMIN')
+    await expect(call('SET_BANK_DETAILS', bank(method), CARRIER_USER)).rejects.toThrow('Forbidden: SET_BANK_DETAILS requires owner, ADMIN or the Accounts payable page')
+    await expect(call('CLEAR_BANK_DETAILS', { methodId: method.id, expectedUpdatedAt: method.updatedAt }, CARRIER_USER)).rejects.toThrow('requires owner, ADMIN or the Accounts payable page')
+    await expect(call('SET_BANK_DETAILS', bank(method), OUTSIDER)).rejects.toThrow('Forbidden')
     expect(table(TABLES.payment).get(String(method.id))!.bankCipher).toBeUndefined()
+  })
+
+  it('lets an Accounts payable user enter and remove bank details, and audits who did it', async () => {
+    const method = await achMethod()
+    const saved = await call('SET_BANK_DETAILS', bank(method), AP_USER)
+    expect(saved).not.toHaveProperty('bankCipher')
+    expect(table(TABLES.payment).get(String(method.id))!.bankCipher).toBeInstanceOf(Uint8Array)
+    await call('CLEAR_BANK_DETAILS', { methodId: method.id, expectedUpdatedAt: saved.updatedAt }, AP_USER)
+    expect(table(TABLES.payment).get(String(method.id))!.bankCipher).toBeUndefined()
+    const audits = JSON.stringify([...table(TABLES.audit).values()])
+    expect(audits).toContain('jenny@bcatcorp.com')
+    expect(audits).toContain('SET_BANK_DETAILS')
   })
 
   it('refuses a bad routing number, a bad account and a non-ACH method without echoing the numbers', async () => {

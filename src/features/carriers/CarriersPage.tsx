@@ -51,7 +51,7 @@ const STATUS_TONE: Record<CarrierStatus, TmsTone> = {
 export function CarriersPage() {
   const navigate = useNavigate()
   const params = useParams<{ id: string }>()
-  const { isAdmin, user } = useAuth()
+  const { isAdmin, user, hasPageAccess } = useAuth()
   const { carriers, loading, error, refresh, replace } = useCarriers()
   const [settings, setSettings] = useState<TmsSettings | null>(null)
   const [tab, setTab] = useState<CarrierTabKey | 'all'>('active')
@@ -228,6 +228,7 @@ export function CarriersPage() {
           key={profileId}
           carrierId={profileId}
           isAdmin={isAdmin}
+          canEditBank={isAdmin || hasPageAccess('carrierPay')}
           settings={settings}
           onClose={closeProfile}
           onPaymentMethodsChanged={() => setMethodsVersion((v) => v + 1)}

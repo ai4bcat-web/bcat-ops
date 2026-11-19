@@ -1,5 +1,5 @@
 /**
- * The Chase ACH file for the Selected tab (owner/ADMIN only).
+ * The Chase ACH file for the Selected tab (Accounts payable page, as the other AP actions).
  *
  * Preview first: every chosen bill is READY, BLOCKED (with the reason) or SKIPPED (not ACH). The screen only
  * ever sees last fours; the numbers stay in the Lambda and go into the downloaded file. Exporting marks the

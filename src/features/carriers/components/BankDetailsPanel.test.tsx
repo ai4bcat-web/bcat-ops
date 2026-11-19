@@ -24,19 +24,19 @@ beforeEach(() => vi.clearAllMocks())
 
 describe('BankDetailsPanel', () => {
   it('shows only a masked line to a non-admin, with no way to act', () => {
-    render(<BankDetailsPanel method={method({ bankDetailsOnFileAt: '2026-11-19T00:00:00Z', bankAccountType: 'CHECKING' })} isAdmin={false} onChanged={vi.fn()} />)
+    render(<BankDetailsPanel method={method({ bankDetailsOnFileAt: '2026-11-19T00:00:00Z', bankAccountType: 'CHECKING' })} canEditBank={false} onChanged={vi.fn()} />)
     expect(screen.getByText(/on file ••••6789/)).toBeInTheDocument()
     expect(screen.queryByRole('button')).toBeNull()
   })
 
   it('flags a method with no numbers on file', () => {
-    render(<BankDetailsPanel method={method()} isAdmin onChanged={vi.fn()} />)
+    render(<BankDetailsPanel method={method()} canEditBank onChanged={vi.fn()} />)
     expect(screen.getByText('not on file')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Enter' })).toBeInTheDocument()
   })
 
   it('blocks a routing number that fails the check digit and a mismatched account re-entry', () => {
-    render(<BankDetailsPanel method={method()} isAdmin onChanged={vi.fn()} />)
+    render(<BankDetailsPanel method={method()} canEditBank onChanged={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Enter' }))
     fireEvent.change(screen.getByLabelText('Routing number (9 digits)'), { target: { value: '011000016' } })
     expect(screen.getByText('That routing number fails the check-digit test.')).toBeInTheDocument()
@@ -49,7 +49,7 @@ describe('BankDetailsPanel', () => {
   it('sends the numbers once, then clears every field and never shows them back', async () => {
     api.setCarrierBankDetails.mockResolvedValue(method({ bankDetailsOnFileAt: '2026-11-19T00:00:00Z' }))
     const onChanged = vi.fn()
-    const { container } = render(<BankDetailsPanel method={method()} isAdmin onChanged={onChanged} />)
+    const { container } = render(<BankDetailsPanel method={method()} canEditBank onChanged={onChanged} />)
     fireEvent.click(screen.getByRole('button', { name: 'Enter' }))
     const routing = screen.getByLabelText('Routing number (9 digits)') as HTMLInputElement
     const account = screen.getByLabelText('Account number') as HTMLInputElement
@@ -70,7 +70,7 @@ describe('BankDetailsPanel', () => {
 
   it('shows the server refusal and keeps nothing on screen after cancel', async () => {
     api.setCarrierBankDetails.mockRejectedValue(new Error('That routing number fails the check-digit test; re-check it'))
-    render(<BankDetailsPanel method={method()} isAdmin onChanged={vi.fn()} />)
+    render(<BankDetailsPanel method={method()} canEditBank onChanged={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Enter' }))
     fireEvent.change(screen.getByLabelText('Routing number (9 digits)'), { target: { value: ROUTING } })
     fireEvent.change(screen.getByLabelText('Account number'), { target: { value: ACCOUNT } })
