@@ -49,6 +49,14 @@ interface FinancialLinesProps {
   beforeSave?: ReactNode
   /** Why Save cannot be pressed yet, in words; the button is held until it is null. */
   saveBlocked?: string | null
+  /** Sides shown but not editable (the AP dialog shows the customer's lines beside the carrier's). */
+  readOnlySides?: ChargeSide[]
+  /** Lines that count toward the totals but are neither shown nor saved (the shipment's other carriers). */
+  extraLines?: LoadChargeRecord[]
+  /** A side to mark, with the label that says what editing it changes. */
+  highlight?: { side: ChargeSide; label: string }
+  /** Show dashes, not $0 and a made-up profit, when the shipment has no customer revenue. */
+  dashWithoutCustomer?: boolean
   /** Tells the parent whether there are unsaved edits, so closing can ask before throwing them away. */
   onDirtyChange?: (dirty: boolean) => void
   onSave: (charges: LoadChargeInput[]) => Promise<void>
@@ -75,7 +83,7 @@ function linesToSave(draft: LoadChargeInput[], dropZeroLines: boolean): LoadChar
   return kept.map((l) => ({ ...l, sortOrder: next[l.side]++ }))
 }
 
-export function FinancialLines({ charges, catalog, context, pricing, marginFloorBps, readOnly, dropZeroLines = false, beforeSave, saveBlocked = null, onDirtyChange, onSave }: FinancialLinesProps) {
+export function FinancialLines({ charges, catalog, context, pricing, marginFloorBps, readOnly, dropZeroLines = false, readOnlySides = [], extraLines = [], highlight, dashWithoutCustomer = false, beforeSave, saveBlocked = null, onDirtyChange, onSave }: FinancialLinesProps) {
   const [draft, setDraft] = useState<LoadChargeInput[] | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -88,8 +96,8 @@ export function FinancialLines({ charges, catalog, context, pricing, marginFloor
   const dropping = draft ? draft.length - linesToSave(draft, dropZeroLines).length : 0
 
   const totals: FinancialTotals = useMemo(
-    () => computeFinancials(lines, context, pricing, marginFloorBps),
-    [lines, context, pricing, marginFloorBps],
+    () => computeFinancials([...lines, ...extraLines.map(chargeToDraft)], context, pricing, marginFloorBps),
+    [lines, extraLines, context, pricing, marginFloorBps],
   )
 
   const update = (index: number, patch: Partial<LoadChargeInput>) =>
@@ -126,21 +134,35 @@ export function FinancialLines({ charges, catalog, context, pricing, marginFloor
   }
 
   const overTopSpend = totals.costCents > totals.topSpendCents
+  const noCustomer = dashWithoutCustomer && !lines.some((l) => l.side === 'CUSTOMER') && totals.revenueCents === 0
 
   return (
     <div className="space-y-4">
-      <TotalsBox totals={totals} overTopSpend={overTopSpend} />
+      <TotalsBox
+        totals={totals}
+        overTopSpend={overTopSpend && !noCustomer}
+        noCustomer={noCustomer}
+      />
 
-      {SIDES.map(({ side, title }) => (
+      {SIDES.map(({ side, title }) => {
+        const sideReadOnly = readOnly || readOnlySides.includes(side)
+        const marked = highlight?.side === side
+        return (
         <TmsCard
           key={side}
           title={title}
-          actions={!readOnly ? (
+          className={marked ? 'border-2 border-[color:var(--tms-primary)] bg-[color:var(--tms-card)]' : undefined}
+          actions={!sideReadOnly ? (
             <TmsButton type="button" size="sm" onClick={() => addLine(side)}>
               <Plus size={14} className="mr-1" /> Add line
             </TmsButton>
           ) : undefined}
         >
+          {marked && (
+            <p className="mb-2 text-xs font-semibold" data-testid="highlight-label">
+              <TmsBadge tone="blue" className="mr-2 text-[10px]">AP record</TmsBadge>{highlight.label}
+            </p>
+          )}
           {sideRows(lines, side).length === 0 && (
             <p className="text-xs tms-muted">No {side.toLowerCase()} charges.</p>
           )}
@@ -151,7 +173,7 @@ export function FinancialLines({ charges, catalog, context, pricing, marginFloor
                 <TmsSelect
                   aria-label={`${side} charge code ${position + 1}`}
                   value={line.code}
-                  disabled={readOnly}
+                  disabled={sideReadOnly}
                   onChange={(e) => {
                     const def = catalog.find((c) => c.code === e.target.value)
                     update(index, {
@@ -164,6 +186,8 @@ export function FinancialLines({ charges, catalog, context, pricing, marginFloor
                   className="mt-1 w-full"
                 >
                   <option value="">— select —</option>
+                  {/* A stored code the catalog no longer lists still shows, so the line is not read as blank. */}
+                  {line.code && !catalog.some((c) => c.code === line.code) && <option value={line.code}>{line.label ?? line.code} ({line.code})</option>}
                   {catalog.map((c) => <option key={c.code} value={c.code}>{c.label} ({c.code})</option>)}
                 </TmsSelect>
               </div>
@@ -172,7 +196,7 @@ export function FinancialLines({ charges, catalog, context, pricing, marginFloor
                 <TmsSelect
                   aria-label={`${side} calculated by ${position + 1}`}
                   value={line.calculatedBy}
-                  disabled={readOnly}
+                  disabled={sideReadOnly}
                   onChange={(e) => update(index, { calculatedBy: e.target.value as ChargeCalc })}
                   className="mt-1 w-full"
                 >
@@ -183,7 +207,7 @@ export function FinancialLines({ charges, catalog, context, pricing, marginFloor
                 <MoneyField
                   label={line.calculatedBy === 'PERCENT' ? 'Percent (bps)' : 'Rate'}
                   value={line.rateCents}
-                  disabled={readOnly}
+                  disabled={sideReadOnly}
                   onChange={(cents) => update(index, { rateCents: cents ?? 0 })}
                 />
               </div>
@@ -194,7 +218,7 @@ export function FinancialLines({ charges, catalog, context, pricing, marginFloor
                   type="number"
                   min={0}
                   value={line.count ?? 1}
-                  disabled={readOnly}
+                  disabled={sideReadOnly}
                   onChange={(e) => update(index, { count: Number(e.target.value) })}
                   className="h-9 text-sm"
                 />
@@ -204,20 +228,24 @@ export function FinancialLines({ charges, catalog, context, pricing, marginFloor
                 {line.isRate && <TmsBadge tone="gray" className="ml-2 text-[10px]">RATE</TmsBadge>}
               </div>
               <div className="col-span-1 flex justify-end pb-1">
-                {!readOnly && (
+                {!sideReadOnly && (
                   <TmsButton variant="ghost"
-                    type="button" size="sm" className="h-7 w-7"
+                    type="button" size="sm"
+                    // .tms-btn-sm pads 12px a side, which squeezed a 28px-wide button's icon to a dot.
+                    style={{ width: 32, padding: 0 }}
+                    title="Delete line"
                     aria-label={`Remove ${side} line ${position + 1}`}
                     onClick={() => setDraft(lines.filter((_, i) => i !== index))}
                   >
-                    <Trash2 size={14} />
+                    <Trash2 size={16} />
                   </TmsButton>
                 )}
               </div>
             </div>
           ))}
         </TmsCard>
-      ))}
+        )
+      })}
 
       {error && <p className="text-xs text-[color:var(--tms-badge-red)]">{error}</p>}
       {dropping > 0 && (
@@ -239,16 +267,17 @@ export function FinancialLines({ charges, catalog, context, pricing, marginFloor
   )
 }
 
-function TotalsBox({ totals, overTopSpend }: { totals: FinancialTotals; overTopSpend: boolean }) {
+function TotalsBox({ totals, overTopSpend, noCustomer }: { totals: FinancialTotals; overTopSpend: boolean; noCustomer: boolean }) {
+  const dash = '—'
   const cells: { label: string; value: string }[] = [
-    { label: 'Customer Rate', value: `$${formatCents(totals.customerRateCents)}` },
-    { label: 'Revenue', value: `$${formatCents(totals.revenueCents)}` },
+    { label: 'Customer Rate', value: noCustomer ? dash : `$${formatCents(totals.customerRateCents)}` },
+    { label: 'Revenue', value: noCustomer ? dash : `$${formatCents(totals.revenueCents)}` },
     { label: 'Carrier Rate', value: `$${formatCents(totals.carrierRateCents)}` },
     { label: 'Cost', value: `$${formatCents(totals.costCents)}` },
-    { label: 'Profit', value: `$${formatCents(totals.profitCents)}` },
-    { label: 'Margin', value: `${(totals.marginBps / 100).toFixed(2)}%` },
-    { label: 'Top spend', value: `$${formatCents(totals.topSpendCents)}` },
-    { label: 'Target buy', value: totals.targetBuyCents != null ? `$${formatCents(totals.targetBuyCents)}` : '—' },
+    { label: 'Profit', value: noCustomer ? dash : `$${formatCents(totals.profitCents)}` },
+    { label: 'Margin', value: noCustomer ? dash : `${(totals.marginBps / 100).toFixed(2)}%` },
+    { label: 'Top spend', value: noCustomer ? dash : `$${formatCents(totals.topSpendCents)}` },
+    { label: 'Target buy', value: !noCustomer && totals.targetBuyCents != null ? `$${formatCents(totals.targetBuyCents)}` : dash },
   ]
   return (
     <div data-testid="financial-totals" className="space-y-2">
