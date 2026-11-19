@@ -1,5 +1,5 @@
 import type { FleetGroup } from '@/types/equipment'
-import { SEED_DIVISIONS } from '@/lib/ownership'
+import { SEED_DIVISIONS } from './ownership'
 
 export const FLEET_GROUPS: FleetGroup[] = ['LOCAL', 'AMAZON', 'BOX_TRUCK']
 
