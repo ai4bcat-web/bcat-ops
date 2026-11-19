@@ -110,6 +110,7 @@ import {
 } from './integrations'
 import { MCP_FIND_ACTIONS, runMcpFindAction, type McpFindActionName, type McpFindDeps } from './mcpFind'
 import { parsePoints, routeMiles } from './routeMiles'
+import { syncCustomerName } from './customerRename'
 import { deleteCustomer, mergeCustomer, previewDeleteCustomer, restoreCustomer, type DeleteDeps } from './customerDelete'
 import { validateProgressSteps } from '../../../src/lib/progressSteps'
 import { auditCustomerChange, changeNeedsReason, diffCustomer, REASON_REQUIRED_MESSAGE } from '../_shared/customerAudit'
@@ -225,6 +226,8 @@ type Action =
   | 'DELETE_CUSTOMER'
   | 'MERGE_CUSTOMER'
   | 'RESTORE_CUSTOMER'
+  // Ryne 2026-11-19 — copy the profile name onto every record that holds a copy of it (resumable).
+  | 'SYNC_CUSTOMER_NAME'
 
 interface AppSyncIdentity {
   sub: string
@@ -323,6 +326,7 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
     DELETE_CUSTOMER: true,
     MERGE_CUSTOMER: true,
     RESTORE_CUSTOMER: true,
+    SYNC_CUSTOMER_NAME: true,
   }
   // The Academy Ask assistant answers questions from any user who can open the Academy.
   const assistantActions: Partial<Record<Action, true>> = {
@@ -1544,6 +1548,7 @@ async function upsertCustomer(
     const saved = unmarshall(result.Attributes)
     await auditCustomer(existing, saved)
     await refreshFactoringQueueMc(id, existing?.mcNumber, saved.mcNumber)
+    await propagateCustomerName(id, existing?.name, saved.name, caller)
     return saved
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -1593,6 +1598,22 @@ async function refreshFactoringQueueMc(customerId: string, oldMc: unknown, newMc
     if (out.refreshed.length || out.skipped.length) console.log('[tms-directory-actions] factoring queue MC refreshed', { customerId, ...out })
   } catch (err) {
     console.warn('[tms-directory-actions] factoring queue MC refresh failed; the customer save stands', { customerId, err })
+  }
+}
+
+/**
+ * A renamed customer profile reaches the shipments, orders, loads, invoices, quotes and the rest that copied
+ * the name. The save has already succeeded, so a failure is logged and never fails it; SYNC_CUSTOMER_NAME
+ * finishes whatever a slow run left.
+ */
+async function propagateCustomerName(customerId: string, oldName: unknown, newName: unknown, caller: Caller): Promise<void> {
+  if (String(oldName ?? '').trim() === String(newName ?? '').trim()) return
+  try {
+    const deadline = Date.now() + 20_000
+    const out = await syncCustomerName(customerDeleteDeps(caller, () => deadline - Date.now()), customerId)
+    console.log('[tms-directory-actions] customer name propagated', { customerId, status: out.status, updated: out.updated })
+  } catch (err) {
+    console.warn('[tms-directory-actions] customer name propagation failed; the customer save stands', { customerId, err })
   }
 }
 
@@ -3978,6 +3999,11 @@ export const handler = async (event: AppSyncEvent, context?: { getRemainingTimeI
         assertString(input.sourceId, 'sourceId'),
         assertString(input.targetId, 'targetId'),
         input.confirmName,
+      )) }
+    case 'SYNC_CUSTOMER_NAME':
+      return { ...(await syncCustomerName(
+        customerDeleteDeps(caller, context?.getRemainingTimeInMillis ? () => context.getRemainingTimeInMillis!() : undefined),
+        assertString(input.id, 'id'),
       )) }
     case 'RESTORE_CUSTOMER':
       return restoreCustomer(customerDeleteDeps(caller), assertString(input.id, 'id'))
