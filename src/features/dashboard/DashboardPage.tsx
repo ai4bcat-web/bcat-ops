@@ -11,6 +11,7 @@ import { RepairInvoicesWidget } from './RepairInvoicesWidget'
 import { VendorApCard } from './VendorApCard'
 import { DriverLeaderboardWidget } from './DriverLeaderboardWidget'
 import { YearProfitWidget } from './YearProfitWidget'
+import { LocalFleetCostShareCard } from './LocalFleetCostShareCard'
 import { DieselPriceWidget } from './DieselPriceWidget'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useAuth } from '@/hooks/useAuth'
@@ -331,6 +332,10 @@ export function DashboardPage() {
               )}
               {/* Vendor (non-carrier) bills, next to carrier AP. */}
               <Cell><VendorApCard onOpen={() => navigate('/tms/vendors')} /></Cell>
+              {/* Local drivers: revenue by month and the share spent on fuel, driver pay, insurance and maintenance (Ryne 2026-11-19). Internal money: same access as AR/AP. */}
+              {(isAdmin || hasPageAccess('invoicing') || hasPageAccess('carrierPay')) && (
+                <div className="dash-cell dash-cell-wide"><LazyWidget enabled={kpiFinal} minHeight={330} label="local-fleet-cost-share"><LocalFleetCostShareCard /></LazyWidget></div>
+              )}
             </div>
           </div>
         </div>
