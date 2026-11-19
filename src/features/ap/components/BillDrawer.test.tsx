@@ -23,14 +23,14 @@ const facts = new Map([['s1', { shipmentNumber: '20027', customerRef: 'FR-113188
 
 function draw(
   b: CarrierBillRecord,
-  handlers: Partial<Record<'onChanged' | 'onAdjustPay' | 'onSetDates' | 'onClearReview', () => void>> = {},
+  handlers: Partial<Record<'onChanged' | 'onAdjustPay' | 'onSetDates' | 'onClearReview' | 'onDelete', () => void>> = {},
   reviewFlag?: { financeReviewReason?: string | null; financeReviewApNote?: string | null },
 ) {
   render(
     <MemoryRouter>
       <BillDrawer bill={b} facts={facts} infos={[]} onClose={vi.fn()} onChanged={handlers.onChanged ?? vi.fn()}
         onAdjustPay={handlers.onAdjustPay ?? vi.fn()} onSetDates={handlers.onSetDates ?? vi.fn()} onPaymentInfo={vi.fn()}
-        reviewFlag={reviewFlag} onClearReview={handlers.onClearReview} />
+        reviewFlag={reviewFlag} onClearReview={handlers.onClearReview} onDelete={handlers.onDelete} />
     </MemoryRouter>,
   )
 }
@@ -77,6 +77,18 @@ describe('BillDrawer', () => {
   it('has no Needs review section when the shipment is not flagged', () => {
     draw(bill())
     expect(screen.queryByRole('button', { name: 'Mark reviewed' })).toBeNull()
+  })
+
+  it('offers Delete bill on an open bill and hands the bill to the page; none on a paid one', () => {
+    const onDelete = vi.fn()
+    draw(bill(), { onDelete })
+    fireEvent.click(screen.getByRole('button', { name: 'Delete bill' }))
+    expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ id: 'b1' }))
+  })
+
+  it('has no Delete bill on a bill that has been paid', () => {
+    draw(bill({ status: 'PAID', paidCents: 100_000, balanceCents: 0 }), { onDelete: vi.fn() })
+    expect(screen.queryByRole('button', { name: 'Delete bill' })).toBeNull()
   })
 
   it('puts the bill on 2-day quick pay and shows each fee before the click', async () => {

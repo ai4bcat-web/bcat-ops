@@ -79,7 +79,7 @@ export function HistorySection({ bundle }: { bundle: ShipmentBundle }) {
           data-testid="shipment-history"
           items={rows.map((row) => ({
             id: row.id,
-            title: row.action.startsWith('rate_con_') || row.action.endsWith('_RATE_CON') ? actionSentence(row.action, row.entityType) : row.action,
+            title: row.action.startsWith('rate_con_') || row.action.endsWith('_RATE_CON') || row.action.startsWith('CARRIER_BILL_') ? actionSentence(row.action, row.entityType) : row.action,
             description: (
               <>
                 <span>{row.user}</span>
@@ -87,7 +87,7 @@ export function HistorySection({ bundle }: { bundle: ShipmentBundle }) {
               </>
             ),
             at: formatDateTime(row.createdAt),
-            tone: row.action.startsWith('VOID') ? 'red' : 'gray',
+            tone: row.action.startsWith('VOID') || row.action.startsWith('CARRIER_BILL_') ? 'red' : 'gray',
           }))}
         />
       )}

@@ -608,12 +608,46 @@ export async function unapproveBill(input: Row, caller: Caller): Promise<Row> {
  * bill re-recorded. Refused the moment any money has touched it.
  */
 export async function voidBill(input: Row, caller: Caller): Promise<Row> {
+  return releaseBill(input, caller, 'void')
+}
+
+/** Why a payable is deleted: the dropdown on the Delete bill dialog, stored as the readable label. */
+export const BILL_DELETE_REASONS: Record<string, string> = {
+  DUPLICATE: 'Duplicate',
+  WRONG_CARRIER: 'Wrong carrier',
+  LOAD_CANCELLED: 'Load cancelled',
+  ENTERED_IN_ERROR: 'Entered in error',
+  OTHER: 'Other',
+}
+
+/**
+ * Delete a payable (Ryne 2026-11-18). The same release as a void: the row is KEPT, marked VOID (the ledger does not
+ * forget what it was told), taken off every open list and the pay run, and the assignment goes back to
+ * AWAITING_INVOICE so a fresh bill can be recorded. What a delete adds is a coded reason and a line on the SHIPMENT's
+ * own history saying who deleted which bill, when and why. It never touches the load's carrier pay lines, the
+ * customer's invoice or any payment, and it is refused once money has touched the bill.
+ */
+export async function deleteBill(input: Row, caller: Caller): Promise<Row> {
+  return releaseBill(input, caller, 'delete')
+}
+
+async function releaseBill(input: Row, caller: Caller, mode: 'void' | 'delete'): Promise<Row> {
   const billId = assertString(input.billId, 'billId')
-  const reason = optionalString(input.reason, MAX_NOTE)
-  if (!reason) throw new Error('Voiding a bill needs a reason')
+  let reason = optionalString(input.reason, MAX_NOTE)
+  let reasonCode: string | null = null
+  if (mode === 'delete') {
+    reasonCode = optionalString(input.reasonCode, 40)?.toUpperCase() ?? null
+    if (!reasonCode || !Object.prototype.hasOwnProperty.call(BILL_DELETE_REASONS, reasonCode)) throw new Error('Pick why the bill is being deleted')
+    if (reasonCode === 'OTHER' && !reason) throw new Error('Say why the bill is being deleted')
+    reason = reason ? `${BILL_DELETE_REASONS[reasonCode]}: ${reason}` : BILL_DELETE_REASONS[reasonCode]
+  }
+  if (!reason) throw new Error(mode === 'delete' ? 'Deleting a bill needs a reason' : 'Voiding a bill needs a reason')
 
   const bill = await readBill(billId)
-  if (bill.status === 'VOID') throw new Error('That bill is already void')
+  if (bill.status === 'VOID') throw new Error(mode === 'delete' ? 'That bill is already deleted' : 'That bill is already void')
+  if (bill.status === 'PAID' || bill.status === 'PARTIAL') {
+    throw new Error('Money has already been applied to this bill; reverse the payment first')
+  }
   if ((bill.paidCents ?? 0) + (bill.creditedCents ?? 0) > 0) {
     throw new Error('Money has already been applied to this bill; reverse the payment first')
   }
@@ -637,7 +671,8 @@ export async function voidBill(input: Row, caller: Caller): Promise<Row> {
         {
           // `apOpen` must LEAVE the row, never become null: a NULL in an index key is
           // rejected outright (step C, BUILD_LOG 32d3eec).
-          remove: ['apOpen'],
+          // A deleted bill also leaves the pay run it was selected into.
+          remove: ['apOpen', 'selectedForPayment', 'selectedAt', 'selectedBy'],
           condition: 'version = :expectedVersion AND paidCents = :paid AND creditedCents = :credited',
           extraValues: {
             ':expectedVersion': { N: String(bill.version ?? 1) },
@@ -663,9 +698,22 @@ export async function voidBill(input: Row, caller: Caller): Promise<Row> {
         },
       ),
     ],
-    'bill void',
+    mode === 'delete' ? 'bill delete' : 'bill void',
   )
-  await writeAudit('CarrierBill', billId, 'VOID_BILL', caller, { reason, netCents: bill.netCents })
+  await writeAudit('CarrierBill', billId, mode === 'delete' ? 'DELETE_BILL' : 'VOID_BILL', caller, { reason, ...(reasonCode ? { reasonCode } : {}), netCents: bill.netCents })
+  // The shipment keeps its own record of it: the History tab and the Activity block read the shipment's entries, and
+  // the bill row alone would not say anything on the load it was deleted from.
+  if (bill.shipmentId) {
+    await writeAudit('SHIPMENT', bill.shipmentId, mode === 'delete' ? 'CARRIER_BILL_DELETED' : 'CARRIER_BILL_VOIDED', caller, {
+      bill: bill.billNumber ?? bill.id,
+      billId,
+      carrier: bill.carrierName ?? null,
+      pro: bill.shipmentNumber ?? bill.loadNumber ?? null,
+      amountCents: bill.netCents ?? null,
+      status: { from: bill.status, to: 'VOID' },
+      why: reason,
+    })
+  }
   return { bill: (await getById(CARRIER_BILL_TABLE_NAME, billId)) ?? {} }
 }
 
