@@ -3738,7 +3738,7 @@ const schema = a.schema(stageTypes({
   CarrierPaymentMethod: a
     .model({
       carrierId:     a.string().required(),
-      method:        a.enum(['ACH', 'WIRE', 'CHECK', 'ZELLE', 'VENMO', 'EFT']),
+      method:        a.enum(['ACH', 'WIRE', 'CHECK', 'ZELLE', 'VENMO', 'EFT', 'CARD']),
       // A factored carrier is paid through its factor, not through itself.
       recipientType: a.enum(['CARRIER', 'FACTOR']),
       factorName:    a.string(),

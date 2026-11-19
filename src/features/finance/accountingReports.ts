@@ -37,7 +37,7 @@ export interface AccountingReportDef {
 
 const ALL: ReportStatusOption = { key: 'all', label: 'All' }
 
-const AP_METHOD_LABEL: Record<string, string> = { ACH: 'ACH', CHECK: 'Paper check', WIRE: 'Wire', ZELLE: 'Zelle', VENMO: 'Venmo', EFT: 'EFT', OTHER: 'Other' }
+const AP_METHOD_LABEL: Record<string, string> = { ACH: 'ACH', CHECK: 'Paper check', WIRE: 'Wire', ZELLE: 'Zelle', VENMO: 'Venmo', EFT: 'EFT', CARD: 'Credit card', OTHER: 'Other' }
 
 export const ACCOUNTING_REPORTS: AccountingReportDef[] = [
   { kind: 'arAgingSummary', title: 'AR aging by customer', side: 'AR', dateBasis: null, partyLabel: 'Customer', statuses: [ALL, { key: 'late', label: 'Customers with late invoices' }] },

@@ -163,7 +163,7 @@ const INSURANCE_POLICY_TYPES = ['AUTO_LIABILITY', 'CARGO', 'GENERAL_LIABILITY', 
 const CARRIER_CONTACT_TYPES = [
   'ACCOUNTING', 'AFTER_HOURS', 'CLAIMS', 'DISPATCH', 'DRIVER', 'EMERGENCY', 'MANAGER', 'OWNER',
 ] as const
-const PAYMENT_METHOD_KINDS = ['ACH', 'WIRE', 'CHECK', 'ZELLE', 'VENMO', 'EFT'] as const
+const PAYMENT_METHOD_KINDS = ['ACH', 'WIRE', 'CHECK', 'ZELLE', 'VENMO', 'EFT', 'CARD'] as const
 const PAYEE_TYPES = ['CARRIER', 'FACTOR'] as const
 const PAYMENT_METHOD_STATUSES = ['ACTIVE', 'INACTIVE'] as const
 const CARRIER_DOCUMENT_TYPES = [
@@ -1035,6 +1035,26 @@ function optionalLast4(value: unknown, label: string): string | null {
   return trimmed
 }
 
+/**
+ * A credit-card method is a note that the carrier takes cards, nothing more. Any free-text
+ * field holding a run of 13+ digits (spaces and dashes ignored) looks like a card number, so
+ * the whole write is refused rather than the number quietly kept or trimmed.
+ */
+export function looksLikeCardNumber(value: unknown): boolean {
+  return typeof value === 'string' && /\d{13,}/.test(value.replace(/[\s-]/g, ''))
+}
+
+function assertNoCardNumber(input: Row): void {
+  for (const key of ['bankName', 'accountName', 'accountLast4', 'routingLast4', 'payeeEmail', 'factorName', 'bankDetailsKey'] as const) {
+    if (looksLikeCardNumber(input[key])) {
+      throw new Error(`${key} looks like a full card number — card numbers are never stored; send only the last four digits`)
+    }
+  }
+  for (const forbidden of ['cardNumber', 'cvv', 'cvc', 'expiry', 'expiration'] as const) {
+    if (input[forbidden] !== undefined) throw new Error(`${forbidden} is never stored`)
+  }
+}
+
 async function upsertPaymentMethod(input: Row, caller: Caller): Promise<Row> {
   const carrierId = assertString(input.carrierId, 'carrierId')
   const carrier = await getById(CARRIER_TABLE_NAME, carrierId)
@@ -1049,6 +1069,7 @@ async function upsertPaymentMethod(input: Row, caller: Caller): Promise<Row> {
   }
 
   const method = assertEnum(input.method, PAYMENT_METHOD_KINDS, 'method')
+  if (method === 'CARD') assertNoCardNumber(input)
   const recipientType = assertEnum(input.recipientType, PAYEE_TYPES, 'recipientType')
   const factorName = optionalString(input.factorName, 255)
   if (recipientType === 'FACTOR' && !factorName) {

@@ -733,6 +733,31 @@ describe('UPSERT_PAYMENT_METHOD', () => {
     expect(table(TABLES.payment).size).toBe(0)
   })
 
+  it('stores a credit-card method with only a last four', async () => {
+    const row = await call('UPSERT_PAYMENT_METHOD', {
+      carrierId: 'car-1', method: 'CARD', recipientType: 'CARRIER', accountLast4: '4242', bankName: 'Visa',
+    })
+    expect(JSON.stringify(row)).toContain('CARD')
+    expect(table(TABLES.payment).size).toBe(1)
+  })
+
+  it('refuses a full card number, CVV or expiry on a credit-card method', async () => {
+    await expect(
+      call('UPSERT_PAYMENT_METHOD', {
+        carrierId: 'car-1', method: 'CARD', recipientType: 'CARRIER', accountName: '4242 4242 4242 4242',
+      }),
+    ).rejects.toThrow('looks like a full card number')
+    await expect(
+      call('UPSERT_PAYMENT_METHOD', {
+        carrierId: 'car-1', method: 'CARD', recipientType: 'CARRIER', accountLast4: '4242424242424242',
+      }),
+    ).rejects.toThrow('looks like a full card number')
+    await expect(
+      call('UPSERT_PAYMENT_METHOD', { carrierId: 'car-1', method: 'CARD', recipientType: 'CARRIER', cvv: '123' }),
+    ).rejects.toThrow('cvv is never stored')
+    expect(table(TABLES.payment).size).toBe(0)
+  })
+
   it('leaves exactly one preferred payee behind', async () => {
     const first = await call('UPSERT_PAYMENT_METHOD', {
       carrierId: 'car-1', method: 'ACH', recipientType: 'CARRIER', accountLast4: '1234', isPreferred: true,
