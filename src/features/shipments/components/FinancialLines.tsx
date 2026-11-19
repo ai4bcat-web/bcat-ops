@@ -9,11 +9,12 @@
  * negative-buy are warnings here and refusals server-side — the editor never blocks a
  * number the Lambda would accept.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Plus, Trash2, AlertTriangle } from 'lucide-react'
 import { TmsAlert, TmsBadge, TmsButton, TmsCard, TmsInput, TmsSelect, TmsStatRow } from '@/features/tms/kit'
 import { Label } from '@/components/ui/label'
 import { MoneyField } from '@/features/directory/components/MoneyField'
+import { chargeToDraft } from '@/lib/carrierInvoiceAmount'
 import { computeFinancials, isRateCode } from '@/lib/shipmentCharges'
 import type { ChargeContext, FinancialTotals } from '@/lib/shipmentCharges'
 import { formatCents } from '@/lib/tmsDirectory'
@@ -42,25 +43,15 @@ interface FinancialLinesProps {
   marginFloorBps: number | null
   /** Frozen (invoiced) shipments and non-draft reads render the grid without inputs. */
   readOnly?: boolean
+  /** Also drop coded lines worth nothing when saving (the AP dialog; a $0 TONU placeholder is not a charge). */
+  dropZeroLines?: boolean
+  /** Shown above Save: whatever the save needs besides the lines (a reason for the change). */
+  beforeSave?: ReactNode
+  /** Why Save cannot be pressed yet, in words; the button is held until it is null. */
+  saveBlocked?: string | null
+  /** Tells the parent whether there are unsaved edits, so closing can ask before throwing them away. */
+  onDirtyChange?: (dirty: boolean) => void
   onSave: (charges: LoadChargeInput[]) => Promise<void>
-}
-
-function toDraft(charge: LoadChargeRecord): LoadChargeInput {
-  return {
-    side: charge.side,
-    code: charge.code,
-    label: charge.label ?? null,
-    calculatedBy: charge.calculatedBy,
-    rateCents: charge.rateCents,
-    count: charge.count ?? 1,
-    isRate: charge.isRate,
-    sortOrder: charge.sortOrder,
-    note: charge.note ?? null,
-    orderId: charge.orderId ?? null,
-    loadId: charge.loadId ?? null,
-    loadCarrierId: charge.loadCarrierId ?? null,
-    release: charge.release ?? null,
-  }
 }
 
 /**
@@ -74,15 +65,27 @@ function sideRows(lines: LoadChargeInput[], side: ChargeSide): { line: LoadCharg
   return rows
 }
 
-export function FinancialLines({ charges, catalog, context, pricing, marginFloorBps, readOnly, onSave }: FinancialLinesProps) {
+/** A line nobody filled in: no code, no rate. It is never a charge, so it is dropped rather than refused. */
+const isBlankLine = (line: LoadChargeInput): boolean => !line.code && !line.rateCents
+
+/** The lines Save sends: blank lines gone (and, where asked, zero-dollar coded ones), positions renumbered per side. */
+function linesToSave(draft: LoadChargeInput[], dropZeroLines: boolean): LoadChargeInput[] {
+  const kept = draft.filter((l) => !isBlankLine(l) && !(dropZeroLines && l.code && !l.isRate && !l.rateCents))
+  const next: Record<ChargeSide, number> = { CUSTOMER: 0, CARRIER: 0 }
+  return kept.map((l) => ({ ...l, sortOrder: next[l.side]++ }))
+}
+
+export function FinancialLines({ charges, catalog, context, pricing, marginFloorBps, readOnly, dropZeroLines = false, beforeSave, saveBlocked = null, onDirtyChange, onSave }: FinancialLinesProps) {
   const [draft, setDraft] = useState<LoadChargeInput[] | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Until the user touches a cell the grid mirrors the server rows, so a poll refresh is
   // never thrown away; the first edit forks a local draft that Save commits.
-  const lines = draft ?? charges.map(toDraft)
+  const lines = draft ?? charges.map(chargeToDraft)
   const dirty = draft != null
+  useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
+  const dropping = draft ? draft.length - linesToSave(draft, dropZeroLines).length : 0
 
   const totals: FinancialTotals = useMemo(
     () => computeFinancials(lines, context, pricing, marginFloorBps),
@@ -103,12 +106,17 @@ export function FinancialLines({ charges, catalog, context, pricing, marginFloor
 
   const save = async () => {
     if (!draft) return
-    if (draft.some((l) => !l.code)) { setError('Every line needs a charge code.'); return }
-    if (draft.some((l) => l.count != null && l.count < 0)) { setError('A count cannot be negative.'); return }
+    const toSave = linesToSave(draft, dropZeroLines)
+    const uncoded = toSave.find((l) => !l.code)
+    if (uncoded) {
+      setError(`Pick a charge code for the $${formatCents(uncoded.rateCents)} ${uncoded.side.toLowerCase()} line, or remove it.`)
+      return
+    }
+    if (toSave.some((l) => l.count != null && l.count < 0)) { setError('A count cannot be negative.'); return }
     setError(null)
     setSaving(true)
     try {
-      await onSave(draft)
+      await onSave(toSave)
       setDraft(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Charges failed to save')
@@ -212,9 +220,14 @@ export function FinancialLines({ charges, catalog, context, pricing, marginFloor
       ))}
 
       {error && <p className="text-xs text-[color:var(--tms-badge-red)]">{error}</p>}
+      {dropping > 0 && (
+        <p className="text-xs tms-muted">{dropping === 1 ? '1 empty line is' : `${dropping} empty lines are`} left out when you save.</p>
+      )}
+      {!readOnly && beforeSave}
+      {!readOnly && dirty && saveBlocked && <p className="text-xs tms-muted">{saveBlocked}</p>}
       {!readOnly && (
         <div className="flex items-center gap-2">
-          <TmsButton variant="primary" type="button" onClick={save} disabled={!dirty || saving}>
+          <TmsButton variant="primary" type="button" onClick={save} disabled={!dirty || saving || saveBlocked != null}>
             {saving ? 'Saving…' : 'Save charges'}
           </TmsButton>
           <TmsButton variant="ghost" type="button" onClick={() => { setDraft(null); setError(null) }} disabled={!dirty || saving}>

@@ -1,20 +1,28 @@
 /**
- * The carrier's invoice date, due date and invoice number for a bill that is still in review.
+ * The carrier's invoice date, due date, invoice number and invoice amount for a bill that is still in review.
  *
  * Moving a load to billing creates the bill with placeholder dates (`datesPending`); this is where AP
  * enters the real ones from the carrier's invoice, and saving clears the pending flag so the bill can be
  * approved. For a bill that already has real dates it corrects them. The inputs start empty while the
  * dates are pending, so a placeholder can never be saved by pressing Enter.
+ *
+ * The amount starts at what BCAT Ops has for the carrier. Typing the invoice's own amount moves the carrier's
+ * rate (and so the shipment's cost and the bill) before the dates are saved, with a reason, so the bill lands in
+ * Aging with the right amount and the right dates.
  */
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { TmsButton, TmsDialog, TmsField, TmsInput } from '@/features/tms/kit'
+import { centsFromInput, inputFromCents } from '@/features/ar/components/money'
+import { TmsButton, TmsDialog, TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { graphqlErrorText, setBillDates } from '@/lib/apiClient'
 import { billDueDate } from '@/lib/carrierBill'
 import { formatCents } from '@/lib/invoiceBuild'
 import { AP_QUICK_PAY_OPTIONS } from '@/lib/quickPay'
+import { applyInvoiceAmount, INVOICE_AMOUNT_REASONS } from '../applyInvoiceAmount'
 import { quickPayPreview } from './quickPayPreview'
 import type { CarrierBillRecord } from '@/types/tms'
+
+const OTHER = 'Other'
 
 export function SetBillDatesDialog({ bill, open, onOpenChange, onDone }: {
   bill: CarrierBillRecord
@@ -32,14 +40,29 @@ export function SetBillDatesDialog({ bill, open, onOpenChange, onDone }: {
   const [billDate, setBillDate] = useState(pending ? '' : bill.billDate)
   const [dueAt, setDueAt] = useState(pending ? '' : bill.dueAt)
   const [dueTouched, setDueTouched] = useState(!pending)
-  const preview = quickPayPreview(bill, billDate, quickPayDays)
-  const shownDue = preview?.dueAt || dueAt
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [amountText, setAmountText] = useState(inputFromCents(bill.grossCents))
+  const [reason, setReason] = useState<string>(INVOICE_AMOUNT_REASONS[0])
+  const [otherText, setOtherText] = useState('')
+  // Set once the rate has been moved, so a retry after the dates failed does not move it twice.
+  const [appliedCents, setAppliedCents] = useState<number | null>(null)
+
+  const amountCents = centsFromInput(amountText)
+  const currentCents = appliedCents ?? bill.grossCents
+  const amountChanged = amountCents != null && amountCents > 0 && amountCents !== currentCents
+  const deltaCents = amountCents != null ? amountCents - bill.grossCents : 0
+  const reasonText = reason === OTHER ? `${OTHER}: ${otherText.trim()}` : reason
+  // The discount is shown on the amount being saved, not the one the bill has now.
+  const owedCents = amountCents != null && amountCents > 0 ? amountCents : currentCents
+  const preview = quickPayPreview({ grossCents: owedCents }, billDate, quickPayDays)
+  const shownDue = preview?.dueAt || dueAt
 
   const problem = !billDate ? 'Enter the invoice date.'
     : !shownDue ? 'Enter the due date.'
     : shownDue < billDate ? 'The due date cannot be before the invoice date.'
+    : (amountCents == null ? bill.grossCents > 0 || amountText.trim() !== '' : amountCents <= 0 && bill.grossCents > 0) ? 'Enter the amount on the carrier’s invoice.'
+    : amountChanged && reason === OTHER && otherText.trim().length < 3 ? 'Say what the amount change is for.'
     : null
 
   function changeBillDate(value: string) {
@@ -61,14 +84,19 @@ export function SetBillDatesDialog({ bill, open, onOpenChange, onDone }: {
     // Quick pay is only sent when the choice differs from what the bill already has, so a plain date
     // correction on a bill leaves its terms alone.
     const quickPayChanged = quickPayDays !== currentQuickPay
-    setBillDates({
-      billId: bill.id,
-      billDate,
-      dueAt: shownDue,
-      billNumber: billNumber.trim() || null,
-      ...(quickPayChanged ? { quickPayDays } : {}),
-    })
-      .then(() => { toast.success('Invoice and due dates saved'); onDone() })
+    // The amount goes first: the bill's quick-pay discount is worked out on the amount it ends up with.
+    const amountStep = amountChanged && amountCents != null
+      ? applyInvoiceAmount({ bill, targetCents: amountCents, reason: reasonText }).then(() => { setAppliedCents(amountCents) })
+      : Promise.resolve()
+    amountStep
+      .then(() => setBillDates({
+        billId: bill.id,
+        billDate,
+        dueAt: shownDue,
+        billNumber: billNumber.trim() || null,
+        ...(quickPayChanged ? { quickPayDays } : {}),
+      }))
+      .then(() => { toast.success(amountChanged ? 'Invoice amount and dates saved' : 'Invoice and due dates saved'); onDone() })
       .catch((err: unknown) => setError(graphqlErrorText(err)))
       .finally(() => setSaving(false))
   }
@@ -81,7 +109,7 @@ export function SetBillDatesDialog({ bill, open, onOpenChange, onDone }: {
       footer={(
         <>
           <TmsButton variant="ghost" disabled={saving} onClick={() => onOpenChange(false)}>Cancel</TmsButton>
-          <TmsButton variant="primary" disabled={saving || problem != null} onClick={save}>Save dates</TmsButton>
+          <TmsButton variant="primary" disabled={saving || problem != null} onClick={save}>{amountChanged ? 'Save amount and dates' : 'Save dates'}</TmsButton>
         </>
       )}
     >
@@ -104,6 +132,28 @@ export function SetBillDatesDialog({ bill, open, onOpenChange, onDone }: {
       <p className="tms-muted text-xs mt-1">
         {preview ? `Quick pay sets the due date to ${preview.days} days after the invoice date.` : `Due date starts ${standardDays} days after the invoice date; change it if the invoice says otherwise.`}
       </p>
+      <div className="tms-grid tms-grid-3 mt-2">
+        <TmsField label="Invoice amount">
+          <TmsInput aria-label="Carrier invoice amount" inputMode="decimal" value={amountText} onChange={(e) => setAmountText(e.target.value)} />
+        </TmsField>
+        {amountChanged && (
+          <TmsField label="Why it changed">
+            <TmsSelect aria-label="Reason for amount change" value={reason} onChange={(e) => setReason(e.target.value)} className="w-full">
+              {[...INVOICE_AMOUNT_REASONS].map((r) => <option key={r} value={r}>{r}</option>)}
+            </TmsSelect>
+          </TmsField>
+        )}
+        {amountChanged && reason === OTHER && (
+          <TmsField label="Details">
+            <TmsInput aria-label="Reason details" value={otherText} onChange={(e) => setOtherText(e.target.value)} />
+          </TmsField>
+        )}
+      </div>
+      <p className="tms-muted text-xs mt-1" aria-live="polite">
+        {amountChanged
+          ? `${formatCents(Math.abs(deltaCents))} ${deltaCents < 0 ? 'lower' : 'higher'} than BCAT Ops (${formatCents(bill.grossCents)}). Saving moves the carrier’s rate to match, so the shipment’s cost and this bill agree.`
+          : `BCAT Ops has ${formatCents(currentCents)} for this carrier. Change it if the invoice says something else.`}
+      </p>
       <fieldset className="mt-3" aria-label="Quick pay" disabled={factored}>
         <legend className="tms-label">Quick pay</legend>
         <div className="flex flex-wrap gap-2">
@@ -121,7 +171,7 @@ export function SetBillDatesDialog({ bill, open, onOpenChange, onDone }: {
         {factored && <p className="tms-muted text-xs mt-1">Paid through a factor; quick pay does not apply.</p>}
         {preview && (
           <dl className="grid grid-cols-2 gap-x-4 text-sm mt-2" aria-label="Quick pay amounts">
-            <dt>Carrier pay</dt><dd className="text-right tabular-nums">{formatCents(bill.grossCents)}</dd>
+            <dt>Carrier pay</dt><dd className="text-right tabular-nums">{formatCents(owedCents)}</dd>
             <dt>Quick pay discount ({preview.feePercent}%)</dt><dd className="text-right tabular-nums">−{formatCents(preview.feeCents)}</dd>
             <dt className="font-medium">Amount to pay</dt><dd className="text-right tabular-nums font-medium">{formatCents(preview.netCents)}</dd>
             <dt>Due</dt><dd className="text-right tabular-nums">{preview.dueAt}</dd>

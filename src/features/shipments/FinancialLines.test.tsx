@@ -97,15 +97,55 @@ describe('FinancialLines totals', () => {
   })
 })
 
+const onSaveSpy = vi.fn(async () => {})
+
 describe('FinancialLines editing', () => {
-  it('refuses to save a line with no charge code', async () => {
+  it('leaves out a line nobody filled in instead of refusing the save', async () => {
     const onSave = renderGrid()
-    fireEvent.click(screen.getAllByRole('button', { name: 'Add line' })[0])
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save charges' })).toBeTruthy())
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add line' })[1])
+    await waitFor(() => expect(screen.getByText('1 empty line is left out when you save.')).toBeTruthy())
     fireEvent.click(screen.getByRole('button', { name: 'Save charges' }))
 
-    await waitFor(() => expect(screen.getByText('Every line needs a charge code.')).toBeTruthy())
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    const sent = (onSave.mock.calls as unknown as [Array<{ side: string; code: string }>][])[0][0]
+    expect(sent.map((l) => `${l.side}:${l.code}`)).toEqual(['CUSTOMER:LINEHAUL', 'CUSTOMER:DETENTION', 'CARRIER:LINEHAUL'])
+  })
+
+  it('refuses a line that has a rate but no charge code, and says which one', async () => {
+    const onSave = renderGrid()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add line' })[1])
+    await waitFor(() => expect(screen.getByLabelText('CARRIER charge code 2')).toBeTruthy())
+    const rate = screen.getAllByLabelText('Rate').at(-1) as HTMLInputElement
+    fireEvent.change(rate, { target: { value: '100.00' } })
+    fireEvent.blur(rate)
+    fireEvent.click(screen.getByRole('button', { name: 'Save charges' }))
+
+    await waitFor(() => expect(screen.getByText('Pick a charge code for the $100.00 carrier line, or remove it.')).toBeTruthy())
     expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('drops a coded line worth nothing only where the caller asks for it', async () => {
+    const withZero = [...charges, charge({ side: 'CARRIER', code: 'DETENTION', rateCents: 0, isRate: false, sortOrder: 1 })]
+    for (const [dropZeroLines, expected] of [[false, 4], [true, 3]] as const) {
+      const { unmount } = render(
+        <FinancialLines charges={withZero} catalog={catalog} context={{ miles: 500 }} pricing={pricing} marginFloorBps={1000}
+          dropZeroLines={dropZeroLines} onSave={onSaveSpy} />,
+      )
+      fireEvent.change(screen.getByLabelText('CUSTOMER count 1'), { target: { value: '2' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save charges' }))
+      await waitFor(() => expect(onSaveSpy).toHaveBeenCalledTimes(1))
+      expect((onSaveSpy.mock.calls as unknown as [unknown[]][])[0][0]).toHaveLength(expected)
+      onSaveSpy.mockClear()
+      unmount()
+    }
+  })
+
+  it('holds Save, with the reason in words, until the caller says it can go', () => {
+    renderGrid({ saveBlocked: 'Add the reason for the change to save.', beforeSave: <p>reason box</p> })
+    fireEvent.change(screen.getByLabelText('CUSTOMER count 1'), { target: { value: '2' } })
+    expect(screen.getByText('reason box')).toBeTruthy()
+    expect(screen.getByText('Add the reason for the change to save.')).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Save charges' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('refuses a negative count', async () => {

@@ -8659,6 +8659,10 @@ export async function updateCarrierCharges(input: {
   loadCarrierId: string
   expectedVersion: number
   charges: LoadChargeInput[]
+  /** Required once the shipment has a customer invoice (REASON_REQUIRED otherwise); written to the post-invoice audit entry. */
+  changeReason?: string
+  /** Why the carrier's bill total moved, for the shipment's own audit entry; only read when a bill in review is re-priced. */
+  amountReason?: string
 }): Promise<ShipmentBundle> {
   return shipmentAction<ShipmentBundle>('UPDATE_CARRIER_CHARGES', input)
 }

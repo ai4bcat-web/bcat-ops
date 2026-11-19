@@ -5,7 +5,9 @@ import type { CarrierBillRecord } from '@/types/tms'
 import { SetBillDatesDialog } from './SetBillDatesDialog'
 
 const setBillDates = vi.hoisted(() => vi.fn())
-vi.mock('@/lib/apiClient', () => ({ setBillDates, graphqlErrorText: (e: unknown) => String(e) }))
+const getShipmentBundle = vi.hoisted(() => vi.fn())
+const updateCarrierCharges = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/apiClient', () => ({ setBillDates, getShipmentBundle, updateCarrierCharges, graphqlErrorText: (e: unknown) => String(e) }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 function bill(over: Partial<CarrierBillRecord> = {}): CarrierBillRecord {
@@ -21,8 +23,74 @@ function bill(over: Partial<CarrierBillRecord> = {}): CarrierBillRecord {
 
 const field = (label: string) => screen.getByLabelText(label) as HTMLInputElement
 
+function carrierLine(code: string, rateCents: number, sortOrder: number, isRate = false) {
+  return { id: `c${sortOrder}`, side: 'CARRIER', code, calculatedBy: 'FLAT', rateCents, count: 1, isRate, sortOrder, amountCents: rateCents, loadCarrierId: 'lc-1', loadId: 'l-1' }
+}
+
 describe('SetBillDatesDialog', () => {
-  beforeEach(() => { setBillDates.mockReset().mockResolvedValue({ bill: bill({ datesPending: false }) }) })
+  beforeEach(() => {
+    setBillDates.mockReset().mockResolvedValue({ bill: bill({ datesPending: false }) })
+    getShipmentBundle.mockReset().mockResolvedValue({
+      shipment: { version: 7 },
+      orders: [],
+      loads: [{ id: 'l-1', miles: 400 }],
+      loadCarriers: [{ id: 'lc-1', kind: 'CARRIER', loadId: 'l-1' }],
+      charges: [carrierLine('LINEHAUL', 490_000, 0, true), carrierLine('DETENTION', 22_500, 1)],
+    })
+    // The server stores what it is sent; the amounts are the flat rates here.
+    updateCarrierCharges.mockReset().mockImplementation(async (input: { charges: Array<{ rateCents: number }> }) => ({
+      charges: input.charges.map((c, i) => ({ ...c, side: 'CARRIER', loadCarrierId: 'lc-1', sortOrder: i, amountCents: c.rateCents, id: `n${i}` })),
+    }))
+  })
+
+  it('records the carrier’s invoice amount with the dates: the rate moves first, with the reason, then the dates are saved', async () => {
+    const onDone = vi.fn()
+    render(<SetBillDatesDialog bill={bill({ grossCents: 512_500, netCents: 512_500, billedCents: 512_500, balanceCents: 512_500 })} open onOpenChange={vi.fn()} onDone={onDone} />)
+    expect(field('Carrier invoice amount').value).toBe('5125.00')
+    fireEvent.change(field('Invoice date'), { target: { value: '2026-10-05' } })
+    fireEvent.change(field('Carrier invoice amount'), { target: { value: '5000.00' } })
+    expect(screen.getByText(/\$125\.00 lower than BCAT Ops \(\$5,125\.00\)/)).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('Reason for amount change'), { target: { value: 'Detention' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save amount and dates' }))
+
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    const sent = updateCarrierCharges.mock.calls[0][0]
+    expect(sent).toMatchObject({ loadCarrierId: 'lc-1', expectedVersion: 7 })
+    expect(sent.charges.map((c: { code: string; rateCents: number }) => [c.code, c.rateCents])).toEqual([['LINEHAUL', 477_500], ['DETENTION', 22_500]])
+    expect(sent.changeReason).toBe('Detention: carrier invoice $5,000.00, was $5,125.00')
+    expect(sent.amountReason).toBe(sent.changeReason)
+    expect(updateCarrierCharges.mock.invocationCallOrder[0]).toBeLessThan(setBillDates.mock.invocationCallOrder[0])
+    expect(setBillDates).toHaveBeenCalledWith(expect.objectContaining({ billId: 'cb:lc-1:1', billDate: '2026-10-05' }))
+  })
+
+  it('needs the details when the reason is Other, and touches nothing when the amount is left as it is', async () => {
+    render(<SetBillDatesDialog bill={bill()} open onOpenChange={vi.fn()} onDone={vi.fn()} />)
+    fireEvent.change(field('Invoice date'), { target: { value: '2026-10-05' } })
+    fireEvent.change(field('Carrier invoice amount'), { target: { value: '1300.00' } })
+    fireEvent.change(screen.getByLabelText('Reason for amount change'), { target: { value: 'Other' } })
+    expect(screen.getByText('Say what the amount change is for.')).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Save amount and dates' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(field('Carrier invoice amount'), { target: { value: '1400.00' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save dates' }))
+    await waitFor(() => expect(setBillDates).toHaveBeenCalled())
+    expect(getShipmentBundle).not.toHaveBeenCalled()
+    expect(updateCarrierCharges).not.toHaveBeenCalled()
+  })
+
+  it('does not save the dates when the amount cannot be applied, and says why', async () => {
+    getShipmentBundle.mockResolvedValue({
+      shipment: { version: 7 }, orders: [], loads: [{ id: 'l-1' }],
+      loadCarriers: [{ id: 'lc-1', kind: 'CARRIER', loadId: 'l-1' }],
+      charges: [carrierLine('DETENTION', 22_500, 0)],
+    })
+    render(<SetBillDatesDialog bill={bill({ grossCents: 22_500 })} open onOpenChange={vi.fn()} onDone={vi.fn()} />)
+    fireEvent.change(field('Invoice date'), { target: { value: '2026-10-05' } })
+    fireEvent.change(field('Carrier invoice amount'), { target: { value: '100.00' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save amount and dates' }))
+    await waitFor(() => expect(screen.getByText(/no rate line/)).toBeTruthy())
+    expect(updateCarrierCharges).not.toHaveBeenCalled()
+    expect(setBillDates).not.toHaveBeenCalled()
+  })
 
   it('starts empty while the dates are placeholders, so one cannot be saved by accident', () => {
     render(<SetBillDatesDialog bill={bill()} open onOpenChange={vi.fn()} onDone={vi.fn()} />)

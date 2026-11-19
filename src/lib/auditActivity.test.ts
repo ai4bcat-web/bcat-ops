@@ -38,6 +38,7 @@ describe('actionSentence', () => {
   })
   it('words a deleted or voided carrier bill', () => {
     expect(actionSentence('CARRIER_BILL_DELETED')).toBe('deleted a carrier bill')
+    expect(actionSentence('CARRIER_BILL_AMOUNT_CHANGED')).toBe('changed the amount on a carrier bill')
     expect(actionSentence('CARRIER_BILL_VOIDED')).toBe('voided a carrier bill')
   })
   it('humanises an action it does not know, and does not trip on inherited keys', () => {
