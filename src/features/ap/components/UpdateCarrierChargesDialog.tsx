@@ -77,14 +77,17 @@ export function UpdateCarrierChargesDialog({ loadCarrierId, shipmentId, bill, op
   const ours = (bundle?.charges ?? []).filter(
     (row) => row.side === 'CARRIER' && row.loadCarrierId === loadCarrierId,
   )
+  // The customer's lines are shown (not editable) and the shipment's other carriers count toward the totals,
+  // so Profit and Margin are the load's true figures, not this carrier's cost against nothing.
+  const customerLines = (bundle?.charges ?? []).filter((row) => row.side === 'CUSTOMER')
+  const otherCarrierLines = (bundle?.charges ?? []).filter(
+    (row) => row.side === 'CARRIER' && row.loadCarrierId !== loadCarrierId,
+  )
 
   const save = async (charges: LoadChargeInput[]) => {
     if (!bundle) return
-    // The grid renders both sides; only the carrier's are this assignment's money, and
-    // the Lambda refuses the rest by name. Saying so here is kinder than a round trip.
-    if (charges.some((line) => line.side !== 'CARRIER')) {
-      throw new Error('Only carrier lines belong on this form. Customer charges are edited on the shipment.')
-    }
+    // The grid shows the customer's lines for the margin; only the carrier's are this assignment's money.
+    charges = charges.filter((line) => line.side === 'CARRIER')
     await updateCarrierCharges({
       loadCarrierId,
       expectedVersion: bundle.shipment.version ?? 1,
@@ -160,7 +163,11 @@ export function UpdateCarrierChargesDialog({ loadCarrierId, shipmentId, bill, op
             </p>
           )}
           <FinancialLines
-            charges={ours}
+            charges={[...customerLines, ...ours]}
+            readOnlySides={['CUSTOMER']}
+            extraLines={otherCarrierLines}
+            highlight={{ side: 'CARRIER', label: 'Changes here change the carrier pay on the AP record.' }}
+            dashWithoutCustomer
             catalog={settings?.chargeCodes ?? []}
             context={{ miles: leg?.miles ?? null }}
             pricing={pricing}

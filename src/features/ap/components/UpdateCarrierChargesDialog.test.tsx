@@ -90,4 +90,37 @@ describe('UpdateCarrierChargesDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Discard and close' }))
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
+  it('edits a line, adds one, deletes one, and saves carrier lines only', async () => {
+    getShipmentBundle.mockReset().mockResolvedValue({
+      ...bundle(null),
+      charges: [{ ...line('LINEHAUL', 512_500, 0, true), side: 'CUSTOMER', loadCarrierId: null }, line('LINEHAUL', 490_000, 0, true), line('TONU', 12_500, 1)],
+    })
+    const { onDone } = open()
+    await waitFor(() => expect(screen.getByLabelText('CARRIER charge code 1')).toBeTruthy())
+    // The customer side is shown, read only, with a true profit.
+    expect((screen.getByLabelText('CUSTOMER charge code 1') as HTMLSelectElement).disabled).toBe(true)
+    expect(screen.getByText('AP record')).toBeTruthy()
+    // Edit rate and count, delete the TONU, add a fuel line.
+    fireEvent.change(screen.getAllByLabelText('Rate')[1], { target: { value: '5000.00' } })
+    fireEvent.blur(screen.getAllByLabelText('Rate')[1])
+    fireEvent.change(screen.getByLabelText('CARRIER count 1'), { target: { value: '1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Remove CARRIER line 2' }))
+    fireEvent.click(screen.getByRole('button', { name: /Add line/ }))
+    fireEvent.change(screen.getByLabelText('CARRIER charge code 2'), { target: { value: 'TONU' } })
+    fireEvent.change(screen.getAllByLabelText('Rate')[2], { target: { value: '100.00' } })
+    fireEvent.blur(screen.getAllByLabelText('Rate')[2])
+    fireEvent.click(screen.getByRole('button', { name: 'Save charges' }))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    const sent = updateCarrierCharges.mock.calls[0][0]
+    expect(sent.charges.map((c: { side: string; code: string; rateCents: number }) => [c.side, c.code, c.rateCents]))
+      .toEqual([['CARRIER', 'LINEHAUL', 500_000], ['CARRIER', 'TONU', 10_000]])
+  })
+
+  it('shows dashes, not a made-up profit, when the shipment has no customer lines', async () => {
+    getShipmentBundle.mockReset().mockResolvedValue(bundle(null))
+    open()
+    await waitFor(() => expect(screen.getByTestId('financial-totals')).toBeTruthy())
+    expect(screen.getByTestId('financial-totals').textContent).not.toMatch(/-\$|\$-/)
+    expect(screen.getByLabelText('Financial totals').textContent).toContain('—')
+  })
 })
