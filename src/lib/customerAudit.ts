@@ -167,6 +167,7 @@ const ACTION_TITLES: Record<string, string> = {
   MERGE_CUSTOMER: 'Merged',
   MERGE_CUSTOMER_START: 'Merge started',
   RESTORE_CUSTOMER: 'Restored',
+  CUSTOMER_NAME_SYNC: 'Name copied to records',
 }
 
 function titleFor(action: string): string {
