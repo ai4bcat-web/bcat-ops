@@ -23,7 +23,8 @@ export interface DashboardSummaryRow {
 
 export interface DashboardSummaryGroup {
   key: string
-  label: string
+  /** Left off, the group's rows sit under the main rows with no heading. */
+  label?: string
   rows: DashboardSummaryRow[]
 }
 
@@ -83,7 +84,7 @@ export function DashboardSummaryCard({ title, icon, headline, headlineText, subl
         </div>
         {groups.map((g) => (
           <div key={g.key} style={{ minWidth: 0 }}>
-            <div style={GROUP_LABEL}>{g.label}</div>
+            {g.label && <div style={GROUP_LABEL}>{g.label}</div>}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
               {g.rows.map((r) => <Row key={r.key} row={r} />)}
             </div>

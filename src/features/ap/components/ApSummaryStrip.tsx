@@ -40,6 +40,8 @@ export function ApSummaryStrip({ summary, divisionName, division, onDivision, on
           { key: 'selected', label: 'Selected', value: formatCents(s.selected.cents), sub: bills(s.selected.count), title: `${bills(s.selected.count)} · next payment run`, onClick: () => onTab('selected') },
           { key: 'past-due', label: 'Past due', value: formatCents(s.pastDue.cents), sub: bills(s.pastDue.count), tone: s.pastDue.cents > 0 ? 'bad' : 'default', onClick: onCashRequirements },
           { key: 'next7', label: 'Due next 7 days', value: formatCents(s.dueNext7.cents), sub: bills(s.dueNext7.count), title: `${bills(s.dueNext7.count)} · opens cash requirements`, onClick: onCashRequirements },
+          { key: 'paid-week', label: 'Paid this week', value: formatCents(s.paidWeek.cents), sub: bills(s.paidWeek.count), title: `${bills(s.paidWeek.count)} · net paid to carriers since Monday` },
+          { key: 'paid-month', label: 'Paid this month', value: formatCents(s.paidMonth.cents), sub: bills(s.paidMonth.count), title: `${bills(s.paidMonth.count)} · net paid to carriers this month` },
           {
             key: 'quick',
             label: 'Quick pay this month',
