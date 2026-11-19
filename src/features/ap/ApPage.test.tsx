@@ -828,14 +828,14 @@ describe('Pay-to needed: bills whose carrier has nowhere to send money (Ryne 202
     vi.mocked(listCarrierPaymentInfo).mockResolvedValue(methods as never)
     try {
       await setup({ bills: mixed() })
-      expect((await screen.findByTestId('payto-banner')).textContent).toBe('1 payee needs a pay-to · $1,300.00 waiting')
+      expect((await screen.findByTestId('payto-banner')).textContent).toBe('1 payee is missing payment info · $1,300.00 waiting')
       fireEvent.click(screen.getByRole('tab', { name: /^Selected/ }))
       const bad = screen.getByLabelText('Select bill LS-1').closest('tr') as HTMLElement
       expect(within(bad).getByRole('button', { name: /Pay-to needed for Landstar Ranger/ })).toBeTruthy()
       const ok = screen.getByLabelText('Select bill OK-1').closest('tr') as HTMLElement
       expect(within(ok).queryByText('Pay-to needed')).toBeNull()
 
-      fireEvent.click(screen.getByRole('button', { name: /Pay-to needed \(1\)/ }))
+      fireEvent.click(screen.getByRole('button', { name: /Missing payment info \(1\)/ }))
       expect(screen.queryByLabelText('Select bill OK-1')).toBeNull()
       expect(screen.getByLabelText('Select bill LS-1')).toBeTruthy()
     } finally {
@@ -848,10 +848,39 @@ describe('Pay-to needed: bills whose carrier has nowhere to send money (Ryne 202
     try {
       await setup({ bills: mixed() })
       fireEvent.click(await screen.findByTestId('payto-banner'))
-      expect(await screen.findByRole('table', { name: 'Payees that need a pay-to' })).toBeTruthy()
+      expect(await screen.findByRole('table', { name: 'Payees missing payment info' })).toBeTruthy()
       expect(screen.getByText('Landstar Ranger')).toBeTruthy()
       fireEvent.click(screen.getByRole('button', { name: 'Add pay-to for Landstar Ranger' }))
       expect(await screen.findByText('pay-to editor for Landstar Ranger')).toBeTruthy()
+    } finally {
+      vi.mocked(listCarrierPaymentInfo).mockResolvedValue([])
+    }
+  })
+
+  it('flags a payee with a method but no bank info, and will not let the bill be paid until it is on file (Ryne 2026-11-19)', async () => {
+    const ach = { id: 'pm1', carrierId: 'car1', method: 'ACH', recipientType: 'CARRIER', accountLast4: '9545', isPreferred: true, status: 'ACTIVE' }
+    vi.mocked(listCarrierPaymentInfo).mockResolvedValue([ach] as never)
+    try {
+      await setup({ bills: [bill({ id: 'ok', billNumber: 'OK-1', selectedForPayment: true, remitTo: null })] })
+      expect((await screen.findByTestId('payto-banner')).textContent).toMatch(/1 payee is missing payment info/)
+      fireEvent.click(screen.getByRole('tab', { name: /^Selected/ }))
+      const row = screen.getByLabelText('Select bill OK-1').closest('tr') as HTMLElement
+      expect(within(row).getByRole('button', { name: /No bank info for/ })).toBeTruthy()
+      expect((within(row).getByRole('button', { name: 'Record payment for bill OK-1' }) as HTMLButtonElement).disabled).toBe(true)
+    } finally {
+      vi.mocked(listCarrierPaymentInfo).mockResolvedValue([])
+    }
+  })
+
+  it('lets the bill be paid once the bank details are on file', async () => {
+    const ach = { id: 'pm1', carrierId: 'car1', method: 'ACH', recipientType: 'CARRIER', accountLast4: '9545', bankDetailsOnFileAt: '2026-11-19T12:00:00Z', isPreferred: true, status: 'ACTIVE' }
+    vi.mocked(listCarrierPaymentInfo).mockResolvedValue([ach] as never)
+    try {
+      await setup({ bills: [bill({ id: 'ok', billNumber: 'OK-1', selectedForPayment: true, remitTo: null })] })
+      fireEvent.click(await screen.findByRole('tab', { name: /^Selected/ }))
+      const row = screen.getByLabelText('Select bill OK-1').closest('tr') as HTMLElement
+      expect((within(row).getByRole('button', { name: 'Record payment for bill OK-1' }) as HTMLButtonElement).disabled).toBe(false)
+      expect(screen.queryByTestId('payto-banner')).toBeNull()
     } finally {
       vi.mocked(listCarrierPaymentInfo).mockResolvedValue([])
     }

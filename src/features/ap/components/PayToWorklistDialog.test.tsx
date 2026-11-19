@@ -13,7 +13,7 @@ describe('PayToWorklistDialog', () => {
   it('lists each carrier with what is missing, its open bills and the money waiting, in the order given', () => {
     render(<PayToWorklistDialog rows={rows} open onOpenChange={vi.fn()} onAdd={vi.fn()} />)
     expect(screen.getByText(/2 payees, 4 open bills, \$3,450\.00/)).toBeInTheDocument()
-    const body = within(screen.getByRole('table', { name: 'Payees that need a pay-to' }))
+    const body = within(screen.getByRole('table', { name: 'Payees missing payment info' }))
     const lines = body.getAllByTestId('payto-worklist-row')
     expect(lines).toHaveLength(2)
     expect(within(lines[0]).getByText('ECHO GLOBAL LOGISTIC')).toBeInTheDocument()
@@ -30,8 +30,17 @@ describe('PayToWorklistDialog', () => {
     expect(onAdd).toHaveBeenCalledWith(rows[1])
   })
 
+  it('says Fix payment info for a payee that has a pay-to but lacks its bank info', () => {
+    const onAdd = vi.fn()
+    const bank = { carrierId: 'blue', carrierName: 'BLUE RIDGE', status: 'NO_BANK' as const, bills: 2, cents: 180_000 }
+    render(<PayToWorklistDialog rows={[bank]} open onOpenChange={vi.fn()} onAdd={onAdd} />)
+    expect(screen.getAllByText('No bank info').length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Fix payment info for BLUE RIDGE' }))
+    expect(onAdd).toHaveBeenCalledWith(bank)
+  })
+
   it('says nothing is waiting once every payee has a pay-to', () => {
     render(<PayToWorklistDialog rows={[]} open onOpenChange={vi.fn()} onAdd={vi.fn()} />)
-    expect(screen.getByText(/Every open bill has a payee/)).toBeInTheDocument()
+    expect(screen.getByText(/Every open bill has a payee with what it needs/)).toBeInTheDocument()
   })
 })

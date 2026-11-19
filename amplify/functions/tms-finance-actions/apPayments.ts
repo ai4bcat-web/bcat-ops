@@ -33,6 +33,7 @@ import {
 } from '../_shared/actionInputs'
 import { deliverNotice } from '../_shared/shipmentNotices'
 import { apFundingSplit, billStatusAfter } from '../../../src/lib/carrierBill'
+import { assertBillsPayable } from './paymentInfoGate'
 import {
   planPayment,
   reversalPlan,
@@ -382,6 +383,12 @@ export async function recordApPayment(input: Row, caller: Caller): Promise<Poste
   if (existing) {
     const ids = (existing.applications as ApPaymentApplication[] | undefined)?.map((a) => a.billId) ?? []
     return readBack(id, ids, true)
+  }
+
+  // Nobody pays a payee that has no bank info (Ryne 2026-11-19). A credit-only application moves no money, so it
+  // is not held to this; a replay of an already-posted payment returned above.
+  if (amountCents > 0) {
+    await assertBillsPayable(applications.filter((application) => application.amountCents > 0).map((application) => application.billId))
   }
 
   const { documents, credits, before } = await readPlanInputs(applications, creditApplications)

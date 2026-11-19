@@ -48,7 +48,7 @@ import {
   EMPTY_TO_BE_PAID_FILTERS, applyToBePaidFilters, avgDaysToPayBills, awaitingInvoiceTotals, billCarrierOptions,
   billGates, type BillGates, billsAging, billsExpected, billsSelected, canSelectForPayment, invoiceAgeBuckets, isOwnFleet, paidBills,
   paidInMonth, paidMonthOptions, visiblePaidBills,
-  paymentInfoFor, payeeNameFor, isFactorPaid, payToStatusFor, payToWorklist, PAY_TO_STATUS_LABEL, PAY_TO_STATUS_TITLE, quickPayLabel, setFactorNamesForLabels, setPayeeRemitForLabels, payeeCopies, remitEmailOf, remitEmailOfPayment, remittanceStatusOf, selectionBalanceCents,
+  paymentInfoFor, payeeNameFor, isFactorPaid, payToStatusFor, paymentGapFor, isPaymentGap, payToWorklist, PAY_TO_STATUS_LABEL, PAY_TO_STATUS_TITLE, quickPayLabel, setFactorNamesForLabels, setPayeeRemitForLabels, payeeCopies, remitEmailOf, remitEmailOfPayment, remittanceStatusOf, selectionBalanceCents,
   selectionCarrierId, sharedProLabel, sharedProIndex, multiCarrierLoadIds, withLegSuffix, type ApTabKey, type SharedProIndex, type ToBePaidFilters,
 } from './apViews'
 import { ApCreditDialog } from './components/ApCreditDialog'
@@ -56,6 +56,7 @@ import { VerifyPaymentBadge } from './components/VerifyPaymentBadge'
 import { isVerifyPaymentBill } from '@/lib/verifyPayment'
 import { ApproveBillDialog } from './components/ApproveBillDialog'
 import { PayCarrierDialog } from './components/PayCarrierDialog'
+import { paymentGapMessage } from '@/lib/paymentInfo'
 import { RemitEmailDialog } from './components/RemitEmailDialog'
 import { PayToDialog } from './components/PayToDialog'
 import { PayToWorklistDialog } from './components/PayToWorklistDialog'
@@ -254,11 +255,15 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     return map
   }, [carriers])
 
-  // The factor method each carrier names lives on the carrier, not on its payment methods; the Pay-to needed flag
+  // The factor method each carrier names lives on the carrier, not on its payment methods; the Missing payment info flag
   // reads it (see `payToStatusFor`) the way approval chooses a payee. Left unset until the carriers have loaded.
   const payInfos = useMemo(() => (carriersById.size === 0
     ? infoRows
-    : infoRows.map((info) => ({ ...info, carrierFactorMethodId: carriersById.get(info.carrierId)?.factorPaymentMethodId ?? null }))),
+    : infoRows.map((info) => ({
+      ...info,
+      carrierFactorMethodId: carriersById.get(info.carrierId)?.factorPaymentMethodId ?? null,
+      carrierAddress: (carriersById.get(info.carrierId)?.address ?? null) as CarrierPaymentInfo['carrierAddress'],
+    }))),
   [infoRows, carriersById])
 
   const reviewRows = useMemo(() => {
@@ -544,10 +549,10 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
             type="button"
             className="tms-badge tms-badge-orange whitespace-nowrap"
             data-testid="payto-banner"
-            title="Open bills whose carrier has no payment method (or none chosen) cannot be approved or paid. Click to add each one's pay-to."
+            title="These payees have no pay-to, or are missing the bank info (or address) their payment method needs. Their bills cannot be paid until it is added. Click to fix each one."
             onClick={() => setDialog({ kind: 'payto-list' })}
           >
-            {payToRows.length} {payToRows.length === 1 ? 'payee needs' : 'payees need'} a pay-to · {formatCents(payToRows.reduce((sum, row) => sum + row.cents, 0))} waiting
+            {payToRows.length} {payToRows.length === 1 ? 'payee is' : 'payees are'} missing payment info · {formatCents(payToRows.reduce((sum, row) => sum + row.cents, 0))} waiting
           </button>
         )}
       </div>
@@ -866,6 +871,15 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
               ? { label: PAY_TO_STATUS_LABEL[status], title: PAY_TO_STATUS_TITLE[status], onFix: () => payToFor(lead) }
               : null
           })()}
+          payBlocks={(() => {
+            const blocks: Record<string, string> = {}
+            for (const bill of open.bills) {
+              if (bill.carrierId !== dialog.carrierId) continue
+              const gap = paymentGapFor(bill, payInfos)
+              if (gap) blocks[bill.id] = paymentGapMessage(gap, payeeNameFor(bill, payInfos), paymentInfoFor(bill, payInfos)?.method)
+            }
+            return blocks
+          })()}
           preselectBillIds={dialog.billIds}
           onOpenChange={(o) => { if (!o) setDialog(null) }}
           onDone={closeAndRefresh}
@@ -1092,12 +1106,14 @@ function payToColumn(
     'PAY TO',
     (bill) => {
       const status = payToStatusFor(bill, infos)
-      return status === 'OK' ? payeeNameFor(bill, infos) : PAY_TO_STATUS_LABEL[status]
+      if (status === 'OK') return payeeNameFor(bill, infos)
+      // A payee that exists but cannot be paid keeps its name in the text, so the filter and the export say who.
+      return isPaymentGap(status) ? `${payeeNameFor(bill, infos)} · ${PAY_TO_STATUS_LABEL[status]}` : PAY_TO_STATUS_LABEL[status]
     },
     (bill) => {
       const status = payToStatusFor(bill, infos)
       if (status !== 'OK') {
-        return (
+        const chip = (
           <button
             type="button"
             className="tms-badge tms-badge-orange whitespace-nowrap"
@@ -1108,6 +1124,7 @@ function payToColumn(
             {PAY_TO_STATUS_LABEL[status]}
           </button>
         )
+        return isPaymentGap(status) ? <span className="whitespace-nowrap">{payeeNameFor(bill, infos)} {chip}</span> : chip
       }
       return isFactorPaid(bill, infos) ? <TmsBadge tone="blue">{payeeNameFor(bill, infos)}</TmsBadge> : payeeNameFor(bill, infos)
     },
@@ -1487,7 +1504,7 @@ function reviewView({
       { label: 'Expected', value: bills.length },
       { label: 'Need invoice date', value: bills.filter(pendingDates).length, tone: 'warn' as const },
       { label: 'Needs review', value: bills.filter((bill) => !!flagOf(bill)).length, tone: 'bad' as const },
-      { label: 'Pay-to needed', value: bills.filter((bill) => payToStatusFor(bill, infos) !== 'OK').length, tone: 'warn' as const },
+      { label: 'Missing payment info', value: bills.filter((bill) => payToStatusFor(bill, infos) !== 'OK').length, tone: 'warn' as const },
       { label: 'Carrier pay', value: formatCents(sumCents(bills, (bill) => bill.grossCents)) },
       { label: 'Net', value: formatCents(sumCents(bills, (bill) => bill.netCents)) },
       { label: 'With variance', value: bills.filter((bill) => bill.varianceCents !== 0).length, tone: 'bad' },
@@ -1678,7 +1695,21 @@ function payableView({
             </>
           ) : (
             <>
-              <TmsButton variant="ghost" size="sm" aria-label={`Record payment for bill ${bill.billNumber ?? bill.id}`} title={AP_ACTION_COPY.recordPayment.hint} disabled={busy} onClick={() => onPay(bill)}>{AP_ACTION_COPY.recordPayment.label}</TmsButton>
+              {(() => {
+                const gap = paymentGapFor(bill, infos)
+                return (
+                  <TmsButton
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Record payment for bill ${bill.billNumber ?? bill.id}`}
+                    title={gap ? paymentGapMessage(gap, payeeNameFor(bill, infos), paymentInfoFor(bill, infos)?.method) : AP_ACTION_COPY.recordPayment.hint}
+                    disabled={busy || gap != null}
+                    onClick={() => onPay(bill)}
+                  >
+                    {AP_ACTION_COPY.recordPayment.label}
+                  </TmsButton>
+                )
+              })()}
               {mode === 'selected' && (
                 <TmsButton variant="ghost" size="sm" aria-label={`Move bill ${bill.billNumber ?? bill.id} back to Aging`} title={AP_ACTION_COPY.backToAging.hint} disabled={busy} onClick={() => onUnselect([bill.id])}>{AP_ACTION_COPY.backToAging.label}</TmsButton>
               )}
@@ -1913,7 +1944,7 @@ function payableView({
       },
       {
         key: 'payTo',
-        label: `Pay-to needed (${allBills.filter((bill) => payToStatusFor(bill, infos) !== 'OK').length})`,
+        label: `Missing payment info (${allBills.filter((bill) => payToStatusFor(bill, infos) !== 'OK').length})`,
         value: filters.payTo ? 'only' : null,
         onClick: () => onFilters({ ...filters, payTo: !filters.payTo }),
       },
@@ -1965,7 +1996,7 @@ function payableView({
                   onChange={(e) => onFilters({ ...filters, payTo: e.target.value === 'only' })}
                 >
                   <option value="">All bills</option>
-                  <option value="only">Pay-to needed only ({allBills.filter((bill) => payToStatusFor(bill, infos) !== 'OK').length})</option>
+                  <option value="only">Missing payment info only ({allBills.filter((bill) => payToStatusFor(bill, infos) !== 'OK').length})</option>
                 </TmsSelect>
               </TmsField>
               <TmsField label="Verify payment">

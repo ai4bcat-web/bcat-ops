@@ -64,7 +64,7 @@ function billName(bill: CarrierBillRecord): string {
   return pro ? `${pro}${bill.legSuffix ?? ''}` : bill.id
 }
 
-export function PayCarrierDialog({ carrierId, payeeName, payToNeeded, preselectBillIds, legs, open, onOpenChange, onDone }: {
+export function PayCarrierDialog({ carrierId, payeeName, payToNeeded, payBlocks, preselectBillIds, legs, open, onOpenChange, onDone }: {
   carrierId: string
   /** Which carrier leg each bill is, for loads that pay several carriers (14598-1, 14598-2). Display only. */
   legs?: LegIndex
@@ -72,6 +72,11 @@ export function PayCarrierDialog({ carrierId, payeeName, payToNeeded, preselectB
   payeeName?: string | null
   /** This carrier has no usable pay-to (see `payToStatusFor`): say so, and offer the editor. Display only; it blocks nothing. */
   payToNeeded?: { label: string; title: string; onFix: () => void } | null
+  /**
+   * Bills whose payee cannot be paid (no bank info, no remit address…), bill id to the sentence that says why. A payment
+   * that applies any money to one of them cannot be posted; the server refuses it too.
+   */
+  payBlocks?: Record<string, string>
   /** Bills the board was looking at when Pay was pressed; filled in at their balance. */
   preselectBillIds?: string[]
   open: boolean
@@ -207,8 +212,14 @@ export function PayCarrierDialog({ carrierId, payeeName, payToNeeded, preselectB
   // A paper check needs its number, the same rule as Mark paid on Receivable (#426).
   const checkNumberMissing = method === 'CHECK' && reference.trim() === ''
 
+  // Nobody pays a payee that has no bank info (Ryne 2026-11-19): money applied to a blocked bill cannot be posted.
+  const blockedMessages = [...new Set(
+    applications.filter((application) => application.amountCents > 0).map((application) => payBlocks?.[application.billId]).filter((m): m is string => !!m),
+  )]
+  const payBlocked = blockedMessages.length > 0
+
   const submit = () => {
-    if (!method || checkNumberMissing) return
+    if (!method || checkNumberMissing || payBlocked) return
     setPosting(true)
     setError(null)
     recordApPayment({
@@ -247,7 +258,7 @@ export function PayCarrierDialog({ carrierId, payeeName, payToNeeded, preselectB
       footer={
         <>
           <TmsButton variant="ghost" onClick={() => onOpenChange(false)} disabled={posting}>Cancel</TmsButton>
-          <TmsButton variant="primary" onClick={submit} disabled={disabled || !plan.ok || unallocated || checkNumberMissing}>
+          <TmsButton variant="primary" onClick={submit} disabled={disabled || !plan.ok || unallocated || checkNumberMissing || payBlocked}>
             {posting ? 'Posting…' : 'Post payment'}
           </TmsButton>
         </>
@@ -261,6 +272,13 @@ export function PayCarrierDialog({ carrierId, payeeName, payToNeeded, preselectB
 
       {!loading && (
         <div className="flex flex-col gap-4">
+          {payBlocked && (
+            <div className="p-2 tms-tint tms-tint-red text-xs" data-testid="pay-dialog-payment-info-blocked" role="alert">
+              <strong>This payment cannot be posted yet.</strong>{' '}
+              {blockedMessages.map((message) => <span key={message}>{message} </span>)}
+              Take the bill off this payment, or fix the payee first.
+            </div>
+          )}
           {payToNeeded && (
             <div className="p-2 tms-tint tms-tint-orange text-xs" data-testid="pay-dialog-payto-needed">
               <strong>{payToNeeded.label}.</strong> {payToNeeded.title}{' '}

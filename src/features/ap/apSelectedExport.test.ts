@@ -177,22 +177,34 @@ describe('selectedPayablesCsv', () => {
 
 
 describe('Pay-to status on the pay run sheet (Ryne 2026-11-18)', () => {
-  const others = [{ id: 'pmX', carrierId: 'someone-else', recipientType: 'CARRIER', method: 'ACH', isPreferred: true, status: 'ACTIVE', carrierFactorMethodId: null }] as unknown as CarrierPaymentInfo[]
+  const others = [
+    { id: 'pmX', carrierId: 'someone-else', recipientType: 'CARRIER', method: 'ACH', isPreferred: true, status: 'ACTIVE', carrierFactorMethodId: null },
+    // The carrier of `bill()` has its ACH bank details on file, so only the carrier-less bill is flagged.
+    { id: 'pmC', carrierId: 'car1', recipientType: 'CARRIER', method: 'ACH', isPreferred: true, status: 'ACTIVE', bankDetailsOnFileAt: '2026-11-19T00:00:00Z', carrierFactorMethodId: null },
+  ] as unknown as CarrierPaymentInfo[]
 
   it('says Pay-to needed for a bill whose carrier has no payment method, and Pay-to set otherwise', () => {
-    const [needed] = selectedExportRows(run([bill({ remitTo: null })], { infos: others }))
+    const [needed] = selectedExportRows(run([bill({ carrierId: 'car2', remitTo: null })], { infos: others }))
     expect(needed.payToStatus).toBe('Pay-to needed')
     const [set] = selectedExportRows(run([bill()], { infos: others }))
     expect(set.payToStatus).toBe('Pay-to set')
   })
 
   it('puts a Pay-to status column in the CSV and flags the payee', () => {
-    const csv = selectedPayablesCsv(run([bill({ remitTo: null })], { infos: others }))
+    const csv = selectedPayablesCsv(run([bill({ carrierId: 'car2', remitTo: null })], { infos: others }))
     const [header, first] = csv.split('\r\n')
     expect(header.split(',')).toContain('Pay-to status')
     expect(first).toContain('Pay-to needed')
     expect(csv).toContain('Pay-to needed')
     expect(SELECTED_EXPORT_HEADERS).toContain('Pay-to status')
+  })
+})
+
+describe('Pay-to status flags a payee that cannot be paid (Ryne 2026-11-19)', () => {
+  it('says No bank info for an ACH payee whose bank details are not on file', () => {
+    const noBank = [{ id: 'pmC', carrierId: 'car1', recipientType: 'CARRIER', method: 'ACH', isPreferred: true, status: 'ACTIVE', carrierFactorMethodId: null }] as unknown as CarrierPaymentInfo[]
+    const [row] = selectedExportRows(run([bill()], { infos: noBank }))
+    expect(row.payToStatus).toBe('No bank info')
   })
 })
 
