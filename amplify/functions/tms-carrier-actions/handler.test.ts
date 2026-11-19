@@ -34,6 +34,16 @@ vi.mock('@aws-sdk/client-cognito-identity-provider', () => {
   return { CognitoIdentityProviderClient, AdminGetUserCommand }
 })
 
+// ── KMS mock (bank details): an in-memory stand-in, never cryptography ───────
+const kmsFake = vi.hoisted(() => ({ send: undefined as unknown as (c: unknown) => Promise<unknown> }))
+vi.mock('@aws-sdk/client-kms', () => {
+  class KMSClient { send = (c: unknown) => kmsFake.send(c) }
+  class EncryptCommand { constructor(public input: Record<string, unknown>) {} }
+  class DecryptCommand { constructor(public input: Record<string, unknown>) {} }
+  class GenerateMacCommand { constructor(public input: Record<string, unknown>) {} }
+  return { KMSClient, EncryptCommand, DecryptCommand, GenerateMacCommand }
+})
+
 // ── DynamoDB mock ────────────────────────────────────────────────────────────
 const TABLES = {
   carrier: 'Carrier-test',
@@ -769,6 +779,97 @@ describe('UPSERT_PAYMENT_METHOD', () => {
     const preferred = [...table(TABLES.payment).values()].filter((m) => m.isPreferred === true)
     expect(preferred.map((m) => m.id)).toEqual([String(second.id)])
     expect(table(TABLES.payment).get(String(first.id))!.isPreferred).toBe(false)
+  })
+})
+
+// ── Bank details (the Chase ACH file's numbers) ──────────────────────────────
+
+describe('SET_BANK_DETAILS / CLEAR_BANK_DETAILS', () => {
+  // Synthetic numbers only: a public Federal Reserve routing number and a made-up account.
+  const ROUTING = '011000015'
+  const ACCOUNT = '000123456789'
+
+  async function achMethod(): Promise<Row> {
+    carrier()
+    return call('UPSERT_PAYMENT_METHOD', { carrierId: 'car-1', method: 'ACH', recipientType: 'CARRIER', accountLast4: '0000' }, ADMIN)
+  }
+  const bank = (method: Row, over: Row = {}) => ({
+    methodId: method.id, expectedUpdatedAt: method.updatedAt, routingNumber: ROUTING, accountNumber: ACCOUNT, accountType: 'SAVINGS', ...over,
+  })
+
+  beforeEach(async () => {
+    const { fakeKms } = await import('../_shared/fakeKms')
+    kmsFake.send = fakeKms().send as never
+  })
+
+  it('stores the numbers encrypted, returns only the masked mirror, and audits last fours', async () => {
+    const method = await achMethod()
+    const out = await call('SET_BANK_DETAILS', bank(method), ADMIN)
+    expect(out).toMatchObject({ accountLast4: '6789', routingLast4: '0015', bankAccountType: 'SAVINGS' })
+    expect(out.bankDetailsOnFileAt).toBeTruthy()
+    expect(out).not.toHaveProperty('bankCipher')
+    expect(JSON.stringify(out)).not.toContain(ACCOUNT)
+    expect(JSON.stringify(out)).not.toContain(ROUTING)
+
+    const stored = table(TABLES.payment).get(String(method.id))!
+    expect(stored.bankCipher).toBeInstanceOf(Uint8Array)
+    expect(JSON.stringify(stored)).not.toContain(ACCOUNT)
+    const audits = JSON.stringify([...table(TABLES.audit).values()])
+    expect(audits).toContain('SET_BANK_DETAILS')
+    expect(audits).toContain('6789')
+    expect(audits).not.toContain(ACCOUNT)
+    expect(audits).not.toContain(ROUTING)
+  })
+
+  it('never returns the ciphertext from an ordinary payment-method save either', async () => {
+    const method = await achMethod()
+    const saved = await call('SET_BANK_DETAILS', bank(method), ADMIN)
+    const again = await call('UPSERT_PAYMENT_METHOD', {
+      id: method.id, expectedUpdatedAt: saved.updatedAt, carrierId: 'car-1', method: 'ACH', recipientType: 'CARRIER', accountLast4: '6789', routingLast4: '0015',
+    }, ADMIN)
+    expect(again).not.toHaveProperty('bankCipher')
+    expect(table(TABLES.payment).get(String(method.id))!.bankCipher).toBeInstanceOf(Uint8Array)
+  })
+
+  it('is owner or ADMIN only', async () => {
+    const method = await achMethod()
+    await expect(call('SET_BANK_DETAILS', bank(method), CARRIER_USER)).rejects.toThrow('Forbidden: SET_BANK_DETAILS requires owner or ADMIN')
+    await expect(call('CLEAR_BANK_DETAILS', { methodId: method.id, expectedUpdatedAt: method.updatedAt }, CARRIER_USER)).rejects.toThrow('requires owner or ADMIN')
+    expect(table(TABLES.payment).get(String(method.id))!.bankCipher).toBeUndefined()
+  })
+
+  it('refuses a bad routing number, a bad account and a non-ACH method without echoing the numbers', async () => {
+    const method = await achMethod()
+    for (const bad of [{ routingNumber: '011000016' }, { routingNumber: '123' }, { accountNumber: '12' }]) {
+      let message = ''
+      await call('SET_BANK_DETAILS', bank(method, bad), ADMIN).catch((e: Error) => { message = e.message })
+      expect(message).not.toBe('')
+      expect(message).not.toContain(ACCOUNT)
+      for (const value of Object.values(bad)) expect(message).not.toContain(String(value))
+    }
+    const check = await call('UPSERT_PAYMENT_METHOD', { carrierId: 'car-1', method: 'CHECK', recipientType: 'CARRIER' }, ADMIN)
+    await expect(call('SET_BANK_DETAILS', bank(check), ADMIN)).rejects.toThrow('only be saved on an ACH method')
+    expect(table(TABLES.payment).get(String(method.id))!.bankCipher).toBeUndefined()
+  })
+
+  it('removes the stored numbers on clear and keeps the last fours', async () => {
+    const method = await achMethod()
+    const saved = await call('SET_BANK_DETAILS', bank(method), ADMIN)
+    const cleared = await call('CLEAR_BANK_DETAILS', { methodId: method.id, expectedUpdatedAt: saved.updatedAt }, ADMIN)
+    expect(cleared.bankDetailsOnFileAt ?? null).toBeNull()
+    const stored = table(TABLES.payment).get(String(method.id))!
+    expect(stored.bankCipher).toBeUndefined()
+    expect(stored.accountLast4).toBe('6789')
+    expect(JSON.stringify([...table(TABLES.audit).values()])).toContain('CLEAR_BANK_DETAILS')
+  })
+
+  it('fails closed with a fixed sentence when the vault is unavailable', async () => {
+    const method = await achMethod()
+    kmsFake.send = async () => { throw new Error(`AccessDenied for ${ACCOUNT}`) }
+    let message = ''
+    await call('SET_BANK_DETAILS', bank(method), ADMIN).catch((e: Error) => { message = e.message })
+    expect(message).toBe('Bank details could not be saved')
+    expect(table(TABLES.payment).get(String(method.id))!.bankCipher).toBeUndefined()
   })
 })
 

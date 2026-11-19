@@ -2,8 +2,9 @@
  * Where the carrier's money goes. Each method is its own row written through the Lambda,
  * so every line saves on its own.
  *
- * Full account and routing numbers are never typed here and never stored — only the last
- * four, which is all anyone needs to tell two bank accounts apart on a settlement.
+ * This form only ever holds the last four digits. The full routing and account number for the Chase
+ * bank file are entered in the separate write-only panel (BankDetailsPanel, ADMIN only), encrypted by
+ * the Lambda and never sent back to a browser.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -14,6 +15,7 @@ import { getFactorRemitEmails } from '@/lib/apiClient'
 import { canonicalFactorName, factorEmailFor, type FactorRemitMap } from '@/lib/factorRemit'
 import { looksLikeCardNumber } from '@/lib/cardNumber'
 import { formatCents } from '@/lib/invoiceBuild'
+import { BankDetailsPanel } from './BankDetailsPanel'
 import type { CarrierPayeeType, CarrierPaymentMethodKind, CarrierPaymentMethodRecord } from '@/types/tms'
 
 const METHODS: CarrierPaymentMethodKind[] = ['ACH', 'WIRE', 'CHECK', 'ZELLE', 'VENMO', 'EFT', 'CARD']
@@ -50,9 +52,13 @@ interface CarrierPaymentEditorProps {
   disabled?: boolean
   /** The carrier's own name: it is the pay-to of a direct method, whose one remit address is filed under that name. */
   carrierName?: string
+  /** Owner/ADMIN: may enter, replace or remove the full bank numbers behind an ACH method. */
+  isAdmin?: boolean
+  /** Reload the carrier after bank details change. */
+  onBankChanged?: () => void | Promise<void>
 }
 
-export function CarrierPaymentEditor({ methods, awaitingPayment, onSave, onArchive, disabled, carrierName }: CarrierPaymentEditorProps) {
+export function CarrierPaymentEditor({ methods, awaitingPayment, onSave, onArchive, disabled, carrierName, isAdmin, onBankChanged }: CarrierPaymentEditorProps) {
   const [adding, setAdding] = useState(false)
   // A factoring company has one remittance address, set on Carriers › Remit e-mails; carriers paid through it inherit it.
   const [factorEmails, setFactorEmails] = useState<FactorRemitMap>({})
@@ -85,6 +91,8 @@ export function CarrierPaymentEditor({ methods, awaitingPayment, onSave, onArchi
           factorEmails={factorEmails}
           carrierName={carrierName}
           disabled={disabled}
+          isAdmin={isAdmin === true}
+          onBankChanged={onBankChanged}
           onSave={onSave}
           onArchive={() => onArchive(method)}
         />
@@ -117,11 +125,13 @@ function addressField(method: CarrierPaymentMethodRecord | null, key: string): s
   return typeof value === 'string' ? value : ''
 }
 
-function PaymentRow({ method, factorEmails, carrierName, disabled, onSave, onArchive, onCancel }: {
+function PaymentRow({ method, factorEmails, carrierName, disabled, isAdmin, onBankChanged, onSave, onArchive, onCancel }: {
   method: CarrierPaymentMethodRecord | null
   factorEmails: FactorRemitMap
   carrierName?: string
   disabled?: boolean
+  isAdmin?: boolean
+  onBankChanged?: () => void | Promise<void>
   onSave: (draft: CarrierPaymentDraft) => Promise<void>
   onArchive?: () => Promise<void>
   onCancel?: () => void
@@ -241,11 +251,11 @@ function PaymentRow({ method, factorEmails, carrierName, disabled, onSave, onArc
           <TmsInput aria-label="Bank" value={bankName} disabled={disabled} onChange={(e) => setBankName(e.target.value)} />
         </TmsField>
         <TmsField label={kind === 'CARD' ? 'Card last 4 (optional)' : 'Account last 4'}>
-          <TmsInput aria-label="Account last 4" maxLength={4} value={accountLast4} disabled={disabled} onChange={(e) => setAccountLast4(e.target.value)} />
+          <TmsInput aria-label="Account last 4" maxLength={4} value={accountLast4} disabled={disabled || Boolean(method?.bankDetailsOnFileAt)} onChange={(e) => setAccountLast4(e.target.value)} />
         </TmsField>
         {kind !== 'CARD' && (
           <TmsField label="Routing last 4">
-            <TmsInput aria-label="Routing last 4" maxLength={4} value={routingLast4} disabled={disabled} onChange={(e) => setRoutingLast4(e.target.value)} />
+            <TmsInput aria-label="Routing last 4" maxLength={4} value={routingLast4} disabled={disabled || Boolean(method?.bankDetailsOnFileAt)} onChange={(e) => setRoutingLast4(e.target.value)} />
           </TmsField>
         )}
         <TmsField label="Payee email">
@@ -278,6 +288,10 @@ function PaymentRow({ method, factorEmails, carrierName, disabled, onSave, onArc
         </TmsField>
       </div>
       {addressHint && <p className="tms-autofill-hint" role="status">{addressHint}</p>}
+
+      {method && method.method === 'ACH' && (
+        <BankDetailsPanel method={method} isAdmin={isAdmin === true} onChanged={() => onBankChanged?.()} />
+      )}
 
       <div className="mt-3 flex items-center gap-4">
         <label className="flex items-center gap-1.5 text-xs">

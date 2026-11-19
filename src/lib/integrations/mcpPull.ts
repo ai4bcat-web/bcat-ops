@@ -12,12 +12,14 @@
  * - Never invites. Lookup and write only.
  */
 import { McpApiError } from './mcpAdapter'
-import { addToIndex, auditChanges, buildCarrierIndex, mapProfileToCarrier, matchCarrier, mcKey, dotKey } from './mcpProfile'
-import type { McpContact, McpPayment, McpProfile, MatchedBy } from './mcpProfile'
+import { addToIndex, auditChanges, bankSecretOf, buildCarrierIndex, mapProfileToCarrier, matchCarrier, mcKey, dotKey } from './mcpProfile'
+import type { McpContact, McpProfile, MatchedBy } from './mcpProfile'
 import { normalizeName as carrierKey } from '../tmsDirectory'
 import { mcpCarrierStatusPatch } from './mcpCarrierStatus'
 
 export type TaxIdOutcome = 'SET' | 'UNCHANGED' | 'DUPLICATE' | 'INVALID'
+/** What the bank-details import did for one payment method. Never carries a number. */
+export type BankImportOutcome = 'SET' | 'WOULD_SET' | 'UNCHANGED' | 'INVALID' | 'FAILED'
 
 type Row = Record<string, unknown>
 
@@ -110,6 +112,12 @@ export interface McpPullDeps {
    * Absent = the pull has no vault and the tax id is dropped on the floor, never written to the Carrier row.
    */
   setTaxId?(carrierId: string, value: string): Promise<TaxIdOutcome>
+  /**
+   * Hands MCP's routing + account number to the encrypted bank vault for this payment method
+   * (`_shared/bankVault.ts`); resolves to what happened, never the numbers. Absent = import is off and the
+   * numbers are dropped, exactly as before. `onlyIfAbsent`: a number somebody typed in by hand is never replaced.
+   */
+  setBankDetails?(carrierId: string, methodId: string, bank: { routingNumber: string; accountNumber: string }): Promise<BankImportOutcome>
 }
 
 export interface McpPullOptions {
@@ -174,24 +182,38 @@ async function syncContacts(deps: McpPullDeps, carrierId: string, wanted: McpCon
   return { created, updated }
 }
 
-async function syncPayment(deps: McpPullDeps, carrierId: string, wanted: McpPayment | undefined, now: string): Promise<'CREATED' | 'UPDATED' | null> {
-  if (!wanted) return null
+/** The bank import for one method, best effort and number-free: a failure is reported as FAILED and nothing else. */
+async function syncBank(deps: McpPullDeps, carrierId: string, methodId: string, profile: McpProfile): Promise<BankImportOutcome | null> {
+  const bank = bankSecretOf(profile)
+  if (!bank || !deps.setBankDetails || profile.payment?.method !== 'ACH') return null
+  try {
+    return await deps.setBankDetails(carrierId, methodId, bank)
+  } catch {
+    return 'FAILED'
+  }
+}
+
+async function syncPayment(deps: McpPullDeps, carrierId: string, profile: McpProfile, now: string): Promise<{ result: 'CREATED' | 'UPDATED' | null; bank: BankImportOutcome | null }> {
+  const wanted = profile.payment
+  if (!wanted) return { result: null, bank: null }
   const existing = await deps.loadPayments(carrierId)
   const mine = existing.find((p) => p.source === 'MCP')
   const fields: Row = { ...wanted, status: 'ACTIVE', isPreferred: true, source: 'MCP' }
   if (mine) {
     const patch: Row = {}
     for (const [k, v] of Object.entries(fields)) if (JSON.stringify(mine[k] ?? null) !== JSON.stringify(v)) patch[k] = v
-    if (Object.keys(patch).length === 0) return null
+    const bank = await syncBank(deps, carrierId, String(mine.id), profile)
+    if (Object.keys(patch).length === 0) return { result: null, bank }
     await deps.updatePayment(String(mine.id), { ...patch, updatedBy: MCP_PULL_ACTOR, updatedAt: now })
-    return 'UPDATED'
+    return { result: 'UPDATED', bank }
   }
   // MCP wins: its method becomes the preferred one; a hand-typed method stays on file, no longer preferred.
   for (const other of existing) {
     if (other.isPreferred === true) await deps.updatePayment(String(other.id), { isPreferred: false, updatedBy: MCP_PULL_ACTOR, updatedAt: now })
   }
-  await deps.putPayment({ id: deps.newId(), __typename: 'CarrierPaymentMethod', carrierId, ...fields, createdBy: MCP_PULL_ACTOR, updatedBy: MCP_PULL_ACTOR, createdAt: now, updatedAt: now })
-  return 'CREATED'
+  const id = deps.newId()
+  await deps.putPayment({ id, __typename: 'CarrierPaymentMethod', carrierId, ...fields, createdBy: MCP_PULL_ACTOR, updatedBy: MCP_PULL_ACTOR, createdAt: now, updatedAt: now })
+  return { result: 'CREATED', bank: await syncBank(deps, carrierId, id, profile) }
 }
 
 /** Apply one profile to one Carrier row: carrier fields (CAS), contacts, payment method, audit. */
@@ -230,14 +252,14 @@ export async function applyProfileToCarrier(
 
   const id = String(carrier.id)
   const contacts = await syncContacts(deps, id, profile.contacts, ctx.now, false)
-  const payment = await syncPayment(deps, id, profile.payment, ctx.now)
+  const { result: payment, bank } = await syncPayment(deps, id, profile, ctx.now)
   const taxId = await syncTaxId(deps, id, carrier, profile)
-  const touched = Object.keys(changes).length > 0 || contacts.created > 0 || contacts.updated > 0 || payment !== null || taxId === 'SET'
+  const touched = Object.keys(changes).length > 0 || contacts.created > 0 || contacts.updated > 0 || payment !== null || taxId === 'SET' || bank === 'SET' || bank === 'WOULD_SET'
   if (touched) {
     await deps.audit({
       entityId: id,
       action: 'MCP_PULL',
-      changes: { source: 'MYCARRIERPACKETS', runId: ctx.runId, matchedBy: ctx.matchedBy, fields: auditChanges(changes), contacts, payment, ...(taxId ? { taxId } : {}) },
+      changes: { source: 'MYCARRIERPACKETS', runId: ctx.runId, matchedBy: ctx.matchedBy, fields: auditChanges(changes), contacts, payment, ...(taxId ? { taxId } : {}), ...(bank ? { bankDetails: bank } : {}) },
     })
   }
   return touched && outcome === 'UNCHANGED' ? 'UPDATED' : outcome
@@ -289,9 +311,9 @@ export async function ingestProfile(
     addToIndex(index, row)
     touched.add(String(row.id))
     const contacts = await syncContacts(deps, String(row.id), profile.contacts, ctx.now, false)
-    const payment = await syncPayment(deps, String(row.id), profile.payment, ctx.now)
+    const { result: payment, bank } = await syncPayment(deps, String(row.id), profile, ctx.now)
     const taxId = await syncTaxId(deps, String(row.id), row, profile)
-    await deps.audit({ entityId: String(row.id), action: 'MCP_CREATE', changes: { source: 'MYCARRIERPACKETS', runId: ctx.runId, matchedBy: 'CREATED', fields: auditChanges(mapProfileToCarrier({}, profile).changes), contacts, payment, ...(taxId ? { taxId } : {}) } })
+    await deps.audit({ entityId: String(row.id), action: 'MCP_CREATE', changes: { source: 'MYCARRIERPACKETS', runId: ctx.runId, matchedBy: 'CREATED', fields: auditChanges(mapProfileToCarrier({}, profile).changes), contacts, payment, ...(taxId ? { taxId } : {}), ...(bank ? { bankDetails: bank } : {}) } })
     counts.created++
     return
   }

@@ -1444,7 +1444,7 @@ const TMS_SETTINGS_V7_FIELDS = [
 // Step G's AP settings. Its own flag again, for the same reason.
 const TMS_SETTINGS_V8_FIELDS = [
   'apApprovalAdminOnly', 'apPostingAdminOnly', 'apRequireSignedRateCon',
-  'remittanceEmailTemplate', 'remittanceCcEmails', 'apBillDocsRequired',
+  'remittanceEmailTemplate', 'remittanceCcEmails', 'apBillDocsRequired', 'chaseAch',
 ]
 // Step H's quotes & rates settings. Its own flag again, for the same reason.
 const TMS_SETTINGS_V9_FIELDS = [
@@ -1494,7 +1494,7 @@ const TMS_SETTINGS_V18_FIELDS = ['checkCallSkipWhenDriverActive']
 const TMS_SETTINGS_V19_FIELDS = ['progressSteps']
 // Dispatch > Empty trucks: the daily value of an idle truck. Its own flag again.
 const TMS_SETTINGS_V20_FIELDS = ['emptyTruckDailyValueCents']
-const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo', 'teams', 'commissionPlans', 'commissionPaySchedule', 'postalCodeAliases', 'aiAgents', 'marginTargetBpsByMode', 'defaultCheckCallPlan', 'brandSenders', 'whiteLabel', 'customerPortalDefaults', 'customerTags', 'rateConTemplate', 'carrierAgreementTemplate', 'consolidationRules', 'notificationSubscriptions', 'notificationWebhooks', 'notificationDefaults', 'paymentTerms', 'trackingAutomation', 'divisionSalesReps', 'progressSteps']
+const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo', 'teams', 'commissionPlans', 'commissionPaySchedule', 'postalCodeAliases', 'aiAgents', 'marginTargetBpsByMode', 'defaultCheckCallPlan', 'brandSenders', 'whiteLabel', 'customerPortalDefaults', 'customerTags', 'rateConTemplate', 'carrierAgreementTemplate', 'consolidationRules', 'notificationSubscriptions', 'notificationWebhooks', 'notificationDefaults', 'paymentTerms', 'trackingAutomation', 'divisionSalesReps', 'progressSteps', 'chaseAch']
 let settingsHaveV2 = true
 let settingsHaveV3 = true
 let settingsHaveV4 = true
@@ -4136,7 +4136,7 @@ const CARRIER_CONTACT_FIELDS = `
 `
 const CARRIER_PAYMENT_METHOD_FIELDS = `
   id carrierId method recipientType factorName factorAddress bankName accountName
-  accountLast4 routingLast4 bankDetailsKey payeeEmail remitToAddress isPreferred status
+  accountLast4 routingLast4 bankDetailsKey bankDetailsOnFileAt bankAccountType payeeEmail remitToAddress isPreferred status
   createdBy updatedBy createdAt updatedAt
 `
 const CARRIER_PAYMENT_METHOD_JSON_FIELDS: (keyof CarrierPaymentMethodRecord)[] = ['factorAddress', 'remitToAddress']
@@ -4287,6 +4287,8 @@ export interface CarrierPaymentInfo {
   accountName?: string | null
   accountLast4?: string | null
   routingLast4?: string | null
+  /** Set when the full routing + account numbers are on file for the Chase ACH file. */
+  bankDetailsOnFileAt?: string | null
   payeeEmail?: string | null
   isPreferred?: boolean | null
   status?: string | null
@@ -4298,7 +4300,7 @@ export interface CarrierPaymentInfo {
 }
 export async function listCarrierPaymentInfo(): Promise<CarrierPaymentInfo[]> {
   if (!modelAvailable('CarrierPaymentMethod')) throw new Error('Carrier payment methods are unavailable')
-  return listAll('listCarrierPaymentMethods', 'id carrierId method recipientType factorName bankName accountName accountLast4 routingLast4 payeeEmail isPreferred status', 1000)
+  return listAll('listCarrierPaymentMethods', 'id carrierId method recipientType factorName bankName accountName accountLast4 routingLast4 bankDetailsOnFileAt payeeEmail isPreferred status', 1000)
 }
 
 /** Everything one carrier profile renders, in one round trip's worth of parallel reads. */
@@ -4387,6 +4389,23 @@ export interface UpsertCarrierPaymentMethodInput {
 }
 export async function upsertCarrierPaymentMethod(input: UpsertCarrierPaymentMethodInput): Promise<CarrierPaymentMethodRecord> {
   return carrierAction<CarrierPaymentMethodRecord>('UPSERT_PAYMENT_METHOD', input)
+}
+/**
+ * Full routing + account numbers for the Chase ACH file. Admin only, server-side. The numbers travel in this one
+ * request, are encrypted by the Lambda and are never returned: the response is the safe mirror (last fours).
+ */
+export interface SetCarrierBankDetailsInput {
+  methodId: string
+  expectedUpdatedAt: string
+  routingNumber: string
+  accountNumber: string
+  accountType: 'CHECKING' | 'SAVINGS'
+}
+export async function setCarrierBankDetails(input: SetCarrierBankDetailsInput): Promise<CarrierPaymentMethodRecord> {
+  return carrierAction<CarrierPaymentMethodRecord>('SET_BANK_DETAILS', input)
+}
+export async function clearCarrierBankDetails(input: { methodId: string; expectedUpdatedAt: string }): Promise<CarrierPaymentMethodRecord> {
+  return carrierAction<CarrierPaymentMethodRecord>('CLEAR_BANK_DETAILS', input)
 }
 export async function archiveCarrierPaymentMethod(input: { id: string; expectedUpdatedAt: string }): Promise<CarrierPaymentMethodRecord> {
   return carrierAction<CarrierPaymentMethodRecord>('ARCHIVE_PAYMENT_METHOD', input)
@@ -8162,7 +8181,7 @@ const CARRIER_BILL_FIELDS = `
   lines grossCents quickPayFeeCents netCents billedCents varianceCents
   paidCents creditedCents balanceCents apOpen documentId
   approvedAt approvedBy approvalWarnings docsOverrideAt docsOverrideBy docsOverrideNote
-  paidAt voidedAt voidedBy voidReason archivedAt archivedBy archivedReason note
+  paidAt voidedAt voidedBy voidReason archivedAt archivedBy archivedReason achExportedAt achExportedBy achExportId note
   apInboxItemId apInboxSourceUrl apInboxAppliedAt
   createdBy updatedBy version createdAt updatedAt
 `
@@ -8563,6 +8582,65 @@ export async function markRemittanceSent(input: { paymentId: string; note: strin
 
 export async function saveApSettings(input: Partial<ApSettings>): Promise<{ settings: TmsSettings }> {
   return financeAction<{ settings: TmsSettings }>('SAVE_AP_SETTINGS', input)
+}
+
+// ── Chase ACH file (AP Selected tab). Owner/ADMIN only, server-side. ──
+
+export interface ChaseAchSettingsInput {
+  companyName: string
+  companyId: string
+  odfiRouting: string
+  secCode: 'CCD' | 'PPD'
+  entryDescription: string
+}
+export async function saveChaseAchSettings(input: ChaseAchSettingsInput): Promise<{ chaseAch: ChaseAchSettingsInput }> {
+  return financeAction<{ chaseAch: ChaseAchSettingsInput }>('SAVE_CHASE_ACH_SETTINGS', input)
+}
+
+/** One bill's line in the preview. Last four only: a full number never reaches a browser. */
+export interface ChaseAchPreviewRow {
+  billId: string
+  status: 'READY' | 'BLOCKED' | 'SKIPPED'
+  reason?: string
+  warnings?: string[]
+  pro: string
+  payeeName: string
+  payeeKind: 'CARRIER' | 'FACTOR'
+  method: string
+  last4: string | null
+  amountCents: number
+  alreadyExportedAt: string | null
+}
+export interface ChaseAchPreview {
+  settingsReady: boolean
+  settingsProblem: string | null
+  effectiveDate: string
+  effectiveDateProblem: string | null
+  rows: ChaseAchPreviewRow[]
+  readyCount: number
+  readyTotalCents: number
+  blockedCount: number
+  skippedCount: number
+  alreadyExportedCount: number
+}
+export async function previewChaseAch(input: { billIds: string[]; effectiveDate?: string }): Promise<ChaseAchPreview> {
+  return financeAction<ChaseAchPreview>('PREVIEW_CHASE_ACH', input)
+}
+export interface ChaseAchExport {
+  exportId: string
+  fileName: string
+  fileText: string
+  entryCount: number
+  totalCents: number
+  effectiveDate: string
+  exportedBillIds: string[]
+  notExported: { billId: string; reason: string }[]
+}
+export async function exportChaseAch(input: { billIds: string[]; effectiveDate?: string; includeAlreadyExported?: boolean }): Promise<ChaseAchExport> {
+  return financeAction<ChaseAchExport>('EXPORT_CHASE_ACH', input)
+}
+export async function clearChaseAchMark(input: { billIds: string[] }): Promise<{ cleared: string[] }> {
+  return financeAction<{ cleared: string[] }>('CLEAR_CHASE_ACH_MARK', input)
 }
 
 /**

@@ -152,7 +152,7 @@ export function normalizeMcpProfile(raw: unknown, ref: { mcNumber?: string; dotN
   const legalName = text(field(root, 'LegalName')) ?? text(field(root, 'CompanyName')) ?? text(field(identity, 'legalName'))
   const email = text(field(root, 'Email')) ?? text(field(identity, 'emailAddress'))
 
-  return {
+  const profile: McpProfile = {
     carrier,
     packetKnown,
     ...(legalName ? { legalName } : {}),
@@ -171,6 +171,27 @@ export function normalizeMcpProfile(raw: unknown, ref: { mcNumber?: string; dotN
     contacts: contactsOf(root, cd),
     ...(paymentOf(root) ? { payment: paymentOf(root)! } : {}),
   }
+  const bank = bankNumbersOf(root)
+  if (bank) BANK_SECRETS.set(profile, bank)
+  return profile
+}
+
+/**
+ * MCP states a carrier's full routing and account number, and nothing in the pull keeps them: the profile only
+ * carries last fours. The numbers are held in a WeakMap keyed by the profile object, so they can never be
+ * serialised, spread, audited or returned with it. Only the backend bank-details import reads them back out.
+ */
+const BANK_SECRETS = new WeakMap<object, { routingNumber: string; accountNumber: string }>()
+export function bankSecretOf(profile: McpProfile): { routingNumber: string; accountNumber: string } | null {
+  return BANK_SECRETS.get(profile) ?? null
+}
+
+function bankNumbersOf(root: unknown): { routingNumber: string; accountNumber: string } | null {
+  const info = field(root, 'CarrierPaymentInfo')
+  const bank = field(root, 'CarrierBank')
+  const account = (text(field(bank, 'CarrierBankAccountNumber')) ?? text(field(info, 'BankAccountNumber')) ?? '').replace(/\D/g, '')
+  const routing = (text(field(bank, 'CarrierBankRoutingNumber')) ?? text(field(info, 'BankRoutingNumber')) ?? '').replace(/\D/g, '')
+  return account && routing ? { routingNumber: routing, accountNumber: account } : null
 }
 
 // ── Matching ─────────────────────────────────────────────────────────────────

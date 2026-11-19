@@ -21,6 +21,7 @@ import { PostalCodeAliasesCard } from './PostalCodeAliasesCard'
 import { DocumentSettingsCard } from './DocumentSettingsCard'
 import { ArSettingsCard } from './ArSettingsCard'
 import { ApSettingsCard } from './ApSettingsCard'
+import { ChaseAchSettingsCard } from './ChaseAchSettingsCard'
 import { ApInboxSettingsCard } from './ApInboxSettingsCard'
 import { InvoiceCopyCard } from './InvoiceCopyCard'
 import { QuoteSettingsCard } from './QuoteSettingsCard'
@@ -65,6 +66,7 @@ export function SettingsPage() {
           <DocumentSettingsCard />
           <ArSettingsCard />
           <ApSettingsCard />
+          <ChaseAchSettingsCard />
           <ApInboxSettingsCard />
           <InvoiceCopyCard />
           <QuoteSettingsCard />

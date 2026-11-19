@@ -54,6 +54,14 @@ import {
   type ImportRow,
   type VaultDeps,
 } from '../_shared/taxVault'
+import {
+  BankVaultError,
+  bankVaultDepsFromEnv,
+  encryptBankDetails,
+  normalizeBankDetails,
+  redactBankNumbers,
+  type BankVaultDeps,
+} from '../_shared/bankVault'
 
 import {
   CARRIER_STATUSES,
@@ -128,6 +136,8 @@ type Action =
   | 'GET_TAX_ID_STATUS'
   | 'REVEAL_TAX_ID'
   | 'CLEAR_TAX_ID'
+  | 'SET_BANK_DETAILS'
+  | 'CLEAR_BANK_DETAILS'
 
 interface AppSyncIdentity {
   sub: string
@@ -215,6 +225,9 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
     SET_TAX_ID: true,
     REVEAL_TAX_ID: true,
     CLEAR_TAX_ID: true,
+    // The numbers a bank file is built from: owner or ADMIN only.
+    SET_BANK_DETAILS: true,
+    CLEAR_BANK_DETAILS: true,
   }
 
   if (adminActions[action]) {
@@ -1159,7 +1172,14 @@ async function upsertPaymentMethod(input: Row, caller: Caller): Promise<Row> {
     recipientType,
     isPreferred,
   })
-  return saved
+  return withoutBankCipher(saved)
+}
+
+/** The ciphertext never leaves a Lambda, not even as a response body. */
+function withoutBankCipher(row: Row): Row {
+  const { bankCipher: _bankCipher, ...rest } = row
+  void _bankCipher
+  return rest
 }
 
 async function archivePaymentMethod(input: Row, caller: Caller): Promise<Row> {
@@ -1180,7 +1200,7 @@ async function archivePaymentMethod(input: Row, caller: Caller): Promise<Row> {
     carrierId: existing.carrierId,
     method: existing.method,
   })
-  return saved
+  return withoutBankCipher(saved)
 }
 
 // ── Documents ────────────────────────────────────────────────────────────────
@@ -1441,6 +1461,92 @@ async function saveCarrierSettings(input: Row, caller: Caller): Promise<Row> {
 // Nothing in this block may log, or put into an error message, anything that came from `input`: the number
 // travels in it. JSON.parse's own SyntaxError quotes a snippet of its text, so a bad body gets a fixed sentence.
 
+// ── Bank-detail actions (the Chase ACH export's numbers) ─────────────────────
+// Same rule as the tax-ID block: nothing here may log, or put into an error message, anything that came from
+// `input`. The numbers are encrypted with the vault key (`_shared/bankVault.ts`) and written straight onto the
+// CarrierPaymentMethod item as `bankCipher`, which is not in the GraphQL schema. The audit row carries last
+// fours and who/when, never a number. The response is the safe mirror only.
+
+const BANK_ACTIONS: Partial<Record<Action, true>> = { SET_BANK_DETAILS: true, CLEAR_BANK_DETAILS: true }
+
+let bankDeps: BankVaultDeps | null = null
+function bankVault(): BankVaultDeps {
+  bankDeps ??= bankVaultDepsFromEnv()
+  return bankDeps
+}
+
+function bankFailure(err: unknown): Error {
+  if (err instanceof BankVaultError) return new Error(redactBankNumbers(err.message))
+  if (err instanceof Error && /^Forbidden|^Unauthorized|^Carrier payment method|changed by someone/.test(err.message)) {
+    return new Error(redactBankNumbers(err.message))
+  }
+  console.error('[tms-carrier-actions] bank details action failed:', err instanceof Error ? err.name : 'Error')
+  return new Error('Bank details could not be saved')
+}
+
+async function bankAction(action: Action, rawInput: AppSyncEvent['arguments']['input'], caller: Caller): Promise<Row> {
+  let input: Row
+  try {
+    input = parseInput(rawInput)
+  } catch {
+    throw new BankVaultError('Invalid input', 'INVALID_INPUT')
+  }
+  const methodId = typeof input.methodId === 'string' ? input.methodId.trim() : ''
+  if (!methodId) throw new BankVaultError('methodId is required', 'INVALID_INPUT')
+  const existing = await getById(CARRIER_PAYMENT_METHOD_TABLE_NAME, methodId)
+  if (!existing) throw new BankVaultError('Carrier payment method not found', 'NOT_FOUND')
+  const carrierId = String(existing.carrierId)
+  if (existing.method !== 'ACH') throw new BankVaultError('Bank details can only be saved on an ACH method', 'NOT_ACH')
+  const expectedUpdatedAt = assertExpectedUpdatedAt(input)
+  const now = nowIso()
+  const hadDetails = existing.bankCipher != null
+
+  if (action === 'CLEAR_BANK_DETAILS') {
+    const saved = await casUpdate(
+      CARRIER_PAYMENT_METHOD_TABLE_NAME,
+      methodId,
+      { bankCipher: null, bankDetailsOnFileAt: null, bankAccountType: null, updatedBy: caller.email, updatedAt: now },
+      expectedUpdatedAt,
+      'carrier payment method',
+    )
+    await writeAudit('CARRIER_PAYMENT_METHOD', methodId, 'CLEAR_BANK_DETAILS', caller, {
+      carrierId, accountLast4: existing.accountLast4 ?? null, routingLast4: existing.routingLast4 ?? null, hadDetails,
+    })
+    return withoutBankCipher(saved)
+  }
+
+  const details = normalizeBankDetails({
+    routingNumber: input.routingNumber,
+    accountNumber: input.accountNumber,
+    accountType: input.accountType,
+  })
+  const cipher = await encryptBankDetails(bankVault(), { carrierId, methodId }, details)
+  const saved = await casUpdate(
+    CARRIER_PAYMENT_METHOD_TABLE_NAME,
+    methodId,
+    {
+      bankCipher: cipher,
+      bankDetailsOnFileAt: now,
+      bankAccountType: details.accountType,
+      accountLast4: details.accountLast4,
+      routingLast4: details.routingLast4,
+      updatedBy: caller.email,
+      updatedAt: now,
+    },
+    expectedUpdatedAt,
+    'carrier payment method',
+  )
+  await writeAudit('CARRIER_PAYMENT_METHOD', methodId, 'SET_BANK_DETAILS', caller, {
+    carrierId,
+    accountLast4: details.accountLast4,
+    routingLast4: details.routingLast4,
+    accountType: details.accountType,
+    replaced: hadDetails,
+    previousAccountLast4: existing.accountLast4 ?? null,
+  })
+  return withoutBankCipher(saved)
+}
+
 const TAX_ACTIONS: Partial<Record<Action, true>> = { SET_TAX_ID: true, GET_TAX_ID_STATUS: true, REVEAL_TAX_ID: true, CLEAR_TAX_ID: true }
 
 let vaultDeps: VaultDeps | null = null
@@ -1618,6 +1724,13 @@ export const handler = async (event: AppSyncEvent | InternalEvent): Promise<Row>
       return await taxAction(action, event, caller)
     } catch (err) {
       throw taxFailure(err)
+    }
+  }
+  if (BANK_ACTIONS[action]) {
+    try {
+      return await bankAction(action, event.arguments.input, caller)
+    } catch (err) {
+      throw bankFailure(err)
     }
   }
   const input = parseInput(event.arguments.input)

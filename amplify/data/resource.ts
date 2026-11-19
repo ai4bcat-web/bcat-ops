@@ -1138,6 +1138,8 @@ const schema = a.schema(stageTypes({
       aljexCutoffAt:         a.datetime(),
       divisionSalesReps:     a.json(),
       marginFloorBps:        a.integer(),
+      // Chase ACH file origin: { companyName, companyId, odfiRouting, secCode, entryDescription, fileSeq: {date, n} }. Admin-written only.
+      chaseAch:              a.json(),
       // Step AG: AP-inbox config and machine state. Read ONLY through tmsApInboxActions; written
       // only by tms-ap-inbox with UpdateItem SET (never touches updatedAt).
       apInbox:               a.json(),
@@ -2627,6 +2629,10 @@ const schema = a.schema(stageTypes({
       archivedAt:      a.datetime(),
       archivedBy:      a.string(),
       archivedReason:  a.string(),
+      // Last time this bill went into a Chase ACH file. A mark, not a payment: posting stays a separate step.
+      achExportedAt:   a.datetime(),
+      achExportedBy:   a.string(),
+      achExportId:     a.string(),
       note:            a.string(),
       // Step AG: provenance of an AP-inbox update (only tms-ap-inbox writes these).
       apInboxItemId:   a.string(),
@@ -3748,6 +3754,11 @@ const schema = a.schema(stageTypes({
       accountLast4:  a.string(),
       routingLast4:  a.string(),
       bankDetailsKey: a.string(),            // carrier-docs/{carrierId}/private/…
+      // The full routing + account numbers live KMS-encrypted on this same item under `bankCipher`, written only by
+      // the Lambdas (see _shared/bankVault.ts). `bankCipher` is deliberately NOT declared here: no AppSync query or
+      // mutation can ever carry it. These two are the safe mirror a screen may read.
+      bankDetailsOnFileAt: a.datetime(),
+      bankAccountType:     a.enum(['CHECKING', 'SAVINGS']),
       payeeEmail:    a.string(),
       remitToAddress: a.json(),              // Address
       isPreferred:   a.boolean(),            // at most one per carrier
