@@ -83,9 +83,9 @@ describe('dashboard Accounts payable card', () => {
     const { unmount } = render(<MemoryRouter><ApPage /></MemoryRouter>)
     await settle()
     const page: Record<string, string> = {}
-    for (const li of screen.getByTestId('ap-summary').querySelectorAll('li')) {
-      const label = li.querySelector('.tms-list-row-label')?.firstChild?.textContent?.trim() ?? ''
-      page[label] = (li.querySelector('.tms-list-row-value')?.textContent ?? '').replace(/\.\d\d$/, '')
+    for (const tile of screen.getByTestId('ap-summary').querySelectorAll('.tms-kpi-card')) {
+      const label = tile.querySelector('.tms-kpi-card-label')?.textContent?.trim() ?? ''
+      page[label] = (tile.querySelector('.tms-kpi-card-value')?.textContent ?? '').replace(/\.\d\d$/, '')
     }
     unmount()
     render(<MemoryRouter><PayablesCard /></MemoryRouter>)
