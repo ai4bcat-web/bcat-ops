@@ -23,6 +23,7 @@ import {
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb'
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda'
 import { randomUUID } from 'crypto'
 import {
@@ -1088,6 +1089,44 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: Re
         if (!load) return fail(`no load found with PRO ${item.proNumber}`)
         await updateItem(String(item.id), { loadId: String(load.id) })
         return ok({ loadId: load.id, customer: load.customer })
+      }
+
+      /**
+       * The two documents OTR would receive for a load, as short-lived links, for the review step before Factor
+       * (Ryne 2026-11-18). Read-only and the same lookups submit uses (findPod, findRatecon: the customer's rate
+       * confirmation only, never a carrier one), so what is reviewed is what is sent. Takes a queue row (`id`)
+       * or a load's PRO (`pro`) for a draft with no queue row yet. Writes nothing and calls nothing outside.
+       */
+      case 'previewDocs': {
+        const itemId = trim(input.id)
+        const item = itemId ? await getFactoringItem(itemId) : null
+        if (itemId && !item) return fail('factoring item not found')
+        const pro = trim(item?.proNumber) || trim(input.pro)
+        const loadId = trim(item?.loadId)
+        const load = loadId
+          ? ((await ddb.send(new GetCommand({ TableName: LOAD_TABLE, Key: { id: loadId } }))).Item as Row) ?? null
+          : pro ? await findLoadByPro(pro) : null
+        if (!load) return ok({ pro, found: false, pod: null, rateCon: null })
+        const [pod, rc] = await Promise.all([
+          findPod(String(load.id), pro, trim(load.shipmentId)),
+          findRatecon(load, pro),
+        ])
+        const link = async (key: string, name: string) => ({
+          name,
+          url: await getSignedUrl(
+            s3,
+            new GetObjectCommand({ Bucket: BUCKET, Key: key, ResponseContentDisposition: 'inline' }),
+            { expiresIn: 600 },
+          ),
+        })
+        const podKey = trim(pod?.enhancedKey) || trim(pod?.originalKey)
+        const rcKey = trim(rc?.originalKey)
+        return ok({
+          pro,
+          found: true,
+          pod: podKey ? await link(podKey, trim(pod?.fileName) || `POD-${pro}`) : null,
+          rateCon: rcKey ? await link(rcKey, trim(rc?.fileName) || `RateCon-${pro}`) : null,
+        })
       }
 
       /** Rebuild readiness and cache it on the row for the queue to render. */

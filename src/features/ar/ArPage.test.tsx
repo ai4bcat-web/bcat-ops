@@ -39,7 +39,10 @@ vi.mock('@/hooks/useFactoringItems', () => ({
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 const factorReady = vi.hoisted(() => ({ current: {} as Record<string, { orderId: string; factorBilled: boolean; ready: boolean; missing: string[] }> }))
-vi.mock('@/lib/otrClient', () => ({ assembleInvoice: vi.fn(), submitToOtr: vi.fn(), uploadOtrDocs: vi.fn() }))
+vi.mock('@/lib/otrClient', () => ({
+  assembleInvoice: vi.fn(), submitToOtr: vi.fn(), uploadOtrDocs: vi.fn(),
+  previewOtrDocs: vi.fn(async () => ({ pro: 'S-1001', found: true, pod: { name: 'POD.pdf', url: 'https://s3.test/pod' }, rateCon: { name: 'RC.pdf', url: 'https://s3.test/rc' } })),
+}))
 vi.mock('@/lib/apiClient', () => ({
   graphqlErrorText: (e: unknown) => String(e),
   getInvoiceAttachmentPlans: vi.fn().mockResolvedValue([]),
@@ -577,10 +580,12 @@ describe('Ready to invoice: batch Factor', () => {
     fireEvent.click(screen.getByTestId('batch-factor'))
     const confirm = await screen.findByTestId('batch-factor-confirm')
     expect(within(confirm).getByText('1')).toBeTruthy()
-    expect(within(confirm).getByText('$2,500.00')).toBeTruthy()
+    expect(within(confirm).getAllByText('$2,500.00').length).toBeGreaterThan(0)
     expect(within(confirm).getByText('OTR Capital, LLC')).toBeTruthy()
     // Nothing goes to OTR until Submit is pressed.
     expect(otr.submitToOtr).not.toHaveBeenCalled()
+    expect(await screen.findByTitle('POD preview')).toBeTruthy()
+    expect(screen.getByTitle('Customer rate confirmation preview')).toBeTruthy()
     fireEvent.click(screen.getByTestId('batch-factor-submit'))
     expect(await screen.findByTestId('batch-factor-results')).toBeTruthy()
     expect(apiClient.batchGenerateInvoices).toHaveBeenCalledWith({ orderIds: ['o1'] })
