@@ -22,4 +22,10 @@ describe('LocalFleetCostShareCard', () => {
     expect(screen.getByText(/current month is to date/i)).toBeTruthy()
     expect(screen.getByText(/Add the policy lines on the Insurance page/)).toBeTruthy()
   })
+
+  it('says what the columns and the left-over segment mean', () => {
+    render(<LocalFleetCostShareCard />)
+    expect(screen.getByText(/Column height is the month's revenue/)).toBeTruthy()
+    expect(screen.getAllByText(/Left over/).length).toBeGreaterThan(0)
+  })
 })

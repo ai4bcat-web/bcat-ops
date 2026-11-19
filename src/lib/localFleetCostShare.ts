@@ -13,6 +13,11 @@ export interface CostShareRow {
   maintenance: number
   /** Each category as a percent of revenue; null when there is no revenue or the month has no costs on file. */
   pct: Record<ShareKey, number | null>
+  /** Revenue left after the four categories (never below 0), and as a percent of revenue (null without costs or revenue). */
+  leftover: number
+  leftoverPct: number | null
+  /** The four categories together cost more than the month's revenue. */
+  overRevenue: boolean
   partial: boolean
   /** The month predates the expense setup (no fixed costs on file): revenue shows, shares do not. */
   noCosts: boolean
@@ -37,6 +42,7 @@ export function buildCostShare(months: ReviewMonthInput[]): CostShareRow[] {
     const partial = m.daysElapsed < m.daysInMonth
     const noCosts = !!m.incomplete
     const pct = (v: number): number | null => (noCosts || m.revenue <= 0 ? null : (v / m.revenue) * 100)
+    const costs = m.fuel + m.driverPay + m.insurance + m.maintenance
     return {
       key: m.key,
       month: m.label.split(' ')[0],
@@ -46,6 +52,9 @@ export function buildCostShare(months: ReviewMonthInput[]): CostShareRow[] {
       insurance: m.insurance,
       maintenance: m.maintenance,
       pct: { fuel: pct(m.fuel), driverPay: pct(m.driverPay), insurance: pct(m.insurance), maintenance: pct(m.maintenance) },
+      leftover: noCosts ? 0 : Math.max(0, m.revenue - costs),
+      leftoverPct: noCosts || m.revenue <= 0 ? null : ((m.revenue - costs) / m.revenue) * 100,
+      overRevenue: !noCosts && m.revenue > 0 && costs > m.revenue,
       partial,
       noCosts,
       lowEntry: [],
