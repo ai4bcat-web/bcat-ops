@@ -7,18 +7,19 @@
  * payments with the existing Record payment step. If the upload never happens, "Undo mark" clears it.
  */
 import { useEffect, useState } from 'react'
-import { TmsBadge, TmsButton, TmsDialog, TmsField, TmsInput } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsDialog, TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
 import {
   clearChaseAchMark,
   exportChaseAch,
   previewChaseAch,
   type ChaseAchExport,
+  type ChaseAchFormat,
   type ChaseAchPreview,
 } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
 
-function downloadText(filename: string, text: string): void {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=us-ascii' }))
+function downloadText(filename: string, text: string, type = 'text/plain'): void {
+  const url = URL.createObjectURL(new Blob([text], { type: `${type};charset=us-ascii` }))
   const a = document.createElement('a')
   a.href = url
   a.download = filename
@@ -39,6 +40,7 @@ export function ChaseAchDialog({ billIds, onClose, onDone }: {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [again, setAgain] = useState(false)
+  const [format, setFormat] = useState<ChaseAchFormat>('NACHA')
   const [result, setResult] = useState<ChaseAchExport | null>(null)
 
   useEffect(() => {
@@ -53,8 +55,8 @@ export function ChaseAchDialog({ billIds, onClose, onDone }: {
     setBusy(true)
     setError(null)
     try {
-      const out = await exportChaseAch({ billIds, ...(effectiveDate ? { effectiveDate } : {}), includeAlreadyExported: again })
-      downloadText(out.fileName, out.fileText)
+      const out = await exportChaseAch({ billIds, ...(effectiveDate ? { effectiveDate } : {}), includeAlreadyExported: again, format })
+      downloadText(out.fileName, out.fileText, format === 'CSV' ? 'text/csv' : 'text/plain')
       setResult({ ...out, fileText: '' })
       onDone()
     } catch (e) {
@@ -114,7 +116,7 @@ export function ChaseAchDialog({ billIds, onClose, onDone }: {
               Downloaded <strong>{result.fileName}</strong>: {result.entryCount} payment{result.entryCount === 1 ? '' : 's'}, {formatCents(result.totalCents)}, effective {result.effectiveDate}.
             </p>
             <p className="tms-muted text-xs">
-              Upload it at Chase › ACH Payment Services › ACH file upload. The bills are marked "Exported to Chase"; they stay on Selected until you record the payments.
+              Upload it at Chase › ACH Payment Services › ACH file upload{result.fileName.endsWith('.csv') ? ' (CSV)' : ''}. The bills are marked "Exported to Chase"; they stay on Selected until you record the payments.
             </p>
             {result.notExported.length > 0 && (
               <p className="tms-muted text-xs">{result.notExported.length} bill{result.notExported.length === 1 ? ' was' : 's were'} not in the file; see the list on the Selected tab.</p>
@@ -133,6 +135,14 @@ export function ChaseAchDialog({ billIds, onClose, onDone }: {
               <TmsField label="Effective date" htmlFor="chase-ach-date">
                 <TmsInput id="chase-ach-date" type="date" value={effectiveDate ?? preview.effectiveDate} onChange={(e) => setEffectiveDate(e.target.value || undefined)} />
               </TmsField>
+              <TmsField label="File format" htmlFor="chase-ach-format">
+                <TmsSelect
+                  id="chase-ach-format"
+                  value={format}
+                  onChange={(e) => setFormat(e.target.value === 'CSV' ? 'CSV' : 'NACHA')}
+                  options={[{ value: 'NACHA', label: 'NACHA file (.ach)' }, { value: 'CSV', label: 'Chase CSV (.csv)' }]}
+                />
+              </TmsField>
               <span className="tms-muted text-xs">When the carriers are paid. At least one bank business day out.</span>
               {preview.alreadyExportedCount > 0 && (
                 <label className="flex items-center gap-1.5 text-xs">
@@ -141,6 +151,11 @@ export function ChaseAchDialog({ billIds, onClose, onDone }: {
                 </label>
               )}
             </div>
+            {format === 'CSV' && (
+              <p className="tms-muted text-xs" data-testid="chase-csv-note">
+                The CSV leaves the Chase pay-from account blank. BCAT never stores your account number: choose it when you upload at Chase, or type it into the "Chase Acct" column of the batch row.
+              </p>
+            )}
             {preview.effectiveDateProblem && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{preview.effectiveDateProblem}</p>}
             <p className="text-sm">
               <strong>{preview.readyCount}</strong> ready ({formatCents(preview.readyTotalCents)})

@@ -66,4 +66,24 @@ describe('ChaseAchDialog', () => {
     await waitFor(() => expect(api.clearChaseAchMark).toHaveBeenCalledWith({ billIds: ['b1'] }))
     click.mockRestore()
   })
+
+  it('exports the Chase CSV when chosen and explains the blank pay-from account', async () => {
+    api.previewChaseAch.mockResolvedValue(preview())
+    api.exportChaseAch.mockResolvedValue({
+      exportId: 'e2', format: 'CSV', fileName: 'BCAT-ACH-20261119-0900A.csv', fileText: 'FILE', entryCount: 1, totalCents: 95000,
+      effectiveDate: '2026-11-23', exportedBillIds: ['b1'], notExported: [],
+    })
+    URL.createObjectURL = vi.fn(() => 'blob:x')
+    URL.revokeObjectURL = vi.fn()
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    render(<ChaseAchDialog billIds={['b1']} onClose={vi.fn()} onDone={vi.fn()} />)
+    await screen.findByText('Fake Trucking LLC')
+    expect(screen.queryByTestId('chase-csv-note')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('File format'), { target: { value: 'CSV' } })
+    expect(screen.getByTestId('chase-csv-note')).toHaveTextContent('never stores your account number')
+    fireEvent.click(screen.getByRole('button', { name: 'Download Chase ACH file' }))
+    expect(await screen.findByTestId('chase-ach-result')).toHaveTextContent('BCAT-ACH-20261119-0900A.csv')
+    expect(api.exportChaseAch).toHaveBeenCalledWith(expect.objectContaining({ billIds: ['b1'], format: 'CSV' }))
+    click.mockRestore()
+  })
 })

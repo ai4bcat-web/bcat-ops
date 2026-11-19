@@ -163,7 +163,8 @@ export function validateOrigin(origin: NachaOrigin): string | null {
   return null
 }
 
-export function buildNachaFile(input: NachaFileInput): NachaFile {
+/** The checks both file formats share; returns the file ID modifier to use. */
+export function checkNachaInput(input: NachaFileInput): string {
   const originProblem = validateOrigin(input.origin)
   if (originProblem) throw new Error(originProblem)
   if (input.entries.length === 0) throw new Error('There are no payments to put in the file')
@@ -172,6 +173,18 @@ export function buildNachaFile(input: NachaFileInput): NachaFile {
   const modifier = (input.fileIdModifier ?? 'A').toUpperCase()
   if (!/^[A-Z0-9]$/.test(modifier)) throw new Error('File ID modifier must be one letter or digit')
   if (!/^\d{4}$/.test(input.fileTime)) throw new Error('File time must be HHMM')
+  for (const entry of input.entries) {
+    if (!isValidRoutingNumber(entry.routingNumber)) throw new Error('An entry has an invalid routing number')
+    if (!/^[0-9A-Za-z]{1,17}$/.test(entry.accountNumber)) throw new Error('An entry has an invalid account number')
+    if (!Number.isInteger(entry.amountCents) || entry.amountCents <= 0 || entry.amountCents > MAX_ENTRY_CENTS) {
+      throw new Error('An entry has an amount that cannot go in an ACH file')
+    }
+  }
+  return modifier
+}
+
+export function buildNachaFile(input: NachaFileInput): NachaFile {
+  const modifier = checkNachaInput(input)
 
   const { origin } = input
   const odfi8 = origin.odfiRouting.slice(0, 8)
