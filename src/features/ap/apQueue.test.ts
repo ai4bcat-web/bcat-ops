@@ -217,3 +217,21 @@ describe('the PRO a bill prints when its load pays several carriers', () => {
     expect(billLabel(bill({ billNumber: 'RL-1', legSuffix: '-2' }))).toBe('RL-1')
   })
 })
+
+describe('apSummary paid this week / month', () => {
+  const paid = (id: string, paidAt: string, net: number, patch: Partial<CarrierBillRecord> = {}) =>
+    bill({ id, status: 'PAID', paidAt, netCents: net, balanceCents: 0, ...patch })
+
+  it('counts net paid by Chicago paid date, week from Monday, and leaves archived bills out', () => {
+    const paidRecent = [
+      paid('wk', '2026-11-17T15:00:00Z', 100_00), // Tue this week
+      paid('mo', '2026-11-03T15:00:00Z', 250_00), // earlier this month
+      paid('old', '2026-10-30T15:00:00Z', 999_00), // last month
+      paid('arch', '2026-11-16T15:00:00Z', 777_00, { archivedAt: '2026-11-18T00:00:00Z' }),
+      paid('late', '2026-11-01T04:30:00Z', 50_00), // 11:30pm Oct 31 Chicago: last month
+    ]
+    const s = apSummary({ expected: [], aging: [], selected: [], paidRecent, facts: new Map(), asOf: '2026-11-18' })
+    expect(s.paidWeek).toEqual({ count: 1, cents: 100_00 })
+    expect(s.paidMonth).toEqual({ count: 2, cents: 350_00 })
+  })
+})

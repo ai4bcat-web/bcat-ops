@@ -15,6 +15,8 @@ import type { CarrierPaymentInfo } from '@/lib/apiClient'
 import type { CarrierBillRecord, OrderRecord, ShipmentRecord } from '@/types/tms'
 import type { Load } from '@/types'
 import { deliveredTimeOf } from '@/lib/deliveredAt'
+import { chicagoDateStr as chicagoDay } from '@/lib/date'
+import { mondayOf } from '@/lib/financeOps'
 import { customerRefOf } from '@/lib/customerRef'
 
 /** The load facts a bill row shows, read once per shipment. */
@@ -371,6 +373,9 @@ export interface ApSummary {
   selected: ApMoney
   pastDue: ApMoney
   dueNext7: ApMoney
+  /** Net paid to carriers on bills settled this week (Monday on) and this month, by Chicago paid date. Archived bills left out. */
+  paidWeek: ApMoney
+  paidMonth: ApMoney
   payToFactor: ApMoney
   payDirect: ApMoney
   /** Bills on quick pay invoiced this month, and the fees taken off them. */
@@ -438,6 +443,18 @@ export function apSummary(input: {
     if (b.quickPayFeeBps === 300) qp.fee3Cents += b.quickPayFeeCents ?? 0
   }
 
+  const weekStart = mondayOf(asOf)
+  const paidWeek: ApMoney = { count: 0, cents: 0 }
+  const paidMonth: ApMoney = { count: 0, cents: 0 }
+  for (const b of paidRecent) {
+    if (b.status !== 'PAID' || !b.paidAt || b.archivedAt) continue
+    const day = chicagoDay(b.paidAt)
+    if (day.slice(0, 7) !== month || day > asOf) continue
+    paidMonth.count += 1
+    paidMonth.cents += b.netCents
+    if (day >= weekStart) { paidWeek.count += 1; paidWeek.cents += b.netCents }
+  }
+
   const since = addDays(asOf, -90)
   const toPay = paidRecent
     .filter((b) => b.status === 'PAID' && b.paidAt && b.paidAt.slice(0, 10) >= since && b.billDate)
@@ -470,6 +487,8 @@ export function apSummary(input: {
     selected: money(selected),
     pastDue: sumRows(pastDueRows),
     dueNext7: sumRows(next7Rows),
+    paidWeek,
+    paidMonth,
     payToFactor: money(open.filter((b) => b.payeeKind === 'FACTOR')),
     payDirect: money(open.filter((b) => b.payeeKind !== 'FACTOR')),
     quickPay: qp,

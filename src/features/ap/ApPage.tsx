@@ -84,6 +84,7 @@ import { apCompactItems } from './apCompactItems'
 import { AccountingReportsDialog } from '@/features/finance/AccountingReportsDialog'
 import { useApPaymentLines } from '@/features/finance/useApPaymentLines'
 import { useAllPaidBills } from './useAllPaidBills'
+import { useBillFacts } from './useBillFacts'
 import { useLegIndex } from './useLegIndex'
 import type { BillPaymentLine } from '@/features/finance/accountingStats'
 import type { AccountingReportKind } from '@/features/finance/accountingReports'
@@ -353,6 +354,10 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   )
   const [verifyOnlyPaid, setVerifyOnlyPaid] = useState(false)
   const settledShown = useMemo(() => (verifyOnlyPaid ? settled.filter(isVerifyPaymentBill) : settled), [settled, verifyOnlyPaid])
+  // Paid bills from before the summary's three-month window have no facts yet: read them for the Customer ref column, only while the Paid tab is open.
+  const paidFactBills = useMemo(() => (tab === 'paid' ? settledShown : []), [tab, settledShown])
+  const { facts: paidFacts } = useBillFacts(paidFactBills)
+  const paidFactsAll: BillFactsIndex = paidFacts.size > 0 ? paidFacts : facts
   const awaitingTotals = useMemo(() => awaitingInvoiceTotals(awaitingRows), [awaitingRows])
   // One bill per carrier per load: a load with several carriers shows up as several rows on
   // one PRO, and each row says so.
@@ -632,6 +637,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     : tab === 'paid' ? paidView({
       banner: errorBanner,
       bills: settledShown,
+      facts: paidFactsAll,
       infos: payInfos,
       lines: apPaymentLines,
       onAddRemit: addRemitFor,
@@ -1953,9 +1959,10 @@ function paidProText(bill: CarrierBillRecord): string {
   return pro ? `${pro}${bill.legSuffix ?? ''}` : '—'
 }
 
-function paidView({ banner, bills, shared, months, month, loading, onMonth, verifyOnly, verifyCount, onVerifyOnly, infos, lines, onAddRemit, canSeeArchived, archivedCount, includeArchived, onIncludeArchived }: {
+function paidView({ banner, bills, facts, shared, months, month, loading, onMonth, verifyOnly, verifyCount, onVerifyOnly, infos, lines, onAddRemit, canSeeArchived, archivedCount, includeArchived, onIncludeArchived }: {
   banner: ReactNode
   bills: CarrierBillRecord[]
+  facts: BillFactsIndex
   shared: SharedProIndex
   months: string[]
   month: string
@@ -1990,6 +1997,7 @@ function paidView({ banner, bills, shared, months, month, loading, onMonth, veri
       render: (bill) => <>{paidProText(bill)}</>,
     },
     facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
+    facetCol<CarrierBillRecord>('custRef', 'CUSTOMER REF', (bill) => facts.get(bill.shipmentId)?.customerRef || '—', undefined, { filter: 'text' }),
     dayCol<CarrierBillRecord>('billDate', 'BILL DATE', (bill) => bill.billDate),
     dayCol<CarrierBillRecord>('paid', 'PAID', (bill) => bill.paidAt),
     facetCol('payee', 'PAYEE', (bill) => payeeNameFor(bill, infos)),
@@ -2006,7 +2014,7 @@ function paidView({ banner, bills, shared, months, month, loading, onMonth, veri
   ]
 
   return view<CarrierBillRecord>({
-    gridId: 'ap-paid-v3',
+    gridId: 'ap-paid-v4',
     cardLayout: { title: 'bill', party: 'carrier', amount: 'net' },
     kpis: [
       { label: month ? `Paid in ${monthLabel(month)}` : 'Paid, all time', value: bills.length },
