@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildCostShare } from './localFleetCostShare'
+import { buildCostShare, donutSlices } from './localFleetCostShare'
 import type { ReviewMonthInput } from './profitReview'
 
 const month = (over: Partial<ReviewMonthInput>): ReviewMonthInput => ({
@@ -8,9 +8,10 @@ const month = (over: Partial<ReviewMonthInput>): ReviewMonthInput => ({
 })
 
 describe('buildCostShare', () => {
-  it('turns each category into a percent of revenue', () => {
+  it('turns fuel, driver pay and maintenance into percents of revenue and ignores insurance', () => {
     const [r] = buildCostShare([month({})])
-    expect(r.pct).toEqual({ fuel: 20, driverPay: 30, insurance: 8, maintenance: 5 })
+    expect(r.pct).toEqual({ fuel: 20, driverPay: 30, maintenance: 5 })
+    expect(r.controllablePct).toBeCloseTo(55, 9)
     expect(r.month).toBe('Sep')
   })
 
@@ -40,15 +41,39 @@ describe('buildCostShare', () => {
     expect(zero[0].lowEntry).toEqual(['fuel'])
   })
 
-  it('works out what is left of the revenue after the four costs, and never stacks a negative', () => {
+  it('works out what is left of the revenue after the three costs, and never stacks a negative', () => {
     const [r, over, none] = buildCostShare([month({}), month({ key: '2026-08', label: 'Aug 2026', fuel: 9000 }), month({ key: '2026-05', label: 'May 2026', incomplete: true })])
-    expect(r.leftover).toBe(3700)
-    expect(r.leftoverPct).toBe(37)
+    expect(r.leftover).toBe(4500)
+    expect(r.leftoverPct).toBe(45)
     expect(r.overRevenue).toBe(false)
     expect(over.leftover).toBe(0)
-    expect(over.leftoverPct).toBeCloseTo(-33, 0)
+    expect(over.leftoverPct).toBeCloseTo(-25, 0)
     expect(over.overRevenue).toBe(true)
     expect(none.leftover).toBe(0)
     expect(none.leftoverPct).toBeNull()
+  })
+})
+
+describe('donutSlices', () => {
+  it('splits the ring into the three costs and left over, adding up to the whole', () => {
+    const [r] = buildCostShare([month({})])
+    const slices = donutSlices(r)
+    expect(slices.map((s) => s.key)).toEqual(['fuel', 'driverPay', 'maintenance', 'leftover'])
+    expect(slices.reduce((a, s) => a + s.fraction, 0)).toBeCloseTo(1, 9)
+    expect(slices[0].fraction).toBeCloseTo(0.2, 9)
+    expect(slices[3].fraction).toBeCloseTo(0.45, 9)
+  })
+
+  it('scales the costs to fill the ring when they exceed revenue, with no left-over slice', () => {
+    const [r] = buildCostShare([month({ fuel: 9000 })])
+    const slices = donutSlices(r)
+    expect(slices.map((s) => s.key)).toEqual(['fuel', 'driverPay', 'maintenance'])
+    expect(slices.reduce((a, s) => a + s.fraction, 0)).toBeCloseTo(1, 9)
+  })
+
+  it('has no slices for a month without costs or revenue', () => {
+    const rows = buildCostShare([month({ incomplete: true }), month({ revenue: 0 })])
+    expect(donutSlices(rows[0])).toEqual([])
+    expect(donutSlices(rows[1])).toEqual([])
   })
 })

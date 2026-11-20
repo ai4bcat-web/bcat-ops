@@ -1,34 +1,78 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Truck } from 'lucide-react'
-import { BarChart, Bar, Cell, LabelList, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useProfitReview } from '@/hooks/useProfitReview'
-import { buildCostShare, SHARE_KEYS, type CostShareRow, type ShareKey } from '@/lib/localFleetCostShare'
+import { buildCostShare, donutSlices, SHARE_KEYS, type CostShareRow, type ShareKey } from '@/lib/localFleetCostShare'
 import { DashCard } from './DashCard'
 
 const MONTHS_BACK = 6
-const CHART_HEIGHT = 250
-const LABELS: Record<ShareKey, string> = { fuel: 'Fuel', driverPay: 'Driver pay', insurance: 'Insurance', maintenance: 'Maintenance' }
-const COLORS: Record<ShareKey, string> = { fuel: 'var(--tms-chart-4)', driverPay: 'var(--tms-chart-6)', insurance: 'var(--tms-chart-8)', maintenance: 'var(--tms-chart-7)' }
-const LEFTOVER = 'var(--tms-chart-9)'
-const REVENUE_ONLY = 'var(--tms-chart-10)'
-const SEGMENT_TEXT = 'var(--tms-chart-label)'
-/** A segment must be this tall (px) to carry its percent inside. */
-const MIN_LABEL_HEIGHT = 15
+const LABELS: Record<ShareKey, string> = { fuel: 'Fuel', driverPay: 'Driver pay', maintenance: 'Maintenance' }
+const COLORS: Record<ShareKey | 'leftover', string> = { fuel: 'var(--tms-chart-4)', driverPay: 'var(--tms-chart-6)', maintenance: 'var(--tms-chart-7)', leftover: 'var(--tms-chart-9)' }
+const NO_COSTS_RING = 'var(--tms-chart-9)'
+const SLICE_TEXT = 'var(--tms-chart-label)'
+
+/** Donut geometry in a 120 x 120 box: a ring of this radius and thickness, so it scales with its cell. */
+const CX = 60
+const RADIUS = 42
+const THICKNESS = 20
+const CIRCUMFERENCE = 2 * Math.PI * RADIUS
+/** A slice must take at least this share of the ring to carry its percent. */
+const MIN_LABEL_FRACTION = 0.09
 
 const money0 = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
-const moneyK = (n: number) => `$${Math.round(n / 1000)}k`
 const pctText = (n: number | null) => (n == null ? '—' : `${n.toFixed(1)}%`)
 const pctWhole = (n: number | null) => (n == null ? '' : `${Math.round(n)}%`)
 
-/** A stacked column's segments: the dollars of each category, then what is left of the revenue. */
-interface StackRow extends CostShareRow { revenueOnly: number }
-const toStack = (r: CostShareRow): StackRow => ({ ...r, revenueOnly: r.noCosts ? r.revenue : 0 })
+function describe(r: CostShareRow): string {
+  if (r.noCosts) return `${r.month}${r.partial ? ' to date' : ''}: ${money0(r.revenue)} revenue, costs not on file`
+  const parts = SHARE_KEYS.map((k) => `${LABELS[k]} ${pctText(r.pct[k])}`).join(', ')
+  return `${r.month}${r.partial ? ' to date' : ''}: ${money0(r.revenue)} revenue. ${parts}. ${r.overRevenue ? 'Costs are over revenue' : `Left over ${pctText(r.leftoverPct)}`}.`
+}
 
-function ShareTooltip({ active, payload }: { active?: boolean; payload?: { payload: StackRow }[] }) {
-  const row = active ? payload?.[0]?.payload : undefined
-  if (!row) return null
+/** One month's ring: the three controllable costs and what is left, drawn to scale around the month and its revenue. */
+function MonthDonut({ row }: { row: CostShareRow }) {
+  const slices = donutSlices(row)
+  const opacity = row.partial ? 0.6 : 1
+  let start = 0
+  const arcs = slices.map((s) => {
+    const arc = { ...s, start }
+    start += s.fraction
+    return arc
+  })
   return (
-    <div style={{ background: 'var(--tms-card)', color: 'var(--tms-text)', border: '1px solid var(--tms-border)', borderRadius: 8, fontSize: 12, boxShadow: 'var(--tms-shadow-pop)', padding: '8px 10px', minWidth: 210 }}>
+    <svg viewBox="0 0 120 120" role="img" aria-label={describe(row)} style={{ width: '100%', maxWidth: 150, height: 'auto', display: 'block', margin: '0 auto' }}>
+      {slices.length === 0 ? (
+        <circle cx={CX} cy={CX} r={RADIUS} fill="none" stroke={NO_COSTS_RING} strokeOpacity={0.45} strokeWidth={THICKNESS} />
+      ) : (
+        arcs.map((a) => {
+          const mid = (a.start + a.fraction / 2) * 2 * Math.PI - Math.PI / 2
+          const showLabel = a.fraction >= MIN_LABEL_FRACTION
+          const pct = a.key === 'leftover' ? row.leftoverPct : row.pct[a.key]
+          return (
+            <g key={a.key}>
+              <circle
+                cx={CX} cy={CX} r={RADIUS} fill="none" stroke={COLORS[a.key]} strokeWidth={THICKNESS}
+                strokeOpacity={a.key === 'leftover' ? opacity * 0.75 : opacity}
+                strokeDasharray={`${a.fraction * CIRCUMFERENCE} ${CIRCUMFERENCE}`} strokeDashoffset={-a.start * CIRCUMFERENCE}
+                transform={`rotate(-90 ${CX} ${CX})`}
+              />
+              {showLabel && (
+                <text x={CX + RADIUS * Math.cos(mid)} y={CX + RADIUS * Math.sin(mid)} textAnchor="middle" dominantBaseline="central" fontSize={9.5} fontWeight={700} fill={SLICE_TEXT} style={{ fontVariantNumeric: 'tabular-nums', pointerEvents: 'none' }}>
+                  {row.overRevenue ? `${Math.round(a.fraction * 100)}%` : pctWhole(pct)}
+                </text>
+              )}
+            </g>
+          )
+        })
+      )}
+      <text x={CX} y={CX - 4} textAnchor="middle" fontSize={13} fontWeight={700} fill="var(--tms-text)">{row.month}</text>
+      <text x={CX} y={CX + 11} textAnchor="middle" fontSize={10.5} fill="var(--tms-text)" style={{ fontVariantNumeric: 'tabular-nums' }}>{money0(row.revenue)}</text>
+    </svg>
+  )
+}
+
+function MonthTooltip({ row }: { row: CostShareRow }) {
+  return (
+    <div role="tooltip" style={{ position: 'absolute', zIndex: 5, top: '100%', left: '50%', transform: 'translateX(-50%)', marginTop: 2, background: 'var(--tms-card)', color: 'var(--tms-text)', border: '1px solid var(--tms-border)', borderRadius: 8, fontSize: 12, boxShadow: 'var(--tms-shadow-pop)', padding: '8px 10px', minWidth: 214, textAlign: 'left' }}>
       <div style={{ fontWeight: 700, marginBottom: 4 }}>{row.month}{row.partial ? ' (to date)' : ''} · {money0(row.revenue)} revenue</div>
       {row.noCosts ? (
         <div style={{ color: 'var(--tms-muted)' }}>Costs were not on file this month.</div>
@@ -43,10 +87,10 @@ function ShareTooltip({ active, payload }: { active?: boolean; payload?: { paylo
             </div>
           ))}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontVariantNumeric: 'tabular-nums', marginTop: 3, paddingTop: 3, borderTop: '1px solid var(--tms-border)' }}>
-            <span style={{ width: 8, height: 8, borderRadius: 2, background: LEFTOVER, flexShrink: 0 }} />
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: COLORS.leftover, flexShrink: 0 }} />
             <span style={{ flex: 1 }}>{row.overRevenue ? 'Over revenue by' : 'Left over'}</span>
-            <span style={{ fontWeight: 600 }}>{pctText(row.leftoverPct)}</span>
-            <span style={{ color: 'var(--tms-muted)', minWidth: 64, textAlign: 'right' }}>{money0(row.revenue - row.fuel - row.driverPay - row.insurance - row.maintenance)}</span>
+            <span style={{ fontWeight: 600 }}>{pctText(row.overRevenue && row.leftoverPct != null ? -row.leftoverPct : row.leftoverPct)}</span>
+            <span style={{ color: 'var(--tms-muted)', minWidth: 64, textAlign: 'right' }}>{money0(Math.abs(row.revenue - row.controllable))}</span>
           </div>
         </>
       )}
@@ -54,60 +98,22 @@ function ShareTooltip({ active, payload }: { active?: boolean; payload?: { paylo
   )
 }
 
-/** The month under each column: its name, its revenue, and the share left over after the four costs. */
-function MonthTick({ x, y, payload, rows }: { x?: number; y?: number; payload?: { value: string }; rows: StackRow[] }) {
-  const row = rows.find((r) => r.key === payload?.value)
-  if (!row) return null
-  const cx = x ?? 0
-  const cy = y ?? 0
-  return (
-    <g transform={`translate(${cx},${cy})`}>
-      <text y={14} textAnchor="middle" fill="var(--tms-text)" fontSize={12} fontWeight={600}>{row.month}{row.partial ? ' (to date)' : ''}</text>
-      <text y={29} textAnchor="middle" fill="var(--tms-text)" fontSize={11.5} style={{ fontVariantNumeric: 'tabular-nums' }}>{money0(row.revenue)}</text>
-      <text y={43} textAnchor="middle" fill="var(--tms-chart-axis)" fontSize={11} style={{ fontVariantNumeric: 'tabular-nums' }}>
-        {row.noCosts ? 'costs not on file' : `${pctWhole(row.leftoverPct)} left`}
-      </text>
-    </g>
-  )
-}
-
-/** The percent printed inside a segment; skipped when the segment is too short to hold it. */
-function segmentLabel(rows: StackRow[], pick: (r: StackRow) => number | null) {
-  return function SegmentLabel(props: { x?: number | string; y?: number | string; width?: number | string; height?: number | string; index?: number }) {
-    const r = props.index == null ? undefined : rows[props.index]
-    const h = Number(props.height ?? 0)
-    if (!r || h < MIN_LABEL_HEIGHT) return null
-    const text = pctWhole(pick(r))
-    if (!text) return null
-    return (
-      <text x={Number(props.x ?? 0) + Number(props.width ?? 0) / 2} y={Number(props.y ?? 0) + h / 2} textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={600} fill={SEGMENT_TEXT} style={{ fontVariantNumeric: 'tabular-nums', pointerEvents: 'none' }}>{text}</text>
-    )
-  }
-}
-
 /**
  * Our local drivers (the Ivan local fleet plus the box truck, same scope as the Profit Review and the Finances P&L):
- * one column per month whose height is that month's revenue, split into what went to fuel, driver pay, insurance and
- * maintenance, with the rest on top. Months with no costs on file show a plain revenue column. Internal money, so it
- * sits behind the same accounting access as the receivable and payable cards.
+ * one donut per month showing how much of that month's revenue went to the costs we control (fuel, driver pay and
+ * maintenance) and how much is left. Months with no costs on file show a plain grey ring. Internal money, so it sits
+ * behind the same accounting access as the receivable and payable cards.
  */
 export function LocalFleetCostShareCard() {
   const { months, loading } = useProfitReview(MONTHS_BACK)
-  const rows = useMemo(() => buildCostShare(months).map(toStack), [months])
+  const rows = useMemo(() => buildCostShare(months), [months])
+  const [open, setOpen] = useState<string | null>(null)
   const hasData = rows.some((r) => r.revenue > 0)
   const latest = [...rows].reverse().find((r) => r.revenue > 0 && !r.noCosts)
   const flagged = rows.filter((r) => r.lowEntry.length > 0)
-  const noInsurance = rows.some((r) => !r.noCosts && r.revenue > 0) && rows.filter((r) => !r.noCosts && r.revenue > 0).every((r) => r.insurance === 0)
-  const labelFor = useMemo(() => ({
-    fuel: segmentLabel(rows, (r) => r.pct.fuel),
-    driverPay: segmentLabel(rows, (r) => r.pct.driverPay),
-    insurance: segmentLabel(rows, (r) => r.pct.insurance),
-    maintenance: segmentLabel(rows, (r) => r.pct.maintenance),
-    leftover: segmentLabel(rows, (r) => r.leftoverPct),
-  }), [rows])
 
   return (
-    <DashCard label="Local drivers · revenue and cost share" icon={<Truck size={15} />} hint="Each column is a month of local fleet revenue, split into fuel, driver pay, insurance, maintenance and what is left" testId="local-fleet-cost-share" ariaBusy={loading && !hasData}>
+    <DashCard label="Local drivers · revenue and cost share" icon={<Truck size={15} />} hint="One ring per month of local fleet revenue: fuel, driver pay and maintenance, and what is left" testId="local-fleet-cost-share" ariaBusy={loading && !hasData}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: 11.5, color: 'var(--tms-muted)', alignItems: 'center' }}>
         {SHARE_KEYS.map((k) => (
           <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -116,48 +122,47 @@ export function LocalFleetCostShareCard() {
           </span>
         ))}
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ width: 10, height: 10, borderRadius: 2, background: LEFTOVER }} />
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: COLORS.leftover }} />
           Left over{latest ? <b style={{ color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>{pctText(latest.leftoverPct)}</b> : null}
         </span>
         {latest ? <span>· percents are {latest.month}, % of revenue</span> : null}
       </div>
       {loading && !hasData ? (
-        <div style={{ height: CHART_HEIGHT, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12.5, color: 'var(--tms-muted)' }}>Loading…</div>
+        <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12.5, color: 'var(--tms-muted)' }}>Loading…</div>
       ) : (
-        <div style={{ overflowX: 'auto', minWidth: 0 }}>
-          <div style={{ height: CHART_HEIGHT, minWidth: 460 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={rows} margin={{ top: 6, right: 4, bottom: 0, left: 0 }} barCategoryGap="18%">
-                <CartesianGrid stroke="var(--tms-chart-grid)" strokeDasharray="3 4" vertical={false} />
-                <XAxis dataKey="key" interval={0} height={54} tickLine={false} axisLine={false} tick={<MonthTick rows={rows} />} />
-                <YAxis tickFormatter={(v) => moneyK(Number(v))} tick={{ fill: 'var(--tms-chart-axis)', fontSize: 11 }} axisLine={false} tickLine={false} width={44} />
-                <Tooltip content={<ShareTooltip />} cursor={{ fill: 'var(--tms-bg)' }} />
-                {SHARE_KEYS.map((k) => (
-                  <Bar key={k} dataKey={k} stackId="m" name={LABELS[k]} fill={COLORS[k]} maxBarSize={72} isAnimationActive={false}>
-                    {rows.map((r) => <Cell key={r.key} fillOpacity={r.partial ? 0.6 : 1} />)}
-                    <LabelList content={labelFor[k]} />
-                  </Bar>
-                ))}
-                <Bar dataKey="leftover" stackId="m" name="Left over" fill={LEFTOVER} maxBarSize={72} isAnimationActive={false}>
-                  {rows.map((r) => <Cell key={r.key} fillOpacity={r.partial ? 0.45 : 0.75} />)}
-                  <LabelList content={labelFor.leftover} />
-                </Bar>
-                <Bar dataKey="revenueOnly" stackId="m" name="Revenue" fill={REVENUE_ONLY} maxBarSize={72} radius={[4, 4, 0, 0]} isAnimationActive={false} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(128px, 1fr))', gap: '14px 10px' }}>
+          {rows.map((r) => (
+            <div
+              key={r.key} data-testid={`fleet-donut-${r.key}`} tabIndex={0}
+              onMouseEnter={() => setOpen(r.key)} onMouseLeave={() => setOpen((k) => (k === r.key ? null : k))}
+              onFocus={() => setOpen(r.key)} onBlur={() => setOpen((k) => (k === r.key ? null : k))}
+              style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, outlineOffset: 2 }}
+            >
+              <MonthDonut row={r} />
+              <div style={{ textAlign: 'center', fontSize: 11.5, lineHeight: 1.35, fontVariantNumeric: 'tabular-nums' }}>
+                {r.noCosts ? (
+                  <span style={{ color: 'var(--tms-muted)' }}>costs not on file</span>
+                ) : r.overRevenue ? (
+                  <span style={{ color: 'var(--tms-badge-orange)', fontWeight: 600 }}>Over revenue · costs {pctWhole(r.controllablePct)}</span>
+                ) : (
+                  <span><b style={{ color: 'var(--tms-text)' }}>{pctWhole(r.controllablePct)}</b> <span style={{ color: 'var(--tms-muted)' }}>on fuel, driver pay, maintenance</span></span>
+                )}
+                {r.partial ? <div style={{ color: 'var(--tms-muted)' }}>to date</div> : null}
+              </div>
+              {open === r.key ? <MonthTooltip row={r} /> : null}
+            </div>
+          ))}
         </div>
       )}
       <div style={{ fontSize: 11.5, color: 'var(--tms-muted)', display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <div>Column height is the month's revenue. Left over is what remains after these four costs, before other fixed costs.</div>
-        {rows.some((r) => r.partial) && <div>The current month is to date and drawn lighter; insurance is cut to the days so far.</div>}
-        {rows.some((r) => r.noCosts && r.revenue > 0) && <div>Earlier months show revenue only: costs were not on file.</div>}
+        <div>Each ring is the month's revenue. Left over is what remains after fuel, driver pay and maintenance, before other costs.</div>
+        {rows.some((r) => r.partial) && <div>The current month is to date and drawn lighter.</div>}
+        {rows.some((r) => r.noCosts && r.revenue > 0) && <div>Earlier months show a grey ring: costs were not on file.</div>}
         {flagged.map((r) => (
           <div key={r.key} style={{ color: 'var(--tms-badge-orange)' }}>
             {r.month}: {r.lowEntry.map((k) => LABELS[k].toLowerCase()).join(' and ')} looks incomplete, so its share reads low and the profit looks better than it is.
           </div>
         ))}
-        {noInsurance && <div style={{ color: 'var(--tms-badge-orange)' }}>No insurance is entered for these months. Add the policy lines on the Insurance page.</div>}
       </div>
     </DashCard>
   )
