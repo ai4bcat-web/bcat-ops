@@ -13,9 +13,6 @@ import {
 import { useResolveLoads } from '@/hooks/useResolveLoads'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { NewShipmentDialog } from '@/features/shipments/components/NewShipmentDialog'
-import { VoidShipmentDialog } from '@/features/shipments/components/VoidShipmentDialog'
-import { getShipment } from '@/lib/apiClient'
-import type { ShipmentRecord } from '@/types/tms'
 import { useIntakeItems } from '@/hooks/useIntakeItems'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
@@ -27,6 +24,8 @@ import {
   assigneeLabel,
   STATUS_BADGE,
   SOURCE_LABEL,
+  VOID_NOTE_PREFIX,
+  voidNote,
 } from '@/lib/intake'
 import { parseTender, resolveTenderCustomer } from '@/lib/intakeTender'
 import { useDirectory } from '@/hooks/useDirectory'
@@ -48,6 +47,65 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
   })
+}
+
+// ── Void ──────────────────────────────────────────────────────────────────────
+
+/*
+ * Void clears the intake item from the queue (status ARCHIVED, reason in its notes). It never
+ * touches a shipment built from it: builtLoadId stays, and a live shipment is voided from the board.
+ */
+export function VoidIntakeItemDialog({
+  item,
+  onConfirm,
+  onClose,
+}: {
+  item: IntakeItem
+  onConfirm: (reason: string) => Promise<void>
+  onClose: () => void
+}) {
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async () => {
+    if (!reason.trim()) { setError('Say why this item is being voided.'); return }
+    setBusy(true)
+    try { await onConfirm(reason) } finally { setBusy(false) }
+  }
+
+  return (
+    <Dialog open onOpenChange={(next) => { if (!next && !busy) onClose() }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Void intake item</DialogTitle>
+          <DialogDescription>
+            {item.subject || '(no subject)'} leaves the active queue and stays in the history as voided.
+          </DialogDescription>
+        </DialogHeader>
+        {item.builtLoadId && (
+          <p className="rounded border border-border bg-muted/40 px-3 py-2 text-xs text-foreground" data-testid="void-shipment-note">
+            The shipment built from this item stays active. Void it from the shipments board if it should go too.
+          </p>
+        )}
+        <label className="text-xs font-medium text-foreground" htmlFor="intake-void-reason">Reason</label>
+        <Input
+          id="intake-void-reason"
+          aria-label="Reason"
+          value={reason}
+          maxLength={500}
+          onChange={(e) => { setReason(e.target.value); setError(null) }}
+        />
+        {error && <p className="text-xs text-destructive">{error}</p>}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button variant="destructive" onClick={() => { void submit() }} disabled={busy}>
+            {busy ? 'Voiding…' : 'Void item'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 // ── Pro# modal ────────────────────────────────────────────────────────────────
@@ -232,7 +290,7 @@ export function QueueRow({
   onMarkDone: (item: IntakeItem) => void
   onStatusChange: (id: string, status: IntakeStatus) => void
   onAssigneeChange: (id: string, email: string) => void
-  /** Void the shipment this item built. Offered only when the item has one. */
+  /** Void this intake item (clears it from the queue). Never touches a shipment built from it. */
   onVoid?: (item: IntakeItem) => void
 }) {
   const done = item.status === 'BUILT' || item.status === 'DONE' || !!item.builtLoadId
@@ -311,9 +369,9 @@ export function QueueRow({
             Done
           </Button>
         )}
-        {hasLoad && onVoid && (
+        {onVoid && (
           <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-[11px] text-destructive"
-                  onClick={() => onVoid(item)} title="Void the shipment built from this tender">
+                  onClick={() => onVoid(item)} title="Void this intake item">
             <Ban className="size-3" aria-hidden />Void
           </Button>
         )}
@@ -472,13 +530,13 @@ export function QueueCard({
           </Button>
         )}
 
-        {hasLoad && onVoid && (
+        {onVoid && (
           <Button
             size="sm"
             variant="outline"
             className="h-7 text-xs gap-1 text-destructive"
             onClick={() => onVoid(item)}
-            title="Void the shipment built from this tender"
+            title="Void this intake item"
           >
             <Ban className="size-3" aria-hidden />
             Void
@@ -506,7 +564,7 @@ function HistoryRow({
   onVoid,
 }: {
   item: IntakeItem
-  loads: { id: string; aljexId: string; voidedAt?: string | null }[]
+  loads: { id: string; aljexId: string }[]
   onAssigneeChange: (id: string, email: string) => void
   onVoid?: (item: IntakeItem) => void
 }) {
@@ -581,9 +639,9 @@ function HistoryRow({
         )}
       </td>
       <td className="px-4 py-2.5">
-        {builtLoad?.voidedAt ? (
-          <span className="text-[10px] font-semibold text-destructive">Voided</span>
-        ) : builtLoad && onVoid ? (
+        {item.status === 'ARCHIVED' ? (
+          <span className="text-[10px] font-semibold text-muted-foreground">{(item.notes ?? '').startsWith(VOID_NOTE_PREFIX) ? 'Voided' : 'Archived'}</span>
+        ) : onVoid ? (
           <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-[11px] text-destructive" onClick={() => onVoid(item)}>
             <Ban className="size-3" aria-hidden />Void
           </Button>
@@ -625,8 +683,8 @@ export function IntakePage() {
   const [historySource, setHistorySource] = useState<string>('ALL')
   const [historyStatus, setHistoryStatus] = useState<string>('ALL')
 
-  // Void: the shipment an intake item built, loaded fresh so the dialog has its latest updatedAt.
-  const [voidTarget, setVoidTarget] = useState<ShipmentRecord | null>(null)
+  // Void: the intake item being cleared. The dialog asks for a reason first.
+  const [voidItem, setVoidItem] = useState<IntakeItem | null>(null)
 
   // Pro# modal state
   const [proModalItem, setProModalItem] = useState<IntakeItem | null>(null)
@@ -712,16 +770,22 @@ export function IntakePage() {
     setSelectedLoad(item.builtLoadId!, 'edit')
   }
 
-  const handleVoid = async (item: IntakeItem) => {
-    if (!item.builtLoadId) return
+  const handleVoid = (item: IntakeItem) => setVoidItem(item)
+
+  const handleVoidConfirm = async (reason: string) => {
+    if (!voidItem) return
     try {
-      const shipment = await getShipment(item.builtLoadId)
-      if (!shipment) { toast.error('That shipment could not be found'); return }
-      if (shipment.voidedAt) { toast.info(`Shipment ${shipment.number} is already voided`); return }
-      setVoidTarget(shipment)
+      await updateItem(
+        voidItem.id,
+        { status: 'ARCHIVED', notes: voidNote(voidItem.notes, reason, actorEmail) },
+        { actorName: actorEmail },
+      )
     } catch {
-      toast.error('Could not load the shipment to void')
+      toast.error('Could not void this item')
+      return
     }
+    toast.success('Intake item voided')
+    setVoidItem(null)
   }
 
   const handleMarkDone = (item: IntakeItem) => {
@@ -759,7 +823,7 @@ export function IntakePage() {
   }
 
   const loadIndex = useMemo(() =>
-    loads.map((l) => ({ id: l.id, aljexId: l.aljexId, voidedAt: l.voidedAt })),
+    loads.map((l) => ({ id: l.id, aljexId: l.aljexId })),
     [loads],
   )
 
@@ -935,12 +999,11 @@ export function IntakePage() {
         />
       )}
 
-      {voidTarget && (
-        <VoidShipmentDialog
-          shipment={voidTarget}
-          open
-          onClose={() => setVoidTarget(null)}
-          onVoided={() => { toast.success(`Shipment ${voidTarget.number} voided`); void refresh() }}
+      {voidItem && (
+        <VoidIntakeItemDialog
+          item={voidItem}
+          onConfirm={handleVoidConfirm}
+          onClose={() => setVoidItem(null)}
         />
       )}
 
