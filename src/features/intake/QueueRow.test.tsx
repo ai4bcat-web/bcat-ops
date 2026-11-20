@@ -127,3 +127,26 @@ describe('acting on a row', () => {
     expect(screen.queryByRole('button', { name: 'Done' })).toBeNull()
   })
 })
+
+describe('void', () => {
+  it('offers Void on an item that built a shipment and hands the item to the handler', () => {
+    const onVoid = vi.fn()
+    const fns = {
+      onBuildLoad: vi.fn(), onUpdateLoad: vi.fn(), onMarkDone: vi.fn(),
+      onStatusChange: vi.fn(), onAssigneeChange: vi.fn(),
+    }
+    const item = { ...base, builtLoadId: 'l1' } as IntakeItem
+    render(<QueueRow item={item} {...fns} onVoid={onVoid} />)
+    fireEvent.click(screen.getByRole('button', { name: /void/i }))
+    expect(onVoid).toHaveBeenCalledWith(item)
+  })
+
+  it('offers no Void when there is no shipment to void', () => {
+    const fns = {
+      onBuildLoad: vi.fn(), onUpdateLoad: vi.fn(), onMarkDone: vi.fn(),
+      onStatusChange: vi.fn(), onAssigneeChange: vi.fn(),
+    }
+    render(<QueueRow item={{ ...base, builtLoadId: null } as IntakeItem} {...fns} onVoid={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: /void/i })).toBeNull()
+  })
+})

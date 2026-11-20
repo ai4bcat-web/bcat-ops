@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import {
   RefreshCw, ExternalLink, Paperclip, MessageSquare, User,
-  ChevronDown, Clock, CheckCircle2, Archive, Loader2, Hash,
+  ChevronDown, Clock, CheckCircle2, Archive, Loader2, Hash, Ban,
 } from 'lucide-react'
 import { TmsEmptyState } from '@/features/tms/kit/TmsEmptyState'
 import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
@@ -13,6 +13,9 @@ import {
 import { useResolveLoads } from '@/hooks/useResolveLoads'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { NewShipmentDialog } from '@/features/shipments/components/NewShipmentDialog'
+import { VoidShipmentDialog } from '@/features/shipments/components/VoidShipmentDialog'
+import { getShipment } from '@/lib/apiClient'
+import type { ShipmentRecord } from '@/types/tms'
 import { useIntakeItems } from '@/hooks/useIntakeItems'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
@@ -221,6 +224,7 @@ export function QueueRow({
   onMarkDone,
   onStatusChange,
   onAssigneeChange,
+  onVoid,
 }: {
   item: IntakeItem
   onBuildLoad: (item: IntakeItem) => void
@@ -228,6 +232,8 @@ export function QueueRow({
   onMarkDone: (item: IntakeItem) => void
   onStatusChange: (id: string, status: IntakeStatus) => void
   onAssigneeChange: (id: string, email: string) => void
+  /** Void the shipment this item built. Offered only when the item has one. */
+  onVoid?: (item: IntakeItem) => void
 }) {
   const done = item.status === 'BUILT' || item.status === 'DONE' || !!item.builtLoadId
   const hasLoad = !!item.builtLoadId
@@ -305,6 +311,12 @@ export function QueueRow({
             Done
           </Button>
         )}
+        {hasLoad && onVoid && (
+          <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-[11px] text-destructive"
+                  onClick={() => onVoid(item)} title="Void the shipment built from this tender">
+            <Ban className="size-3" aria-hidden />Void
+          </Button>
+        )}
       </div>
     </div>
   )
@@ -328,6 +340,7 @@ export function QueueCard({
   onMarkDone,
   onStatusChange,
   onAssigneeChange,
+  onVoid,
 }: {
   item: IntakeItem
   onBuildLoad: (item: IntakeItem) => void
@@ -335,6 +348,7 @@ export function QueueCard({
   onMarkDone: (item: IntakeItem) => void
   onStatusChange: (id: string, status: IntakeStatus) => void
   onAssigneeChange: (id: string, email: string) => void
+  onVoid?: (item: IntakeItem) => void
 }) {
   const isIvan  = item.source === 'IVAN_CARTAGE'
   // Appointment tasks (Dennis/Ruben ladder) already point at their load — there is
@@ -458,6 +472,19 @@ export function QueueCard({
           </Button>
         )}
 
+        {hasLoad && onVoid && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs gap-1 text-destructive"
+            onClick={() => onVoid(item)}
+            title="Void the shipment built from this tender"
+          >
+            <Ban className="size-3" aria-hidden />
+            Void
+          </Button>
+        )}
+
         <button
           style={{ height: 28, width: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, border: '1px solid var(--tms-border)', color: 'var(--tms-muted)', background: 'transparent', cursor: 'pointer', transition: 'background 0.15s' }}
           title="Archive"
@@ -476,10 +503,12 @@ function HistoryRow({
   item,
   loads,
   onAssigneeChange,
+  onVoid,
 }: {
   item: IntakeItem
-  loads: { id: string; aljexId: string }[]
+  loads: { id: string; aljexId: string; voidedAt?: string | null }[]
   onAssigneeChange: (id: string, email: string) => void
+  onVoid?: (item: IntakeItem) => void
 }) {
   const badge = STATUS_BADGE[item.status] ?? { label: item.status, className: 'bg-muted text-muted-foreground border-border' }
   const builtLoad = item.builtLoadId ? loads.find((l) => l.id === item.builtLoadId) : null
@@ -551,6 +580,17 @@ function HistoryRow({
           <span className="text-muted-foreground text-xs">—</span>
         )}
       </td>
+      <td className="px-4 py-2.5">
+        {builtLoad?.voidedAt ? (
+          <span className="text-[10px] font-semibold text-destructive">Voided</span>
+        ) : builtLoad && onVoid ? (
+          <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-[11px] text-destructive" onClick={() => onVoid(item)}>
+            <Ban className="size-3" aria-hidden />Void
+          </Button>
+        ) : (
+          <span className="text-muted-foreground text-xs">—</span>
+        )}
+      </td>
     </tr>
   )
 }
@@ -584,6 +624,9 @@ export function IntakePage() {
   // History filters
   const [historySource, setHistorySource] = useState<string>('ALL')
   const [historyStatus, setHistoryStatus] = useState<string>('ALL')
+
+  // Void: the shipment an intake item built, loaded fresh so the dialog has its latest updatedAt.
+  const [voidTarget, setVoidTarget] = useState<ShipmentRecord | null>(null)
 
   // Pro# modal state
   const [proModalItem, setProModalItem] = useState<IntakeItem | null>(null)
@@ -669,6 +712,18 @@ export function IntakePage() {
     setSelectedLoad(item.builtLoadId!, 'edit')
   }
 
+  const handleVoid = async (item: IntakeItem) => {
+    if (!item.builtLoadId) return
+    try {
+      const shipment = await getShipment(item.builtLoadId)
+      if (!shipment) { toast.error('That shipment could not be found'); return }
+      if (shipment.voidedAt) { toast.info(`Shipment ${shipment.number} is already voided`); return }
+      setVoidTarget(shipment)
+    } catch {
+      toast.error('Could not load the shipment to void')
+    }
+  }
+
   const handleMarkDone = (item: IntakeItem) => {
     setProModalItem(item)
   }
@@ -704,7 +759,7 @@ export function IntakePage() {
   }
 
   const loadIndex = useMemo(() =>
-    loads.map((l) => ({ id: l.id, aljexId: l.aljexId })),
+    loads.map((l) => ({ id: l.id, aljexId: l.aljexId, voidedAt: l.voidedAt })),
     [loads],
   )
 
@@ -790,6 +845,7 @@ export function IntakePage() {
                   onMarkDone={handleMarkDone}
                   onStatusChange={handleStatusChange}
                   onAssigneeChange={handleAssigneeChange}
+                  onVoid={handleVoid}
                 />
               ))}
             </div>
@@ -845,7 +901,7 @@ export function IntakePage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr style={{ borderBottom: '1px solid var(--tms-border)', background: 'var(--tms-bg)' }}>
-                      {['Received', 'Source', 'Subject', 'Assignee', 'Status', 'Pro# / Load', 'Link'].map((col) => (
+                      {['Received', 'Source', 'Subject', 'Assignee', 'Status', 'Pro# / Load', 'Link', 'Void'].map((col) => (
                         <th key={col} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>
                           {col}
                         </th>
@@ -859,6 +915,7 @@ export function IntakePage() {
                         item={item}
                         loads={loadIndex}
                         onAssigneeChange={handleAssigneeChange}
+                        onVoid={handleVoid}
                       />
                     ))}
                   </tbody>
@@ -875,6 +932,15 @@ export function IntakePage() {
           item={proModalItem}
           onConfirm={handleProConfirm}
           onClose={() => setProModalItem(null)}
+        />
+      )}
+
+      {voidTarget && (
+        <VoidShipmentDialog
+          shipment={voidTarget}
+          open
+          onClose={() => setVoidTarget(null)}
+          onVoided={() => { toast.success(`Shipment ${voidTarget.number} voided`); void refresh() }}
         />
       )}
 
