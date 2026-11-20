@@ -12,6 +12,6 @@ export function apCompactItems(s: ApSummary): TmsSummaryChip[] {
     { key: 'aging', label: 'Aging', value: formatCents(s.aging.cents), sub: bills(s.aging.count) },
     { key: 'selected', label: 'Selected', value: formatCents(s.selected.cents), sub: bills(s.selected.count) },
     { key: 'past-due', label: 'Past due', value: formatCents(s.pastDue.cents), sub: s.expectedLate.count > 0 ? `${bills(s.pastDue.count)} · +${s.expectedLate.count} expected, not invoiced` : bills(s.pastDue.count), tone: s.pastDue.cents > 0 ? 'bad' : 'default' },
-    { key: 'next7', label: 'Due this week', value: formatCents(s.dueNext7.cents), sub: bills(s.dueNext7.count) },
+    { key: 'next7', label: 'Due within 7 days', value: formatCents(s.dueNext7.cents), sub: bills(s.dueNext7.count) },
   ]
 }

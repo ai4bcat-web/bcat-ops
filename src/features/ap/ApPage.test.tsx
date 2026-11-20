@@ -365,7 +365,7 @@ describe('the AP board', () => {
     expect(screen.queryByRole('button', { name: /^Record bill/ })).toBeNull()
     // The totals strip sits above the tabs on every tab.
     expect(screen.getByRole('group', { name: 'Open payables and the payment ladder' })).toBeTruthy()
-    expect(screen.getByText('Due this week')).toBeTruthy()
+    expect(screen.getByText('Due within 7 days')).toBeTruthy()
   })
 
   /** Ryne 2026-11-16: the Payable section has no Needs review tab; its flags ride on the bill rows instead. */

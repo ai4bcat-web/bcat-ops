@@ -32,7 +32,7 @@ describe('ApSummaryStrip', () => {
     render(strip())
     const tiles = screen.getByRole('group', { name: 'Open payables and the payment ladder' })
     expect(within(tiles).getAllByRole('button').length).toBe(5)
-    for (const label of ['Open AP', 'Expected', 'Aging', 'Selected', 'Past due', 'Due next 7 days']) expect(within(tiles).getByText(label)).toBeTruthy()
+    for (const label of ['Open AP', 'Expected', 'Aging', 'Selected', 'Past due', 'Due within 7 days']) expect(within(tiles).getByText(label)).toBeTruthy()
     const row2 = screen.getByTestId('ap-summary-cards')
     expect(row2.children).toHaveLength(3)
     expect(screen.getByTestId('ap-paid-card')).toBeTruthy()

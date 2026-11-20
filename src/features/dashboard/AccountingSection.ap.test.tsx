@@ -93,7 +93,7 @@ describe('dashboard Accounts payable card', () => {
     expect(screen.getByTestId('dashboard-ap-card')).toHaveTextContent(page['Open AP'])
     // Every open bill, Aljex ones included: 1,500 + 800 + 420.
     expect(page['Open AP']).toBe('$2,720')
-    for (const [key, label] of [['expected', 'Expected'], ['aging', 'Aging'], ['past-due', 'Past due'], ['next7', 'Due this week']] as const) {
+    for (const [key, label] of [['expected', 'Expected'], ['aging', 'Aging'], ['past-due', 'Past due'], ['next7', 'Due within 7 days']] as const) {
       expect(screen.getByTestId(`summary-row-${key}`)).toHaveTextContent(page[label])
     }
   })
