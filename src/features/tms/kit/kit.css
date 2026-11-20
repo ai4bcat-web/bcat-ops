@@ -940,6 +940,11 @@
 .tms-portal .tms-head-band-cards { grid-area: cards; display: grid; grid-template-columns: repeat(2, minmax(280px, 340px)); gap: 12px; align-items: start; justify-self: end; }
 .tms-shell .tms-head-band-plain,
 .tms-portal .tms-head-band-plain { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'top' 'bottom'; }
+/* Cards below: the cards span the page width between the filters and the status tabs, however wide the window. */
+.tms-shell .tms-head-band-below,
+.tms-portal .tms-head-band-below { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'top' 'cards' 'bottom'; grid-template-rows: auto; row-gap: 4px; }
+.tms-shell .tms-head-band-below .tms-head-band-cards,
+.tms-portal .tms-head-band-below .tms-head-band-cards { display: block; justify-self: stretch; min-width: 0; }
 /* Collapsed head band: the headline numbers in one wrapping row, with Show / Hide details beside them. */
 .tms-shell .tms-head-band-compact,
 .tms-portal .tms-head-band-compact { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }

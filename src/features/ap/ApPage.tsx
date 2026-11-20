@@ -1239,6 +1239,7 @@ function daysPastDueColumn(asOf: string): ApColumn<CarrierBillRecord> {
     filter: 'number',
     numberOf: (bill) => billDaysPastDue(bill, asOf),
     numberUnit: 'days',
+    duePresets: true,
     extraPx: 24,
     render: (bill) => {
       const days = billDaysPastDue(bill, asOf)

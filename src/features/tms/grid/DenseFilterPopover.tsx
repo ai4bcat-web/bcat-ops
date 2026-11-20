@@ -162,6 +162,25 @@ export function DenseFilterPopover<T>({ column, rows, value, onChange, recentKey
         </div>
       )}
 
+      {kind === 'number' && column.duePresets && (
+        <div className="tms-dg-filter-presets" role="group" aria-label={`${column.header} quick filter`}>
+          {([['', 'All'], ['past', 'Past due'], ['current', 'Current']] as const).map(([key, label]) => {
+            const on = (current.due ?? '') === key && (key !== '' || (current.min == null && current.max == null && !current.blanks))
+            return (
+              <button
+                key={label}
+                type="button"
+                className={`tms-btn tms-btn-sm ${on ? 'tms-btn-primary' : 'tms-btn-secondary'}`}
+                aria-pressed={on}
+                onClick={() => onChange(key ? { due: key } : null)}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       {kind === 'number' && (
         <div className="tms-dg-filter-range">
           <label>

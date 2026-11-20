@@ -126,7 +126,9 @@ const readOpen = (key: string): boolean => {
  * With `collapseKey` the cards fold away (Ryne 2026-11-15: room for the list): closed by default,
  * `compact` shows the headline numbers instead, and the choice is remembered per viewer.
  */
-export function TmsHeadBand({ top, bottom, cards, compact, collapseKey, testId }: {
+export function TmsHeadBand({ top, bottom, cards, compact, collapseKey, testId, cardsBelow }: {
+  /** Full-width cards between `top` and `bottom` at every width, instead of a column beside them (the AP tab's two card rows). */
+  cardsBelow?: boolean
   top?: ReactNode
   bottom?: ReactNode
   cards?: ReactNode
@@ -148,7 +150,7 @@ export function TmsHeadBand({ top, bottom, cards, compact, collapseKey, testId }
   ) : null
   const showCards = Boolean(cards) && open
   return (
-    <div className={`tms-head-band${showCards ? '' : ' tms-head-band-plain'}`} data-testid={testId}>
+    <div className={`tms-head-band${showCards ? (cardsBelow ? ' tms-head-band-below' : '') : ' tms-head-band-plain'}`} data-testid={testId}>
       <div className="tms-head-band-top">
         {top}
         {toggleBtn ? (

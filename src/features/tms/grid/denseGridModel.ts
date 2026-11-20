@@ -44,6 +44,8 @@ export interface DenseColumn<T> {
   numberOf?: (row: T) => number | null
   /** Unit shown beside the number range inputs. */
   numberUnit?: string
+  /** `number` (days past due): one-click All / Past due / Current choices above the Min and Max boxes. */
+  duePresets?: boolean
   /** A fixed pixel width instead of auto-fit (icon and action columns). */
   width?: number
   /** Room for a chip drawn beside the text (tracking pill, Not linked badge): added to the auto-fit width. */
@@ -72,6 +74,8 @@ export interface DenseColumnFilter {
   to?: string
   min?: number
   max?: number
+  /** Days-past-due columns: `past` keeps rows 1 or more days late; `current` keeps rows not yet late (due today counts) and rows with no due date. */
+  due?: 'past' | 'current'
 }
 
 export type DenseFilters = Record<string, DenseColumnFilter>
@@ -84,7 +88,7 @@ export function filterKindOf<T>(col: DenseColumn<T>): DenseFilterKind | null {
 export function isFilterActive(f: DenseColumnFilter | undefined): boolean {
   if (!f) return false
   return Boolean(
-    f.blanks || (f.text && f.text.trim()) || (f.values && f.values.length > 0) || f.from || f.to || f.min != null || f.max != null,
+    f.blanks || (f.text && f.text.trim()) || (f.values && f.values.length > 0) || f.from || f.to || f.min != null || f.max != null || f.due != null,
   )
 }
 
@@ -133,8 +137,10 @@ export function matchesColumnFilter<T>(row: T, col: DenseColumn<T>, f: DenseColu
       return (!f.from || day >= f.from) && (!f.to || day <= f.to)
     }
     case 'number': {
-      if (f.min == null && f.max == null) return true
+      if (f.min == null && f.max == null && !f.due) return true
       const n = col.numberOf ? col.numberOf(row) : null
+      if (f.due === 'past') return n != null && !Number.isNaN(n) && n >= 1
+      if (f.due === 'current') return n == null || Number.isNaN(n) || n <= 0
       if (n == null || Number.isNaN(n)) return false
       return (f.min == null || n >= f.min) && (f.max == null || n <= f.max)
     }

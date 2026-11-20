@@ -150,6 +150,20 @@ describe('DenseGrid', () => {
     expect(screen.getByRole('button', { name: 'Filter City' })).toHaveAttribute('aria-pressed', 'false')
   })
 
+  it('a days past due filter offers All, Past due and Current, marks the column when one is on, and All clears it', () => {
+    const dueCols: DenseColumn<Row>[] = [...columns, { key: 'late', header: 'DAYS PAST DUE', text: () => '3', filter: 'number', numberOf: () => 3, duePresets: true }]
+    const { props, rerender } = grid({ columns: dueCols })
+    fireEvent.click(screen.getByRole('button', { name: 'Filter DAYS PAST DUE' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Past due' }))
+    expect(props.onFilterChange).toHaveBeenLastCalledWith('late', { due: 'past' })
+    fireEvent.click(screen.getByRole('button', { name: 'Current' }))
+    expect(props.onFilterChange).toHaveBeenLastCalledWith('late', { due: 'current' })
+    rerender(<DenseGrid<Row> {...props} columns={dueCols} filters={{ late: { due: 'past' } }} />)
+    expect(screen.getByRole('button', { name: 'Filter DAYS PAST DUE' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByRole('button', { name: 'All' }))
+    expect(props.onFilterChange).toHaveBeenLastCalledWith('late', null)
+  })
+
   it('dragging a header onto another reorders, and a fixed column cannot move', () => {
     const { props } = grid({ columns: [...columns.slice(0, 2), { ...columns[2], fixed: true }] })
     const name = screen.getByRole('columnheader', { name: /^Name/ })

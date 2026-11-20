@@ -29,7 +29,7 @@ export function ApSummaryStrip({ summary, divisionName, division, onDivision, on
   const rows = apDivisionRows(s.byDivision, divisionName, s.open.cents)
   return (
     <div data-testid="ap-summary">
-      <div className="tms-factoring-totals" style={{ padding: '4px 8px' }}>
+      <div className="tms-factoring-totals" style={{ padding: '0 8px' }}>
         <TmsStatRow
           aria-label="Open payables and the payment ladder"
           columns="auto"
@@ -45,7 +45,7 @@ export function ApSummaryStrip({ summary, divisionName, division, onDivision, on
           ]}
         />
       </div>
-      <div className="flex flex-wrap gap-3" style={{ padding: '4px 8px' }} data-testid="ap-summary-cards">
+      <div className="flex flex-wrap items-start gap-2" style={{ padding: '6px 8px 4px' }} data-testid="ap-summary-cards">
         <TmsListCard
           title="Paid"
           aria-label="Paid to carriers"

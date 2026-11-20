@@ -59,7 +59,7 @@ export function ApChrome({ title, viewTabs, quickTabs, actions, summary, compact
   collapseKey?: string
   /** Page filters (carrier, division) under the view tabs. */
   filters?: React.ReactNode
-  /** Totals cards, right-aligned beside the tabs on every tab. */
+  /** Totals cards, full width between the filters and the status tabs on every tab. */
   summary?: React.ReactNode
   /** Page-level buttons, on the right of the title. */
   actions?: React.ReactNode
@@ -79,6 +79,7 @@ export function ApChrome({ title, viewTabs, quickTabs, actions, summary, compact
         {actions ? <div className="tms-page-actions">{actions}</div> : null}
       </div>
       <TmsHeadBand
+        cardsBelow
         top={viewTabs || filters ? (
           <>
             {viewTabs ? <TmsTabs tabs={viewTabs.tabs} active={viewTabs.active} onSelect={viewTabs.onSelect} /> : null}

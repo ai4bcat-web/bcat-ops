@@ -3,6 +3,7 @@ import {
   searchRows,
   BLANK_VALUE,
   matchesColumnFilter,
+  isFilterActive,
   columnWidths,
   defaultColumnWidth,
   facetOptions,
@@ -233,5 +234,27 @@ describe('blanks in a column filter', () => {
     expect(keep(textCol, { blanks: true })).toEqual(['(blank)'])
     expect(keep(numCol, { blanks: true })).toEqual(['(blank)'])
     expect(keep(dateCol, { blanks: true })).toEqual(['(blank)'])
+  })
+})
+
+describe('days past due presets', () => {
+  type R = { id: string; days: number | null }
+  const col = { key: 'd', header: 'DAYS PAST DUE', text: (r: R) => String(r.days ?? ''), numberOf: (r: R) => r.days, filter: 'number' as const, duePresets: true }
+  const rows: R[] = [
+    { id: 'late', days: 12 }, { id: 'one', days: 1 }, { id: 'today', days: 0 }, { id: 'future', days: -5 }, { id: 'none', days: null },
+  ]
+  const pick = (due: 'past' | 'current') => filterRows(rows, [col], { d: { due } }).map((r) => r.id)
+
+  it('Past due keeps bills 1 or more days late', () => {
+    expect(pick('past')).toEqual(['late', 'one'])
+  })
+
+  it('Current keeps bills not yet late, due today included, and bills with no due date', () => {
+    expect(pick('current')).toEqual(['today', 'future', 'none'])
+  })
+
+  it('counts as an active filter, and an empty filter keeps every row', () => {
+    expect(isFilterActive({ due: 'past' })).toBe(true)
+    expect(filterRows(rows, [col], { d: {} })).toBe(rows)
   })
 })
