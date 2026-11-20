@@ -140,4 +140,88 @@ describe('AgingReportTable', () => {
       expect(names.join(' ')).toContain('Gamma')
     })
   })
+  describe('column filters, invoice sorting and export', () => {
+    const rep = buildAgingReport([
+      inv({ id: 'z', number: 'Z', customerId: 'cz', customerName: 'Zeta', balanceCents: 90000, totalCents: 90000 }),
+      inv({ id: 'm', number: 'M', customerId: 'cm', customerName: 'Mid', invoiceDate: '2026-07-01', dueAt: '2026-07-31', balanceCents: 5000, totalCents: 5000 }),
+      inv({ id: 'a', number: 'A', customerId: 'ca', customerName: 'Alpha', balanceCents: 1000, totalCents: 1000 }),
+      inv({ id: 'a2', number: 'A2', customerId: 'ca', customerName: 'Alpha', invoiceDate: '2026-10-01', dueAt: '2026-10-31', balanceCents: 3000, totalCents: 3000, shipmentNumber: '14090' }),
+    ], '2026-11-15')
+    const draw = () => render(<AgingReportTable report={rep} onOpenInvoice={vi.fn()} onPreview={vi.fn()} onStatement={vi.fn()} selected={[]} onSelect={vi.fn()} busy={false} />)
+    const names = () => within(screen.getByRole('table', { name: 'Aging by customer' })).getAllByTestId('aging-customer-row').map((r) => r.textContent ?? '')
+    beforeEach(() => { try { window.localStorage.clear() } catch { /* jsdom */ } })
+
+    it('a funnel on each column opens a filter; Total open min/max narrows the rows and the totals follow', () => {
+      draw()
+      expect(names()).toHaveLength(3)
+      fireEvent.click(screen.getByTestId('aging-col-filter-total'))
+      fireEvent.change(screen.getByLabelText('Total open min'), { target: { value: '500' } })
+      expect(names()).toHaveLength(1)
+      expect(names()[0]).toContain('Zeta')
+      expect(screen.getByTestId('aging-total-row').textContent).toContain('Filtered total')
+      expect(screen.getByTestId('aging-filtered-note').textContent).toContain('Open AR')
+      // The funnel lights up and Reset counts it.
+      expect(screen.getByTestId('aging-col-filter-total').className).toContain('tms-active')
+      expect(screen.getByTestId('aging-reset').textContent).toContain('(1)')
+      fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+      expect(names()).toHaveLength(3)
+    })
+
+    it('Past due min leaves only customers that owe something late; a max narrows from above', () => {
+      draw()
+      fireEvent.click(screen.getByTestId('aging-col-filter-pastDue'))
+      // Alpha is $30 late, Mid $50, Zeta nothing yet.
+      fireEvent.change(screen.getByLabelText('Past due min'), { target: { value: '10' } })
+      expect(names()).toHaveLength(2)
+      expect(names().join(' ')).not.toContain('Zeta')
+      fireEvent.change(screen.getByLabelText('Past due max'), { target: { value: '40' } })
+      expect(names()).toHaveLength(1)
+      expect(names()[0]).toContain('Alpha')
+    })
+
+    it('the Customer funnel and the Customer contains box are one filter', () => {
+      draw()
+      fireEvent.click(screen.getByTestId('aging-col-filter-customer'))
+      fireEvent.change(screen.getByLabelText('Filter customer'), { target: { value: 'alp' } })
+      expect(names()).toHaveLength(1)
+      expect((screen.getByLabelText('Filter by customer name') as HTMLInputElement).value).toBe('alp')
+    })
+
+    it('Reset clears column filters too', () => {
+      draw()
+      fireEvent.click(screen.getByTestId('aging-col-filter-count'))
+      fireEvent.change(screen.getByLabelText('Invoices min'), { target: { value: '2' } })
+      expect(names()).toHaveLength(1)
+      fireEvent.click(screen.getByTestId('aging-reset'))
+      expect(names()).toHaveLength(3)
+    })
+
+    it('sorts the invoices under an expanded customer by a clicked header', () => {
+      draw()
+      fireEvent.click(screen.getByRole('button', { name: 'Expand Alpha' }))
+      const table = screen.getByRole('table', { name: 'Open invoices' })
+      const pros = () => within(table).getAllByTestId('aging-invoice-row').map((r) => (r.textContent ?? '').slice(0, 5))
+      // Default: due date, oldest first.
+      expect(within(table).getAllByTestId('aging-invoice-row')[0].textContent).toContain('A2')
+      fireEvent.click(within(table).getByTitle('Sort invoices by Balance'))
+      expect(within(table).getAllByTestId('aging-invoice-row')[0].textContent).toContain('$30.00')
+      fireEvent.click(within(table).getByTitle('Sort invoices by Balance'))
+      expect(within(table).getAllByTestId('aging-invoice-row')[0].textContent).toContain('$10.00')
+      expect(pros()).toHaveLength(2)
+    })
+
+    it('Export CSV downloads the filtered rows only', () => {
+      const created: string[] = []
+      const origCreate = URL.createObjectURL
+      URL.createObjectURL = ((b: Blob) => { created.push(String((b as Blob).size)); return 'blob:x' }) as typeof URL.createObjectURL
+      URL.revokeObjectURL = vi.fn()
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+      draw()
+      fireEvent.click(screen.getByTestId('aging-export'))
+      expect(click).toHaveBeenCalledTimes(1)
+      click.mockRestore()
+      URL.createObjectURL = origCreate
+      expect(created).toHaveLength(1)
+    })
+  })
 })
