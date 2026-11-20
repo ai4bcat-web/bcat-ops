@@ -52,6 +52,8 @@ import {
   selectionCarrierId, sharedProLabel, sharedProIndex, multiCarrierLoadIds, withLegSuffix, type ApTabKey, type SharedProIndex, type ToBePaidFilters,
 } from './apViews'
 import { ApCreditDialog } from './components/ApCreditDialog'
+import { AmountMismatchChip } from './components/AmountMismatchChip'
+import { hasAmountMismatch } from '@/lib/billAmountMismatch'
 import { VerifyPaymentBadge } from './components/VerifyPaymentBadge'
 import { isVerifyPaymentBill } from '@/lib/verifyPayment'
 import { PayCarrierDialog } from './components/PayCarrierDialog'
@@ -373,7 +375,15 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const runSelect = (ids: string[]) => {
     setBusy(true)
     selectBillsForPayment({ billIds: ids })
-      .then((r) => { reportSelection('selected for payment', r.selected, r.skipped); closeAndRefresh() })
+      .then((r) => {
+        reportSelection('selected for payment', r.selected, r.skipped)
+        // The payable is what gets paid; say so when the carrier's invoice says something else.
+        const off = openRaw.bills.filter((b) => r.selected.includes(b.id) && hasAmountMismatch(b))
+        if (off.length > 0) {
+          toast.warning(`${off.length} selected bill${off.length === 1 ? ' has' : 's have'} an amount mismatch: ${off.map((b) => `${proOf(b, facts)} invoice ${formatCents(b.invoiceAmountCents ?? 0)}, payable ${formatCents(b.grossCents)}`).join('; ')}`)
+        }
+        closeAndRefresh()
+      })
       .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not select the bills'))
       .finally(() => setBusy(false))
   }
@@ -1343,6 +1353,7 @@ function reviewView({
         {bill.quickPay === true && bill.quickPayFeeCents ? (
           <> <TmsBadge tone="blue" title={`${termsLabel(bill)}: pay ${formatCents(bill.netCents)}`}>Quick pay −{formatCents(bill.quickPayFeeCents)}</TmsBadge></>
         ) : null}
+        <AmountMismatchChip bill={bill} />
       </span>
     )),
     daysPastDueColumn(asOf),
@@ -1614,6 +1625,7 @@ function payableView({
         {bill.quickPay === true && bill.quickPayFeeCents ? (
           <> <TmsBadge tone="blue" title={`${termsLabel(bill)}: ${formatCents(bill.grossCents)} less ${formatCents(bill.quickPayFeeCents)}`}>Quick pay</TmsBadge></>
         ) : null}
+        <AmountMismatchChip bill={bill} />
       </span>
     )),
     {
@@ -1803,6 +1815,12 @@ function payableView({
         onClick: () => onFilters({ ...filters, verifyPayment: !filters.verifyPayment }),
       },
       {
+        key: 'amountMismatch',
+        label: `Amount mismatch (${allBills.filter(hasAmountMismatch).length})`,
+        value: filters.amountMismatch ? 'only' : null,
+        onClick: () => onFilters({ ...filters, amountMismatch: !filters.amountMismatch }),
+      },
+      {
         key: 'payTo',
         label: `Missing payment info (${allBills.filter((bill) => payToStatusFor(bill, infos) !== 'OK').length})`,
         value: filters.payTo ? 'only' : null,
@@ -1857,6 +1875,16 @@ function payableView({
                 >
                   <option value="">All bills</option>
                   <option value="only">Missing payment info only ({allBills.filter((bill) => payToStatusFor(bill, infos) !== 'OK').length})</option>
+                </TmsSelect>
+              </TmsField>
+              <TmsField label="Amount mismatch">
+                <TmsSelect
+                  aria-label="Filter amount mismatch"
+                  value={filters.amountMismatch ? 'only' : ''}
+                  onChange={(e) => onFilters({ ...filters, amountMismatch: e.target.value === 'only' })}
+                >
+                  <option value="">All bills</option>
+                  <option value="only">Amount mismatch only ({allBills.filter(hasAmountMismatch).length})</option>
                 </TmsSelect>
               </TmsField>
               <TmsField label="Verify payment">

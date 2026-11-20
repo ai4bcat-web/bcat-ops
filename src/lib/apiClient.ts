@@ -8191,7 +8191,7 @@ export type {
 const CARRIER_BILL_FIELDS = `
   id loadCarrierId loadId shipmentId shipmentNumber loadNumber
   carrierId carrierName carrierMc payeeKind paymentMethodId remitTo divisionKey
-  status billNumber billDate billMonth recordedAt recordedBy recordedEarly datesPending selectedForPayment selectedAt selectedBy
+  status billNumber billDate billMonth recordedAt recordedBy recordedEarly datesPending invoiceAmountCents selectedForPayment selectedAt selectedBy
   dueAt termsDays quickPay quickPayDays quickPayFeeBps
   lines grossCents quickPayFeeCents netCents billedCents varianceCents
   paidCents creditedCents balanceCents apOpen documentId
@@ -8462,6 +8462,8 @@ export async function setBillDates(input: {
   billNumber?: string | null
   /** Set quick pay in the same write: 2 or 10 days, or null for standard terms. Left out, quick pay is untouched. */
   quickPayDays?: 2 | 10 | number | null
+  /** The amount on the carrier's invoice when the payable is kept as it is: the bill is flagged Amount mismatch. null clears the flag; left out, it is untouched. */
+  invoiceAmountCents?: number | null
 }): Promise<{ bill: CarrierBillRecord }> {
   return financeAction<{ bill: CarrierBillRecord }>('SET_BILL_DATES', input)
 }

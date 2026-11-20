@@ -2595,6 +2595,7 @@ const schema = a.schema(stageTypes({
       recordedBy:      a.string().required(),
       recordedEarly:   a.boolean(),            // recorded before the load delivered
       datesPending:    a.boolean(),            // created at Move to billing; invoice date + due date still to be set on the AP page
+      invoiceAmountCents: a.integer(),         // the amount on the carrier's invoice when AP kept the payable and flagged the difference; null when they agree
       selectedForPayment: a.boolean(),         // chosen on the AP Aging tab for the next pay run; cleared on unapprove
       selectedAt:      a.datetime(),
       selectedBy:      a.string(),

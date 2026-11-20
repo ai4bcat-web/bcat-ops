@@ -3407,6 +3407,8 @@ export interface CarrierBillRecord {
    * until then.
    */
   datesPending?: boolean | null
+  /** The amount printed on the carrier's invoice, kept when AP left the payable as it was and flagged the difference. The bill is an Amount mismatch while this differs from `grossCents`. */
+  invoiceAmountCents?: number | null
   /** Chosen on the AP Aging tab for the next pay run (approved bills only); cleared on unapprove. */
   selectedForPayment?: boolean | null
   selectedAt?: string | null

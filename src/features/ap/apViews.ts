@@ -8,6 +8,7 @@
  * and the aging chip are AR's helpers imported outright, because a bill 31 days late and
  * an invoice 31 days late have to read the same.
  */
+import { hasAmountMismatch } from '@/lib/billAmountMismatch'
 import { isVerifyPaymentBill } from '@/lib/verifyPayment'
 import { approvalReadiness, billPayee, PENDING_DATES_BLOCK, type ApprovalWarning, type BillPayee } from '@/lib/carrierBill'
 import { daysLate } from '@/lib/arAging'
@@ -535,9 +536,11 @@ export interface ToBePaidFilters {
   verifyPayment: boolean
   /** Only the bills whose carrier has no usable pay-to (see `payToStatusFor`). */
   payTo: boolean
+  /** Only the bills whose carrier invoice amount differs from the payable (see `hasAmountMismatch`). */
+  amountMismatch: boolean
 }
 
-export const EMPTY_TO_BE_PAID_FILTERS: ToBePaidFilters = { carrierId: '', due: '', payeeKind: '', verifyPayment: false, payTo: false }
+export const EMPTY_TO_BE_PAID_FILTERS: ToBePaidFilters = { carrierId: '', due: '', payeeKind: '', verifyPayment: false, payTo: false, amountMismatch: false }
 
 export function applyToBePaidFilters(
   bills: readonly CarrierBillRecord[],
@@ -551,6 +554,7 @@ export function applyToBePaidFilters(
     if (filters.payeeKind && (isFactorPaid(bill, infos) ? 'FACTOR' : 'CARRIER') !== filters.payeeKind) return false
     if (filters.verifyPayment && !isVerifyPaymentBill(bill)) return false
     if (filters.payTo && payToStatusFor(bill, infos) === 'OK') return false
+    if (filters.amountMismatch && !hasAmountMismatch(bill)) return false
     if (filters.due) {
       const late = daysLate(bill.dueAt, asOf)
       if (filters.due === 'OVERDUE' && late <= 0) return false

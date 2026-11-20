@@ -759,6 +759,9 @@ export async function setBillDates(input: Row, caller: Caller): Promise<Row> {
   const quickPayRequested = Object.prototype.hasOwnProperty.call(input, 'quickPayDays')
   const quickPayDays = quickPayRequested ? optionalInteger(input.quickPayDays, { min: 0, label: 'quickPayDays' }) : null
   const option = quickPayDays ? apQuickPayOption(quickPayDays) : null
+  // Present means "flag or clear the amount mismatch as I say"; absent leaves it alone.
+  const mismatchRequested = Object.prototype.hasOwnProperty.call(input, 'invoiceAmountCents')
+  const invoiceAmountTyped = mismatchRequested ? optionalInteger(input.invoiceAmountCents, { min: 1, label: 'invoiceAmountCents' }) : null
   if (quickPayDays && !option) throw new Error(`${quickPayDays} days is not one of the quick-pay options (2 days at 6%, 10 days at 3%)`)
 
   const bill = await readBill(billId)
@@ -821,6 +824,8 @@ export async function setBillDates(input: Row, caller: Caller): Promise<Row> {
             termsDays,
           } : {}),
           datesPending: false,
+          // Only a difference is kept: an invoice amount equal to the payable is no mismatch.
+          ...(mismatchRequested ? { invoiceAmountCents: invoiceAmountTyped != null && invoiceAmountTyped !== bill.grossCents ? invoiceAmountTyped : null } : {}),
           // Written unchanged so the condition below can name it (`status` is a reserved word).
           status: bill.status,
           updatedAt: now,
@@ -838,8 +843,8 @@ export async function setBillDates(input: Row, caller: Caller): Promise<Row> {
     'bill dates',
   )
   await writeAudit('CarrierBill', billId, 'SET_BILL_DATES', caller, {
-    from: { billDate: bill.billDate, dueAt: bill.dueAt, billNumber: bill.billNumber ?? null, datesPending: bill.datesPending === true, ...(changesQuickPay ? { quickPayDays: bill.quickPayDays ?? null, feeCents: bill.quickPayFeeCents ?? 0, netCents: bill.netCents } : {}) },
-    to: { billDate, dueAt, billNumber: billNumber ?? bill.billNumber ?? null, ...(changesQuickPay && money ? { quickPayDays: option?.days ?? null, feeCents: money.quickPayFeeCents, netCents: money.netCents } : {}) },
+    from: { billDate: bill.billDate, dueAt: bill.dueAt, billNumber: bill.billNumber ?? null, datesPending: bill.datesPending === true, ...(mismatchRequested ? { invoiceAmountCents: bill.invoiceAmountCents ?? null } : {}), ...(changesQuickPay ? { quickPayDays: bill.quickPayDays ?? null, feeCents: bill.quickPayFeeCents ?? 0, netCents: bill.netCents } : {}) },
+    to: { billDate, dueAt, billNumber: billNumber ?? bill.billNumber ?? null, ...(mismatchRequested ? { invoiceAmountCents: invoiceAmountTyped != null && invoiceAmountTyped !== bill.grossCents ? invoiceAmountTyped : null } : {}), ...(changesQuickPay && money ? { quickPayDays: option?.days ?? null, feeCents: money.quickPayFeeCents, netCents: money.netCents } : {}) },
   })
   // Recording the invoice date is the review: the bill is approved now. If that step fails the dates stand and the
   // bill is approved the first time it is selected or paid.

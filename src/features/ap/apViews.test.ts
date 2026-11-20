@@ -337,6 +337,16 @@ describe('Pay-to needed: a payee whose carrier has nowhere to send money (Ryne 2
     expect(only.map((b) => b.carrierName)).toEqual(['LANDSTAR', 'ECHO'])
     expect(applyToBePaidFilters(bills, EMPTY_TO_BE_PAID_FILTERS, '2026-11-18', infos)).toHaveLength(3)
   })
+
+  it('filters a list down to the bills whose invoice amount differs from the payable', () => {
+    const bills = [
+      bill('landstar', 'LANDSTAR', { grossCents: 140_000, invoiceAmountCents: 155_000 }),
+      bill('biska', 'BISKA', { grossCents: 90_000, invoiceAmountCents: 90_000 }),
+      bill('echo', 'ECHO'),
+    ]
+    const only = applyToBePaidFilters(bills, { ...EMPTY_TO_BE_PAID_FILTERS, amountMismatch: true }, '2026-11-18', [] as never)
+    expect(only.map((b) => b.carrierName)).toEqual(['LANDSTAR'])
+  })
 })
 
 describe('leg numbers on a load that pays several carriers (14598-1, 14598-2)', () => {
