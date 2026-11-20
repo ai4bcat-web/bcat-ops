@@ -139,6 +139,8 @@
   --tms-chart-12: #2563eb;
   /* Text printed on a chart segment: near-black reads on every segment fill in both themes. */
   --tms-chart-label: #111827;
+  /* The profit slice of the local-fleet pies: a clear green that the near-black label reads on in both themes. */
+  --tms-chart-profit: #4ade80;
   --tms-chart-axis: var(--tms-muted);
   --tms-chart-grid: var(--tms-border);
 }
@@ -245,6 +247,8 @@
   --tms-chart-11: #f59e0b;
   --tms-chart-12: #93c5fd;
   --tms-chart-label: #111827;
+  /* The profit slice of the local-fleet pies: a clear green that the near-black label reads on in both themes. */
+  --tms-chart-profit: #4ade80;
 }
 
 /* ── shadcn bridge: ui/* utilities (bg-popover, text-muted-foreground, …) follow the TMS tokens ── */

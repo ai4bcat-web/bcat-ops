@@ -1,6 +1,6 @@
 import type { ReviewMonthInput } from './profitReview'
 
-/** The costs we control, in the order they are drawn around each month's donut. */
+/** The costs we control, in the order they are drawn around each month's pie. */
 export type ShareKey = 'fuel' | 'driverPay' | 'maintenance'
 export const SHARE_KEYS: ShareKey[] = ['fuel', 'driverPay', 'maintenance']
 
@@ -80,10 +80,10 @@ export function buildCostShare(months: ReviewMonthInput[]): CostShareRow[] {
 }
 
 /**
- * The fractions of a donut's ring each slice takes: the three costs then left over, adding up to 1. When the costs
- * exceed revenue the ring is the costs alone, scaled to fill it. Months without costs or revenue have no slices.
+ * The fractions of a pie each slice takes: the three costs then profit (the 'leftover' slice), adding up to 1. When the
+ * costs exceed revenue the pie is the costs alone, scaled to fill it. Months without costs or revenue have no slices.
  */
-export function donutSlices(r: CostShareRow): { key: ShareKey | 'leftover'; fraction: number }[] {
+export function pieSlices(r: CostShareRow): { key: ShareKey | 'leftover'; fraction: number }[] {
   if (r.noCosts || r.revenue <= 0) return []
   const total = r.overRevenue ? r.controllable : r.revenue
   if (total <= 0) return []
