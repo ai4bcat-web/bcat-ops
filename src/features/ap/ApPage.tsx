@@ -90,15 +90,12 @@ import { useBillFacts } from './useBillFacts'
 import { useLegIndex } from './useLegIndex'
 import type { BillPaymentLine } from '@/features/finance/accountingStats'
 import type { AccountingReportKind } from '@/features/finance/accountingReports'
-import { ApAgingCard, ApExpectedCard, ApPaidCard, ProfitCheckCard } from '@/features/finance/AccountingCards'
 import { AP_ACTION_COPY, GATES_HEADER, GATES_HELP } from './apActionCopy'
 import { ApActionHelp } from './components/ApActionHelp'
-import { apAgingStats, apExpectedStats, apPaidStats } from '@/features/finance/accountingStats'
 import { OwedFilterBar } from '@/features/ar/components/OwedFilterBar'
-import { OwedSummary } from '@/features/ar/components/OwedSummary'
 import {
-  inDueBucket, owedFilterActive, owedFilterCount, owedSelectionLabel, partyOptions,
-  readOwedFilter, summarizeOwed, writeOwedFilter, type OwedFilter, type OwedOption,
+  inDueBucket, owedFilterCount, partyOptions,
+  readOwedFilter, writeOwedFilter, type OwedFilter, type OwedOption,
 } from '@/features/ar/owedFilters'
 import { apSummary, billLabel, inDivision } from './apQueue'
 import type { ApInboxItemRecord } from '@/lib/apInbox/types'
@@ -312,7 +309,6 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const queueBills = useMemo(() => ownedQueue.filter((b) => inDueBucket(b.dueAt, asOf, owed.due)), [ownedQueue, asOf, owed.due])
   const totalsParty = useMemo(() => totalsAll.filter(byParty), [totalsAll, byParty])
   const totalsOwned = useMemo(() => totalsParty.filter(byDivision), [totalsParty, byDivision])
-  const totalsBills = useMemo(() => totalsOwned.filter((b) => inDueBucket(b.dueAt, asOf, owed.due)), [totalsOwned, asOf, owed.due])
   // The totals follow the carrier and division filters; the division card keeps every division's
   // share (of the selected carriers) so there is always a division to pick.
   const summary = useMemo(() => payablesSummary({
@@ -322,7 +318,6 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     facts,
     asOf,
   }), [totalsOwned, totalsParty, paidRecent, byParty, byDivision, facts, asOf])
-  const owedSummary = useMemo(() => summarizeOwed(totalsOwned, asOf), [totalsOwned, asOf])
   const carrierOptions: OwedOption[] = useMemo(() => partyOptions([
     ...open.bills.map((b) => ({ id: b.carrierId, name: b.carrierName })),
     ...monthBills.map((b) => ({ id: b.carrierId, name: b.carrierName })),
@@ -334,8 +329,6 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         || divisionName(a.subdivision).localeCompare(divisionName(b.subdivision)))
       .map((slice) => ({ key: slice.key, label: divisionName(slice.subdivision ?? slice.division), sub: Boolean(slice.subdivision) }))
   }, [totalsAll, facts, asOf, divisionName])
-  const carrierLabel = (id: string) => carrierOptions.find((o) => o.key === id)?.label ?? id
-  const divisionLabel = (key: string) => divisionOptions.find((o) => o.key === key)?.label ?? key
   const expectedBills = useMemo(() => billsExpected(queueBills), [queueBills])
   // Open bills whose carrier has no usable pay-to (Ryne 2026-11-18), by carrier, biggest balance first.
   const payToRows = useMemo(() => payToWorklist(open.bills, payInfos), [open.bills, payInfos])
@@ -558,13 +551,6 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       </div>
     </>
   )
-  const onCarrier = (id: string | null) => setOwed({ ...owed, parties: id ? [id] : [] })
-  const apTabCard = tab === 'expected' ? <ApExpectedCard stats={apExpectedStats(billsExpected(totalsBills), reviewByShipment, asOf)} />
-    : tab === 'aging' ? (
-      <ApAgingCard stats={apAgingStats(billsAging(totalsBills), asOf)} due={owed.due} onDue={(due) => setOwed({ ...owed, due })} parties={owed.parties} onParty={onCarrier} />
-    )
-    : tab === 'paid' ? <ApPaidCard stats={apPaidStats(settled, facts, apPaymentLines)} monthLabel={monthLabel(month)} />
-    : null
   const addRemitFor = (bill: CarrierBillRecord) => setDialog({ kind: 'remit-email', payee: payeeNameFor(bill, payInfos), billId: bill.id })
   const payToFor = (bill: CarrierBillRecord) => setDialog({ kind: 'payto', carrierId: bill.carrierId, carrierName: bill.carrierName || 'this carrier' })
   const openDrawer = (bill: CarrierBillRecord) => setDrawerId(bill.id)
@@ -726,25 +712,12 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           summary={(
             <ApSummaryStrip
               summary={summary}
-              divisionName={divisionName}
-              division={owed.divisions.length === 1 ? owed.divisions[0] : null}
-              onDivision={(key) => setOwed({ ...owed, divisions: key ? [key] : [] })}
+              due={owed.due}
+              onDue={(due) => setOwed({ ...owed, due })}
+              missing={{ payees: payToRows.length, cents: payToRows.reduce((sum, row) => sum + row.cents, 0), onOpen: () => setDialog({ kind: 'payto-list' }) }}
               onCashRequirements={() => setTab('cash')}
               onTab={setTab}
-            >
-              {apTabCard}
-              <ProfitCheckCard asOf={asOf} onOpenReport={setReportsOpen} testId="ap-profit-check" />
-              {owedFilterActive(owed) && (
-                <OwedSummary
-                  title={owedSelectionLabel(owed, carrierLabel, divisionLabel)}
-                  summary={owedSummary}
-                  unit="bill"
-                  due={owed.due}
-                  onDue={(due) => setOwed({ ...owed, due })}
-                  testId="ap-owed-summary"
-                />
-              )}
-            </ApSummaryStrip>
+            />
           )}
           actions={(
             <>
@@ -1239,6 +1212,7 @@ function daysPastDueColumn(asOf: string): ApColumn<CarrierBillRecord> {
     filter: 'number',
     numberOf: (bill) => billDaysPastDue(bill, asOf),
     numberUnit: 'days',
+    duePresets: true,
     extraPx: 24,
     render: (bill) => {
       const days = billDaysPastDue(bill, asOf)
