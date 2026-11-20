@@ -93,6 +93,12 @@ export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAd
   const blocked = batch.filter((inv) => blockersOf(inv).length > 0)
   const sendable = batch.filter((inv) => blockersOf(inv).length === 0)
   const sendableCents = sendable.reduce((sum, inv) => sum + inv.totalCents, 0)
+  // Invoices going to OTR (factoring) must each have been on screen before the send button works (Ryne 2026-11-19).
+  const [viewed, setViewed] = useState<ReadonlySet<string>>(() => new Set())
+  const currentId = current?.id
+  // Marked while rendering (React re-renders at once): the page on screen counts as looked at.
+  if (currentId && !viewed.has(currentId)) setViewed(new Set(viewed).add(currentId))
+  const unviewedFactored = sendable.filter((inv) => isFactoredInvoice(inv, customerById.get(inv.customerId)) && !viewed.has(inv.id))
 
   const go = useCallback((delta: number) => setIndex((i) => Math.max(0, Math.min(batch.length - 1, i + delta))), [batch.length])
   useEffect(() => {
@@ -206,10 +212,10 @@ export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAd
             {invoices.length - batch.length > 0 && <TmsBadge tone="gray">{invoices.length - batch.length} skipped</TmsBadge>}
           </span>
           <TmsButton variant="ghost" onClick={onClose} disabled={sending}>Cancel</TmsButton>
-          <TmsButton variant="primary" aria-label="Send invoices" disabled={sending || sendable.length === 0}
-            title={blocked.length > 0 ? `${blocked.map((inv) => `${inv.number}: ${blockersOf(inv).join('; ')}`).join('\n')}\nThese are left out of the send.` : undefined}
+          <TmsButton variant="primary" aria-label="Send invoices" disabled={sending || sendable.length === 0 || unviewedFactored.length > 0}
+            title={unviewedFactored.length > 0 ? `${unviewedFactored.length} going to OTR not looked at yet: step through each one first` : blocked.length > 0 ? `${blocked.map((inv) => `${inv.number}: ${blockersOf(inv).join('; ')}`).join('\n')}\nThese are left out of the send.` : undefined}
             onClick={() => void sendAll()}>
-            {sending ? <><Loader2 size={14} className="animate-spin" /> Sending…</> : `Send ${sendable.length} invoice${sendable.length === 1 ? '' : 's'}`}
+            {sending ? <><Loader2 size={14} className="animate-spin" /> Sending…</> : unviewedFactored.length > 0 ? `Send ${sendable.length} (${unviewedFactored.length} not viewed)` : `Send ${sendable.length} invoice${sendable.length === 1 ? '' : 's'}`}
           </TmsButton>
         </>
       }

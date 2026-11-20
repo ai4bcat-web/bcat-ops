@@ -29,6 +29,7 @@ import { otrStatusMeta } from '@/lib/otrInvoiceStatus'
 import { assembleInvoice, checkBroker, markManualInvoice, setBrokerMc, setOtrField, submitToOtr, uploadOtrDocs } from '@/lib/otrClient'
 import { otrDocsIncomplete, otrDocsErrorMessage } from '@/lib/otrSubmitOutcome'
 import { FactoringDocCell } from './FactoringDocCell'
+import { SubmitToOtrReviewDialog } from './SubmitToOtrReviewDialog'
 import { useAuthUser } from '@/hooks/useAuth'
 import { mayInvoiceManually } from '@/lib/otrRejection'
 import { isReadyToSubmit, whatIsMissing } from './factoringFields'
@@ -87,6 +88,8 @@ export function OtrPanel({ item, onChanged }: Props) {
   const authUser = useAuthUser()
   const staffEmail = authUser?.email ?? 'staff'
   const [busy, setBusy] = useState<string | null>(null)
+  // Submit to OTR opens the review first; only its Factor button submits.
+  const [reviewing, setReviewing] = useState(false)
   // A field typed on a row that already bills an invoice waits here for its reason (D.4).
   const [pendingChange, setPendingChange] = useState<{ field: EditableField; label: string; value: string } | null>(null)
 
@@ -311,6 +314,14 @@ export function OtrPanel({ item, onChanged }: Props) {
 
   return (
     <div className="space-y-3 rounded-md border border-[var(--tms-border)] bg-[var(--tms-bg)] p-3">
+      {reviewing && (
+        <SubmitToOtrReviewDialog
+          item={item}
+          busy={busy === 'submit'}
+          onClose={() => setReviewing(false)}
+          onConfirm={() => { void runDocs('submit', () => submitToOtr(item.id), 'Submitted to OTR with its documents').finally(() => setReviewing(false)) }}
+        />
+      )}
       {/* Every required field, with its source. Missing ones are called out. */}
       <div className="grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
         {/*
@@ -454,9 +465,7 @@ export function OtrPanel({ item, onChanged }: Props) {
               ? 'Create the invoice at OTR and upload the POD and rate confirmation'
               : `Still needed: ${whatIsMissing(readiness, (f) => OTR_FIELD_LABEL[f])}`
           }
-          onClick={() =>
-            runDocs('submit', () => submitToOtr(item.id), 'Submitted to OTR with its documents')
-          }
+          onClick={() => setReviewing(true)}
         >
           {busy === 'submit' ? (
             <Loader2 className="size-3.5 animate-spin" />
