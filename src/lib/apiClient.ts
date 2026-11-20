@@ -1235,6 +1235,14 @@ export async function deleteVendorPayable(id: string): Promise<void> {
   })
 }
 
+/**
+ * Reads an e-mailed vendor invoice again (the AP workflow agent runs it from the top) and fills only
+ * what the row still has blank. Answers once the reading is done; nothing is e-mailed or paid.
+ */
+export async function rereadVendorPayable(id: string): Promise<void> {
+  await workflowAction<unknown>('REREAD_PAYABLE', { payableId: id })
+}
+
 export async function getVendorApAttachmentUrl(key: string): Promise<string> {
   if (!key.startsWith('intake-pdfs/vendor-ap/')) throw new Error('Invalid Vendor AP attachment')
   return getIntakePdfUrl(key)

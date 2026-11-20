@@ -10,7 +10,7 @@ import { useMemo, useState, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Loader2, AlertCircle, Trash2, Check, RotateCcw,
-  Mail, Wrench, FileText, ExternalLink, CreditCard, Pencil, Receipt, Search,
+  Mail, Wrench, FileText, ExternalLink, CreditCard, Pencil, Receipt, Search, RefreshCw,
 } from 'lucide-react'
 import {
   TmsBadge, TmsButton, TmsDialog, TmsField, TmsIconButton, TmsInput, TmsSegmentedTabs,
@@ -24,7 +24,9 @@ import {
 } from '@/features/tms/grid/denseGridModel'
 import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import { useVendorPayables } from '@/hooks/useVendorPayables'
+import { rereadVendorPayable } from '@/lib/apiClient'
 import { findVendorApDuplicates } from '@/lib/vendorApDuplicates'
+import { needsDetails } from '@/lib/vendorApBlank'
 import {
   filterBySource, groupByVendor, sourceCounts as countSources, vendorApTotals,
   type VendorGroup, type VendorSourceFilter,
@@ -605,6 +607,7 @@ function RowActions({
   onPay,
   onReopen,
   onDelete,
+  onReread,
 }: {
   item: VendorPayable
   pendingIds: Set<string>
@@ -612,10 +615,23 @@ function RowActions({
   onPay: (item: VendorPayable) => void
   onReopen: (item: VendorPayable) => void
   onDelete: (item: VendorPayable) => void
+  onReread: (item: VendorPayable) => void
 }) {
   const isPending = pendingIds.has(item.id)
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+      {needsDetails(item) && (
+        <TmsButton
+          variant="ghost"
+          size="sm"
+          disabled={isPending}
+          title="Read the invoice again and fill the blank columns"
+          onClick={(e) => { e.stopPropagation(); onReread(item) }}
+        >
+          <RefreshCw size={13} />
+          Re-read
+        </TmsButton>
+      )}
       {item.status === 'NEED_TO_PAY' ? (
         <TmsButton
           variant="ghost"
@@ -695,6 +711,7 @@ export function VendorApPage() {
   const [pageSize, setPageSize] = useState(PAGE_STEP)
   const [billFilters, setBillFilters] = useState<DenseFilters>({})
   const [vendorFilters, setVendorFilters] = useState<DenseFilters>({})
+  const [rereading, setRereading] = useState<Set<string>>(new Set())
 
   const canDelete = user?.groups.includes('ADMIN') ?? false
   const canSeeInvoices = hasPageAccess('invoices')
@@ -863,7 +880,7 @@ export function VendorApPage() {
   const billCols = useMemo<Array<DenseColumn<VendorPayable>>>(() => [
     {
       key: 'vendor', header: 'Vendor', group: 'Bill', width: 200,
-      text: (i) => `${i.vendor || '—'}${duplicates.has(i.id) ? ` · Duplicate · same ${duplicates.get(i.id)!.reason}` : ''}`,
+      text: (i) => `${i.vendor || (needsDetails(i) ? `Needs details · ${i.subject || ''}` : '—')}${duplicates.has(i.id) ? ` · Duplicate · same ${duplicates.get(i.id)!.reason}` : ''}`,
       sortValue: (i) => (i.vendor ?? '').toLowerCase() || null,
     },
     { key: 'invoice', header: 'Invoice #', group: 'Bill', text: (i) => i.invoiceNumber || '—' },
@@ -902,7 +919,16 @@ export function VendorApPage() {
       case 'vendor':
         return (
           <span style={{ whiteSpace: 'nowrap' }}>
-            <span style={{ fontWeight: 600 }}>{item.vendor || '—'}</span>
+            {item.vendor ? (
+              <span style={{ fontWeight: 600 }}>{item.vendor}</span>
+            ) : needsDetails(item) ? (
+              <span title={`${item.subject || '(no subject)'}${item.fromEmail ? ` · from ${item.fromEmail}` : ''}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span className="tms-muted" style={{ fontStyle: 'italic', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.subject || '(no subject)'}</span>
+                <TmsBadge tone="orange">Needs details</TmsBadge>
+              </span>
+            ) : (
+              <span style={{ fontWeight: 600 }}>—</span>
+            )}
             {duplicates.has(item.id) ? (
               <span
                 style={{ fontSize: 11, fontWeight: 600, marginLeft: 6, color: 'var(--tms-badge-red)' }}
@@ -943,7 +969,7 @@ export function VendorApPage() {
         )
       case 'actions':
         return (
-          <RowActions item={item} pendingIds={pendingIds} canDelete={canDelete} onPay={openPayment} onReopen={handleReopen} onDelete={handleDelete} />
+          <RowActions item={item} pendingIds={allPending} canDelete={canDelete} onPay={openPayment} onReopen={handleReopen} onDelete={handleDelete} onReread={(row) => { void handleReread([row]) }} />
         )
       default: return null
     }
@@ -985,6 +1011,29 @@ export function VendorApPage() {
   const filterCount = activeFilterCount(byVendor ? vendorFilters : billFilters) + (search.trim() ? 1 : 0) + (source !== 'ALL' ? 1 : 0) + (!byVendor && activeTab !== 'ALL' ? 1 : 0)
   const shownCount = byVendor ? shownVendors.length : shownBills.length
   const totalCount = byVendor ? vendorRows.length : billRows.length
+
+  const blankRows = useMemo(() => items.filter(needsDetails), [items])
+  // One at a time: each reading is a model call that answers when it is done, and the page should say which row is being read.
+  const handleReread = useCallback(async (targets: VendorPayable[]) => {
+    let attempted = 0
+    let failed = 0
+    for (const target of targets) {
+      setRereading((prev) => new Set(prev).add(target.id))
+      try {
+        await rereadVendorPayable(target.id)
+      } catch (err) {
+        failed += 1
+        toast.error(err instanceof Error ? err.message : 'Could not read that invoice')
+      } finally {
+        setRereading((prev) => { const next = new Set(prev); next.delete(target.id); return next })
+      }
+      attempted += 1
+    }
+    await refresh()
+    const read = attempted - failed
+    if (read > 0) toast.success(`Read ${read} invoice${read === 1 ? '' : 's'} again`)
+  }, [refresh])
+  const allPending = new Set([...pendingIds, ...rereading])
 
   const refreshAll = () => { void (async () => { await refresh(); reloadDetails() })() }
   const queueError = error ? (
@@ -1042,6 +1091,17 @@ export function VendorApPage() {
             onClear={() => { setSearch(''); setSource('ALL'); if (!byVendor) setActiveTab('ALL'); setBillFilters({}); setVendorFilters({}); setPageSize(PAGE_STEP) }}
           />
           <span className="tms-dense-spacer" />
+          {!byVendor && blankRows.length > 0 && (
+            <TmsButton
+              size="sm"
+              variant="secondary"
+              disabled={rereading.size > 0}
+              title="Read each blank invoice again and fill vendor, invoice #, amount and due date"
+              onClick={() => { void handleReread(blankRows) }}
+            >
+              <RefreshCw size={13} /> Re-read {blankRows.length} blank
+            </TmsButton>
+          )}
           <TmsButton size="sm" variant="secondary" onClick={refreshAll}>Refresh</TmsButton>
           {byVendor ? (
             <ColumnsButton sharedWithAll={vendorPrefs.layoutSharedWithAll} catalog={vendorCols} columns={vendorPrefs.columns} widths={vendorPrefs.widths} pinned={vendorPrefs.pinned} onApply={(next) => vendorPrefs.applyLayout({ ...next, replaceWidths: true })} />
