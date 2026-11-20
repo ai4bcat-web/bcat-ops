@@ -22,23 +22,20 @@ import { toast } from 'sonner'
 import { VERIFY_PAYMENT_LABEL, VERIFY_PAYMENT_NOTE, isVerifyPaymentBill } from '@/lib/verifyPayment'
 import { TmsAlert, TmsBadge, TmsButton, TmsCard, TmsMetaList, TmsPage, TmsTabs, TmsTimeline } from '@/features/tms/kit'
 import { useCarrierBill } from '@/hooks/useCarrierBill'
-import { graphqlErrorText, unapproveBill, deleteBill, type BillDeleteReason } from '@/lib/apiClient'
-import { AP_ACTION_COPY } from './apActionCopy'
+import { graphqlErrorText, deleteBill, type BillDeleteReason } from '@/lib/apiClient'
 import { APPROVAL_WARNING_KEYS, billData } from '@/lib/carrierBill'
 import { chicagoDateStr, formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/invoiceBuild'
 import { agingChipFor, formatDay } from '@/features/ar/arViews'
-import { ReasonDialog } from '@/features/ar/components/ReasonDialog'
 import { DeleteBillDialog } from './components/DeleteBillDialog'
 import { AP_PAYEE_KIND_LABEL, AP_PAYMENT_KIND_LABEL, BILL_STATUS_LABEL, legIndex, legSuffixOf, paymentsForBill, siblingCarriers } from './apViews'
-import { ApproveBillDialog } from './components/ApproveBillDialog'
 import { SetBillDatesDialog } from './components/SetBillDatesDialog'
 import { BillInboxStrip } from './inbox/BillInboxStrip'
 import type { CarrierBillStatus } from '@/types/tms'
 import type { TmsTone } from '@/features/tms/kit'
 import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
-type DetailDialog = { kind: 'approve' } | { kind: 'unapprove' } | { kind: 'delete' } | { kind: 'dates' }
+type DetailDialog = { kind: 'delete' } | { kind: 'dates' }
 
 const STATUS_TONE: Record<CarrierBillStatus, TmsTone> = {
   IN_REVIEW: 'purple',
@@ -105,18 +102,6 @@ export function BillDetail() {
   // Everything that has already settled part of this bill, however it got there.
   const settledCents = view.totals.paidCents + view.totals.creditedCents
 
-  const runUnapprove = (reason: string) => {
-    setBusy(true)
-    unapproveBill({ billId: bill.id, reason })
-      .then(() => {
-        toast.success('Back in review')
-        setDialog(null)
-        return refresh()
-      })
-      .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not take the bill back'))
-      .finally(() => setBusy(false))
-  }
-
   const runDelete = (reasonCode: BillDeleteReason, detail: string) => {
     setBusy(true)
     deleteBill({ billId: bill.id, reasonCode, ...(detail ? { reason: detail } : {}) })
@@ -161,22 +146,6 @@ export function BillDetail() {
             onClick={() => setDialog({ kind: 'dates' })}
           >
             {bill.datesPending === true ? 'Set dates' : 'Dates'}
-          </TmsButton>
-          <TmsButton
-            variant={bill.datesPending === true ? undefined : 'primary'}
-            aria-label="Approve bill"
-            disabled={busy || view.status !== 'IN_REVIEW'}
-            onClick={() => setDialog({ kind: 'approve' })}
-          >
-            Approve
-          </TmsButton>
-          <TmsButton
-            aria-label="Send bill back to review"
-            title={AP_ACTION_COPY.sendBackToReview.hint}
-            disabled={busy || view.status !== 'TO_BE_PAID'}
-            onClick={() => setDialog({ kind: 'unapprove' })}
-          >
-            {AP_ACTION_COPY.sendBackToReview.label}
           </TmsButton>
           <TmsButton
             variant="destructive"
@@ -370,9 +339,9 @@ export function BillDetail() {
 
       {tab === 'approval' && (
         <TmsCard title="Approval">
-          {!view.approvedAt && view.status !== 'VOID' && (
+          {bill.datesPending === true && view.status !== 'VOID' && (
             <p className="tms-muted">
-              Not approved yet. Approving moves it to To be paid and puts it in the pay run.
+              Waiting on the carrier's invoice date. Once the dates are recorded the bill is reviewed and can be selected for payment.
             </p>
           )}
           {view.approvedAt && (
@@ -445,26 +414,6 @@ export function BillDetail() {
           open
           onOpenChange={(next) => { if (!next) setDialog(null) }}
           onDone={closeAndRefresh}
-        />
-      )}
-      {dialog?.kind === 'approve' && (
-        <ApproveBillDialog
-          bill={bill}
-          open
-          onOpenChange={(next) => { if (!next) setDialog(null) }}
-          onDone={closeAndRefresh}
-        />
-      )}
-      {dialog?.kind === 'unapprove' && (
-        <ReasonDialog
-          title={`Send bill ${label} back to review`}
-          description="The bill leaves the pay run and goes back to In review. It has to be approved again before it can be paid. A bill that already has a payment applied cannot be sent back. The earlier approval stays on the record."
-          label="Why it is going back"
-          confirmLabel="Send back to review"
-          tone="default"
-          busy={busy}
-          onClose={() => setDialog(null)}
-          onConfirm={runUnapprove}
         />
       )}
       {dialog?.kind === 'delete' && (

@@ -53,8 +53,6 @@ export interface CashLine<B extends CashBill = CashBill> {
   count: number
   totalCents: number
   approvedCents: number
-  /** IN_REVIEW money: owed but not yet approved to pay. */
-  unapprovedCents: number
   /** Cumulative total through this line, in the order shown. 0 for lines outside the schedule. */
   runningCents: number
 }
@@ -75,13 +73,10 @@ export interface CashRequirements<B extends CashBill = CashBill> {
 const isOpen = (b: CashBill) => b.status === 'IN_REVIEW' || b.status === 'TO_BE_PAID' || b.status === 'PARTIAL'
 
 function line<B extends CashBill>(key: string, label: string, friday: string | null, bills: B[]): CashLine<B> {
+  // No review step any more (Ryne 2026-11-19): every dated bill is reviewed, so everything scheduled is payable.
   let totalCents = 0
-  let approvedCents = 0
-  for (const b of bills) {
-    totalCents += b.balanceCents
-    if (b.status !== 'IN_REVIEW') approvedCents += b.balanceCents
-  }
-  return { key, label, friday, bills, count: bills.length, totalCents, approvedCents, unapprovedCents: totalCents - approvedCents, runningCents: 0 }
+  for (const b of bills) totalCents += b.balanceCents
+  return { key, label, friday, bills, count: bills.length, totalCents, approvedCents: totalCents, runningCents: 0 }
 }
 
 export function cashRequirements<B extends CashBill>(bills: readonly B[], today: string, count: number = CASH_FRIDAYS): CashRequirements<B> {

@@ -313,15 +313,17 @@ export function billsExpected(bills: readonly CarrierBillRecord[]): CarrierBillR
     .sort((a, b) => String(a.recordedAt).localeCompare(String(b.recordedAt)))
 }
 
-const isApproved = (b: Pick<CarrierBillRecord, 'status'>) => b.status === 'TO_BE_PAID' || b.status === 'PARTIAL'
+// There is no separate review step (Ryne 2026-11-19): a bill with its invoice date is reviewed. A bill still stored as
+// IN_REVIEW but dated counts as approved; the server approves it the first time it is selected or paid.
+const isApproved = (b: Pick<CarrierBillRecord, 'status' | 'datesPending'>) =>
+  b.status === 'TO_BE_PAID' || b.status === 'PARTIAL' || (b.status === 'IN_REVIEW' && b.datesPending !== true)
 
 /**
- * Open bills that have their invoice date and are not on a pay run yet, soonest due first. A bill still in
- * review shows here too (it has its dates) but cannot be selected until it is approved.
+ * Open bills that have their invoice date and are not on a pay run yet, soonest due first.
  */
 export function billsAging(bills: readonly CarrierBillRecord[]): CarrierBillRecord[] {
   return bills
-    .filter((b) => (b.status === 'IN_REVIEW' && b.datesPending !== true) || (isApproved(b) && b.selectedForPayment !== true))
+    .filter((b) => isApproved(b) && b.selectedForPayment !== true)
     .sort((a, b) => a.dueAt.localeCompare(b.dueAt))
 }
 
@@ -332,7 +334,7 @@ export function billsSelected(bills: readonly CarrierBillRecord[]): CarrierBillR
     .sort((a, b) => a.dueAt.localeCompare(b.dueAt))
 }
 
-/** Only an approved bill can go on a pay run; a bill still in review has gates to clear first. */
+/** A dated bill can go on a pay run. */
 export function canSelectForPayment(bill: Pick<CarrierBillRecord, 'status' | 'datesPending'>): boolean {
   return isApproved(bill) && bill.datesPending !== true
 }

@@ -96,10 +96,11 @@ describe('the payable ladder: Expected, Aging, Selected', () => {
     expect(billsSelected(bills).map((x) => x.id)).toEqual(['chosen'])
   })
 
-  it('lets only an approved, dated bill be selected for payment', () => {
+  it('lets any dated bill be selected: there is no review step, so a dated bill still stored as in review counts as approved', () => {
     expect(canSelectForPayment({ status: 'TO_BE_PAID', datesPending: false })).toBe(true)
     expect(canSelectForPayment({ status: 'PARTIAL' })).toBe(true)
-    expect(canSelectForPayment({ status: 'IN_REVIEW', datesPending: false })).toBe(false)
+    expect(canSelectForPayment({ status: 'IN_REVIEW', datesPending: false })).toBe(true)
+    expect(canSelectForPayment({ status: 'IN_REVIEW', datesPending: true })).toBe(false)
     expect(canSelectForPayment({ status: 'TO_BE_PAID', datesPending: true })).toBe(false)
   })
 

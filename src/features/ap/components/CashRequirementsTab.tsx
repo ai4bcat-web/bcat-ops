@@ -63,12 +63,10 @@ export function CashRequirementsTab({ bills, facts, infos, asOf, busy, onMoveToS
             <span className="text-sm">{l.key === 'past-due' ? 'Past due' : formatDay(l.friday)}</span>
             <span style={{ background: 'var(--tms-border)', borderRadius: 4, height: 14, overflow: 'hidden', display: 'flex' }} aria-hidden="true">
               <span style={{ width: `${(l.approvedCents / peak) * 100}%`, background: 'var(--tms-badge-green)' }} />
-              <span style={{ width: `${(l.unapprovedCents / peak) * 100}%`, background: 'var(--tms-badge-orange)' }} />
             </span>
             <span className="tms-dg-right text-sm tabular-nums">{formatCents(l.totalCents)}</span>
           </li>
         ))}
-        <li className="tms-muted text-xs">Green is approved (To be paid), orange is still in review.</li>
       </ul>
 
       <div className="tms-aging-table-wrap" style={{ display: 'block' }}>
@@ -78,8 +76,7 @@ export function CashRequirementsTab({ bills, facts, infos, asOf, busy, onMoveToS
               <th scope="col" className="tms-aging-twisty-col"><span className="sr-only">Expand</span></th>
               <th scope="col">Pay on</th>
               <th scope="col" className="tms-dg-right">Bills</th>
-              <th scope="col" className="tms-dg-right">Approved (to be paid)</th>
-              <th scope="col" className="tms-dg-right">In review</th>
+              <th scope="col" className="tms-dg-right">To be paid</th>
               <th scope="col" className="tms-dg-right">Total to pay</th>
               <th scope="col" className="tms-dg-right">Running total</th>
             </tr>
@@ -101,7 +98,6 @@ export function CashRequirementsTab({ bills, facts, infos, asOf, busy, onMoveToS
                     <td>{l.friday && l.key !== 'past-due' ? `Friday ${formatDay(l.friday)}` : l.label}</td>
                     <td className="tms-dg-right">{l.count}</td>
                     <td className="tms-dg-right">{money(l.approvedCents)}</td>
-                    <td className="tms-dg-right">{money(l.unapprovedCents)}</td>
                     <td className="tms-dg-right"><strong>{formatCents(l.totalCents)}</strong></td>
                     <td className="tms-dg-right">{scheduled ? formatCents(l.runningCents) : '—'}</td>
                   </tr>
@@ -148,7 +144,6 @@ export function CashRequirementsTab({ bills, facts, infos, asOf, busy, onMoveToS
               <td colSpan={2}>Total open AP</td>
               <td className="tms-dg-right">{lines.reduce((n, l) => n + l.count, 0)}</td>
               <td className="tms-dg-right">{money(lines.reduce((n, l) => n + l.approvedCents, 0))}</td>
-              <td className="tms-dg-right">{money(lines.reduce((n, l) => n + l.unapprovedCents, 0))}</td>
               <td className="tms-dg-right"><strong>{formatCents(cash.openCents)}</strong></td>
               <td />
             </tr>

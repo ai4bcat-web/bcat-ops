@@ -110,7 +110,7 @@ export function PayablesCard() {
     { key: 'expected', label: 'Expected', count: s.expected.count, cents: s.expected.cents, color: 'var(--tms-badge-orange)', title: 'Waiting on the carrier invoice date', onOpen: () => navigate(payableLink({ tab: 'expected' })) },
     { key: 'aging', label: 'Aging', count: s.aging.count, cents: s.aging.cents, color: 'var(--tms-primary)', onOpen: () => navigate(payableLink({ tab: 'aging' })) },
     { key: 'past-due', label: 'Past due', count: s.pastDue.count, cents: s.pastDue.cents, color: 'var(--tms-badge-red)', onOpen: () => navigate(payableLink({ tab: 'aging', due: 'past' })) },
-    { key: 'next7', label: 'Due next 7 days', count: s.dueNext7.count, cents: s.dueNext7.cents, color: 'var(--tms-badge-blue)', onOpen: () => navigate(payableLink({ tab: 'aging', due: 'week' })) },
+    { key: 'next7', label: 'Due within 7 days', count: s.dueNext7.count, cents: s.dueNext7.cents, color: 'var(--tms-badge-blue)', onOpen: () => navigate(payableLink({ tab: 'aging', due: 'week' })) },
   ]
   return (
     <DashboardSummaryCard

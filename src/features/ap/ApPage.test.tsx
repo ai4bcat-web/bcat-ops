@@ -18,7 +18,7 @@ import { ageOpenItems } from '@/lib/arAging'
 import { chicagoDateStr } from '@/lib/date'
 import { listCarrierPaymentInfo } from '@/lib/apiClient'
 import { ApPage } from './ApPage'
-import { deleteBill } from '@/lib/apiClient'
+import { deleteBill, selectBillsForPayment } from '@/lib/apiClient'
 
 const worklistMock = vi.hoisted(() => vi.fn())
 const authState = vi.hoisted(() => ({ isAdmin: false }))
@@ -248,19 +248,20 @@ describe('the AP board', () => {
   })
 
   /**
-   * Aging is the short list Ryne asked for (Pro #, carrier, pay to, dates, amount and two links). A bill still in review
-   * says so on its amount, and "Move to Selected" does not skip approval: it opens the approval dialog first.
+   * Aging is the short list Ryne asked for (Pro #, carrier, pay to, dates, amount and two links). There is no review
+   * step (Ryne 2026-11-19): a dated bill still stored as in review shows no "In review" mark and moves straight to Selected.
    */
-  it('marks a bill still in review on the Aging tab, and Move to Selected goes through approval', async () => {
+  it('shows no In review mark on the Aging tab, and Move to Selected selects the bill straight away', async () => {
+    vi.mocked(selectBillsForPayment).mockResolvedValue({ selected: ['cb:1'], skipped: [] })
     await setup({
       rowsByTab: { IN_REVIEW: [worklistRow()] },
       bills: [bill({ status: 'IN_REVIEW', billedCents: 175_000, varianceCents: 25_000, billNumber: 'IR-9' })],
     })
     fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
 
-    expect(screen.getByText('In review')).toBeTruthy()
+    expect(screen.queryByText('In review')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Move bill IR-9 to Selected' }))
-    expect(screen.getByText(/approve dialog for/)).toBeTruthy()
+    expect(vi.mocked(selectBillsForPayment)).toHaveBeenCalledTimes(1)
   })
 
   /**
@@ -364,7 +365,7 @@ describe('the AP board', () => {
     expect(screen.queryByRole('button', { name: /^Record bill/ })).toBeNull()
     // The totals strip sits above the tabs on every tab.
     expect(screen.getByRole('group', { name: 'Open payables and the payment ladder' })).toBeTruthy()
-    expect(screen.getByText('Due next 7 days')).toBeTruthy()
+    expect(screen.getByText('Due within 7 days')).toBeTruthy()
   })
 
   /** Ryne 2026-11-16: the Payable section has no Needs review tab; its flags ride on the bill rows instead. */
@@ -594,12 +595,12 @@ describe('the AP board', () => {
     describe('select all', () => {
       const header = () => screen.getByLabelText(/^Select all \d+ bills shown$/) as HTMLInputElement
 
-      it('ticks every bill that can be selected, skips one still in review, and clears them again', async () => {
+      it('ticks every bill that can be selected, including a dated one still stored as in review, and clears them again', async () => {
         await setup({ bills: [...two(), bill({ id: 'cb:lc3:1', loadCarrierId: 'lc3', status: 'IN_REVIEW', billNumber: 'IR-1' })] })
         fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
-        expect(header().getAttribute('aria-label')).toBe('Select all 2 bills shown')
+        expect(header().getAttribute('aria-label')).toBe('Select all 3 bills shown')
         fireEvent.click(header())
-        expect(screen.getByText('2 selected ($2,300.00)')).toBeTruthy()
+        expect(screen.getByText(/^3 selected/)).toBeTruthy()
         expect((screen.getByLabelText('Select bill BL-1') as HTMLInputElement).checked).toBe(true)
         expect(header().checked).toBe(true)
         fireEvent.click(header())
@@ -639,10 +640,10 @@ describe('the AP board', () => {
       })
     })
 
-    it('does not let a bill still in review be ticked for payment', async () => {
+    it('lets a dated bill still stored as in review be ticked for payment', async () => {
       await setup({ bills: [bill({ status: 'IN_REVIEW', billNumber: 'IR-1' })] })
       fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
-      expect((screen.getByLabelText(/Bill IR-1 must be approved/) as HTMLInputElement).disabled).toBe(true)
+      expect((screen.getByLabelText('Select bill IR-1') as HTMLInputElement).disabled).toBe(false)
     })
 
     it('pays a selection of one carrier from the Selected tab, and says when it spans two', async () => {

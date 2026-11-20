@@ -1,3 +1,4 @@
+import { summarizeOwed } from '@/features/ar/owedFilters'
 import { describe, expect, it } from 'vitest'
 import {
   apReportCsv, apReportRows, billLabel, proOf, apReportTotals, apSummary, billCustomerName, billDaysPastDue, billFactsIndex, daysLateLabel, inDivision, cashRequirements, estimatedDueAt, isAljexBill, payablesQueue,
@@ -196,6 +197,37 @@ describe('apSummary', () => {
     expect(s.fromAljex).toEqual({ count: 1, cents: 25_000 })
     expect(s.pastDue).toEqual({ count: 1, cents: 25_000 })
     expect(payablesQueue(all, facts, { includeAljex: false }).map((b) => b.id)).toEqual(['n'])
+  })
+})
+
+describe('apSummary past due', () => {
+  it('counts only invoiced bills as past due; an Expected bill whose guessed due date passed is reported separately', () => {
+    const facts = new Map<string, BillShipmentFacts>([['s1', { ...delivered, deliveredAt: '2026-09-01T00:00:00Z' }]])
+    const expected = [bill({ id: 'e', datesPending: true, balanceCents: 12_000, termsDays: 30 })]
+    const aging = [bill({ id: 'a', dueAt: '2026-11-05', balanceCents: 20_000 })]
+    const s = apSummary({ expected, aging, selected: [], paidRecent: [], facts, asOf: '2026-11-12' })
+    expect(s.pastDue).toEqual({ count: 1, cents: 20_000 })
+    expect(s.expectedLate).toEqual({ count: 1, cents: 12_000 })
+    expect(s.open.cents).toBe(32_000)
+  })
+})
+
+describe('one definition of past due and due this week', () => {
+  it('the headline cards and the Open bills by due date card agree, with Aging and Selected bills together', () => {
+    const facts = new Map<string, BillShipmentFacts>([['s1', delivered]])
+    const aging = [
+      bill({ id: 'p1', dueAt: '2026-11-11', balanceCents: 10_000 }),
+      bill({ id: 'w0', dueAt: '2026-11-12', balanceCents: 20_000 }),
+      bill({ id: 'w7', dueAt: '2026-11-19', balanceCents: 30_000 }),
+      bill({ id: 'm8', dueAt: '2026-11-20', balanceCents: 40_000 }),
+    ]
+    const selected = [bill({ id: 'sp', dueAt: '2026-11-01', balanceCents: 5_000 })]
+    const s = apSummary({ expected: [], aging, selected, paidRecent: [], facts, asOf: '2026-11-12' })
+    const owed = summarizeOwed([...aging, ...selected], '2026-11-12')
+    expect(s.pastDue).toEqual({ count: owed.buckets.past.count, cents: owed.buckets.past.cents })
+    expect(s.pastDue).toEqual({ count: 2, cents: 15_000 })
+    expect(s.dueNext7).toEqual({ count: owed.buckets.week.count, cents: owed.buckets.week.cents })
+    expect(s.dueNext7).toEqual({ count: 2, cents: 50_000 })
   })
 })
 

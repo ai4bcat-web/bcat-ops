@@ -34,6 +34,7 @@ import {
 import { deliverNotice } from '../_shared/shipmentNotices'
 import { apFundingSplit, billStatusAfter } from '../../../src/lib/carrierBill'
 import { assertBillsPayable } from './paymentInfoGate'
+import { autoApproveBill } from './bills'
 import {
   planPayment,
   reversalPlan,
@@ -396,6 +397,9 @@ export async function recordApPayment(input: Row, caller: Caller): Promise<Poste
     const ids = (existing.applications as ApPaymentApplication[] | undefined)?.map((a) => a.billId) ?? []
     return readBack(id, ids, true)
   }
+
+  // There is no review step (Ryne 2026-11-19): a dated bill still stored as IN_REVIEW is approved here before it is paid.
+  for (const application of applications) await autoApproveBill(application.billId, caller)
 
   // Nobody pays a payee that has no bank info (Ryne 2026-11-19). A credit-only application moves no money, so it
   // is not held to this; a replay of an already-posted payment returned above.

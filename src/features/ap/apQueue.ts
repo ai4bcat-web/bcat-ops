@@ -18,6 +18,7 @@ import { deliveredTimeOf } from '@/lib/deliveredAt'
 import { chicagoDateStr as chicagoDay } from '@/lib/date'
 import { mondayOf } from '@/lib/financeOps'
 import { customerRefOf } from '@/lib/customerRef'
+import { summarizeOwed } from '@/features/ar/owedFilters'
 
 /** The load facts a bill row shows, read once per shipment. */
 export interface BillShipmentFacts {
@@ -372,6 +373,8 @@ export interface ApSummary {
   aging: ApMoney
   selected: ApMoney
   pastDue: ApMoney
+  /** Expected bills (no invoice date yet) whose guessed due date has already passed: not in `pastDue`. */
+  expectedLate: ApMoney
   dueNext7: ApMoney
   /** Net paid to carriers on bills settled this week (Monday on) and this month, by Chicago paid date. Archived bills left out. */
   paidWeek: ApMoney
@@ -425,9 +428,13 @@ export function apSummary(input: {
   const open = [...expected, ...aging, ...selected]
   const money = (bills: readonly CarrierBillRecord[]): ApMoney => ({ count: bills.length, cents: bills.reduce((s, b) => s + b.balanceCents, 0) })
   const rows = apReportRows(open, facts, [], asOf)
-  const in7 = addDays(asOf, 6)
-  const pastDueRows = rows.filter((r) => r.balanceCents > 0 && r.dueAt != null && r.dueAt < asOf)
-  const next7Rows = rows.filter((r) => r.balanceCents > 0 && r.dueAt != null && r.dueAt >= asOf && r.dueAt <= in7)
+  // ONE definition of late and due-soon for every AP card and the Days past due column: the due-date buckets the
+  // Open bills by due date card uses (`summarizeOwed` / `dueBucketOf`), over every open bill the carrier has invoiced
+  // (Aging and Selected). Past due = due date before today; due this week = today through 7 days on. A bill still in
+  // Expected has only a guessed due date and shows no days late anywhere, so it is reported on its own (`expectedLate`).
+  const invoiced = rows.filter((r) => !r.dueEstimated)
+  const owed = summarizeOwed(invoiced.map((r) => ({ dueAt: r.dueAt, balanceCents: r.balanceCents })), asOf)
+  const expectedLateRows = rows.filter((r) => r.balanceCents > 0 && r.dueAt != null && r.dueAt < asOf && r.dueEstimated)
   const sumRows = (rs: ApReportRow[]): ApMoney => ({ count: rs.length, cents: rs.reduce((s, r) => s + r.balanceCents, 0) })
 
   const month = asOf.slice(0, 7)
@@ -485,8 +492,9 @@ export function apSummary(input: {
     expected: money(expected),
     aging: money(aging),
     selected: money(selected),
-    pastDue: sumRows(pastDueRows),
-    dueNext7: sumRows(next7Rows),
+    pastDue: { count: owed.buckets.past.count, cents: owed.buckets.past.cents },
+    expectedLate: sumRows(expectedLateRows),
+    dueNext7: { count: owed.buckets.week.count, cents: owed.buckets.week.cents },
     paidWeek,
     paidMonth,
     payToFactor: money(open.filter((b) => b.payeeKind === 'FACTOR')),
