@@ -34,6 +34,22 @@ const customers = new Map<string, CustomerRecord>([
 ])
 
 describe('SendReviewCarousel', () => {
+  it('keeps Send off for invoices going to OTR until each has been on screen', async () => {
+    sendToFactor.mockReset()
+    sendToFactor.mockResolvedValue({})
+    getInvoiceAttachmentPlans.mockResolvedValue([])
+    render(<MemoryRouter><SendReviewCarousel invoices={[inv('20028', 'tql'), inv('20029', 'tql')]} customerById={customers}
+      shipmentsById={new Map()} onClose={vi.fn()} onDone={vi.fn()} /></MemoryRouter>)
+    const send = screen.getByRole('button', { name: 'Send invoices' }) as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+    expect(send.textContent).toContain('1 not viewed')
+    fireEvent.click(send)
+    expect(sendToFactor).not.toHaveBeenCalled()
+    fireEvent.keyDown(window, { key: 'ArrowRight' })
+    await waitFor(() => expect(send.disabled).toBe(false))
+    expect(sendToFactor).not.toHaveBeenCalled()
+  })
+
   it('pages through the batch showing the whole e-mail, and sends each the right way', async () => {
     sendInvoice.mockResolvedValue({ emailStatus: 'SENT', to: ['ap@royal.test'] })
     getInvoiceAttachmentPlans.mockResolvedValue([

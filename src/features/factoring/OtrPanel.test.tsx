@@ -14,6 +14,8 @@ import type { FactoringItem } from '@/types'
 const setOtrField = vi.hoisted(() => vi.fn())
 const assembleInvoice = vi.hoisted(() => vi.fn())
 const setBrokerMc = vi.hoisted(() => vi.fn())
+const submitToOtr = vi.hoisted(() => vi.fn().mockResolvedValue({ documentErrors: [] }))
+const previewOtrDocs = vi.hoisted(() => vi.fn().mockResolvedValue({ pod: { name: 'POD.pdf', url: 'https://s3.test/pod' }, rateCon: { name: 'RC.pdf', url: 'https://s3.test/rc' } }))
 const uploadOtrDocs = vi.hoisted(() => vi.fn().mockResolvedValue({ documentErrors: [] }))
 
 vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))  // clients build at import
@@ -23,7 +25,8 @@ vi.mock('@/lib/otrClient', () => ({
   setBrokerMc,
   setOtrField,
   checkBroker: vi.fn(),
-  submitToOtr: vi.fn(),
+  submitToOtr,
+  previewOtrDocs,
   uploadOtrDocs,
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
@@ -292,5 +295,32 @@ describe('an invoice at OTR without its documents', () => {
     fireEvent.click(screen.getByRole('button', { name: /Resend documents/ }))
     await waitFor(() => expect(uploadOtrDocs).toHaveBeenCalledWith('13364'))
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
+  })
+})
+
+describe('Submit to OTR opens the review first', () => {
+  const ready = () => readiness({ payload: ALL_FIELDS })
+
+  it('Submit only opens the review; Cancel and closing submit nothing', async () => {
+    render(<OtrPanel item={item({ otrReadiness: ready() })} onChanged={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Submit to OTR/ }))
+    expect(await screen.findByTitle('POD preview')).toBeInTheDocument()
+    expect(submitToOtr).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByTitle('POD preview')).not.toBeInTheDocument()
+    expect(submitToOtr).not.toHaveBeenCalled()
+  })
+
+  it('only the final Factor button submits', async () => {
+    const onChanged = vi.fn()
+    render(<OtrPanel item={item({ otrReadiness: ready() })} onChanged={onChanged} />)
+    fireEvent.click(screen.getByRole('button', { name: /Submit to OTR/ }))
+    await screen.findByTitle('POD preview')
+    const confirm = screen.getByTestId('factor-review-confirm')
+    await waitFor(() => expect(confirm).toBeEnabled())
+    expect(submitToOtr).not.toHaveBeenCalled()
+    fireEvent.click(confirm)
+    await waitFor(() => expect(submitToOtr).toHaveBeenCalledWith('13364'))
+    expect(submitToOtr).toHaveBeenCalledTimes(1)
   })
 })

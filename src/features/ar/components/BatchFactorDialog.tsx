@@ -14,20 +14,16 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Loader2, X } from 'lucide-react'
+import { DocPane } from './FactorDocPane'
+import { missingDocs, type DocLook } from '../factorDocs'
+import { InvoicePacketFrame } from './InvoicePacketFrame'
 import { TmsBadge, TmsButton, TmsDialog } from '@/features/tms/kit'
 import { batchGenerateInvoices, sendToFactor } from '@/lib/apiClient'
-import { previewOtrDocs, submitToOtr, uploadOtrDocs, type OtrDocLink } from '@/lib/otrClient'
+import { previewOtrDocs, submitToOtr, uploadOtrDocs } from '@/lib/otrClient'
 import { formatCents } from '@/lib/invoiceBuild'
 import { BATCH_FACTOR_PAUSE_MS, runBatchFactor, sleep, type BatchFactorOutcome } from '../batchFactor'
 import type { ArQueueRow } from '../arQueue'
 import './invoiceEmail.css'
-
-/** What the review found for one load: still looking, the two documents, or why it could not look. */
-type DocLook = { state: 'loading' } | { state: 'ready'; pod: OtrDocLink | null; rateCon: OtrDocLink | null } | { state: 'error'; message: string }
-
-/** A document the review positively found missing: that load is left out of the send. */
-const missingDocs = (look: DocLook | undefined): string[] =>
-  look?.state === 'ready' ? [...(look.rateCon ? [] : ['Rate confirmation']), ...(look.pod ? [] : ['POD'])] : []
 
 export function BatchFactorDialog({ rows, factorName, onClose, onDone }: {
   rows: ArQueueRow[]
@@ -43,14 +39,19 @@ export function BatchFactorDialog({ rows, factorName, onClose, onDone }: {
   const [batch, setBatch] = useState<ArQueueRow[]>(rows)
   const [index, setIndex] = useState(0)
   const [looks, setLooks] = useState<Record<string, DocLook>>({})
+  // Loads whose page has been on screen: the Factor button waits for every load that would go (Ryne 2026-11-19).
+  const [viewed, setViewed] = useState<ReadonlySet<string>>(() => new Set())
   const current = batch[Math.min(index, batch.length - 1)]
   const lookOf = (r: ArQueueRow) => looks[r.key]
   const blocked = batch.filter((r) => missingDocs(lookOf(r)).length > 0)
   const sendable = batch.filter((r) => missingDocs(lookOf(r)).length === 0)
   const total = sendable.reduce((sum, r) => sum + r.amountCents, 0)
+  const unviewed = sendable.filter((r) => !viewed.has(r.key))
 
   // The page being looked at fetches its two documents once (the links last ten minutes; Back-and-forth reuses them).
   const currentKey = current?.key
+  // Marked while rendering (React re-renders at once): the page on screen counts as looked at.
+  if (currentKey && !viewed.has(currentKey)) setViewed(new Set(viewed).add(currentKey))
   useEffect(() => {
     if (!current || looks[current.key]) return
     let alive = true
@@ -118,8 +119,9 @@ export function BatchFactorDialog({ rows, factorName, onClose, onDone }: {
       ) : (
         <>
           <TmsButton variant="ghost" onClick={onClose} disabled={running}>Cancel</TmsButton>
-          <TmsButton variant="primary" onClick={start} disabled={running || sendable.length === 0 || !factorName} data-testid="batch-factor-submit">
-            {running ? `Submitting ${progress} of ${sendable.length}…` : `Send ${sendable.length} to OTR`}
+          <TmsButton variant="primary" onClick={start} disabled={running || sendable.length === 0 || !factorName || unviewed.length > 0} data-testid="batch-factor-submit"
+            title={unviewed.length > 0 ? `${unviewed.length} not looked at yet: step through every load first` : undefined}>
+            {running ? `Submitting ${progress} of ${sendable.length}…` : unviewed.length > 0 ? `Factor ${sendable.length} (${unviewed.length} not viewed)` : `Factor ${sendable.length} invoice${sendable.length === 1 ? '' : 's'}`}
           </TmsButton>
         </>
       )}
@@ -167,12 +169,18 @@ export function BatchFactorDialog({ rows, factorName, onClose, onDone }: {
                   <span><strong>Will not be sent:</strong> no {missingDocs(lookOf(current)).join(' or ')} on file. Add it, or Skip it — the rest still go.</span>
                 </div>
               )}
+              {current.invoiceId && (
+                <section className="send-review-col" aria-label="Invoice">
+                  <strong className="text-sm">Invoice{current.invoiceNumber ? ` ${current.invoiceNumber}` : ''}</strong>
+                  <InvoicePacketFrame invoiceId={current.invoiceId} pdfKey={current.invoice?.pdfKey} height={420} />
+                </section>
+              )}
               <div className="send-review-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>
                 <DocPane title="Customer rate confirmation" look={lookOf(current)} pick={(l) => l.rateCon} />
                 <DocPane title="POD" look={lookOf(current)} pick={(l) => l.pod} />
               </div>
               <p className="text-xs tms-muted">
-                OTR receives these two documents only. Nothing leaves until you press Send; each load is then submitted one at a time and moves to Pending with OTR.
+                OTR receives these two documents only. Nothing leaves until you have stepped through every load and pressed Factor; each load is then submitted one at a time and moves to Pending with OTR.
               </p>
             </div>
           )}
@@ -195,26 +203,5 @@ export function BatchFactorDialog({ rows, factorName, onClose, onDone }: {
         </div>
       )}
     </TmsDialog>
-  )
-}
-
-/** One document of the pair OTR receives, shown as the file itself. */
-function DocPane({ title, look, pick }: {
-  title: string
-  look: DocLook | undefined
-  pick: (look: Extract<DocLook, { state: 'ready' }>) => OtrDocLink | null
-}) {
-  const doc = look?.state === 'ready' ? pick(look) : null
-  return (
-    <section className="send-review-col" aria-label={title}>
-      <div className="flex items-center gap-2 text-sm">
-        <strong>{title}</strong>
-        {look?.state === 'ready' && (doc ? <TmsBadge tone="green">On file</TmsBadge> : <TmsBadge tone="red">Missing</TmsBadge>)}
-        {doc && <span className="tms-muted truncate">{doc.name}</span>}
-      </div>
-      {(!look || look.state === 'loading') && <p className="flex items-center gap-2 text-sm tms-muted"><Loader2 size={14} className="animate-spin" /> Loading…</p>}
-      {doc && <iframe title={`${title} preview`} src={doc.url} style={{ width: '100%', height: 560, border: '1px solid var(--tms-border)' }} />}
-      {look?.state === 'ready' && !doc && <p className="text-sm tms-muted">Nothing on file to send.</p>}
-    </section>
   )
 }

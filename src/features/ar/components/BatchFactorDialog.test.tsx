@@ -9,6 +9,7 @@ const { previewOtrDocs, submitToOtr, batchGenerateInvoices, sendToFactor } = vi.
 vi.mock('@/lib/otrClient', () => ({ previewOtrDocs, submitToOtr, uploadOtrDocs: vi.fn() }))
 vi.mock('@/lib/apiClient', () => ({ batchGenerateInvoices, sendToFactor }))
 vi.mock('../batchFactor', async (orig) => ({ ...(await orig<typeof import('../batchFactor')>()), sleep: () => () => Promise.resolve() }))
+vi.mock('./InvoicePacketFrame', () => ({ InvoicePacketFrame: ({ invoiceId }: { invoiceId: string }) => <div data-testid="invoice-frame">{invoiceId}</div> }))
 import { BatchFactorDialog } from './BatchFactorDialog'
 
 const row = (pro: string, cents: number): ArQueueRow => ({
@@ -43,13 +44,35 @@ describe('BatchFactorDialog review step', () => {
     expect(batchGenerateInvoices).not.toHaveBeenCalled()
   })
 
+  it('shows the invoice and keeps Factor off until every load has been looked at; Cancel submits nothing', async () => {
+    const onClose = vi.fn()
+    render(<BatchFactorDialog rows={[row('1001', 100_000), row('1002', 200_000)]} factorName="OTR Capital, LLC" onClose={onClose} onDone={() => {}} />)
+    await screen.findByTitle('POD preview')
+    expect(screen.getByTestId('invoice-frame').textContent).toBe('inv-1001')
+    const factor = screen.getByTestId('batch-factor-submit') as HTMLButtonElement
+    expect(factor.disabled).toBe(true)
+    expect(factor.textContent).toBe('Factor 2 (1 not viewed)')
+    fireEvent.click(factor)
+    expect(submitToOtr).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByLabelText('Next load'))
+    await waitFor(() => expect(factor.disabled).toBe(false))
+    expect(factor.textContent).toBe('Factor 2 invoices')
+    expect(submitToOtr).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByText('Cancel'))
+    expect(onClose).toHaveBeenCalled()
+    expect(submitToOtr).not.toHaveBeenCalled()
+    expect(batchGenerateInvoices).not.toHaveBeenCalled()
+  })
+
   it('flags a load with no POD and leaves it out of the send', async () => {
     previewOtrDocs.mockImplementation(async ({ pro }: { pro: string }) => docs(pro, { pod: pro !== '1002', rc: true }))
     setup([row('1001', 100_000), row('1002', 200_000)])
     await screen.findByTitle('POD preview')
     fireEvent.click(screen.getByLabelText('Next load'))
     expect((await screen.findByRole('alert', { name: 'Cannot send' })).textContent).toMatch(/no POD on file/)
-    expect(screen.getByTestId('batch-factor-submit').textContent).toBe('Send 1 to OTR')
+    fireEvent.click(screen.getByLabelText('Previous load'))
+    await waitFor(() => expect((screen.getByTestId('batch-factor-submit') as HTMLButtonElement).disabled).toBe(false))
+    expect(screen.getByTestId('batch-factor-submit').textContent).toBe('Factor 1 invoice')
     fireEvent.click(screen.getByTestId('batch-factor-submit'))
     expect(await screen.findByTestId('batch-factor-results')).toBeTruthy()
     expect(submitToOtr).toHaveBeenCalledTimes(1)
@@ -60,7 +83,7 @@ describe('BatchFactorDialog review step', () => {
     await screen.findByTitle('POD preview')
     fireEvent.click(screen.getByLabelText('Skip 1001'))
     expect(screen.getByLabelText('Page').textContent).toBe('1 of 1')
-    expect(screen.getByTestId('batch-factor-submit').textContent).toBe('Send 1 to OTR')
+    expect(screen.getByTestId('batch-factor-submit').textContent).toBe('Factor 1 invoice')
   })
 
   it('a queue row is previewed by its row id', async () => {
