@@ -23,14 +23,14 @@ import { LocalFleetCostShareCard } from './LocalFleetCostShareCard'
 describe('LocalFleetCostShareCard', () => {
   it('shows only fuel, driver pay and maintenance, with no insurance anywhere', () => {
     const { container } = render(<LocalFleetCostShareCard />)
-    for (const label of ['Fuel', 'Driver pay', 'Maintenance', 'Left over']) expect(screen.getAllByText(new RegExp(label)).length).toBeGreaterThan(0)
+    for (const label of ['Fuel', 'Driver pay', 'Maintenance', 'Profit']) expect(screen.getAllByText(new RegExp(label)).length).toBeGreaterThan(0)
     expect(container.textContent).not.toMatch(/insurance/i)
   })
 
-  it('draws one donut per month, with accessible text for each', () => {
+  it('draws one pie per month, with accessible text for each', () => {
     render(<LocalFleetCostShareCard />)
     expect(screen.getAllByRole('img')).toHaveLength(3)
-    expect(screen.getByRole('img', { name: /Oct: \$20,000 revenue\. Fuel 20\.0%, Driver pay 30\.0%, Maintenance 5\.0%\. Left over 45\.0%/ })).toBeTruthy()
+    expect(screen.getByRole('img', { name: /Oct: \$20,000 revenue\. Fuel 20\.0%, Driver pay 30\.0%, Maintenance 5\.0%\. Profit 45\.0%/ })).toBeTruthy()
     expect(screen.getByRole('img', { name: /Aug: \$20,000 revenue, costs not on file/ })).toBeTruthy()
   })
 
@@ -43,15 +43,34 @@ describe('LocalFleetCostShareCard', () => {
 
   it('shows exact dollars and percents for a month on hover', () => {
     render(<LocalFleetCostShareCard />)
-    fireEvent.mouseEnter(screen.getByTestId('fleet-donut-2026-10'))
+    fireEvent.mouseEnter(screen.getByTestId('fleet-pie-2026-10'))
     const tip = screen.getByRole('tooltip')
     expect(tip.textContent).toContain('$4,000')
     expect(tip.textContent).toContain('30.0%')
-    expect(tip.textContent).toContain('Left over')
+    expect(tip.textContent).toContain('Profit')
+    expect(tip.textContent).toContain('$9,000')
+    expect(tip.textContent).toContain('45.0%')
+  })
+
+  it('opens the tooltip in a portal on the page body, outside the card, so the card cannot clip it', () => {
+    const { container } = render(<LocalFleetCostShareCard />)
+    fireEvent.mouseEnter(screen.getByTestId('fleet-pie-2026-10'))
+    const tip = screen.getByRole('tooltip')
+    expect(container.contains(tip)).toBe(false)
+    expect(tip.parentElement).toBe(document.body)
+    expect(tip.style.position).toBe('fixed')
+    fireEvent.mouseLeave(screen.getByTestId('fleet-pie-2026-10'))
+    expect(screen.queryByRole('tooltip')).toBeNull()
+  })
+
+  it('opens the tooltip on tap for touch screens', () => {
+    render(<LocalFleetCostShareCard />)
+    fireEvent.click(screen.getByTestId('fleet-pie-2026-10'))
+    expect(screen.getByRole('tooltip').textContent).toContain('Profit')
   })
 
   it('says what the rings and the left-over slice mean', () => {
     render(<LocalFleetCostShareCard />)
-    expect(screen.getByText(/Each ring is the month's revenue/)).toBeTruthy()
+    expect(screen.getByText(/Each pie is the month's revenue/)).toBeTruthy()
   })
 })
