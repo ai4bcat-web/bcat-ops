@@ -2309,12 +2309,11 @@ describe('SET_BILL_DATES (bills created by Move to billing)', () => {
     await expect(call('APPROVE_BILL', { billId: bill.id })).rejects.toThrow(/invoice date and due date/)
   })
 
-  it('stores the carrier invoice dates and number, clears the flag, and lets the bill be approved', async () => {
+  it('stores the carrier invoice dates and number, clears the flag, and approves the bill (no review step)', async () => {
     const bill = await pendingBill()
     const out = (await call('SET_BILL_DATES', { billId: bill.id, billDate: '2026-10-30', dueAt: '2026-11-29', billNumber: 'W-5512' })) as { bill: Row }
-    expect(out.bill).toMatchObject({ billDate: '2026-10-30', billMonth: '2026-10', dueAt: '2026-11-29', billNumber: 'W-5512', datesPending: false, status: 'IN_REVIEW' })
-    const approved = (await call('APPROVE_BILL', { billId: bill.id })) as { bill: Row }
-    expect(approved.bill.status).toBe('TO_BE_PAID')
+    expect(out.bill).toMatchObject({ billDate: '2026-10-30', billMonth: '2026-10', dueAt: '2026-11-29', billNumber: 'W-5512', datesPending: false, status: 'TO_BE_PAID', approvedBy: 'admin@bcatcorp.com' })
+    expect([...table(TABLES.audit).values()].some((row) => row.action === 'AUTO_APPROVE_BILL')).toBe(true)
     const audit = [...table(TABLES.audit).values()].find((row) => row.action === 'SET_BILL_DATES')
     expect(audit).toBeTruthy()
   })
@@ -2326,11 +2325,11 @@ describe('SET_BILL_DATES (bills created by Move to billing)', () => {
     expect(table(TABLES.carrierBill).get(String(bill.id))!.datesPending).toBe(true)
   })
 
-  it('refuses once the bill is approved: unapprove it first', async () => {
+  it('refuses once the bill is on a pay run: take it off first', async () => {
     seedAssignment()
     const bill = await recordBill({})
-    await call('APPROVE_BILL', { billId: bill.id })
-    await expect(call('SET_BILL_DATES', { billId: bill.id, billDate: '2026-10-30', dueAt: '2026-11-29' })).rejects.toThrow(/unapprove it first/)
+    await call('SELECT_BILLS_FOR_PAYMENT', { billIds: [bill.id] })
+    await expect(call('SET_BILL_DATES', { billId: bill.id, billDate: '2026-10-30', dueAt: '2026-11-29' })).rejects.toThrow(/pay run/)
   })
 
   it('needs AP access, like every other bill action', async () => {
@@ -2351,7 +2350,7 @@ describe('SET_BILL_DATES with quick pay (Add invoice date dialog)', () => {
     const bill = await pendingBill()
     const out = (await call('SET_BILL_DATES', { billId: bill.id, billDate: '2026-11-02', dueAt: '2026-12-02', quickPayDays: 2 })) as { bill: Row }
     expect(out.bill).toMatchObject({
-      billDate: '2026-11-02', dueAt: '2026-11-04', datesPending: false, status: 'IN_REVIEW',
+      billDate: '2026-11-02', dueAt: '2026-11-04', datesPending: false, status: 'TO_BE_PAID',
       quickPay: true, quickPayDays: 2, quickPayFeeBps: 600, quickPayFeeCents: 10_800, netCents: 169_200, balanceCents: 169_200, termsDays: 2,
     })
     expect(table(TABLES.loadCarrier).get(LOAD_CARRIER_ID)).toMatchObject({ quickPay: true, quickPayDays: 2, quickPayFeeBps: 600 })
@@ -2404,7 +2403,6 @@ describe('RETURN_BILL_TO_EXPECTED (Aging → Expected)', () => {
     await call('RETURN_BILL_TO_EXPECTED', { billId: bill.id })
     await expect(call('RETURN_BILL_TO_EXPECTED', { billId: bill.id })).rejects.toThrow(/already in Expected/)
     await call('SET_BILL_DATES', { billId: bill.id, billDate: '2026-11-02', dueAt: '2026-12-02' })
-    await call('APPROVE_BILL', { billId: bill.id })
     await call('SELECT_BILLS_FOR_PAYMENT', { billIds: [bill.id] })
     await expect(call('RETURN_BILL_TO_EXPECTED', { billId: bill.id })).rejects.toThrow(/pay run/)
     table(TABLES.carrierBill).set(String(bill.id), { ...table(TABLES.carrierBill).get(String(bill.id))!, selectedForPayment: false, paidCents: 5_000 })
@@ -2479,13 +2477,24 @@ describe('SELECT_BILLS_FOR_PAYMENT / UNSELECT_BILLS (the pay run)', () => {
     expect(table(TABLES.carrierBill).get(String(bill.id))!.selectedForPayment).toBeUndefined()
   })
 
-  it('reports a bill still in review, or one waiting on its dates, instead of selecting it', async () => {
+  it('approves a dated bill still stored as in review as it is selected, and reports one waiting on its dates', async () => {
     seedAssignment()
-    const inReview = await recordBill({})
-    const out = (await call('SELECT_BILLS_FOR_PAYMENT', { billIds: [inReview.id, 'nope'] })) as { selected: string[]; skipped: { billId: string; reason: string }[] }
+    const dated = await recordBill({})
+    const out = (await call('SELECT_BILLS_FOR_PAYMENT', { billIds: [dated.id, 'nope'] })) as { selected: string[]; skipped: { billId: string; reason: string }[] }
+    expect(out.selected).toEqual([dated.id])
+    expect(out.skipped.map((x) => x.reason)).toEqual(['Bill not found'])
+    expect(table(TABLES.carrierBill).get(String(dated.id))).toMatchObject({ selectedForPayment: true, status: 'TO_BE_PAID' })
+    expect([...table(TABLES.audit).values()].some((row) => row.action === 'AUTO_APPROVE_BILL')).toBe(true)
+  })
+
+  it('reports a bill still waiting on its invoice date instead of selecting it', async () => {
+    seedAssignment()
+    const waiting = await recordBill({})
+    table(TABLES.carrierBill).set(String(waiting.id), { ...table(TABLES.carrierBill).get(String(waiting.id))!, datesPending: true })
+    const out = (await call('SELECT_BILLS_FOR_PAYMENT', { billIds: [waiting.id] })) as { selected: string[]; skipped: { billId: string; reason: string }[] }
     expect(out.selected).toEqual([])
-    expect(out.skipped.map((x) => x.reason)).toEqual(['Only an approved bill can be selected for payment', 'Bill not found'])
-    expect(table(TABLES.carrierBill).get(String(inReview.id))!.selectedForPayment).toBeUndefined()
+    expect(out.skipped.map((x) => x.reason)).toEqual(['Only an approved bill can be selected for payment'])
+    expect(table(TABLES.carrierBill).get(String(waiting.id))!.selectedForPayment).toBeUndefined()
   })
 
   it('clears the selection when the bill is sent back to review', async () => {
@@ -2637,9 +2646,25 @@ describe('RECORD_AP_PAYMENT', () => {
     expect(table(TABLES.apPayment).size).toBe(0)
   })
 
-  it('refuses to pay a bill that has not been approved', async () => {
+  it('pays a dated bill still stored as in review: it is approved first', async () => {
     seedAssignment()
     const bill = await recordBill()
+    const out = (await call('RECORD_AP_PAYMENT', {
+      carrierId: CARRIER_ID,
+      paidAt: '2026-10-25',
+      method: 'ACH',
+      amountCents: 180_000,
+      applications: [{ billId: bill.id, amountCents: 180_000 }],
+    })) as { payment: Row }
+    expect(out.payment).toBeTruthy()
+    expect(table(TABLES.carrierBill).get(String(bill.id))).toMatchObject({ status: 'PAID' })
+    expect([...table(TABLES.audit).values()].some((row) => row.action === 'AUTO_APPROVE_BILL')).toBe(true)
+  })
+
+  it('refuses to pay a bill that is still waiting on its invoice date', async () => {
+    seedAssignment()
+    const bill = await recordBill()
+    table(TABLES.carrierBill).set(String(bill.id), { ...table(TABLES.carrierBill).get(String(bill.id))!, datesPending: true })
     await expect(
       call('RECORD_AP_PAYMENT', {
         carrierId: CARRIER_ID,

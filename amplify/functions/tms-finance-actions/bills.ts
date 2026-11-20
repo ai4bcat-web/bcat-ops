@@ -463,6 +463,22 @@ function adoptedPayeeFields(
 }
 
 export async function approveBill(input: Row, caller: Caller): Promise<Row> {
+  return approveBillWith(input, caller, false)
+}
+
+/**
+ * There is no separate review step any more (Ryne 2026-11-19): a bill that has its invoice date is reviewed. A bill still
+ * stored as IN_REVIEW with real dates is approved on the spot, the first time anything needs it approved (selecting it,
+ * paying it, or recording its dates). Nothing blocks and no warning needs acknowledging; whatever the old review would have
+ * flagged is kept on the bill as `approvalWarnings`, and the audit entry says it was automatic.
+ */
+export async function autoApproveBill(billId: string, caller: Caller): Promise<void> {
+  const bill = await readBill(billId)
+  if (bill.status !== 'IN_REVIEW' || bill.datesPending === true) return
+  await approveBillWith({ billId }, caller, true)
+}
+
+async function approveBillWith(input: Row, caller: Caller, auto: boolean): Promise<Row> {
   const billId = assertString(input.billId, 'billId')
   const acknowledged = input.acknowledgeWarnings == null
     ? []
@@ -499,8 +515,8 @@ export async function approveBill(input: Row, caller: Caller): Promise<Row> {
     // The router admitted this caller to Accounts payable, which is every action on it.
     isAdmin: true,
   })
-  if (check.blocks.length > 0) throw new Error(check.blocks.join(' '))
-  const unacknowledged = check.warnings.filter((warning) => !acknowledged.includes(warning.key))
+  if (!auto && check.blocks.length > 0) throw new Error(check.blocks.join(' '))
+  const unacknowledged = auto ? [] : check.warnings.filter((warning) => !acknowledged.includes(warning.key))
   if (unacknowledged.length > 0) {
     throw new Error(`Acknowledge before approving: ${unacknowledged.map((w) => w.message).join(' ')}`)
   }
@@ -514,7 +530,7 @@ export async function approveBill(input: Row, caller: Caller): Promise<Row> {
           status: 'TO_BE_PAID',
           approvedAt: now,
           approvedBy: caller.email,
-          approvalWarnings: check.warnings.map((warning) => warning.key),
+          approvalWarnings: [...check.blocks.map(() => 'AUTO_BLOCK_SKIPPED'), ...check.warnings.map((warning) => warning.key)].slice(0, 20),
           ...(overriding
             ? { docsOverrideAt: now, docsOverrideBy: caller.email, docsOverrideNote }
             : {}),
@@ -539,8 +555,9 @@ export async function approveBill(input: Row, caller: Caller): Promise<Row> {
     ],
     'bill approval',
   )
-  await writeAudit('CarrierBill', billId, 'APPROVE_BILL', caller, {
+  await writeAudit('CarrierBill', billId, auto ? 'AUTO_APPROVE_BILL' : 'APPROVE_BILL', caller, {
     acknowledged,
+    ...(auto ? { automatic: true, skippedBlocks: check.blocks } : {}),
     docsOverrideNote,
     netCents: bill.netCents,
     ...(adopted
@@ -745,10 +762,10 @@ export async function setBillDates(input: Row, caller: Caller): Promise<Row> {
   if (quickPayDays && !option) throw new Error(`${quickPayDays} days is not one of the quick-pay options (2 days at 6%, 10 days at 3%)`)
 
   const bill = await readBill(billId)
-  if (bill.status !== 'IN_REVIEW') {
-    throw new Error(bill.status === 'VOID'
-      ? 'That bill is void'
-      : 'Only a bill in review can have its dates changed; unapprove it first')
+  // A dated bill is approved at once (no review step), so its dates stay correctable until it is on a pay run or paid.
+  if (bill.status === 'VOID') throw new Error('That bill is void')
+  if (bill.status !== 'IN_REVIEW' && !(bill.status === 'TO_BE_PAID' && bill.selectedForPayment !== true)) {
+    throw new Error('The dates of a bill on a pay run or with money applied cannot change; take it off the pay run first')
   }
   if ((bill.paidCents ?? 0) + (bill.creditedCents ?? 0) > 0) {
     throw new Error('Money has already been applied to this bill; its dates cannot change')
@@ -805,7 +822,7 @@ export async function setBillDates(input: Row, caller: Caller): Promise<Row> {
           } : {}),
           datesPending: false,
           // Written unchanged so the condition below can name it (`status` is a reserved word).
-          status: 'IN_REVIEW',
+          status: bill.status,
           updatedAt: now,
           updatedBy: caller.email,
           version: (bill.version ?? 1) + 1,
@@ -824,6 +841,9 @@ export async function setBillDates(input: Row, caller: Caller): Promise<Row> {
     from: { billDate: bill.billDate, dueAt: bill.dueAt, billNumber: bill.billNumber ?? null, datesPending: bill.datesPending === true, ...(changesQuickPay ? { quickPayDays: bill.quickPayDays ?? null, feeCents: bill.quickPayFeeCents ?? 0, netCents: bill.netCents } : {}) },
     to: { billDate, dueAt, billNumber: billNumber ?? bill.billNumber ?? null, ...(changesQuickPay && money ? { quickPayDays: option?.days ?? null, feeCents: money.quickPayFeeCents, netCents: money.netCents } : {}) },
   })
+  // Recording the invoice date is the review: the bill is approved now. If that step fails the dates stand and the
+  // bill is approved the first time it is selected or paid.
+  try { await autoApproveBill(billId, caller) } catch (err) { console.warn('auto-approve after dates failed', billId, err instanceof Error ? err.message : err) }
   return { bill: (await getById(CARRIER_BILL_TABLE_NAME, billId)) ?? {} }
 }
 
@@ -1006,7 +1026,10 @@ export async function selectBillsForPayment(input: Row, caller: Caller): Promise
   const selected: string[] = []
   const skipped: { billId: string; reason: string }[] = []
   for (const billId of [...new Set(ids)]) {
-    const bill = await getById(CARRIER_BILL_TABLE_NAME, billId) as CarrierBillRecord | null
+    let bill = await getById(CARRIER_BILL_TABLE_NAME, billId) as CarrierBillRecord | null
+    if (bill && bill.status === 'IN_REVIEW' && bill.datesPending !== true) {
+      try { await autoApproveBill(billId, caller); bill = await getById(CARRIER_BILL_TABLE_NAME, billId) as CarrierBillRecord | null } catch { /* reported below as not approved */ }
+    }
     const reason = !bill ? 'Bill not found'
       : bill.status !== 'TO_BE_PAID' && bill.status !== 'PARTIAL' ? 'Only an approved bill can be selected for payment'
         : bill.datesPending === true ? 'Set the invoice date and due date first'

@@ -78,13 +78,13 @@ describe('cash requirements', () => {
     expect(cash.openCents).toBe(154_00)
   })
 
-  it('splits each line into approved and in review, and finds the largest week', () => {
+  it('counts every dated bill as payable (no review step), and finds the largest week', () => {
     const cash = cashRequirements([
       bill({ id: 'a', dueAt: '2026-11-27', balanceCents: 100_00 }),
       bill({ id: 'b', status: 'IN_REVIEW', dueAt: '2026-11-27', balanceCents: 40_00 }),
       bill({ id: 'c', dueAt: '2026-12-04', balanceCents: 90_00 }),
     ], today)
-    expect(cash.weeks[1]).toMatchObject({ approvedCents: 100_00, unapprovedCents: 40_00, totalCents: 140_00 })
+    expect(cash.weeks[1]).toMatchObject({ approvedCents: 140_00, totalCents: 140_00 })
     expect(cash.largestWeek?.friday).toBe('2026-11-27')
     expect(cash.scheduledCents).toBe(230_00)
   })

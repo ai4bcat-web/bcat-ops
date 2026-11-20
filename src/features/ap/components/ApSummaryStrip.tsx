@@ -41,7 +41,7 @@ export function ApSummaryStrip({ summary, due, onDue, missing, onCashRequirement
             { key: 'aging', label: 'Aging', value: formatCents(s.aging.cents), sub: bills(s.aging.count), onClick: () => onTab('aging') },
             { key: 'selected', label: 'Selected', value: formatCents(s.selected.cents), sub: `${bills(s.selected.count)} · next payment run`, onClick: () => onTab('selected') },
             { key: 'past-due', label: 'Past due', value: formatCents(s.pastDue.cents), sub: bills(s.pastDue.count), tone: s.pastDue.cents > 0 ? 'bad' : 'default', onClick: onCashRequirements },
-            { key: 'next7', label: 'Due next 7 days', value: formatCents(s.dueNext7.cents), sub: bills(s.dueNext7.count), onClick: onCashRequirements },
+            { key: 'next7', label: 'Due this week', value: formatCents(s.dueNext7.cents), sub: bills(s.dueNext7.count), onClick: onCashRequirements },
           ]}
         />
       </div>

@@ -8,7 +8,7 @@ import type { ApSummary } from '../apQueue'
 const m = (count: number, cents: number) => ({ count, cents })
 const summary = (over: Partial<ApSummary> = {}): ApSummary => ({
   open: m(5, 1000_00), fromAljex: m(2, 400_00), expected: m(1, 100_00), aging: m(2, 300_00), selected: m(2, 600_00),
-  pastDue: m(1, 150_00), dueNext7: m(2, 250_00), paidWeek: m(3, 450_00), paidMonth: m(7, 1200_00), payToFactor: m(1, 200_00), payDirect: m(4, 800_00),
+  pastDue: m(1, 150_00), expectedLate: m(0, 0), dueNext7: m(2, 250_00), paidWeek: m(3, 450_00), paidMonth: m(7, 1200_00), payToFactor: m(1, 200_00), payDirect: m(4, 800_00),
   quickPay: { count: 0, feeCents: 0, fee6Cents: 0, fee3Cents: 0 },
   avgDaysToPay: 12.5, avgDaysToPayCount: 8, avgDaysToInvoice: 3, avgDaysToInvoiceCount: 6,
   byDivision: [{ key: 'BROKERAGE', division: 'BROKERAGE', subdivision: null, count: 5, cents: 1000_00 }],
