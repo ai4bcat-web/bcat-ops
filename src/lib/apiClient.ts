@@ -8508,6 +8508,8 @@ export async function recordApPayment(input: {
   creditApplications: CreditApplication[]
   note?: string
   clientRequestId: string
+  /** The payment already went out outside the app: record it without e-mailing a remittance. */
+  suppressRemittance?: boolean
 }): Promise<ApPostedRow> {
   return financeAction<ApPostedRow>('RECORD_AP_PAYMENT', input)
 }
