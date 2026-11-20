@@ -91,6 +91,7 @@ export function PayCarrierDialog({ carrierId, payeeName, payToNeeded, payBlocks,
   const [reference, setReference] = useState('')
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
+  const [alreadyPaid, setAlreadyPaid] = useState(false)
   const [allocations, setAllocations] = useState<AmountDrafts>({})
   const [creditUses, setCreditUses] = useState<AmountDrafts>({})
   const [rawBills, setBills] = useState<CarrierBillRecord[]>([])
@@ -232,6 +233,7 @@ export function PayCarrierDialog({ carrierId, payeeName, payToNeeded, payBlocks,
       clientRequestId,
       reference: reference.trim() || undefined,
       note: note.trim() || undefined,
+      ...(alreadyPaid ? { suppressRemittance: true } : {}),
     })
       .then((row) => {
         toast.success(row.duplicate
@@ -401,6 +403,16 @@ export function PayCarrierDialog({ carrierId, payeeName, payToNeeded, payBlocks,
               </ul>
             </div>
           )}
+
+          <label className="flex items-center gap-2 text-sm" data-testid="pay-dialog-no-remittance">
+            <input
+              type="checkbox"
+              checked={alreadyPaid}
+              disabled={disabled}
+              onChange={(e) => setAlreadyPaid(e.target.checked)}
+            />
+            Already paid outside the app — don&apos;t send remittance e-mail
+          </label>
 
           <TmsField label="Note">
             <TmsTextarea

@@ -367,6 +367,18 @@ function remitToOf(bills: Row[]): Row | null {
   return null
 }
 
+const HISTORICAL_NOTE = 'Historical payment recorded outside the app, no remittance sent'
+
+/**
+ * A payment that already went out of the bank outside the app (Ryne 2026-11-19) is recorded without telling the
+ * carrier again; the note on the row says so. Only a literal `true` suppresses: anything else still e-mails.
+ */
+export function remittanceOptions(flag: unknown, typedNote: string | null | undefined): { suppressRemittance: boolean; note: string | null | undefined } {
+  const suppressRemittance = flag === true
+  if (!suppressRemittance) return { suppressRemittance, note: typedNote }
+  return { suppressRemittance, note: [HISTORICAL_NOTE, typedNote].filter(Boolean).join(' — ').slice(0, MAX_NOTE) }
+}
+
 export async function recordApPayment(input: Row, caller: Caller): Promise<PostedRow> {
   const carrierId = assertString(input.carrierId, 'carrierId')
   const paidAt = paidAtOf(input.paidAt)
@@ -375,7 +387,7 @@ export async function recordApPayment(input: Row, caller: Caller): Promise<Poste
   const amountCents = optionalInteger(input.amountCents, { min: 0, label: 'amountCents' }) ?? 0
   const applications = assertApplications(input.applications, 'applications')
   const creditApplications = assertCreditApplications(input.creditApplications, 'creditApplications')
-  const note = optionalString(input.note, MAX_NOTE)
+  const { suppressRemittance, note } = remittanceOptions(input.suppressRemittance, optionalString(input.note, MAX_NOTE))
   const clientRequestId = optionalString(input.clientRequestId, 64)
 
   const id = paymentId('app', carrierId, clientRequestId)
@@ -458,12 +470,14 @@ export async function recordApPayment(input: Row, caller: Caller): Promise<Poste
       appliedCents: plan.appliedCents,
       applications: stored,
       creditApplications,
+      ...(suppressRemittance ? { remittanceSuppressed: true } : {}),
     })
     // The advice is rendered after the money is recorded, never before: a renderer
     // that throws must not stop a payment that has already gone out of the bank.
     await storeRemittance(id, caller)
     // Then the carrier is told, once. A failure here never touches the payment (see autoSendRemittance).
-    await autoSendRemittance(id, caller)
+    // A historical payment recorded with `suppressRemittance` tells nobody.
+    if (!suppressRemittance) await autoSendRemittance(id, caller)
   }
   return readBack(id, billIds, duplicate)
 }

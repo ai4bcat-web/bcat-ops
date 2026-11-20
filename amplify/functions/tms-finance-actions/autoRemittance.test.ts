@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CarrierBillRecord, CarrierPaymentMethodRecord } from '../../../src/types/tms'
-import { autoRemittanceDecision, remitRecipientsFor } from './apPayments'
+import { autoRemittanceDecision, remitRecipientsFor, remittanceOptions } from './apPayments'
 
 type Ctx = Parameters<typeof remitRecipientsFor>[0]
 
@@ -102,5 +102,21 @@ describe('the remit address is the pay to\'s (Ryne 2026-11-19)', () => {
 
   it('falls back to the carrier\'s own address while nothing is filed for the pay to', () => {
     expect(autoRemittanceDecision(ctx({ bills: direct('Green Haul Inc'), factorEmails: {} }), undefined)).toEqual({ action: 'SEND', to: ['ap@blue.com'] })
+  })
+})
+
+describe('remittanceOptions (historical payments)', () => {
+  it('suppresses only on a literal true and says so in the note', () => {
+    expect(remittanceOptions(true, 'Zelle')).toEqual({
+      suppressRemittance: true,
+      note: 'Historical payment recorded outside the app, no remittance sent — Zelle',
+    })
+    expect(remittanceOptions(true, undefined).note).toBe('Historical payment recorded outside the app, no remittance sent')
+  })
+
+  it('still e-mails by default and for anything that is not true', () => {
+    expect(remittanceOptions(undefined, 'x')).toEqual({ suppressRemittance: false, note: 'x' })
+    expect(remittanceOptions('true', null).suppressRemittance).toBe(false)
+    expect(remittanceOptions(1, null).suppressRemittance).toBe(false)
   })
 })

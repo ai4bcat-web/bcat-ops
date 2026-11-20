@@ -138,6 +138,30 @@ describe('PayCarrierDialog', () => {
     expect(postButton().disabled).toBe(false)
   })
 
+  it('posts with the no-remittance flag only when the already-paid box is ticked', async () => {
+    recordApPayment.mockResolvedValue({ payment: { amountCents: 100000 }, bills: [], duplicate: false })
+    await openForm()
+    type('Payment amount', '1000.00')
+    type('Apply to bill BLT-1001', '1000.00')
+    await waitFor(() => expect(postButton().disabled).toBe(false))
+    fireEvent.click(postButton())
+    await waitFor(() => expect(recordApPayment).toHaveBeenCalledTimes(1))
+    expect(recordApPayment.mock.calls[0][0]).not.toHaveProperty('suppressRemittance')
+  })
+
+  it('sends suppressRemittance when "Already paid outside the app" is ticked', async () => {
+    recordApPayment.mockClear()
+    recordApPayment.mockResolvedValue({ payment: { amountCents: 100000 }, bills: [], duplicate: false })
+    await openForm()
+    type('Payment amount', '1000.00')
+    type('Apply to bill BLT-1001', '1000.00')
+    fireEvent.click(screen.getByLabelText(/Already paid outside the app/))
+    await waitFor(() => expect(postButton().disabled).toBe(false))
+    fireEvent.click(postButton())
+    await waitFor(() => expect(recordApPayment).toHaveBeenCalledTimes(1))
+    expect(recordApPayment.mock.calls[0][0]).toMatchObject({ suppressRemittance: true })
+  })
+
   it("refuses to put more against a bill than it owes, in the carrier's words", async () => {
     await openForm()
 
