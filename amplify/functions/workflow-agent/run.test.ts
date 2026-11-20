@@ -351,7 +351,7 @@ s3Send.mockImplementation(async (cmd: MockCommand) => {
   }
 })
 
-import { INLINE_BUDGET_MS, retryRun, runFor, sweepStalled } from './run'
+import { INLINE_BUDGET_MS, rereadPayable, retryRun, runFor, sweepStalled } from './run'
 import { retryable, type RunStateRow } from '../../../src/lib/workflows/runState'
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -709,6 +709,55 @@ describe('runFor', () => {
     expect(Object.keys(update?.sets ?? {}).sort()).toEqual(
       ['amount', 'dueDate', 'extractedAt', 'extractionNote', 'invoiceDate', 'invoiceNumber', 'updatedAt', 'vendor'],
     )
+  })
+
+  it('still fills a vendor payable when the forwarder shares a domain with a carrier on file', async () => {
+    // Staff forward vendor invoices to vendorpayments@, and our own company is a carrier record: the
+    // only candidate is BCAT itself. That used to end the run UNKNOWN_PARTY before the row was written.
+    table(TABLES.carrier).set('carr-own', { id: 'carr-own', name: 'BCAT LOGISTICS CORPORATION', email: 'dispatch@bcatcorp.com' })
+    table(TABLES.payable).set('email:fwd', {
+      id: 'email:fwd',
+      source: 'EMAIL',
+      status: 'NEED_TO_PAY',
+      subject: 'Fwd: Invoices Available [661272]',
+      fromEmail: 'dennis@bcatcorp.com',
+      emailBody: 'Invoice attached',
+      receivedAt: '2026-11-11T12:00:00.000Z',
+      attachments: [],
+    })
+    modelReplies.push({ agent: 'AP', confidence: 'high', reason: 'a bill' }, EXTRACTION)
+
+    const run = await runFor({ sourceKind: 'VENDOR_PAYABLE', sourceId: 'email:fwd', inboxRole: 'AP', provider: 'GMAIL' })
+
+    expect(run.outcome).toBe('PROPOSED')
+    expect(run.exceptionOpen ?? null).toBeNull()
+    expect(table(TABLES.payable).get('email:fwd')).toMatchObject({ vendor: 'Lyons Truck Parts', invoiceNumber: '157588' })
+  })
+
+  it('reads a payable again on request, even after an UNKNOWN_PARTY run', async () => {
+    table(TABLES.payable).set('email:blank', {
+      id: 'email:blank',
+      source: 'EMAIL',
+      status: 'NEED_TO_PAY',
+      subject: 'Fwd: Invoice 157588',
+      fromEmail: 'ap@lyonstruck.example',
+      emailBody: 'Invoice attached',
+      receivedAt: '2026-11-11T12:00:00.000Z',
+      attachments: [],
+    })
+    modelReplies.push({ agent: 'AP', confidence: 'high', reason: 'a bill' }, EXTRACTION)
+    const first = await runFor({ sourceKind: 'VENDOR_PAYABLE', sourceId: 'email:blank', inboxRole: 'AP', provider: 'GMAIL' })
+    // Pretend an earlier build stopped it before the row was written.
+    table(TABLES.run).set(first.id, { ...table(TABLES.run).get(first.id), outcome: 'UNKNOWN_PARTY', exceptionOpen: 'OPEN' })
+    table(TABLES.payable).set('email:blank', { ...table(TABLES.payable).get('email:blank'), vendor: undefined, invoiceNumber: undefined, amount: undefined, dueDate: undefined, invoiceDate: undefined, extractedAt: undefined })
+    modelReplies.push({ agent: 'AP', confidence: 'high', reason: 'a bill' }, EXTRACTION)
+
+    const again = await rereadPayable('email:blank', { email: 'ryne@bcatcorp.com' })
+
+    expect(again.id).toBe(first.id)
+    expect(again.outcome).toBe('PROPOSED')
+    expect(again.attempts).toBe(2)
+    expect(table(TABLES.payable).get('email:blank')).toMatchObject({ vendor: 'Lyons Truck Parts', amount: 123456 })
   })
 
   it('opens an exception when the sender could only be guessed at', async () => {

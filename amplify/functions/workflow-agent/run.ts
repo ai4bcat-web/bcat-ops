@@ -690,7 +690,12 @@ async function execute(run: RunRow, pinned?: PinnedParty, budgetMs: number | nul
 
     // A name we could not resolve but could guess at is the Errors queue's job,
     // not the model's: a person picks, and SET_RUN_PARTY re-runs from here.
-    if (!match.match && match.candidates.length > 0) {
+    // Not for a vendor payable: that is the vendorpayments@ queue, where the sender is a person at
+    // BCAT forwarding someone else's invoice, so the only candidates are our own company's carrier
+    // records (named in the invoice's bill-to). Stopping there threw the finished reading away and
+    // left the row blank; the vendor-bill step below fills a payable's blanks and nothing else.
+    const vendorPayableDesk = run.agent === 'AP' && source.payable != null
+    if (!match.match && match.candidates.length > 0 && !vendorPayableDesk) {
       if (tenderParse) {
         await stageForIntake(run, mailForIntake, {
           kind: 'PARSED', parse: tenderParse, stopFacilityHits: [],
@@ -1047,6 +1052,42 @@ export async function retryRun(
   run.startedAt = null
   run.updatedBy = caller.email
   // The CAS is taken once, here: everything after it is this invocation's own row.
+  await persist(run, expectedVersion)
+  return execute(run, undefined, budgetMs)
+}
+
+/**
+ * REREAD_PAYABLE: a person asked for a vendor payable's invoice to be read again (the row came up
+ * blank, or a better reading is wanted). The run for a payable is addressed by its row id, so the
+ * page never has to know the run. Any run that was not applied or dismissed goes again from the top,
+ * attempts counted; the cap that guards automatic retries does not apply to a person's request. A
+ * payable that never got a run is read for the first time.
+ */
+export async function rereadPayable(
+  payableId: string,
+  caller: { email: string },
+  budgetMs: number | null = INLINE_BUDGET_MS,
+): Promise<RunRow> {
+  const id = runIdFor('AP', `VENDOR_PAYABLE:${payableId}`)
+  const row = await getRun(id)
+  if (!row) return runFor({ sourceKind: 'VENDOR_PAYABLE', sourceId: payableId, inboxRole: 'AP', provider: 'GMAIL' })
+  const run = row as unknown as RunRow
+  if (run.outcome === 'APPLIED' || run.outcome === 'DISMISSED') throw new Error('That invoice was already handled')
+  const expectedVersion = typeof run.version === 'number' ? run.version : 0
+
+  run.attempts = (run.attempts ?? 0) + 1
+  run.lastAttemptAt = nowIso()
+  run.status = 'PENDING'
+  run.outcome = null
+  run.steps = []
+  run.currentStep = null
+  run.errorCode = null
+  run.error = null
+  run.exceptionOpen = null
+  run.endedAt = null
+  run.durationMs = null
+  run.startedAt = null
+  run.updatedBy = caller.email
   await persist(run, expectedVersion)
   return execute(run, undefined, budgetMs)
 }

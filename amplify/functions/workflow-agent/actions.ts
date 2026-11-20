@@ -1,7 +1,7 @@
 /**
  * workflow-agent — the AppSync action router (`tmsWorkflowActions`).
  *
- * Thirteen actions. Four read, eight move a run, one runs the sweep. None of
+ * Fourteen actions. Four read, nine move a run, one runs the sweep. None of
  * them issues a Delete: a run is DISMISSED or RESOLVED, and the row it points
  * at is the audit trail for what a model was shown and what it proposed.
  *
@@ -15,7 +15,7 @@ import { applyLink, dismiss, resolveException, retryable } from '../../../src/li
 import { AGENT_KEYS, isAgent } from '../../../src/lib/workflows/agents'
 import { sampleRun } from './inbox'
 import { cleanToAddresses } from './intakeStage'
-import { rerunWithParty, retryRun, sweepStalled, backfillAp } from './run'
+import { rerunWithParty, rereadPayable, retryRun, sweepStalled, backfillAp } from './run'
 import {
   QUOTE_TABLE_NAME,
   SHIPMENT_TABLE_NAME,
@@ -319,6 +319,14 @@ export async function dispatch(action: string, rawInput: unknown, identity?: App
       const run = await sampleRun({ agent, subject, body, fromEmail, messageId, toAddresses: cleanToAddresses(input.toAddresses) })
       await writeAudit('WorkflowRun', run.id, action, caller, { agent, subject })
       return run
+    }
+
+    // The vendor bills page: read this e-mailed invoice again. The row id is all the page has.
+    case 'REREAD_PAYABLE': {
+      const payableId = requireString(input.payableId, 'payableId')
+      const after = await rereadPayable(payableId, caller)
+      await writeAudit('WorkflowRun', after.id, action, caller, { payableId, attempts: after.attempts, outcome: after.outcome ?? null })
+      return after
     }
 
     case 'BACKFILL_AP': {
