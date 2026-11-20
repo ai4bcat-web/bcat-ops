@@ -50,6 +50,7 @@ describe('SetBillDatesDialog', () => {
     fireEvent.change(field('Invoice date'), { target: { value: '2026-10-05' } })
     fireEvent.change(field('Carrier invoice amount'), { target: { value: '5000.00' } })
     expect(screen.getByText(/\$125\.00 lower than BCAT Ops \(\$5,125\.00\)/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('radio', { name: /Update payable to invoice amount/ }))
     fireEvent.change(screen.getByLabelText('Reason for amount change'), { target: { value: 'Detention' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save amount and dates' }))
 
@@ -67,6 +68,7 @@ describe('SetBillDatesDialog', () => {
     render(<SetBillDatesDialog bill={bill()} open onOpenChange={vi.fn()} onDone={vi.fn()} />)
     fireEvent.change(field('Invoice date'), { target: { value: '2026-10-05' } })
     fireEvent.change(field('Carrier invoice amount'), { target: { value: '1300.00' } })
+    fireEvent.click(screen.getByRole('radio', { name: /Update payable to invoice amount/ }))
     fireEvent.change(screen.getByLabelText('Reason for amount change'), { target: { value: 'Other' } })
     expect(screen.getByText('Say what the amount change is for.')).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Save amount and dates' }) as HTMLButtonElement).disabled).toBe(true)
@@ -75,6 +77,28 @@ describe('SetBillDatesDialog', () => {
     await waitFor(() => expect(setBillDates).toHaveBeenCalled())
     expect(getShipmentBundle).not.toHaveBeenCalled()
     expect(updateCarrierCharges).not.toHaveBeenCalled()
+  })
+
+  it('keeps the payable and flags the difference: the dates are saved with the invoice amount and the rate is not touched', async () => {
+    const onDone = vi.fn()
+    render(<SetBillDatesDialog bill={bill()} open onOpenChange={vi.fn()} onDone={onDone} />)
+    fireEvent.change(field('Invoice date'), { target: { value: '2026-10-05' } })
+    fireEvent.change(field('Carrier invoice amount'), { target: { value: '1550.00' } })
+    expect((screen.getByRole('radio', { name: /Keep payable and flag/ }) as HTMLInputElement).checked).toBe(true)
+    expect(screen.queryByLabelText('Reason for amount change')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Save dates' }))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    expect(updateCarrierCharges).not.toHaveBeenCalled()
+    expect(setBillDates).toHaveBeenCalledWith(expect.objectContaining({ billId: 'cb:lc-1:1', invoiceAmountCents: 155_000 }))
+  })
+
+  it('shows a flagged bill’s invoice amount and clears the flag when it is set back to the payable', async () => {
+    render(<SetBillDatesDialog bill={bill({ datesPending: false, billDate: '2026-10-05', dueAt: '2026-11-04', invoiceAmountCents: 155_000 })} open onOpenChange={vi.fn()} onDone={vi.fn()} />)
+    expect(field('Carrier invoice amount').value).toBe('1550.00')
+    fireEvent.change(field('Carrier invoice amount'), { target: { value: '1400.00' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save dates' }))
+    await waitFor(() => expect(setBillDates).toHaveBeenCalled())
+    expect(setBillDates.mock.calls[0][0].invoiceAmountCents).toBeNull()
   })
 
   it('does not save the dates when the amount cannot be applied, and says why', async () => {
@@ -86,6 +110,7 @@ describe('SetBillDatesDialog', () => {
     render(<SetBillDatesDialog bill={bill({ grossCents: 22_500 })} open onOpenChange={vi.fn()} onDone={vi.fn()} />)
     fireEvent.change(field('Invoice date'), { target: { value: '2026-10-05' } })
     fireEvent.change(field('Carrier invoice amount'), { target: { value: '100.00' } })
+    fireEvent.click(screen.getByRole('radio', { name: /Update payable to invoice amount/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Save amount and dates' }))
     await waitFor(() => expect(screen.getByText(/no rate line/)).toBeTruthy())
     expect(updateCarrierCharges).not.toHaveBeenCalled()

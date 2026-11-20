@@ -27,6 +27,8 @@ import {
 } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
 import { withLegSuffix, type LegIndex } from '../apViews'
+import { amountMismatchCents, hasAmountMismatch } from '@/lib/billAmountMismatch'
+import { AmountMismatchChip } from './AmountMismatchChip'
 import {
   planPayment, suggestAllocation, type PlanCredit, type PlanDocument,
 } from '@/lib/paymentApply'
@@ -354,6 +356,15 @@ export function PayCarrierDialog({ carrierId, payeeName, payToNeeded, payBlocks,
                 <Wand2 size={12} /> Auto-allocate
               </TmsButton>
             </div>
+            {bills.some(hasAmountMismatch) && (
+              <p className="mt-1 flex items-start gap-2 text-xs" role="alert">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--tms-badge-red)' }} />
+                <span>
+                  The carrier's invoice amount does not match the payable on {bills.filter(hasAmountMismatch).map((row) => `${billName(row)} (invoice ${formatCents(row.invoiceAmountCents ?? 0)}, payable ${formatCents(row.grossCents)})`).join('; ')}.
+                  Check them before posting; the payment applies against the payable.
+                </span>
+              </p>
+            )}
             {bills.length === 0 ? (
               <p className="mt-1 text-xs tms-muted">
                 Nothing is approved for this carrier. A bill is paid once it has been through review.
@@ -364,6 +375,7 @@ export function PayCarrierDialog({ carrierId, payeeName, payToNeeded, payBlocks,
                   <li key={row.id} className="flex items-center gap-3 px-2 py-1.5">
                     <span className="w-32 shrink-0 truncate font-medium">{billName(row)}</span>
                     <span className="w-24 shrink-0 text-xs tms-muted">due {row.dueAt}</span>
+                    {amountMismatchCents(row) != null && <AmountMismatchChip bill={row} />}
                     <span className="flex-1 text-right text-xs tms-muted">{formatCents(row.balanceCents)} open</span>
                     <TmsInput
                       aria-label={`Apply to bill ${billName(row)}`}

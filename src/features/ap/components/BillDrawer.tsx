@@ -19,6 +19,7 @@ import { formatDay } from '@/features/ar/arViews'
 import type { CarrierBillRecord } from '@/types/tms'
 import { BILL_STATUS_LABEL, payToLabelFor, paymentInfoFor, remitEmailOf } from '../apViews'
 import { estimatedDueAt, proOf, termsLabel, type BillFactsIndex } from '../apQueue'
+import { amountMismatchCents } from '@/lib/billAmountMismatch'
 import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
 export function BillDrawer({ bill, facts, infos, onClose, onChanged, onAdjustPay, onSetDates, onPaymentInfo, reviewFlag, onClearReview, onDelete }: {
@@ -113,6 +114,18 @@ export function BillDrawer({ bill, facts, infos, onClose, onChanged, onAdjustPay
             </div>
           )}
         </section>
+
+        {amountMismatchCents(bill) != null && (
+          <section className={section} aria-label="Amount mismatch">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <TmsBadge tone="red">Amount mismatch</TmsBadge>
+              {!pending && <TmsButton variant="ghost" size="sm" disabled={busy} onClick={() => onSetDates(bill)}>Review invoice amount</TmsButton>}
+            </div>
+            <p className="m-0 mt-2 text-sm">
+              The carrier invoiced {formatCents(bill.invoiceAmountCents ?? 0)}; the payable is {formatCents(bill.grossCents)}. The payable is what gets paid until it is changed.
+            </p>
+          </section>
+        )}
 
         {reviewFlag && (
           <section className={section} aria-label="Needs review">
