@@ -4,15 +4,22 @@
  * iPads get the same report as expandable cards.
  */
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Eye, Mail, Search, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Download, Eye, Mail, Search, X } from 'lucide-react'
 import { TmsButton } from '@/features/tms/kit'
 import { useAuthUser } from '@/hooks/useAuth'
 import { AR_AGING_BUCKETS, AR_AGING_BUCKET_LABEL } from '@/lib/arAging'
 import { formatCents } from '@/lib/invoiceBuild'
 import { chicagoDateStr } from '@/lib/date'
+import { downloadCsv } from '@/lib/directoryCsv'
 import { formatDay } from '../arViews'
+import { AgingColumnFilter } from './AgingColumnFilter'
+import type { AgingFilterColumn } from '../agingColumnFilters'
 import {
   DEFAULT_AGING_SORT,
+  DEFAULT_AGING_INVOICE_SORT,
+  agingReportCsv,
+  sortAgingInvoices,
+  type AgingInvoiceSortKey,
   EMPTY_AGING_FILTERS,
   agingFilterCount,
   filterAgingCustomers,
@@ -32,29 +39,39 @@ import {
 import './agingReport.css'
 
 type AgingSort = { key: AgingSortKey; dir: 'asc' | 'desc' }
+type AgingInvoiceSort = { key: AgingInvoiceSortKey; dir: 'asc' | 'desc' }
+
+const INVOICE_SORT_KEYS: readonly AgingInvoiceSortKey[] = ['pro', 'number', 'customerRef', 'invoiceDate', 'dueAt', 'ageDays', 'daysPastDue', 'totalCents', 'paidCents', 'balanceCents', 'bucket', 'factored']
 
 /** Each person's own sort and filters for this report (per signed-in user), kept like the other grids. */
 function agingPrefsKey(userId: string | null | undefined): string {
   return `tms:ar-aging:${userId || 'anon'}:v1`
 }
 
-function readPrefs(key: string): { sort?: AgingSort; filters?: AgingFilters } {
+function readPrefs(key: string): { sort?: AgingSort; filters?: AgingFilters; invoiceSort?: AgingInvoiceSort } {
   try {
     const raw = typeof window === 'undefined' ? null : window.localStorage.getItem(key)
     if (!raw) return {}
-    const v = JSON.parse(raw) as { sort?: AgingSort; filters?: Partial<AgingFilters> }
+    const v = JSON.parse(raw) as { sort?: AgingSort; filters?: Partial<AgingFilters>; invoiceSort?: AgingInvoiceSort }
     return {
+      invoiceSort: v.invoiceSort && INVOICE_SORT_KEYS.includes(v.invoiceSort.key) && (v.invoiceSort.dir === 'asc' || v.invoiceSort.dir === 'desc') ? v.invoiceSort : undefined,
       sort: v.sort && typeof v.sort.key === 'string' && (v.sort.dir === 'asc' || v.sort.dir === 'desc') ? v.sort : undefined,
-      filters: v.filters ? { ...EMPTY_AGING_FILTERS, ...v.filters, buckets: Array.isArray(v.filters.buckets) ? v.filters.buckets : [] } : undefined,
+      filters: v.filters
+        ? {
+          ...EMPTY_AGING_FILTERS, ...v.filters,
+          buckets: Array.isArray(v.filters.buckets) ? v.filters.buckets : [],
+          ranges: v.filters.ranges && typeof v.filters.ranges === 'object' ? v.filters.ranges : {},
+        }
+        : undefined,
     }
   } catch {
     return {}
   }
 }
 
-function writePrefs(key: string, sort: AgingSort, filters: AgingFilters): void {
+function writePrefs(key: string, sort: AgingSort, filters: AgingFilters, invoiceSort: AgingInvoiceSort): void {
   try {
-    window.localStorage.setItem(key, JSON.stringify({ sort, filters }))
+    window.localStorage.setItem(key, JSON.stringify({ sort, filters, invoiceSort }))
   } catch {
     // Blocked storage: the report still works, it just won't remember.
   }
@@ -81,7 +98,8 @@ export function AgingReportTable({
   const [open, setOpen] = useState<Set<string>>(() => new Set())
   const [sort, setSort] = useState<AgingSort>(() => readPrefs(prefsKey).sort ?? DEFAULT_AGING_SORT)
   const [filters, setFilters] = useState<AgingFilters>(() => readPrefs(prefsKey).filters ?? EMPTY_AGING_FILTERS)
-  useEffect(() => { writePrefs(prefsKey, sort, filters) }, [prefsKey, sort, filters])
+  const [invSort, setInvSort] = useState<AgingInvoiceSort>(() => readPrefs(prefsKey).invoiceSort ?? DEFAULT_AGING_INVOICE_SORT)
+  useEffect(() => { writePrefs(prefsKey, sort, filters, invSort) }, [prefsKey, sort, filters, invSort])
   const nowIso = useMemo(() => new Date().toISOString(), [])
   const filtered = useMemo(() => filterAgingCustomers(report.customers, filters, nowIso), [report.customers, filters, nowIso])
   const rows = useMemo(() => sortAgingCustomers(filtered, sort.key, sort.dir), [filtered, sort])
@@ -94,7 +112,11 @@ export function AgingReportTable({
   )
   const setF = (patch: Partial<AgingFilters>) => setFilters((f) => ({ ...f, ...patch }))
   const toggleBucket = (b: AgingReportBucket) => setF({ buckets: filters.buckets.includes(b) ? filters.buckets.filter((x) => x !== b) : [...filters.buckets, b] })
-  const reset = () => { setFilters(EMPTY_AGING_FILTERS); setSort(DEFAULT_AGING_SORT) }
+  const reset = () => { setFilters(EMPTY_AGING_FILTERS); setSort(DEFAULT_AGING_SORT); setInvSort(DEFAULT_AGING_INVOICE_SORT) }
+  const onInvSort = (key: AgingInvoiceSortKey) => setInvSort((s) => (s.key === key
+    ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
+    : { key, dir: key === 'pro' || key === 'number' || key === 'customerRef' || key === 'dueAt' || key === 'invoiceDate' || key === 'bucket' ? 'asc' : 'desc' }))
+  const exportCsv = () => downloadCsv(`aging-report-${chicagoDateStr(nowIso)}.csv`, agingReportCsv(rows))
 
   const toggle = (id: string) => setOpen((prev) => {
     const next = new Set(prev)
@@ -109,11 +131,14 @@ export function AgingReportTable({
     ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
     : { key, dir: key === 'customer' || key === 'lastStatement' ? 'asc' : 'desc' }))
 
-  const head = (key: AgingSortKey, label: string, right = true) => (
+  const head = (key: AgingSortKey, label: string, right = true, filterCol?: AgingFilterColumn) => (
     <th scope="col" className={right ? 'tms-dg-right' : undefined} aria-sort={sort.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-      <button type="button" className="tms-aging-sort" onClick={() => onSort(key)} title={`Sort by ${label}`}>
-        {label}{sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
-      </button>
+      <span className="tms-aging-th">
+        <button type="button" className="tms-aging-sort" onClick={() => onSort(key)} title={`Sort by ${label}`}>
+          {label}{sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+        </button>
+        {filterCol && <AgingColumnFilter column={filterCol} label={label} filters={filters} onChange={setFilters} termsOptions={termsOptions} />}
+      </span>
     </th>
   )
 
@@ -160,6 +185,9 @@ export function AgingReportTable({
         <TmsButton size="sm" variant="ghost" onClick={() => setAll(!allOpen)} aria-label={allOpen ? 'Collapse all customers' : 'Expand all customers'}>
           {allOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />} {allOpen ? 'Collapse all' : 'Expand all'}
         </TmsButton>
+        <TmsButton size="sm" variant="ghost" onClick={exportCsv} disabled={rows.length === 0} aria-label="Export the aging report as CSV" data-testid="aging-export">
+          <Download size={13} /> Export CSV
+        </TmsButton>
         <span className="tms-muted text-sm">{rows.length} customer{rows.length === 1 ? '' : 's'} · {shown.count} open invoice{shown.count === 1 ? '' : 's'} · {formatCents(shown.totalCents)}
           {isFiltered && <> · <span data-testid="aging-filtered-note">filtered (Open AR {formatCents(report.totalCents)})</span></>}</span>
       </div>
@@ -172,16 +200,16 @@ export function AgingReportTable({
             <tr>
               <th scope="col" className="tms-aging-twisty-col"><span className="sr-only">Expand</span></th>
               <th scope="col" className="tms-aging-check-col"><span className="sr-only">Select</span></th>
-              {head('customer', 'Customer', false)}
-              {head('terms', 'Terms', false)}
-              {head('daysToPay', 'Avg days to pay')}
-              {AR_AGING_BUCKETS.map((b) => <Fragment key={b}>{head(b, AR_AGING_BUCKET_LABEL[b])}</Fragment>)}
-              {head('total', 'Total open')}
-              {head('pastDue', 'Past due')}
-              {head('count', 'Invoices')}
-              {head('oldest', 'Oldest')}
-              {head('lastPaid', 'Last paid', false)}
-              {head('lastStatement', 'Last aging report', false)}
+              {head('customer', 'Customer', false, 'customer')}
+              {head('terms', 'Terms', false, 'terms')}
+              {head('daysToPay', 'Avg days to pay', true, 'daysToPay')}
+              {AR_AGING_BUCKETS.map((b) => <Fragment key={b}>{head(b, AR_AGING_BUCKET_LABEL[b], true, b)}</Fragment>)}
+              {head('total', 'Total open', true, 'total')}
+              {head('pastDue', 'Past due', true, 'pastDue')}
+              {head('count', 'Invoices', true, 'count')}
+              {head('oldest', 'Oldest', true, 'oldest')}
+              {head('lastPaid', 'Last paid', false, 'lastPaid')}
+              {head('lastStatement', 'Last aging report', false, 'lastStatement')}
               <th scope="col"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
@@ -222,7 +250,7 @@ export function AgingReportTable({
                         <p className="tms-muted text-sm" data-testid="aging-last-statement-detail" style={{ margin: '4px 0 8px' }}>
                           Last aging report: {statementTitle(c)}
                         </p>
-                        <InvoiceTable invoices={c.invoices} onOpenInvoice={onOpenInvoice} />
+                        <InvoiceTable invoices={sortAgingInvoices(c.invoices, invSort.key, invSort.dir)} sort={invSort} onSort={onInvSort} onOpenInvoice={onOpenInvoice} />
                       </td>
                     </tr>
                   )}
@@ -276,7 +304,7 @@ export function AgingReportTable({
               </div>
               {isOpen && (
                 <ul className="tms-aging-card-invoices">
-                  {c.invoices.map((inv) => (
+                  {sortAgingInvoices(c.invoices, invSort.key, invSort.dir).map((inv) => (
                     <li key={inv.id}>
                       <div className="tms-aging-card-inv-top">
                         <button type="button" className="tms-link" onClick={() => onOpenInvoice(inv.id)}>{inv.pro || inv.number}</button>
@@ -339,23 +367,35 @@ function CustomerActions({ c, onPreview, onStatement, busy }: {
   )
 }
 
-function InvoiceTable({ invoices, onOpenInvoice }: { invoices: AgingReportInvoice[]; onOpenInvoice: (id: string) => void }) {
+function InvoiceTable({ invoices, sort, onSort, onOpenInvoice }: {
+  invoices: AgingReportInvoice[]
+  sort: AgingInvoiceSort
+  onSort: (key: AgingInvoiceSortKey) => void
+  onOpenInvoice: (id: string) => void
+}) {
+  const th = (key: AgingInvoiceSortKey, label: string, right = false) => (
+    <th scope="col" className={right ? 'tms-dg-right' : undefined} aria-sort={sort.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button type="button" className="tms-aging-sort" onClick={() => onSort(key)} title={`Sort invoices by ${label}`}>
+        {label}{sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+      </button>
+    </th>
+  )
   return (
     <table className="tms-aging-inv" aria-label="Open invoices">
       <thead>
         <tr>
-          <th scope="col">PRO</th>
-          <th scope="col">Invoice #</th>
-          <th scope="col">Customer ref (PO)</th>
-          <th scope="col">Invoice date</th>
-          <th scope="col">Due</th>
-          <th scope="col" className="tms-dg-right">Age</th>
-          <th scope="col" className="tms-dg-right">Past due</th>
-          <th scope="col" className="tms-dg-right">Amount</th>
-          <th scope="col" className="tms-dg-right">Paid</th>
-          <th scope="col" className="tms-dg-right">Balance</th>
-          <th scope="col">Bucket</th>
-          <th scope="col">Billed</th>
+          {th('pro', 'PRO')}
+          {th('number', 'Invoice #')}
+          {th('customerRef', 'Customer ref (PO)')}
+          {th('invoiceDate', 'Invoice date')}
+          {th('dueAt', 'Due')}
+          {th('ageDays', 'Age', true)}
+          {th('daysPastDue', 'Past due', true)}
+          {th('totalCents', 'Amount', true)}
+          {th('paidCents', 'Paid', true)}
+          {th('balanceCents', 'Balance', true)}
+          {th('bucket', 'Bucket')}
+          {th('factored', 'Billed')}
         </tr>
       </thead>
       <tbody>

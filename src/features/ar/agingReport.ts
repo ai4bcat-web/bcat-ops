@@ -10,7 +10,7 @@
  * totals row equals Open AR. Factored invoices are flagged: OTR collects them, and the customer's
  * statement leaves them off.
  */
-import { AR_AGING_BUCKETS, daysLate, daysSinceInvoice, invoiceAgeBucket } from '@/lib/arAging'
+import { AR_AGING_BUCKETS, AR_AGING_BUCKET_LABEL, daysLate, daysSinceInvoice, invoiceAgeBucket } from '@/lib/arAging'
 import type { InvoiceRecord } from '@/types/tms'
 import { isFactoredInvoice } from '@/lib/agingStatement'
 import { chicagoDateStr } from '@/lib/date'
@@ -186,7 +186,22 @@ export interface AgingFilters {
   pastDueOnly: boolean
   /** The last aging report e-mailed to the customer ('' = any). */
   statement: AgingStatementFilter
+  /** Column filters: min/max per numeric column (dollars for money columns, days or counts for the rest). */
+  ranges: Partial<Record<AgingRangeKey, AgingRange>>
+  /** Last paid from / to (YYYY-MM-DD, Chicago day); either may be ''. */
+  lastPaidFrom: string
+  lastPaidTo: string
+  /** Only customers with no payment on file. */
+  lastPaidBlank: boolean
+  /** Last aging report sent within / not sent in the last N days (a custom count for the column filter); null = off. */
+  statementWithinDays: number | null
+  statementOlderDays: number | null
 }
+
+/** The numeric columns that take a min/max column filter. */
+export type AgingRangeKey = AgingReportBucket | 'total' | 'pastDue' | 'count' | 'oldest' | 'daysToPay'
+export interface AgingRange { min?: number; max?: number }
+export const AGING_RANGE_KEYS: readonly AgingRangeKey[] = [...AR_AGING_BUCKETS, 'total', 'pastDue', 'count', 'oldest', 'daysToPay']
 
 /** Never sent, sent in the last 7 days, or not sent in 14+ days (never counts as not sent). */
 export type AgingStatementFilter = '' | 'never' | 'recent' | 'stale'
@@ -214,10 +229,32 @@ export function statementAgoLabel(days: number | null): string {
   return `${days}d ago`
 }
 
-export const EMPTY_AGING_FILTERS: AgingFilters = { search: '', customer: '', terms: '', buckets: [], pastDueOnly: false, statement: '' }
+export const EMPTY_AGING_FILTERS: AgingFilters = {
+  search: '', customer: '', terms: '', buckets: [], pastDueOnly: false, statement: '',
+  ranges: {}, lastPaidFrom: '', lastPaidTo: '', lastPaidBlank: false, statementWithinDays: null, statementOlderDays: null,
+}
 
+const rangeActive = (r: AgingRange | undefined): boolean => r != null && (r.min != null || r.max != null)
+
+/** How many filters are on: each text box, dropdown, chip and column filter counts once. */
 export function agingFilterCount(f: AgingFilters): number {
-  return (f.search.trim() ? 1 : 0) + (f.customer.trim() ? 1 : 0) + (f.terms ? 1 : 0) + f.buckets.length + (f.pastDueOnly ? 1 : 0) + (f.statement ? 1 : 0)
+  const ranges = AGING_RANGE_KEYS.filter((k) => rangeActive(f.ranges?.[k])).length
+  const paid = (f.lastPaidFrom || f.lastPaidTo ? 1 : 0) + (f.lastPaidBlank ? 1 : 0)
+  const custom = (f.statementWithinDays != null ? 1 : 0) + (f.statementOlderDays != null ? 1 : 0)
+  return (f.search.trim() ? 1 : 0) + (f.customer.trim() ? 1 : 0) + (f.terms ? 1 : 0) + f.buckets.length + (f.pastDueOnly ? 1 : 0)
+    + (f.statement ? 1 : 0) + ranges + paid + custom
+}
+
+/** The customer's value in a numeric column, in the unit its filter uses (dollars for money); null when it has none. */
+export function agingRangeValue(c: AgingReportCustomer, key: AgingRangeKey): number | null {
+  switch (key) {
+    case 'total': return c.totalCents / 100
+    case 'pastDue': return c.pastDueCents / 100
+    case 'count': return c.count
+    case 'oldest': return c.oldestDays
+    case 'daysToPay': return c.avgDaysToPay
+    default: return c.byBucket[key] / 100
+  }
 }
 
 export function filterAgingCustomers(rows: readonly AgingReportCustomer[], f: AgingFilters, nowIso: string = new Date().toISOString()): AgingReportCustomer[] {
@@ -228,6 +265,30 @@ export function filterAgingCustomers(rows: readonly AgingReportCustomer[], f: Ag
     if (f.terms && String(c.termsDays ?? '') !== f.terms) return false
     if (f.pastDueOnly && c.pastDueCents <= 0) return false
     if (f.buckets.length && !f.buckets.some((b) => c.byBucket[b] > 0)) return false
+    for (const k of AGING_RANGE_KEYS) {
+      const r = f.ranges?.[k]
+      if (!rangeActive(r)) continue
+      const v = agingRangeValue(c, k)
+      // A blank (no average yet) never satisfies a number range.
+      if (v == null) return false
+      if (r!.min != null && v < r!.min) return false
+      if (r!.max != null && v > r!.max) return false
+    }
+    if (f.lastPaidBlank && c.lastPaidAt) return false
+    if (f.lastPaidFrom || f.lastPaidTo) {
+      const day = c.lastPaidAt ? chicagoDateStr(c.lastPaidAt) : ''
+      if (!day) return false
+      if (f.lastPaidFrom && day < f.lastPaidFrom) return false
+      if (f.lastPaidTo && day > f.lastPaidTo) return false
+    }
+    if (f.statementWithinDays != null) {
+      const d = daysSinceStatement(c.lastStatementAt, nowIso)
+      if (d == null || d > f.statementWithinDays) return false
+    }
+    if (f.statementOlderDays != null) {
+      const d = daysSinceStatement(c.lastStatementAt, nowIso)
+      if (d != null && d < f.statementOlderDays) return false
+    }
     if (f.statement) {
       const days = daysSinceStatement(c.lastStatementAt, nowIso)
       if (f.statement === 'never' && days != null) return false
@@ -243,6 +304,35 @@ export function filterAgingCustomers(rows: readonly AgingReportCustomer[], f: Ag
   })
 }
 
+export type AgingInvoiceSortKey = 'pro' | 'number' | 'customerRef' | 'invoiceDate' | 'dueAt' | 'ageDays' | 'daysPastDue' | 'totalCents' | 'paidCents' | 'balanceCents' | 'bucket' | 'factored'
+
+/** The order the open invoices under a customer have always had: due date, then invoice date. */
+export const DEFAULT_AGING_INVOICE_SORT: { key: AgingInvoiceSortKey; dir: 'asc' | 'desc' } = { key: 'dueAt', dir: 'asc' }
+
+const BUCKET_ORDER: Record<AgingReportBucket, number> = { D1_30: 0, D31_60: 1, D61_90: 2, D91_PLUS: 3 }
+
+/** A customer's open invoices in the chosen order; ties fall back to invoice number so the order is stable. */
+export function sortAgingInvoices(rows: readonly AgingReportInvoice[], key: AgingInvoiceSortKey, dir: 'asc' | 'desc'): AgingReportInvoice[] {
+  const val = (i: AgingReportInvoice): string | number => {
+    switch (key) {
+      case 'pro': return i.pro.toLowerCase()
+      case 'number': return i.number.toLowerCase()
+      case 'customerRef': return (i.customerRef ?? '').toLowerCase()
+      case 'invoiceDate': return i.invoiceDate || ''
+      case 'dueAt': return i.dueAt || ''
+      case 'bucket': return BUCKET_ORDER[i.bucket]
+      case 'factored': return i.factored ? 1 : 0
+      default: return i[key]
+    }
+  }
+  const sign = dir === 'asc' ? 1 : -1
+  return [...rows].sort((a, b) => {
+    const x = val(a), y = val(b)
+    const cmp = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true })
+    return cmp * sign || a.number.localeCompare(b.number, undefined, { numeric: true })
+  })
+}
+
 /** Totals for the rows on screen, so the totals row follows the filters. */
 export function summarizeAging(rows: readonly AgingReportCustomer[]): Omit<AgingReport, 'customers'> {
   const out = { byBucket: emptyBuckets(), totalCents: 0, pastDueCents: 0, factoredCents: 0, count: 0 }
@@ -254,4 +344,30 @@ export function summarizeAging(rows: readonly AgingReportCustomer[]): Omit<Aging
     out.count += c.count
   }
   return out
+}
+
+/** One CSV cell; a leading = + - @ is neutralised so a spreadsheet can't read a name as a formula. */
+function csvCell(v: string | number | null): string {
+  let t = v == null ? '' : String(v)
+  if (/^[=+\-@\t\r]/.test(t) && typeof v === 'string') t = `'${t}`
+  return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t
+}
+const dollars = (cents: number): string => (cents / 100).toFixed(2)
+
+/** The customers on screen (filtered and sorted) as CSV: one row per customer, amounts in dollars. */
+export function agingReportCsv(rows: readonly AgingReportCustomer[]): string {
+  const head = ['Customer', 'Terms', 'Avg days to pay', ...AR_AGING_BUCKETS.map((b) => AR_AGING_BUCKET_LABEL[b]), 'Total open', 'Past due', 'Invoices', 'Oldest (days)', 'Last paid', 'Last aging report']
+  const lines = [head.map(csvCell).join(',')]
+  for (const c of rows) {
+    lines.push([
+      c.customerName,
+      c.termsDays == null ? '' : `Net ${c.termsDays}`,
+      c.avgDaysToPay == null ? '' : Math.round(c.avgDaysToPay),
+      ...AR_AGING_BUCKETS.map((b) => dollars(c.byBucket[b])),
+      dollars(c.totalCents), dollars(c.pastDueCents), c.count, c.oldestDays,
+      c.lastPaidAt ? chicagoDateStr(c.lastPaidAt) : '',
+      c.lastStatementAt ? chicagoDateStr(c.lastStatementAt) : 'Never',
+    ].map(csvCell).join(','))
+  }
+  return lines.join('\r\n')
 }

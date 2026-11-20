@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  buildAgingReport, daysSinceStatement, EMPTY_AGING_FILTERS, filterAgingCustomers, sortAgingCustomers, statementAgoLabel,
+  agingFilterCount, agingReportCsv, buildAgingReport, daysSinceStatement, EMPTY_AGING_FILTERS, filterAgingCustomers, sortAgingCustomers, sortAgingInvoices, statementAgoLabel,
 } from './agingReport'
 import { ageInvoices } from '@/lib/arAging'
 import type { InvoiceRecord } from '@/types/tms'
@@ -113,5 +113,50 @@ describe('last aging report sent', () => {
     })
     expect(filterAgingCustomers(old.customers, { ...EMPTY_AGING_FILTERS, statement: 'stale' }, NOW)).toHaveLength(1)
     expect(filterAgingCustomers(old.customers, { ...EMPTY_AGING_FILTERS, statement: 'recent' }, NOW)).toHaveLength(0)
+  })
+})
+
+describe('column filters and invoice sorting', () => {
+  const rep = buildAgingReport([
+    inv({ id: '1', number: '1', customerId: 'c1', customerName: 'One', balanceCents: 10000, totalCents: 10000 }),
+    inv({ id: '2', number: '2', customerId: 'c2', customerName: 'Two', balanceCents: 250000, totalCents: 250000, invoiceDate: '2026-07-01', dueAt: '2026-07-31' }),
+  ], '2026-11-15')
+
+  it('filters by a dollar range on a column and counts it once', () => {
+    const f = { ...EMPTY_AGING_FILTERS, ranges: { total: { min: 1000 } } }
+    expect(filterAgingCustomers(rep.customers, f).map((c) => c.customerName)).toEqual(['Two'])
+    expect(agingFilterCount(f)).toBe(1)
+    expect(filterAgingCustomers(rep.customers, { ...EMPTY_AGING_FILTERS, ranges: { total: { max: 1000 } } }).map((c) => c.customerName)).toEqual(['One'])
+  })
+
+  it('filters last paid by a date range and by no payment yet', () => {
+    const rows = rep.customers.map((c) => (c.customerId === 'c1' ? { ...c, lastPaidAt: '2026-11-02T15:00:00Z' } : c))
+    expect(filterAgingCustomers(rows, { ...EMPTY_AGING_FILTERS, lastPaidFrom: '2026-11-01', lastPaidTo: '2026-11-05' }).map((c) => c.customerName)).toEqual(['One'])
+    expect(filterAgingCustomers(rows, { ...EMPTY_AGING_FILTERS, lastPaidBlank: true }).map((c) => c.customerName)).toEqual(['Two'])
+  })
+
+  it('filters the last aging report by custom day counts', () => {
+    const rows = rep.customers.map((c) => (c.customerId === 'c1' ? { ...c, lastStatementAt: '2026-11-13T15:00:00Z' } : c))
+    const now = '2026-11-15T18:00:00Z'
+    expect(filterAgingCustomers(rows, { ...EMPTY_AGING_FILTERS, statementWithinDays: 3 }, now).map((c) => c.customerName)).toEqual(['One'])
+    expect(filterAgingCustomers(rows, { ...EMPTY_AGING_FILTERS, statementOlderDays: 3 }, now).map((c) => c.customerName)).toEqual(['Two'])
+  })
+
+  it('sorts a customer\'s invoices by any column, ties by invoice number', () => {
+    const invs = [
+      { ...rep.customers[0].invoices[0], id: 'x', number: '10', balanceCents: 500 },
+      { ...rep.customers[0].invoices[0], id: 'y', number: '9', balanceCents: 900 },
+    ]
+    expect(sortAgingInvoices(invs, 'balanceCents', 'desc').map((i) => i.id)).toEqual(['y', 'x'])
+    expect(sortAgingInvoices(invs, 'number', 'asc').map((i) => i.id)).toEqual(['y', 'x'])
+  })
+
+  it('exports one CSV row per customer in dollars and neutralises formulas', () => {
+    const rows = [{ ...rep.customers[0], customerName: '=SUM(A1)' }]
+    const csv = agingReportCsv(rows)
+    const lines = csv.split('\r\n')
+    expect(lines[0]).toContain('Customer,Terms')
+    expect(lines[1].startsWith("'=SUM(A1)")).toBe(true)
+    expect(lines[1]).toContain('2500.00')
   })
 })
