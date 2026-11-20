@@ -26,3 +26,11 @@ export const SOURCE_LABEL: Record<string, string> = {
 }
 
 export const ACTIVE_STATUSES = new Set<IntakeStatus>(['NEW', 'IN_PROGRESS'])
+
+export const VOID_NOTE_PREFIX = 'VOIDED'
+
+/** The note an intake void leaves behind: who, when and why, ahead of any earlier notes. */
+export function voidNote(existing: string | null | undefined, reason: string, who: string, now = new Date()): string {
+  const line = `${VOID_NOTE_PREFIX} by ${who} on ${now.toISOString().slice(0, 10)}: ${reason.trim()}`
+  return existing?.trim() ? `${line}\n${existing}` : line
+}

@@ -8,7 +8,8 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { QueueRow } from './IntakePage'
+import { QueueRow, VoidIntakeItemDialog } from './IntakePage'
+import { voidNote } from '@/lib/intake'
 import type { IntakeItem } from '@/types'
 
 vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
@@ -129,24 +130,51 @@ describe('acting on a row', () => {
 })
 
 describe('void', () => {
-  it('offers Void on an item that built a shipment and hands the item to the handler', () => {
+  const fns = () => ({
+    onBuildLoad: vi.fn(), onUpdateLoad: vi.fn(), onMarkDone: vi.fn(),
+    onStatusChange: vi.fn(), onAssigneeChange: vi.fn(),
+  })
+
+  it('offers Void on any active item and hands the item to the handler', () => {
     const onVoid = vi.fn()
-    const fns = {
-      onBuildLoad: vi.fn(), onUpdateLoad: vi.fn(), onMarkDone: vi.fn(),
-      onStatusChange: vi.fn(), onAssigneeChange: vi.fn(),
-    }
-    const item = { ...base, builtLoadId: 'l1' } as IntakeItem
-    render(<QueueRow item={item} {...fns} onVoid={onVoid} />)
+    const item = { ...base, builtLoadId: null } as IntakeItem
+    render(<QueueRow item={item} {...fns()} onVoid={onVoid} />)
     fireEvent.click(screen.getByRole('button', { name: /void/i }))
     expect(onVoid).toHaveBeenCalledWith(item)
   })
+})
 
-  it('offers no Void when there is no shipment to void', () => {
-    const fns = {
-      onBuildLoad: vi.fn(), onUpdateLoad: vi.fn(), onMarkDone: vi.fn(),
-      onStatusChange: vi.fn(), onAssigneeChange: vi.fn(),
-    }
-    render(<QueueRow item={{ ...base, builtLoadId: null } as IntakeItem} {...fns} onVoid={vi.fn()} />)
-    expect(screen.queryByRole('button', { name: /void/i })).toBeNull()
+describe('the void dialog', () => {
+  const item = { ...base } as IntakeItem
+
+  it('needs a reason', async () => {
+    const onConfirm = vi.fn().mockResolvedValue(undefined)
+    render(<VoidIntakeItemDialog item={item} onConfirm={onConfirm} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Void item' }))
+    expect(onConfirm).not.toHaveBeenCalled()
+    expect(await screen.findByText('Say why this item is being voided.')).toBeTruthy()
+  })
+
+  it('says the built shipment stays active, and only then', () => {
+    const { unmount } = render(<VoidIntakeItemDialog item={{ ...item, builtLoadId: 'l1' } as IntakeItem} onConfirm={vi.fn()} onClose={vi.fn()} />)
+    expect(screen.getByTestId('void-shipment-note').textContent).toMatch(/stays active/)
+    unmount()
+    render(<VoidIntakeItemDialog item={item} onConfirm={vi.fn()} onClose={vi.fn()} />)
+    expect(screen.queryByTestId('void-shipment-note')).toBeNull()
+  })
+
+  it('confirms with the reason', () => {
+    const onConfirm = vi.fn().mockResolvedValue(undefined)
+    render(<VoidIntakeItemDialog item={item} onConfirm={onConfirm} onClose={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Duplicate tender' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Void item' }))
+    expect(onConfirm).toHaveBeenCalledWith('Duplicate tender')
+  })
+})
+
+describe('what a void writes', () => {
+  it('records who, when and why, keeps earlier notes, and never names a shipment field', () => {
+    const note = voidNote('earlier note', ' Duplicate ', 'ryne@bcatcorp.com', new Date('2026-11-20T12:00:00Z'))
+    expect(note).toBe('VOIDED by ryne@bcatcorp.com on 2026-11-20: Duplicate\nearlier note')
   })
 })
