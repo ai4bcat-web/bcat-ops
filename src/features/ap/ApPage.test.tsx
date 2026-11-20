@@ -533,14 +533,14 @@ describe('the AP board', () => {
     expect(screen.getAllByText('Red Line Freight').length).toBeGreaterThan(0)
   })
 
-  it('filters by carrier from the URL and shows what that carrier is owed by due date', async () => {
+  it('filters by carrier from the URL and shows what that carrier is owed by due date in the Open bills by due date card', async () => {
     const a = bill({ id: 'cb:lc1:1', billNumber: 'BL-1', dueAt: daysAgo(10), balanceCents: 150_000 })
     const b = bill({
       id: 'cb:lc2:1', loadCarrierId: 'lc2', carrierId: 'car2', carrierName: 'Red Line Freight',
       billNumber: 'RL-1', dueAt: daysAgo(45), balanceCents: 80_000, grossCents: 80_000, netCents: 80_000, billedCents: 80_000,
     })
     await setup({ bills: [a, b], url: '/?carrier=car2' })
-    const owed = within(screen.getByLabelText('Owed by Red Line Freight'))
+    const owed = within(screen.getByTestId('ap-due-card'))
     expect(owed.getByText('Past due').closest('.tms-list-row')?.querySelector('.tms-list-row-value')?.textContent).toBe('$800.00')
     fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! by carrier)/ }))
     expect(screen.getByRole('button', { name: 'Move bill RL-1 to Selected' })).toBeTruthy()

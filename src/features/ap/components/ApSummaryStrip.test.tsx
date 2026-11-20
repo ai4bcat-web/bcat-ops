@@ -15,42 +15,91 @@ const summary = (over: Partial<ApSummary> = {}): ApSummary => ({
   ...over,
 })
 
+const strip = (over: Partial<Parameters<typeof ApSummaryStrip>[0]> = {}) => (
+  <ApSummaryStrip
+    summary={summary()}
+    due={null}
+    onDue={vi.fn()}
+    missing={{ payees: 2, cents: 750_00, onOpen: vi.fn() }}
+    onCashRequirements={vi.fn()}
+    onTab={vi.fn()}
+    {...over}
+  />
+)
+
 describe('ApSummaryStrip', () => {
-  it('shows the headline tiles in one row and the paid, paid-to and speed cards in a second row', () => {
-    render(<ApSummaryStrip summary={summary()} divisionName={(c) => c ?? 'None'} division={null} onDivision={vi.fn()} onCashRequirements={vi.fn()} onTab={vi.fn()} />)
-    const tiles = within(screen.getByRole('group', { name: 'Open payables and the payment ladder' })).getAllByRole('button').length
-    expect(tiles).toBe(5)
-    expect(screen.getByText('Open AP')).toBeTruthy()
+  it('shows six headline tiles in one row and only three small cards in the second', () => {
+    render(strip())
+    const tiles = screen.getByRole('group', { name: 'Open payables and the payment ladder' })
+    expect(within(tiles).getAllByRole('button').length).toBe(5)
+    for (const label of ['Open AP', 'Expected', 'Aging', 'Selected', 'Past due', 'Due next 7 days']) expect(within(tiles).getByText(label)).toBeTruthy()
     const row2 = screen.getByTestId('ap-summary-cards')
-    const labels = within(row2).getAllByRole('listitem').map((li) => li.textContent ?? '')
-    const order = ['Paid this week', 'Paid this month', 'Quick pay this month', 'Pay to factor', 'Pay direct', 'From Aljex', 'Days to pay \u00b7 carriers', 'Days to invoice \u00b7 carriers']
-    const at = order.map((label) => labels.findIndex((t) => t.startsWith(label)))
-    expect(at.every((i) => i >= 0)).toBe(true)
-    expect([...at].sort((a, b) => a - b)).toEqual(at)
+    expect(row2.children).toHaveLength(3)
+    expect(screen.getByTestId('ap-paid-card')).toBeTruthy()
+    expect(screen.getByTestId('ap-due-card')).toBeTruthy()
+    expect(screen.getByTestId('ap-missing-card')).toBeTruthy()
   })
 
-  it('keeps the second row at three rows or fewer per card and renders extra cards after the division card', () => {
-    render(<ApSummaryStrip summary={summary()} divisionName={(c) => c ?? 'None'} division={null} onDivision={vi.fn()} onCashRequirements={vi.fn()} onTab={vi.fn()}><section data-testid="extra">x</section></ApSummaryStrip>)
-    for (const id of ['ap-paid-card', 'ap-payto-card', 'ap-speed-card']) {
-      expect(within(screen.getByTestId(id)).getAllByRole('listitem').length).toBeLessThanOrEqual(3)
+  it('drops the granular cards: paid-to, how fast, division, quick pay, profit check', () => {
+    render(strip())
+    for (const text of ['Pay to factor', 'Pay direct', 'From Aljex', 'Days to pay', 'Days to invoice', 'Quick pay', 'Open AP by division', 'Profit check']) {
+      expect(screen.queryByText(new RegExp(text))).toBeNull()
     }
-    const row2 = screen.getByTestId('ap-summary-cards')
-    expect(row2.lastElementChild).toBe(screen.getByTestId('extra'))
   })
 
-  it('still jumps to the tab when a ladder row is clicked, and opens cash requirements from Past due', () => {
+  it('Paid shows this week and this month', () => {
+    render(strip())
+    const paid = within(screen.getByTestId('ap-paid-card'))
+    expect(paid.getByText('This week').closest('li')?.textContent).toContain('$450.00')
+    expect(paid.getByText('This month').closest('li')?.textContent).toContain('$1,200.00')
+  })
+
+  it('Open bills by due date is past due, due this week and later, and the three add up to Open AP', () => {
+    render(strip())
+    const rows = within(screen.getByTestId('ap-due-card')).getAllByRole('listitem').map((li) => li.textContent ?? '')
+    expect(rows).toHaveLength(3)
+    expect(rows[0]).toContain('Past due')
+    expect(rows[0]).toContain('$150.00')
+    expect(rows[1]).toContain('Due this week')
+    expect(rows[1]).toContain('$250.00')
+    expect(rows[2]).toContain('Later')
+    expect(rows[2]).toContain('$600.00')
+  })
+
+  it('the Past due and Due this week rows filter the table, and the same row clears it', () => {
+    const onDue = vi.fn()
+    const { rerender } = render(strip({ onDue }))
+    const card = within(screen.getByTestId('ap-due-card'))
+    fireEvent.click(card.getByText('Past due'))
+    expect(onDue).toHaveBeenLastCalledWith('past')
+    fireEvent.click(card.getByText('Due this week'))
+    expect(onDue).toHaveBeenLastCalledWith('week')
+    rerender(strip({ onDue, due: 'past' }))
+    fireEvent.click(within(screen.getByTestId('ap-due-card')).getByText('Past due'))
+    expect(onDue).toHaveBeenLastCalledWith(null)
+  })
+
+  it('Missing payment info shows the payee count and the dollars waiting, and opens the worklist; hidden when none', () => {
+    const onOpen = vi.fn()
+    const { rerender } = render(strip({ missing: { payees: 2, cents: 750_00, onOpen } }))
+    const card = screen.getByTestId('ap-missing-card')
+    expect(card.textContent).toContain('2 payees')
+    expect(card.textContent).toContain('$750.00')
+    fireEvent.click(within(card).getByRole('button'))
+    expect(onOpen).toHaveBeenCalled()
+    rerender(strip({ missing: { payees: 0, cents: 0, onOpen } }))
+    expect(screen.queryByTestId('ap-missing-card')).toBeNull()
+  })
+
+  it('still jumps to the tab when a ladder tile is clicked, and opens cash requirements from Past due', () => {
     const onTab = vi.fn()
     const onCash = vi.fn()
-    render(<ApSummaryStrip summary={summary()} divisionName={(c) => c ?? 'None'} division={null} onDivision={vi.fn()} onCashRequirements={onCash} onTab={onTab} />)
-    fireEvent.click(screen.getByText('Selected'))
+    render(strip({ onTab, onCashRequirements: onCash }))
+    const tiles = within(screen.getByRole('group', { name: 'Open payables and the payment ladder' }))
+    fireEvent.click(tiles.getByText('Selected'))
     expect(onTab).toHaveBeenCalledWith('selected')
-    fireEvent.click(screen.getByText('Past due'))
+    fireEvent.click(tiles.getByText('Past due'))
     expect(onCash).toHaveBeenCalled()
-  })
-
-  it('leaves the Aljex row out when none of the open bills came from Aljex', () => {
-    render(<ApSummaryStrip summary={summary({ fromAljex: m(0, 0) })} divisionName={(c) => c ?? 'None'} division={null} onDivision={vi.fn()} onCashRequirements={vi.fn()} onTab={vi.fn()} />)
-    expect(screen.queryByText('From Aljex')).toBeNull()
   })
 })
 
