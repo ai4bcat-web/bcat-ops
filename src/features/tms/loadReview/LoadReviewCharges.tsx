@@ -11,7 +11,7 @@ import { useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { FileText, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { RateConPanel } from '@/features/carriers/components/RateConPanel'
-import { TmsAlert, TmsButton, TmsDialog, TmsInput, TmsSelect } from '@/features/tms/kit'
+import { ChargeCodeInput, TmsAlert, TmsButton, TmsDialog, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { RailSaveContext, useRailPending } from './railSave'
 import { getCarrierBundle, getShipmentBundle, getTmsSettings, recalcCharges, sendRateCon, voidRateCon } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
@@ -75,6 +75,10 @@ export function LoadReviewCharges({ shipmentId, readOnly = false, disabled = fal
   const amounts = useMemo(() => (bundle ? amountsOf(bundle, drafts) : new Map<string, number>()), [bundle, drafts])
   const totals = bundle ? totalsOf(bundle, drafts) : null
   const codes = useMemo(() => [...new Set([...(settings?.chargeCodes ?? []).map((c) => c.code), 'LINEHAUL', 'FSC', ...drafts.map((d) => d.code)].filter(Boolean))], [settings, drafts])
+  const codeOptions = useMemo(() => {
+    const labels = new Map((settings?.chargeCodes ?? []).map((c) => [c.code, c.label]))
+    return codes.map((code) => ({ code, label: labels.get(code) }))
+  }, [codes, settings])
 
   /**
    * The shipment's version right now. Other sections of the rail (the sales rep, the revenue division, the stops) save
@@ -158,7 +162,7 @@ export function LoadReviewCharges({ shipmentId, readOnly = false, disabled = fal
         <ul className="lr-charge-lines">
           {group.lines.map((line) => <li key={line.key} className="lr-charge-line">
             {editing && !groupLocked ? <>
-              <TmsInput aria-label="Charge code" list="lr-charge-codes" className="lr-charge-code" value={line.code} onChange={(e) => update(line.key, { code: e.target.value.toUpperCase() })} />
+              <ChargeCodeInput aria-label="Charge code" className="lr-charge-code" options={codeOptions} value={line.code} onChange={(code) => update(line.key, { code })} />
               <TmsInput aria-label="Description" className="lr-charge-label" placeholder="Description" value={line.label} onChange={(e) => update(line.key, { label: e.target.value })} />
               <TmsSelect aria-label="Calculated by" value={line.calculatedBy} onChange={(e) => update(line.key, { calculatedBy: e.target.value as ChargeCalc })}>
                 {(Object.keys(CALC_LABEL) as ChargeCalc[]).map((c) => <option key={c} value={c}>{CALC_LABEL[c]}</option>)}
@@ -193,7 +197,6 @@ export function LoadReviewCharges({ shipmentId, readOnly = false, disabled = fal
           onClick={() => setRateConFor(group.key)}><FileText size={14} />Rate confirmation</TmsButton>}
       </section>
     })}
-    <datalist id="lr-charge-codes">{codes.map((code) => <option key={code} value={code} />)}</datalist>
     {error && <TmsAlert tone="red">{error}</TmsAlert>}
     {railError && <TmsAlert tone="red">{railError}</TmsAlert>}
     {!locked && <div className="lr-charges-actions">

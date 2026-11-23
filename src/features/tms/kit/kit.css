@@ -999,3 +999,18 @@
   .tms-shell .tms-city-option,
   .tms-portal .tms-city-option { min-height: 44px; }
 }
+
+/* Charge code picker: compact list, portaled so no table or card can clip it. */
+.tms-portal.tms-code-list {
+  position: fixed; z-index: 10000; margin: 0; padding: 4px; list-style: none; overflow-y: auto;
+  background: var(--tms-bg-elevated); color: var(--tms-text); border: 1px solid var(--tms-border);
+  border-radius: 8px; box-shadow: var(--tms-shadow-pop); font-size: 13px; line-height: 1.3;
+}
+.tms-portal .tms-code-option {
+  display: flex; align-items: baseline; gap: 10px; min-height: 28px; padding: 4px 8px;
+  border-radius: 6px; cursor: pointer; white-space: nowrap;
+}
+.tms-portal .tms-code-option.is-active { background: var(--tms-primary-tint); }
+.tms-portal .tms-code-name { font-weight: 600; font-size: 12px; letter-spacing: 0.02em; }
+.tms-portal .tms-code-desc { color: var(--tms-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+@media (pointer: coarse) { .tms-portal .tms-code-option { min-height: 44px; } }

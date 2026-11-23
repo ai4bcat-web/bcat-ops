@@ -12,6 +12,9 @@ describe('withDefaultChargeCodes', () => {
     expect(out.filter((c) => c.code.toUpperCase() === 'DETENTION')).toHaveLength(1)
     expect(out).toHaveLength(DEFAULT_CHARGE_CODES.length + 1)
   })
+  it('offers a Tracking fee code', () => {
+    expect(withDefaultChargeCodes(null).find((c) => c.code === 'TRACKING')).toMatchObject({ label: 'Tracking fee', calculatedBy: 'FLAT', defaultAmountCents: null })
+  })
   it('has unique, upper-case codes the picker can match, and never carries an amount', () => {
     const codes = DEFAULT_CHARGE_CODES.map((c) => c.code)
     expect(new Set(codes).size).toBe(codes.length)

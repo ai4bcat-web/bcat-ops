@@ -19,6 +19,7 @@ export const DEFAULT_CHARGE_CODES: readonly ChargeCodeDef[] = [
   def('DRYRUN', 'Dry run', 'Time'),
   def('TONU', 'Truck ordered not used', 'Time'),
   def('REDELIVERY', 'Redelivery', 'Time'),
+  def('TRACKING', 'Tracking fee', 'Time'),
   // Handling at the dock
   def('LUMPER', 'Lumper', 'Handling'),
   def('LOADUNLOAD', 'Driver load / unload', 'Handling'),
