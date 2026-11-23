@@ -41,6 +41,9 @@ import { CUSTOMER_FACTOR_FLAG_LABEL, customerFactorFlag } from '@/lib/factorRead
 import { INVOICE_FREQUENCY_OPTIONS } from './useCustomerForm'
 import { BillingMethodFields } from './BillingMethodFields'
 import { PossibleDuplicateBadge } from './PossibleDuplicateBadge'
+import { useOtrNoBuy } from '@/hooks/useOtrNoBuy'
+import { noBuySummary } from '@/lib/otrNoBuy'
+import { formatDay } from '@/features/ar/arViews'
 import { buildDuplicateIndex } from '@/lib/customerDuplicates'
 import { ContactsEditor } from './ContactsEditor'
 import { BillToEditor } from './BillToEditor'
@@ -140,6 +143,7 @@ export function CustomerProfile({
   onRemove,
 }: CustomerProfileProps) {
   const { value, set, setPartial, toRecord, errors } = useCustomerForm(customer)
+  const noBuyEvents = useOtrNoBuy().get(customer.id)
   const duplicates = useMemo(
     () => buildDuplicateIndex(activeCustomers.some((c) => c.id === customer.id) ? activeCustomers : [...activeCustomers, customer]),
     [activeCustomers, customer],
@@ -286,6 +290,7 @@ export function CustomerProfile({
               {customer.status ? <TmsBadge tone={statusTones[customer.status]}>{customer.status}</TmsBadge> : null}
               <PossibleDuplicateBadge info={duplicates.get(customer.id)} />
               <InvoiceEmailBadge customer={customer} />
+              {noBuyEvents ? <TmsBadge tone="red" title={noBuySummary(noBuyEvents, formatDay)} data-testid="customer-otr-no-buy">OTR no buy</TmsBadge> : null}
               {customerFactorFlag(customer) ? (
                 <TmsBadge tone={customerFactorFlag(customer) === 'MISSING_MC' ? 'red' : 'orange'} data-testid="customer-factor-flag">
                   {CUSTOMER_FACTOR_FLAG_LABEL[customerFactorFlag(customer)!]}
@@ -311,6 +316,17 @@ export function CustomerProfile({
             { title: 'Account owner', rows: [{ value: accountOwnerIds.length ? `${accountOwnerIds.length} assigned` : 'Unassigned' }] },
           ]}
         />
+
+        {noBuyEvents ? (
+          <div role="note" data-testid="customer-otr-no-buy-note" style={{ border: '1px solid var(--tms-badge-red)', borderRadius: 6, padding: '8px 12px', fontSize: 13 }}>
+            <strong>OTR no buy.</strong> {noBuySummary(noBuyEvents, formatDay)} OTR will not buy this customer's invoices.
+            <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+              {noBuyEvents.map((e) => (
+                <li key={`${e.pro}-${e.at ?? ''}`}>PRO {e.pro}{e.at ? `, ${formatDay(e.at)}` : ''}: {e.reason}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
         <CrmStrip
           customer={customer}
