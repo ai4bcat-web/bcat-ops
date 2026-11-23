@@ -144,6 +144,9 @@ describe('CoverCarrierDialog', () => {
     fireEvent.click(screen.getByTestId('cover-assign'))
 
     expect((await screen.findByTestId('cover-error')).textContent).toBe('Zephyr cannot be assigned: No cargo insurance covering the pickup date is on file.')
+    // Refused: no green "assign it" panel contradicting the red one, and the lookup card's own Cover button is gone.
+    expect(screen.queryByText(/the rate con can be sent right after assigning/)).toBeNull()
+    expect(screen.queryByText('Cover with this carrier')).toBeNull()
     const submit = screen.getByTestId('cover-override-submit') as HTMLButtonElement
     expect(submit.disabled).toBe(true)
     fireEvent.change(screen.getByLabelText('Override reason'), { target: { value: 'COI checked with the agent' } })

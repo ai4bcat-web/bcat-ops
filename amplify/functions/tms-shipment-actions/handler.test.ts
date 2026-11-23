@@ -9577,17 +9577,28 @@ describe('Step AM — cover flow and assignment ladder', () => {
         const { shipmentId, loadId } = await sourcingLoad()
         uninsured()
         const why = 'COI on file in MCP, sync pending'
-        // The admin-only "no cargo insurance" warning still has to be ticked, override or not.
-        await expect(coverAs(loadId, ADMIN, { overrideReason: why })).rejects.toThrow(/Acknowledge these before booking: .*\[ack:INSURANCE_UNVERIFIED\]/)
-        await coverAs(loadId, ADMIN, { overrideReason: why, acknowledgeWarnings: ['INSURANCE_UNVERIFIED'] })
+        // One typed reason covers the "no cargo insurance on file" warning too: no second tick.
+        await coverAs(loadId, ADMIN, { overrideReason: why })
         const row = active()
-        expect(row.bookingWarnings).toEqual(['INSURANCE_UNVERIFIED', 'OVERRIDE:INSURANCE_EXPIRED:AUTO_LIABILITY', 'OVERRIDE:INSURANCE_EXPIRED:CARGO'])
+        expect(row.bookingWarnings).toEqual([
+          'INSURANCE_UNVERIFIED', 'OVERRIDE:INSURANCE_EXPIRED:AUTO_LIABILITY', 'OVERRIDE:INSURANCE_EXPIRED:CARGO', 'OVERRIDE:INSURANCE_UNVERIFIED',
+        ])
         const audits = [...table(TABLES.audit).values()]
         const onShipment = audits.find((a) => a.action === 'OVERRIDE_CARRIER_COMPLIANCE')!
         expect(onShipment).toMatchObject({ entityType: 'SHIPMENT', entityId: shipmentId, user: 'admin@bcatcorp.com' })
         expect(JSON.parse(String(onShipment.changes))).toMatchObject({ why, overridden: expect.stringMatching(/auto liability.*cargo/) })
         const cover = audits.find((a) => a.action === 'COVER_CARRIER')!
-        expect(JSON.parse(String(cover.changes))).toMatchObject({ overridden: ['INSURANCE_EXPIRED:AUTO_LIABILITY', 'INSURANCE_EXPIRED:CARGO'], overrideWhy: why })
+        expect(JSON.parse(String(cover.changes))).toMatchObject({
+          overridden: ['INSURANCE_EXPIRED:AUTO_LIABILITY', 'INSURANCE_EXPIRED:CARGO', 'INSURANCE_UNVERIFIED'], overrideWhy: why,
+        })
+      })
+
+      it('does not let the reason wave through other warnings: an UNACCEPTABLE rating still needs its own acknowledgement', async () => {
+        const { loadId } = await sourcingLoad()
+        carrierRow({ insurancePolicies: [], mcpStatus: 'UNACCEPTABLE' })
+        await expect(coverAs(loadId, ADMIN, { overrideReason: 'COI in hand' })).rejects.toThrow(/Acknowledge these before booking: .*\[ack:MCP_UNACCEPTABLE\]/)
+        await coverAs(loadId, ADMIN, { overrideReason: 'COI in hand', acknowledgeWarnings: ['MCP_UNACCEPTABLE'] })
+        expect(active().bookingWarnings).toEqual(expect.arrayContaining(['OVERRIDE:INSURANCE_EXPIRED:CARGO', 'OVERRIDE:INSURANCE_UNVERIFIED']))
       })
 
       it('never overrides a do-not-use carrier', async () => {

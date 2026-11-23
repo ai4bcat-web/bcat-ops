@@ -100,6 +100,9 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
   const { isAdmin: callerIsAdmin, isOwner: callerIsOwner } = useAuth()
   const gate = coverGate(selected ? selected.mcpStatus : card?.packet.status, selected?.status, callerIsAdmin || callerIsOwner, selected?.mcpRiskScore ?? card?.risk.totalPoints)
   const needsMcp = !selected || selected.status !== 'ACTIVE'
+  // The server refused this carrier: don't leave a green "Ready to cover" panel or a Cover button saying the opposite. An admin
+  // continues with "Override and cover" below; everyone else cannot assign this carrier.
+  const coverBlocked = !!error && (overrideOffer || /cannot be (assigned|booked)/.test(error))
   const rateOk = rateCents != null && rateCents > 0
   const ackOk = !gate.warning || acked
   const assignable = rateOk && ackOk && !gate.blocked && !working && !carriersLoading && (allStops || legStopIds.length > 0)
@@ -389,7 +392,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
           {error && overrideOffer && (
             <TmsAlert tone="orange" title="Admin override" role="status">
               <div className="flex flex-col gap-2" data-testid="cover-override">
-                <span>As an admin you can assign this carrier anyway. Say why; the reason is kept on the shipment&apos;s activity.</span>
+                <span>As an admin you can assign this carrier anyway, including with missing auto liability or cargo insurance. Say why; the reason, and which checks it overrode, are kept on the shipment&apos;s activity.</span>
                 <textarea
                   id="cover-override-reason"
                   data-testid="cover-override-reason"
@@ -445,7 +448,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
               heading={carrierName}
               busy={working}
               onSendPacket={requestInvite}
-              onCover={() => { void requestAssign() }}
+              onCover={coverBlocked ? undefined : () => { void requestAssign() }}
               testId="cover-lookup-card"
             />
           )}
@@ -464,7 +467,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
                     : []),
                 ]}
               />
-              {route === 'ASSIGN_NOW' && (
+              {route === 'ASSIGN_NOW' && !coverBlocked && (
                 <TmsAlert tone="green" title="Set up · Active" role="status">This carrier is set up with us. Assign it; the rate con can be sent right after assigning.</TmsAlert>
               )}
               {pending && route === 'ASSIGN_WAITING' && (
