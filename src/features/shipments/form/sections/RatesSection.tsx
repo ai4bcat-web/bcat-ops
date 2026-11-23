@@ -8,7 +8,7 @@
  */
 import { memo, useMemo, type ReactNode } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
-import { TmsButton, TmsIconButton, TmsInput, TmsSelect } from '@/features/tms/kit'
+import { ChargeCodeInput, TmsButton, TmsIconButton, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { formatCents } from '@/lib/tmsDirectory'
 import { CARRIER_RATE_KIND_OPTIONS, RATE_KIND_OPTIONS } from '../constants'
 import { LABEL } from '../labels'
@@ -182,9 +182,6 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form, carriers }: RatesS
       )}
 
       <div className="tms-acc-wrap" data-testid="rates-lines">
-        <datalist id="rates-charge-codes">
-          {codes.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
-        </datalist>
         <table className="tms-acc-table" aria-label="Accessorials: pay carrier and charge customer">
           <thead>
             <tr>
@@ -254,14 +251,12 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form, carriers }: RatesS
                     ) : carrierName}
                   </td>
                   <td data-label="Accessorial">
-                    <TmsInput
+                    <ChargeCodeInput
                       aria-label={`${LABEL.rates.lineAccessorial.text} ${i + 1}`}
-                      list="rates-charge-codes"
-                      placeholder="Pick or type a code"
+                      options={codes}
                       value={line.code}
                       disabled={disabled || ratesLocked}
-                      onChange={(e) => {
-                        const code = e.target.value.toUpperCase()
+                      onChange={(code) => {
                         const known = codes.find((c) => c.code === code)
                         setLine(i, { code, label: known?.label ?? line.label })
                       }}
