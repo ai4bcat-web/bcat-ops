@@ -47,8 +47,8 @@ import {
   TmsBadge, TmsButton, TmsCard, TmsDialog, TmsHeadBand, TmsSelect, TmsSummaryChips, TmsTabStrip, TmsTabs,
   type TmsTabGroup,
 } from '@/features/tms/kit'
-import type { DenseColumn } from '@/features/tms/grid/denseGridModel'
-import { ArDenseTable, type ArGrid } from './components/ArDenseTable'
+import { ArDenseTable, type ArColumn, type ArGrid } from './components/ArDenseTable'
+import { SelectAllBox } from './components/SelectAllBox'
 import { useShipments, type ShipmentListRow } from '@/hooks/useShipments'
 import { readyFactsOf } from './readyFacts'
 import { exportOutstandingReceivables } from '@/lib/opsExports'
@@ -885,7 +885,7 @@ function RefusalsCard({ refusals, onDismiss }: { refusals: BatchRefusal[]; onDis
 
 /* ── Column helpers ──────────────────────────────────────────────────────── */
 
-type Col<T> = DenseColumn<T>
+type Col<T> = ArColumn<T>
 
 /** A money column: right-aligned, sorted by integer cents, filtered in dollars. */
 function moneyCol<T>(key: string, header: string, cents: (row: T) => number, group = 'Amounts'): Col<T> {
@@ -1074,8 +1074,16 @@ function queueView({
   ]
 
   const columns: Array<Col<ArQueueRow>> = [
-    ...(ready ? [{ key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 76 } as Col<ArQueueRow>] : []),
-    ...(invoiced && onPastDue ? [{ key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 32 } as Col<ArQueueRow>] : []),
+    ...(ready ? [{
+      key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 76,
+      // Select all: the shown shipments that can be ticked (the ones with a blocker keep their Why? button).
+      renderHeader: (shown) => <SelectAllBox ids={shown.filter((row) => selectBlocked(row) == null).map((row) => row.orderId)} selected={selected} onSelect={onSelect} noun="shipments" />,
+    } as Col<ArQueueRow>] : []),
+    ...(invoiced && onPastDue ? [{
+      key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 32,
+      // Select all: the shown invoices a past due reminder can go out for.
+      renderHeader: (shown) => <SelectAllBox ids={shown.filter(canRemind).map((row) => row.orderId)} selected={selected} onSelect={onSelect} noun="invoices" />,
+    } as Col<ArQueueRow>] : []),
     { key: 'shipment', header: 'PRO', group: 'Shipment', text: (row) => row.shipmentNumber ?? row.shipmentId, extraPx: 16 },
     { key: 'invoice', header: 'Invoice #', group: 'Invoice', text: (row) => row.invoiceNumber ?? '—' },
     {
@@ -1533,7 +1541,11 @@ function agingView({
 }): ListView {
   type Row = AgingSummary['byCustomer'][number]
   const columns: Array<Col<Row>> = [
-    { key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 32 },
+    {
+      key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 32,
+      // Select all: the customers the table shows, for the bulk aging report.
+      renderHeader: (shown) => <SelectAllBox ids={shown.map((row) => row.customerId)} selected={statementSelected} onSelect={onStatementSelect} noun="customers" />,
+    },
     { key: 'customer', header: 'Customer', group: 'Customer', text: (row) => row.customerName || row.customerId },
     ...AR_AGING_BUCKETS.map((b) => moneyCol<Row>(b, AR_AGING_BUCKET_LABEL[b], (row) => row.byBucket[b], 'Buckets')),
     moneyCol<Row>('total', 'Total', (row) => row.totalCents, 'Buckets'),

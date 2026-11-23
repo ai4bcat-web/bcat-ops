@@ -21,13 +21,16 @@ import {
 import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import { useAuthUser } from '@/hooks/useAuth'
 
+/** A column that may draw its own header cell (a select-all checkbox), given the rows the grid shows after search and filters. */
+export type ArColumn<T> = DenseColumn<T> & { renderHeader?: (shown: T[]) => ReactNode }
+
 /** One view's grid: a unique `gridId` keeps each view's saved layout apart. */
 export interface ArGrid<T> {
   gridId: string
   /** The grid's accessible name. */
   label: string
   /** Every column. `fixed` ones (the tick box, the row action) stay out of the Columns dialog. */
-  columns: Array<DenseColumn<T>>
+  columns: Array<ArColumn<T>>
   rows: T[]
   rowKey: (row: T) => string
   renderCell?: (row: T, key: string) => ReactNode
@@ -78,12 +81,6 @@ export function ArDenseTable<T>({ grid, pageFilters }: {
     validKeys: movable.map((c) => c.key),
     defaultSort: null,
   })
-  const gridColumns = useMemo(() => [
-    ...leading,
-    ...prefs.columns.map((k) => movable.find((c) => c.key === k)).filter((c): c is DenseColumn<T> => c != null),
-    ...trailing,
-  ], [leading, movable, trailing, prefs.columns])
-
   const setFilter = useCallback((key: string, next: DenseColumnFilter | null) => {
     setFilters((prev) => {
       const copy = { ...prev }
@@ -99,6 +96,14 @@ export function ArDenseTable<T>({ grid, pageFilters }: {
   }, [rows, catalogAll, filters, prefs.sort, search, group])
 
   useEffect(() => { onFiltered?.(filtered) }, [filtered, onFiltered])
+
+  // A column's own header (the select-all tick) sees the rows left after search and filters.
+  const gridColumns = useMemo(() => [
+    ...leading,
+    ...prefs.columns.map((k) => movable.find((c) => c.key === k)).filter((c): c is ArColumn<T> => c != null),
+    ...trailing,
+  ].map((c) => (c.renderHeader ? { ...c, headerContent: c.renderHeader(filtered) } : c)),
+  [leading, movable, trailing, prefs.columns, filtered])
 
   return (
     <div className="tms-dense-page" data-testid={`ar-grid-${gridId}`}>

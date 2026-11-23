@@ -444,6 +444,56 @@ describe('the AR dense grid', () => {
     expect(screen.getByText(/1 selected/)).toBeTruthy()
   })
 
+  it('select all in the header ticks every shown shipment, goes indeterminate, and clears again', async () => {
+    await setup({
+      UNBILLED: [
+        worklistRow({ orderId: 'o1', shipmentNumber: 'S-1' }),
+        worklistRow({ orderId: 'o2', shipmentNumber: 'S-2' }),
+        worklistRow({ orderId: 'o3', shipmentNumber: 'S-3' }),
+      ],
+    })
+    const all = screen.getByRole('checkbox', { name: 'Select all 3 shipments shown' }) as HTMLInputElement
+    expect(all.checked).toBe(false)
+    fireEvent.click(all)
+    expect(all.checked).toBe(true)
+    expect(screen.getByText(/3 selected/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select S-2' }))
+    expect(all.checked).toBe(false)
+    expect(all.indeterminate).toBe(true)
+    expect(screen.getByText(/2 selected/)).toBeTruthy()
+    // From the indeterminate state a click ticks the rest; another click clears every shown row.
+    fireEvent.click(all)
+    expect(all.checked).toBe(true)
+    fireEvent.click(all)
+    expect(screen.getByText(/0 selected/)).toBeTruthy()
+  })
+
+  it('select all only ticks the rows the search leaves, not the ones it hides', async () => {
+    await setup({
+      UNBILLED: [
+        worklistRow({ orderId: 'o1', shipmentNumber: 'S-1' }),
+        worklistRow({ orderId: 'o2', shipmentNumber: 'S-2' }),
+        worklistRow({ orderId: 'o3', shipmentNumber: 'S-3' }),
+      ],
+    })
+    fireEvent.change(screen.getByTestId('ar-search'), { target: { value: 'S-2' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all 1 shipments shown' }))
+    expect(screen.getByText(/1 selected/)).toBeTruthy()
+    fireEvent.change(screen.getByTestId('ar-search'), { target: { value: '' } })
+    expect((screen.getByRole('checkbox', { name: 'Select S-2' }) as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByRole('checkbox', { name: 'Select S-1' }) as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('select all skips a load that cannot be ticked yet, so Factor never sees it', async () => {
+    factorReady.current = { o1: { orderId: 'o1', factorBilled: true, ready: false, missing: ['Missing document: RATE_CON — Rate confirmation'] } }
+    await setup({ UNBILLED: [worklistRow({ orderId: 'o1', shipmentNumber: 'S-1' }), worklistRow({ orderId: 'o2', shipmentNumber: 'S-2' })] })
+    await settle()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all 1 shipments shown' }))
+    expect((screen.getByRole('checkbox', { name: 'Select S-1' }) as HTMLInputElement).checked).toBe(false)
+    expect((screen.getByRole('checkbox', { name: 'Select S-2' }) as HTMLInputElement).checked).toBe(true)
+    factorReady.current = {}
+  })
+
   it('gives each view its own grid; PRO and Invoice # open the invoice, never the shipment', async () => {
     // Only a SENT invoice is in Invoiced; an unsent one is a draft in Ready to invoice.
     openSet.splice(0, openSet.length, invoice({ sentAt: '2026-09-20T12:05:00.000Z', sentCount: 1 }))
@@ -455,7 +505,7 @@ describe('the AR dense grid', () => {
     // No payment entry on the AR tabs (Ryne 2026-11-16): no links on a row, no tick boxes, no Record payment.
     expect(within(grid).queryAllByRole('link')).toHaveLength(0)
     // The only tick boxes are the past-due reminder ones (Ryne 2026-11-17); nothing selects an invoice for payment.
-    expect(within(grid).queryAllByRole('checkbox').filter((box) => !/past due reminder/.test(box.getAttribute('aria-label') ?? ''))).toHaveLength(0)
+    expect(within(grid).queryAllByRole('checkbox').filter((box) => !/past due reminder|Select all \d+ invoices shown/.test(box.getAttribute('aria-label') ?? ''))).toHaveLength(0)
     expect(screen.queryByText(/Record payment/)).toBeNull()
     expect(screen.queryByTestId('ar-record-payment-batch')).toBeNull()
     expect(screen.getByTestId('payments-recorded-note').textContent).toBe('Payments are recorded in Payments Received.')
