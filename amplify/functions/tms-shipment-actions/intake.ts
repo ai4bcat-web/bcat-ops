@@ -39,11 +39,11 @@ import {
   toCreateShipmentInput,
 } from '../../../src/lib/intakeLoad'
 import { requiresApptProofs } from '../../../src/lib/apptQueue'
-import { INTAKE_DELETED_REASON, INTAKE_DISMISSED_BUILT_REASON, NOT_DUPLICATE_TOKEN, isDeletedIntake } from '../../../src/lib/intakeDup'
+import { INTAKE_CLEARED_REASON, INTAKE_CLEAR_REASONS, INTAKE_DELETED_REASON, INTAKE_DISMISSED_BUILT_REASON, NOT_DUPLICATE_TOKEN, isDeletedIntake } from '../../../src/lib/intakeDup'
 import { autoLinkTarget, builtMatchesFor, keyTokens, needsBuiltCheck, normRef, refCandidates, type BuiltShipment } from '../../../src/lib/intakeBuilt'
 import type { IntakeFields, IntakeLoadRecord, IntakeMeta, IntakeNote } from '../../../src/types/intake'
 
-export const INTAKE_ACTIONS = ['INTAKE_SAVE_DRAFT', 'INTAKE_MARK_REVIEWED', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS', 'INTAKE_LINK_SHIPMENT', 'INTAKE_ATTACH_FILES', 'INTAKE_DELETE', 'INTAKE_DISMISS_BUILT', 'INTAKE_NOT_DUPLICATE', 'INTAKE_ADD_NOTE', 'INTAKE_AUTOLINK_BUILT', 'INTAKE_UNLINK_SHIPMENT'] as const
+export const INTAKE_ACTIONS = ['INTAKE_SAVE_DRAFT', 'INTAKE_MARK_REVIEWED', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS', 'INTAKE_LINK_SHIPMENT', 'INTAKE_ATTACH_FILES', 'INTAKE_DELETE', 'INTAKE_DISMISS_BUILT', 'INTAKE_CLEAR', 'INTAKE_NOT_DUPLICATE', 'INTAKE_ADD_NOTE', 'INTAKE_AUTOLINK_BUILT', 'INTAKE_UNLINK_SHIPMENT'] as const
 export type IntakeAction = (typeof INTAKE_ACTIONS)[number]
 
 /** A PROMOTING row with no shipment older than this was abandoned (Lambda timeout is shorter). */
@@ -354,6 +354,67 @@ export async function intakeDismissBuilt(deps: IntakeDeps, input: Row, caller: C
     builtPros: pros || null,
   })
   return intakeRecordOf(saved) as unknown as Row
+}
+
+// ── INTAKE_CLEAR (anyone who works the Build tab) ────────────────────────────
+
+/**
+ * Ryne 2026-11-23: "no option for my team to clear a shipment". One action for every team member on Build: pick a reason, and the open
+ * load leaves Intake. It is handled exactly like a delete (DISMISSED, with a reason that keeps repeat e-mails from reopening the row; a
+ * different e-mail is a different row and is unaffected) and is never refused for lack of an admin. It only ever touches the intake row:
+ * if a live shipment already carries the load's reference, the PRO(s) are recorded in the audit entry and the shipment is left alone.
+ * Delete (owner/ADMIN) and the older Dismiss / Dismiss-built actions stay as they were; the screens use this one.
+ */
+export async function intakeClear(deps: IntakeDeps, input: Row, caller: Caller): Promise<Row> {
+  const intakeId = assertString(input.intakeId, 'intakeId')
+  const code = assertString(input.reasonCode, 'reasonCode')
+  const choice = INTAKE_CLEAR_REASONS.find((r) => r.code === code)
+  if (!choice) throw new Error(`reasonCode must be one of ${INTAKE_CLEAR_REASONS.map((r) => r.code).join(', ')}`)
+  const note = optionalString(input.reason, 500)
+  if (choice.code === 'OTHER' && !note) throw new Error('Say why when the reason is Other')
+  const row = await loadRow(deps, intakeId)
+  assertExpectedVersion(row, input)
+  if (isDeletedIntake({ status: row.status as string, dismissReason: row.dismissReason as string | null })) return intakeRecordOf(row) as unknown as Row
+  if (row.status !== 'OPEN') {
+    throw new Error(row.shipmentId || row.status === 'MOVED' || row.status === 'PROMOTING'
+      ? 'This load already became a shipment: void or delete it on the Shipments page, not from Intake'
+      : 'Only an open intake load can be cleared')
+  }
+  const record = intakeRecordOf(row)
+  const built = await firmBuiltShipments(deps, record)
+  const now = deps.now()
+  const why = note && choice.code !== 'OTHER' ? `${choice.label}: ${note}` : note ?? choice.label
+  const saved = await writeIntake(deps, row, {
+    status: 'DISMISSED',
+    dismissedBy: caller.email,
+    dismissedAt: now,
+    dismissReason: `${INTAKE_CLEARED_REASON}: ${why}`,
+    updatedBy: caller.email,
+  })
+  await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_CLEAR', caller, {
+    reasonCode: choice.code,
+    reason: why,
+    runId: row.runId ?? null,
+    previousStatus: row.status ?? null,
+    subject: optionalString(row.subject, 300),
+    source: optionalString(row.source, 100),
+    builtShipments: built,
+    builtPros: built.map((b) => b.number).filter(Boolean).join(', ') || null,
+  })
+  return intakeRecordOf(saved) as unknown as Row
+}
+
+/** The live shipments whose reference is a firm match for this open row (the same check as the "Already built" notice). */
+async function firmBuiltShipments(deps: IntakeDeps, record: IntakeLoadRecord): Promise<{ number: string; shipmentId: string }[]> {
+  if (!deps.findShipmentsBySearchKeys) return []
+  const values = [...new Set(refCandidates(record).map((c) => c.value.toLowerCase()))]
+  const found = new Map<string, BuiltShipment>()
+  for (let i = 0; i < values.length; i += 25) {
+    for (const s of await deps.findShipmentsBySearchKeys(values.slice(i, i + 25))) found.set(String(s.id), builtShipmentOf(s))
+  }
+  return builtMatchesFor(record, [...found.values()], new Map())
+    .filter((m) => m.source === 'reference')
+    .map((m) => ({ number: m.number, shipmentId: m.shipmentId }))
 }
 
 // ── INTAKE_NOT_DUPLICATE ─────────────────────────────────────────────────────
@@ -724,6 +785,8 @@ export function runIntakeAction(deps: IntakeDeps, action: IntakeAction, input: R
       return intakeDelete(deps, input, caller)
     case 'INTAKE_DISMISS_BUILT':
       return intakeDismissBuilt(deps, input, caller)
+    case 'INTAKE_CLEAR':
+      return intakeClear(deps, input, caller)
     case 'INTAKE_NOT_DUPLICATE':
       return intakeNotDuplicate(deps, input, caller)
     case 'INTAKE_ADD_NOTE':

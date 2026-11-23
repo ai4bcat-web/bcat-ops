@@ -45,9 +45,20 @@ export function isSameEmail(a: DupProbe, b: DupProbe, windowMs = DUP_WINDOW_MS):
 export const INTAKE_DELETED_REASON = 'Deleted by admin'
 /** Same effect, by any reviewer: the load was already built, so the e-mail was cleared (INTAKE_DISMISS_BUILT). */
 export const INTAKE_DISMISSED_BUILT_REASON = 'Dismissed, already built'
+/** Same effect, by anyone on the Build tab: "Clear from Intake" with a picked reason (INTAKE_CLEAR). */
+export const INTAKE_CLEARED_REASON = 'Cleared from Intake'
+/** The reasons the clear dialog offers; `OTHER` needs a typed note. The label is what the row and the audit entry keep. */
+export const INTAKE_CLEAR_REASONS = [
+  { code: 'DUPLICATE', label: 'Duplicate' },
+  { code: 'NOT_A_LOAD', label: 'Not a load' },
+  { code: 'ALREADY_HANDLED', label: 'Already handled' },
+  { code: 'CANCELED', label: 'Canceled by customer' },
+  { code: 'OTHER', label: 'Other' },
+] as const
+export type IntakeClearReasonCode = (typeof INTAKE_CLEAR_REASONS)[number]['code']
 export const isDeletedIntake = (row: { status?: string | null; dismissReason?: string | null }): boolean => {
   const reason = String(row.dismissReason ?? '')
-  return row.status === 'DISMISSED' && (reason.startsWith(INTAKE_DELETED_REASON) || reason.startsWith(INTAKE_DISMISSED_BUILT_REASON))
+  return row.status === 'DISMISSED' && (reason.startsWith(INTAKE_DELETED_REASON) || reason.startsWith(INTAKE_DISMISSED_BUILT_REASON) || reason.startsWith(INTAKE_CLEARED_REASON))
 }
 
 /** Kept in the row's `confirmed` list (survives every save): a person looked and said "not a duplicate". */

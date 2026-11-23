@@ -12,11 +12,11 @@ import { RepPicker } from '@/components/RepPicker'
 import { addressPickPatch, useAddressAutofill, type AddressPatch } from '@/hooks/useAddressAutofill'
 import { useOwnFleetRoster } from '@/hooks/useOwnFleetRoster'
 import {
-  CityInput, TmsAlert, TmsButton, TmsCard, TmsDetailSplit, TmsDialog, TmsField, TmsInput, TmsPage, TmsSelect, TmsTextarea,
+  CityInput, TmsAlert, TmsButton, TmsCard, TmsDetailSplit, TmsDialog, TmsField, TmsInput, TmsPage, TmsSelect,
 } from '@/features/tms/kit'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import {
-  dismissIntake, dismissWorkflowRun, getTmsSettings, getWorkflowRun, linkWorkflowRun, listCustomers,
+  dismissWorkflowRun, getTmsSettings, getWorkflowRun, linkWorkflowRun, listCustomers,
   moveIntakeToActive, saveIntakeDraft,
 } from '@/lib/apiClient'
 import { hasBillToParties, requiredFieldLabel } from '@/lib/flowDefaults'
@@ -30,7 +30,7 @@ import { IntakeFieldRow } from './IntakeFieldRow'
 import { MarkBuiltDialog } from './MarkBuiltDialog'
 import { SourceEmailCard } from './SourceEmailCard'
 import { duplicateGroups } from '@/lib/intakeDuplicates'
-import { BuiltNotice, DeleteIntakeDialog, DuplicateNotice, IntakeNotes } from './DuplicateParts'
+import { BuiltNotice, ClearIntakeDialog, DeleteIntakeDialog, DuplicateNotice, IntakeNotes } from './DuplicateParts'
 import { useBuiltMatches } from './useBuiltMatches'
 import { useIntakeLoad, useIntakeLoads } from './useIntakeLoads'
 import { useIntakePermissions } from './useIntakePermissions'
@@ -89,14 +89,13 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
   const [work, setWork] = useState<Work>(() => ({ fields: ensureRequiredStops(row.fields), meta: row.meta, confirmed: row.confirmed }))
   const [busy, setBusy] = useState(false)
   const [customerQuery, setCustomerQuery] = useState<string | null>(null)
-  const [dismissOpen, setDismissOpen] = useState(false)
   const [markBuiltOpen, setMarkBuiltOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [dismissBuilt, setDismissBuilt] = useState(false)
+  const [clearOpen, setClearOpen] = useState(false)
   const { isOwnerOrAdmin } = useIntakePermissions()
   const queue = useIntakeLoads({ status: 'OPEN', enabled: row.status === 'OPEN' })
   const dupInfo = useMemo(() => duplicateGroups(queue.rows).get(row.id), [queue.rows, row.id])
-  const [reason, setReason] = useState('')
   const [builtConfirmOpen, setBuiltConfirmOpen] = useState(false)
   // Checked against what is on screen (a customer picked or a reference typed here counts), not only what was saved.
   const checkRows = useMemo(() => [{ ...row, fields: work.fields }], [row, work.fields])
@@ -241,18 +240,6 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
     navigate(shipmentEditorPath(done.shipmentId))
   }
 
-  async function dismiss() {
-    const done = await guarded(
-      () => dismissIntake({ intakeId: row.id, expectedVersion: row.version, reason: reason.trim() }),
-      'Could not dismiss',
-    )
-    if (!done) return
-    setDismissOpen(false)
-    onRow(done)
-    toast.success('Dismissed')
-    navigate('/tms/shipments/intake')
-  }
-
   function confirmAll() {
     const keys = intakeFieldKeys(work.fields).filter((k) => ['AUTO', 'LOW'].includes(statusOf(k)))
     if (keys.length) setConfirmed(keys, true)
@@ -303,7 +290,7 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
             isAdmin={isOwnerOrAdmin}
             canReview={canReview}
             onDelete={() => { setDismissBuilt(false); setDeleteOpen(true) }}
-            onDismiss={() => { setDismissBuilt(true); setDeleteOpen(true) }}
+            onDismiss={() => setClearOpen(true)}
             onChanged={(next) => { onRow(next); queue.refresh() }}
           />
         ) : null}
@@ -477,7 +464,8 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
             {/* Anyone on Build can tie the e-mail to a PRO they built elsewhere (Ryne 2026-11-16). */}
             <TmsButton data-testid="intake-review-mark-built" disabled={busy} onClick={() => setMarkBuiltOpen(true)}>Already built</TmsButton>
             {canReview && isOwnerOrAdmin ? <TmsButton variant="destructive" data-testid="intake-delete" disabled={busy} onClick={() => setDeleteOpen(true)}>Delete</TmsButton> : null}
-            {canReview ? <TmsButton variant="destructive" disabled={busy} onClick={() => setDismissOpen(true)}>Dismiss</TmsButton> : null}
+            {/* Anyone on Build can clear a load off Intake (Ryne 2026-11-23); the server checks the same groups as "Already built". */}
+            <TmsButton variant="destructive" data-testid="intake-clear" disabled={busy} onClick={() => setClearOpen(true)}>Clear from Intake</TmsButton>
             {canReview ? <TmsButton variant="primary" data-testid="intake-create" disabled={busy || !gate.ok} onClick={() => { if (builtMatches.length > 0) setBuiltConfirmOpen(true); else void move() }}>Create shipment</TmsButton> : null}
           </div>
         ) : null}
@@ -486,22 +474,6 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
         ) : null}
       </div>
 
-      <TmsDialog
-        open={dismissOpen}
-        onOpenChange={setDismissOpen}
-        title="Dismiss this load?"
-        description="It leaves the Open list. Say why so the next person knows."
-        footer={(
-          <div className="tms-intake-footer">
-            <TmsButton size="sm" onClick={() => setDismissOpen(false)}>Cancel</TmsButton>
-            <TmsButton size="sm" variant="destructive" disabled={busy || reason.trim() === ''} onClick={dismiss}>Dismiss</TmsButton>
-          </div>
-        )}
-      >
-        <TmsField label="Reason">
-          <TmsTextarea value={reason} onChange={(e) => setReason(e.target.value)} />
-        </TmsField>
-      </TmsDialog>
       <TmsDialog
         open={builtConfirmOpen}
         onOpenChange={setBuiltConfirmOpen}
@@ -516,6 +488,13 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
       >
         {null}
       </TmsDialog>
+      <ClearIntakeDialog
+        row={row}
+        builtPros={builtMatches.filter((m) => m.source === 'reference').map((m) => m.number)}
+        open={clearOpen}
+        onOpenChange={setClearOpen}
+        onCleared={() => navigate('/tms/shipments/intake')}
+      />
       <DeleteIntakeDialog
         row={row}
         dismissBuilt={dismissBuilt}

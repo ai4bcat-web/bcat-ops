@@ -763,6 +763,22 @@ describe('intake authorization', () => {
   })
 })
 
+describe('INTAKE_CLEAR authorization', () => {
+  // Ryne 2026-11-23: "no option for my team to clear a shipment". Anyone who works the Build tab can clear a load off Intake.
+  it('lets owner, ADMIN, the intake reviewer and anyone who can build shipments reach it, and refuses a caller with no grant', async () => {
+    const loads = { sub: 's', username: 'l', claims: { email: 'l@bcatcorp.com', 'cognito:groups': ['page-loads'] } }
+    const reviewer = { sub: 'sub-rev', username: 'rev', claims: { email: 'reviewer@bcatcorp.com', 'cognito:groups': ['page-intakeReview'] } }
+    const none = { sub: 's2', username: 'n', claims: { email: 'n@bcatcorp.com', 'cognito:groups': [] } }
+    const input = { intakeId: 'il:none', expectedVersion: 1, reasonCode: 'DUPLICATE' }
+    for (const who of [OWNER, ADMIN, reviewer, TMS_USER, loads]) {
+      await expect(call('INTAKE_CLEAR', input, who)).rejects.toThrow(/Intake load not found/)
+    }
+    for (const who of [none, QUOTER]) {
+      await expect(call('INTAKE_CLEAR', input, who)).rejects.toThrow(/Forbidden: INTAKE_CLEAR requires owner, ADMIN/)
+    }
+  })
+})
+
 describe('INTAKE_LINK_SHIPMENT authorization', () => {
   // Whoever builds a shipment from an intake load can link it: the link ends the build. (Regression: page-tms builders
   // were refused, so a built load stayed in the intake queue.)

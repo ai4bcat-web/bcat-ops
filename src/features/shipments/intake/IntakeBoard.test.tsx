@@ -19,7 +19,7 @@ let divisions: OwnershipDivisionRecord[] = []
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({
   useOwnershipDivisions: () => ({ divisions, loading: false, error: null, refresh: () => undefined }),
 }))
-vi.mock('@/lib/apiClient', () => ({ listIntakeLoads: vi.fn(), countOpenIntakeLoads: vi.fn().mockResolvedValue(0), batchShipmentTask: vi.fn(), dismissIntake: vi.fn(), deleteIntake: vi.fn(), dismissBuiltIntake: vi.fn(), markIntakeNotDuplicate: vi.fn(), addIntakeNote: vi.fn(), listShipmentsBySearchKeys: vi.fn(), autolinkIntakeBuilt: vi.fn().mockResolvedValue({ linked: 0 }) }))
+vi.mock('@/lib/apiClient', () => ({ listIntakeLoads: vi.fn(), countOpenIntakeLoads: vi.fn().mockResolvedValue(0), batchShipmentTask: vi.fn(), dismissIntake: vi.fn(), deleteIntake: vi.fn(), dismissBuiltIntake: vi.fn(), clearIntake: vi.fn(), markIntakeNotDuplicate: vi.fn(), addIntakeNote: vi.fn(), listShipmentsBySearchKeys: vi.fn(), autolinkIntakeBuilt: vi.fn().mockResolvedValue({ linked: 0 }) }))
 
 function Where() {
   const loc = useLocation()
@@ -469,18 +469,33 @@ describe('IntakeBoard: any reviewer dismisses an already-built load', () => {
     vi.mocked(api.listShipmentsBySearchKeys).mockResolvedValue([SHIPMENT])
   })
 
-  it('a reviewer who is not owner/ADMIN gets Dismiss, not Delete, and the confirm says the shipment is untouched and it is audited', async () => {
-    vi.mocked(api.dismissBuiltIntake).mockResolvedValue(intakeRow({ id: 'il:a', status: 'DISMISSED' }))
+  it('a team member who is not owner/ADMIN gets Clear from Intake, not Delete, and the confirm says the built shipment stays and it is audited', async () => {
+    vi.mocked(api.clearIntake).mockResolvedValue(intakeRow({ id: 'il:a', status: 'DISMISSED' }))
     renderBoard('/tms/shipments/intake', false)
     const dialog = await openFlag('intake-flag-built')
     expect(within(dialog).queryByTestId('intake-built-delete')).not.toBeInTheDocument()
     fireEvent.click(within(dialog).getByTestId('intake-built-dismiss'))
-    const confirm = await screen.findByText('Dismiss this load from Intake?')
-    expect(confirm).toBeInTheDocument()
-    expect(screen.getByText(/the shipment is not touched/)).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId('intake-delete-confirm'))
-    await waitFor(() => expect(api.dismissBuiltIntake).toHaveBeenCalledWith({ intakeId: 'il:a', expectedVersion: 1 }))
+    expect(await screen.findByText('Clear this load from Intake?')).toBeInTheDocument()
+    expect(screen.getByText(/PRO 20043 is already built from it and stays active/)).toBeInTheDocument()
+    expect(screen.getByText(/kept in the audit log/)).toBeInTheDocument()
+    const confirm = screen.getByTestId('intake-clear-confirm')
+    expect(confirm).toBeDisabled()
+    fireEvent.change(screen.getByTestId('intake-clear-reason'), { target: { value: 'ALREADY_HANDLED' } })
+    fireEvent.click(confirm)
+    await waitFor(() => expect(api.clearIntake).toHaveBeenCalledWith({ intakeId: 'il:a', expectedVersion: 1, reasonCode: 'ALREADY_HANDLED' }))
     expect(api.deleteIntake).not.toHaveBeenCalled()
+    expect(api.dismissBuiltIntake).not.toHaveBeenCalled()
+  })
+
+  it('the row dialog has Clear from Intake for anyone, even with no built match', async () => {
+    vi.mocked(api.listIntakeLoads).mockImplementation(async () => [
+      intakeRow({ id: 'il:q', subject: 'Plain tender', fields: intakeFields({ reference: 'ZZ-1' }), notes: [{ at: '2026-11-12T15:00:00.000Z', by: 'kel@bcatcorp.com', text: 'Looks like a re-send' }] }),
+    ])
+    vi.mocked(api.listShipmentsBySearchKeys).mockResolvedValue([])
+    renderBoard('/tms/shipments/intake', false)
+    const dialog = await openFlag('intake-flag-notes')
+    expect(within(dialog).getByTestId('intake-dialog-clear')).toBeInTheDocument()
+    expect(within(dialog).queryByTestId('intake-dialog-delete')).not.toBeInTheDocument()
   })
 
   it('a subject-only "May already be built" offers no Dismiss', async () => {

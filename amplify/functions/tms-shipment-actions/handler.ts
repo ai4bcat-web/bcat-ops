@@ -615,6 +615,7 @@ type Action =
   | 'INTAKE_ATTACH_FILES'
   | 'INTAKE_DELETE'
   | 'INTAKE_DISMISS_BUILT'
+  | 'INTAKE_CLEAR'
   | 'INTAKE_NOT_DUPLICATE'
   | 'INTAKE_ADD_NOTE'
   | 'INTAKE_AUTOLINK_BUILT'
@@ -932,7 +933,8 @@ function isActionAuthorized(action: Action, caller: Caller): boolean {
     return groups.includes(LOADS_PAGE_GROUP) || groups.includes(QUOTES_PAGE_GROUP) || tms
   }
   // Whoever builds a shipment from an intake load can tie the two together: the link is the end of the build, not a review step.
-  if (action === 'INTAKE_LINK_SHIPMENT' || action === 'INTAKE_UNLINK_SHIPMENT' || action === 'INTAKE_ATTACH_FILES' || action === 'INTAKE_AUTOLINK_BUILT') return groups.includes(INTAKE_REVIEW_PAGE_GROUP) || groups.includes(LOADS_PAGE_GROUP) || tms
+  // INTAKE_CLEAR (Ryne 2026-11-23): whoever works the Build tab can clear a load off Intake; it is audited and never touches a shipment.
+  if (action === 'INTAKE_CLEAR' || action === 'INTAKE_LINK_SHIPMENT' || action === 'INTAKE_UNLINK_SHIPMENT' || action === 'INTAKE_ATTACH_FILES' || action === 'INTAKE_AUTOLINK_BUILT') return groups.includes(INTAKE_REVIEW_PAGE_GROUP) || groups.includes(LOADS_PAGE_GROUP) || tms
   if (INTAKE_REVIEW_ACTIONS[action]) return groups.includes(INTAKE_REVIEW_PAGE_GROUP)
   if (LOAD_REVIEW_ACTIONS[action]) return groups.includes(LOAD_REVIEW_PAGE_GROUP) || groups.includes(LOADS_PAGE_GROUP) || tms
   if (action === 'RECONCILE_BILLING') return BILLING_RECONCILE_GROUPS.some((g) => groups.includes(g)) || groups.includes(LOADS_PAGE_GROUP) || tms
@@ -978,6 +980,9 @@ export async function authorize(action: Action, identity?: AppSyncIdentity | nul
     if (action === 'DELETE_SHIPMENTS' || action === 'RESTORE_DELETED_SHIPMENTS' || action === 'LATEST_DELETE_EXPORT') throw new Error(`Forbidden: ${action} requires the owner`)
     if (ADMIN_ONLY_ACTIONS[action] || QUOTE_ADMIN_ONLY_ACTIONS[action]) {
       throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
+    }
+    if (action === 'INTAKE_CLEAR') {
+      throw new Error(`Forbidden: INTAKE_CLEAR requires owner, ADMIN, ${INTAKE_REVIEW_PAGE_GROUP}, ${LOADS_PAGE_GROUP}, or ${TMS_PAGE_GROUP}`)
     }
     if (INTAKE_REVIEW_ACTIONS[action]) {
       throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${INTAKE_REVIEW_PAGE_GROUP}`)
@@ -10016,6 +10021,7 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
     case 'INTAKE_ATTACH_FILES':
     case 'INTAKE_DELETE':
     case 'INTAKE_DISMISS_BUILT':
+    case 'INTAKE_CLEAR':
     case 'INTAKE_NOT_DUPLICATE':
     case 'INTAKE_ADD_NOTE':
     case 'INTAKE_AUTOLINK_BUILT':

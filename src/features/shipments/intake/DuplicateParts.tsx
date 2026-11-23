@@ -7,8 +7,9 @@ import { useState, type MouseEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { MessageSquare } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsBadge, TmsButton, TmsDialog, TmsTextarea } from '@/features/tms/kit'
-import { addIntakeNote, deleteIntake, dismissBuiltIntake, markIntakeNotDuplicate } from '@/lib/apiClient'
+import { TmsBadge, TmsButton, TmsDialog, TmsField, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { addIntakeNote, clearIntake, deleteIntake, dismissBuiltIntake, markIntakeNotDuplicate } from '@/lib/apiClient'
+import { INTAKE_CLEAR_REASONS } from '@/lib/intakeDup'
 import { formatDateTime } from '@/lib/date'
 import { intakeRowLabel, type DuplicateInfo } from '@/lib/intakeDuplicates'
 import type { BuiltMatch } from '@/lib/intakeBuilt'
@@ -59,6 +60,69 @@ export function DeleteIntakeDialog({ row, open, onOpenChange, onDeleted, dismiss
   )
 }
 
+/**
+ * "Clear from Intake": the one way anyone on the Build tab takes an open load off Intake. A reason from a short list (Other needs words), the row
+ * leaves the queue and a repeat e-mail does not bring it back, who cleared it and why is kept in the audit log, and a shipment already built from
+ * it is never touched (the dialog says so when one is). Delete stays owner/ADMIN.
+ */
+export function ClearIntakeDialog({ row, builtPros = [], open, onOpenChange, onCleared }: {
+  row: IntakeLoadRecord
+  /** PROs a firm match says are already built from this e-mail, for the reassurance line. */
+  builtPros?: string[]
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onCleared: (row: IntakeLoadRecord) => void
+}) {
+  const [code, setCode] = useState('')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const needsNote = code === 'OTHER'
+  const ready = code !== '' && (!needsNote || note.trim() !== '')
+  async function run() {
+    setBusy(true)
+    try {
+      const done = await clearIntake({ intakeId: row.id, expectedVersion: row.version, reasonCode: code, ...(note.trim() ? { reason: note.trim() } : {}) })
+      toast.success('Cleared from Intake')
+      onOpenChange(false)
+      onCleared(done)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not clear')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <TmsDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Clear this load from Intake?"
+      description={`${intakeRowLabel(row)}. It leaves Intake and a repeat e-mail will not bring it back. ${builtPros.length > 0
+        ? `PRO ${builtPros.join(', ')} is already built from it and stays active: void it from the Shipments board if it should go too. `
+        : 'A shipment already built from it is not touched. '}Who cleared it and why is kept in the audit log.`}
+      footer={(
+        <div className="tms-intake-footer">
+          <TmsButton size="sm" onClick={() => onOpenChange(false)}>Cancel</TmsButton>
+          <TmsButton size="sm" variant="destructive" data-testid="intake-clear-confirm" disabled={busy || !ready} onClick={() => { void run() }}>Clear from Intake</TmsButton>
+        </div>
+      )}
+    >
+      <TmsField label="Reason">
+        <TmsSelect
+          aria-label="Reason"
+          data-testid="intake-clear-reason"
+          value={code}
+          placeholder="Pick a reason"
+          onChange={(e) => setCode(e.target.value)}
+          options={INTAKE_CLEAR_REASONS.map((r) => ({ value: r.code, label: r.label }))}
+        />
+      </TmsField>
+      <TmsField label={needsNote ? 'Say why' : 'Note (optional)'}>
+        <TmsTextarea data-testid="intake-clear-note" value={note} onChange={(e) => setNote(e.target.value)} />
+      </TmsField>
+    </TmsDialog>
+  )
+}
+
 /** "Possible duplicate. Delete this one?" with who the other row is; owner/ADMIN get the delete and "Not a duplicate". */
 export function DuplicateNotice({ row, info, isAdmin, onDelete, onChanged }: {
   row: IntakeLoadRecord
@@ -99,11 +163,11 @@ const MAX_PROS_SHOWN = 3
  * "Already built — PRO 20043": this e-mail's reference is already on a shipment with a PRO. A reference from the parsed fields is a firm
  * match; a number only found in the subject says "May already be built". Owner/ADMIN get "Not the same load" and the delete.
  */
-export function BuiltNotice({ row, matches, isAdmin, canReview = isAdmin, onDelete, onDismiss, onChanged }: {
+export function BuiltNotice({ row, matches, isAdmin, onDelete, onDismiss, onChanged }: {
   row: IntakeLoadRecord
   matches: BuiltMatch[]
   isAdmin: boolean
-  /** Anyone who reviews Intake may dismiss a firm "Already built" row. */
+  /** Kept so callers still compile: anyone may clear a firm "Already built" row now, so it is no longer read. */
   canReview?: boolean
   onDelete: () => void
   onDismiss?: () => void
@@ -137,7 +201,7 @@ export function BuiltNotice({ row, matches, isAdmin, canReview = isAdmin, onDele
       {shown.map((m) => (
         <Link key={m.shipmentId} className="tms-intake-dup-link" to={shipmentEditorPath(m.shipmentId)} data-testid="intake-built-link">Open PRO {m.number}</Link>
       ))}
-      {canReview && firm && onDismiss ? <TmsButton size="sm" variant="destructive" data-testid="intake-built-dismiss" disabled={busy} onClick={onDismiss}>Dismiss (already built)</TmsButton> : null}
+      {firm && onDismiss ? <TmsButton size="sm" variant="destructive" data-testid="intake-built-dismiss" disabled={busy} onClick={onDismiss}>Clear from Intake</TmsButton> : null}
       {isAdmin ? <TmsButton size="sm" variant="destructive" data-testid="intake-built-delete" disabled={busy} onClick={onDelete}>Delete (already built)</TmsButton> : null}
       {isAdmin ? <TmsButton size="sm" variant="ghost" data-testid="intake-built-not" disabled={busy} onClick={() => { void notSame() }}>Not the same load</TmsButton> : null}
     </div>
@@ -236,7 +300,7 @@ export function IntakeRowFlags({ row, dup, built, onOpen }: {
 }
 
 /** A queue row's dialog: the duplicate / already-built details with the admin actions, and the team notes. */
-export function IntakeItemDialog({ row, dup, built, isAdmin, canReview, onClose, onDelete, onDismissBuilt, onChanged }: {
+export function IntakeItemDialog({ row, dup, built, isAdmin, canReview, onClose, onDelete, onDismissBuilt, onClear, onChanged }: {
   row: IntakeLoadRecord
   dup: DuplicateInfo | undefined
   built: BuiltMatch[] | undefined
@@ -245,6 +309,8 @@ export function IntakeItemDialog({ row, dup, built, isAdmin, canReview, onClose,
   onClose: () => void
   onDelete: () => void
   onDismissBuilt?: () => void
+  /** Anyone on Build: open the clear dialog (reason, audited, never touches a shipment). */
+  onClear?: () => void
   onChanged: (row: IntakeLoadRecord) => void
 }) {
   // The dialog keeps the newest copy it was handed back, so a second note in a row carries the right version.
@@ -260,6 +326,7 @@ export function IntakeItemDialog({ row, dup, built, isAdmin, canReview, onClose,
       footer={(
         <div className="tms-intake-footer">
           <Link to={`/tms/shipments/intake/${encodeURIComponent(row.id)}`}>Open the load</Link>
+          {row.status === 'OPEN' && onClear ? <TmsButton size="sm" variant="destructive" data-testid="intake-dialog-clear" onClick={onClear}>Clear from Intake</TmsButton> : null}
           {isAdmin && row.status === 'OPEN' ? <TmsButton size="sm" variant="destructive" data-testid="intake-dialog-delete" onClick={onDelete}>Delete</TmsButton> : null}
           <TmsButton size="sm" onClick={onClose}>Close</TmsButton>
         </div>
@@ -267,7 +334,7 @@ export function IntakeItemDialog({ row, dup, built, isAdmin, canReview, onClose,
     >
       <div className="tms-intake-item">
         {dup ? <DuplicateNotice row={row} info={dup} isAdmin={isAdmin} onDelete={onDelete} onChanged={changed} /> : null}
-        {built && built.length > 0 ? <BuiltNotice row={row} matches={built} isAdmin={isAdmin} canReview={canReview} onDelete={onDelete} onDismiss={onDismissBuilt} onChanged={changed} /> : null}
+        {built && built.length > 0 ? <BuiltNotice row={row} matches={built} isAdmin={isAdmin} canReview={canReview} onDelete={onDelete} onDismiss={onClear ?? onDismissBuilt} onChanged={changed} /> : null}
         <IntakeNotes row={row} canReview={canReview} onChanged={changed} />
       </div>
     </TmsDialog>

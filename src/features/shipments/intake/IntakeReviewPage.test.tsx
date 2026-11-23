@@ -21,7 +21,7 @@ vi.mock('@/features/tms/useOwnershipDivisions', () => ({
 }))
 vi.mock('@/components/RepPicker', () => ({ RepPicker: ({ value }: { value: string | null }) => <span>rep:{value}</span> }))
 vi.mock('@/lib/apiClient', () => ({
-  getIntakeLoad: vi.fn(), saveIntakeDraft: vi.fn(), moveIntakeToActive: vi.fn(), dismissIntake: vi.fn(),
+  getIntakeLoad: vi.fn(), saveIntakeDraft: vi.fn(), moveIntakeToActive: vi.fn(), dismissIntake: vi.fn(), clearIntake: vi.fn(),
   listCustomers: vi.fn(), getTmsSettings: vi.fn(), getWorkflowRun: vi.fn(), linkWorkflowRun: vi.fn(),
   dismissWorkflowRun: vi.fn(), listShipmentsBySearchKeys: vi.fn(), getIntakePdfUrl: vi.fn(), listIntakeLoads: vi.fn().mockResolvedValue([]), deleteIntake: vi.fn(), markIntakeNotDuplicate: vi.fn(),
 }))
@@ -174,18 +174,37 @@ describe('IntakeReviewPage', () => {
     expect(moveButton()).toBeEnabled()
   })
 
-  it('needs a reason to dismiss', async () => {
-    vi.mocked(api.dismissIntake).mockResolvedValue(intakeRow({ status: 'DISMISSED', version: 2 }))
-    renderPage()
+  it('Clear from Intake is on the build screen for anyone, needs a reason, and says a built shipment stays', async () => {
+    vi.mocked(api.clearIntake).mockResolvedValue(intakeRow({ status: 'DISMISSED', version: 2 }))
+    renderPage(false)
     await screen.findByDisplayValue('PO-100')
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+    // Not an owner, admin or intake reviewer: the button is still there, Delete is not.
+    expect(screen.queryByTestId('intake-delete')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('intake-clear'))
     const dialog = await screen.findByRole('dialog')
-    const confirm = within(dialog).getByRole('button', { name: 'Dismiss' })
+    expect(within(dialog).getByText(/A shipment already built from it is not touched/)).toBeInTheDocument()
+    const confirm = within(dialog).getByTestId('intake-clear-confirm')
     expect(confirm).toBeDisabled()
-    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'duplicate tender' } })
+    fireEvent.change(within(dialog).getByTestId('intake-clear-reason'), { target: { value: 'OTHER' } })
+    expect(confirm).toBeDisabled()
+    fireEvent.change(within(dialog).getByTestId('intake-clear-note'), { target: { value: 'customer re-sent it as a new PO' } })
     expect(confirm).toBeEnabled()
     fireEvent.click(confirm)
-    await waitFor(() => expect(api.dismissIntake).toHaveBeenCalledWith({ intakeId: 'il:run-1', expectedVersion: 1, reason: 'duplicate tender' }))
+    await waitFor(() => expect(api.clearIntake).toHaveBeenCalledWith({
+      intakeId: 'il:run-1', expectedVersion: 1, reasonCode: 'OTHER', reason: 'customer re-sent it as a new PO',
+    }))
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/tms/shipments/intake'))
+  })
+
+  it('a listed reason is enough on its own', async () => {
+    vi.mocked(api.clearIntake).mockResolvedValue(intakeRow({ status: 'DISMISSED', version: 2 }))
+    renderPage()
+    await screen.findByDisplayValue('PO-100')
+    fireEvent.click(screen.getByTestId('intake-clear'))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByTestId('intake-clear-reason'), { target: { value: 'DUPLICATE' } })
+    fireEvent.click(within(dialog).getByTestId('intake-clear-confirm'))
+    await waitFor(() => expect(api.clearIntake).toHaveBeenCalledWith({ intakeId: 'il:run-1', expectedVersion: 1, reasonCode: 'DUPLICATE' }))
   })
 
   it('reloads the row after a version conflict', async () => {
