@@ -1,5 +1,5 @@
 /**
- * The Intake duplicate affordances: the delete confirm (owner/ADMIN), the "Possible duplicate" / "Already built" notices, the team notes,
+ * The Intake duplicate affordances: the delete confirm (owner/ADMIN; "Dismiss" for an already-built load, any reviewer), the "Possible duplicate" / "Already built" notices, the team notes,
  * and the compact row flags that open them in one dialog (Ryne 2026-11-12: queue rows stay one line; deleting and clearing a flag are
  * admin calls, everyone else leaves a note). Used by the queue rows and the review page.
  */
@@ -8,29 +8,33 @@ import { Link } from 'react-router-dom'
 import { MessageSquare } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsBadge, TmsButton, TmsDialog, TmsTextarea } from '@/features/tms/kit'
-import { addIntakeNote, deleteIntake, markIntakeNotDuplicate } from '@/lib/apiClient'
+import { addIntakeNote, deleteIntake, dismissBuiltIntake, markIntakeNotDuplicate } from '@/lib/apiClient'
 import { formatDateTime } from '@/lib/date'
 import { intakeRowLabel, type DuplicateInfo } from '@/lib/intakeDuplicates'
 import type { BuiltMatch } from '@/lib/intakeBuilt'
 import type { IntakeLoadRecord } from '@/types/intake'
 import { shipmentEditorPath } from '@/lib/shipmentLinks'
 
-export function DeleteIntakeDialog({ row, open, onOpenChange, onDeleted }: {
+export function DeleteIntakeDialog({ row, open, onOpenChange, onDeleted, dismissBuilt = false }: {
   row: IntakeLoadRecord
   open: boolean
   onOpenChange: (open: boolean) => void
   onDeleted: (row: IntakeLoadRecord) => void
+  /** An already-built load: any reviewer may dismiss it; the server checks it really is built and records who did it. */
+  dismissBuilt?: boolean
 }) {
   const [busy, setBusy] = useState(false)
+  const verb = dismissBuilt ? 'Dismiss' : 'Delete'
   async function run() {
     setBusy(true)
     try {
-      const done = await deleteIntake({ intakeId: row.id, expectedVersion: row.version })
-      toast.success('Deleted from Intake')
+      const input = { intakeId: row.id, expectedVersion: row.version }
+      const done = dismissBuilt ? await dismissBuiltIntake(input) : await deleteIntake(input)
+      toast.success(dismissBuilt ? 'Dismissed from Intake' : 'Deleted from Intake')
       onOpenChange(false)
       onDeleted(done)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not delete')
+      toast.error(err instanceof Error ? err.message : `Could not ${verb.toLowerCase()}`)
     } finally {
       setBusy(false)
     }
@@ -39,12 +43,14 @@ export function DeleteIntakeDialog({ row, open, onOpenChange, onDeleted }: {
     <TmsDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Delete this load from Intake?"
-      description={`${intakeRowLabel(row)}. It is removed from Intake only: a shipment already built from it is not touched, and repeat e-mails for it will not bring it back.`}
+      title={`${verb} this load from Intake?`}
+      description={dismissBuilt
+        ? `${intakeRowLabel(row)}. It is already built, so it is removed from Intake only: the shipment is not touched, repeat e-mails for it will not bring it back, and who dismissed it is kept in the audit log.`
+        : `${intakeRowLabel(row)}. It is removed from Intake only: a shipment already built from it is not touched, and repeat e-mails for it will not bring it back.`}
       footer={(
         <div className="tms-intake-footer">
           <TmsButton size="sm" onClick={() => onOpenChange(false)}>Cancel</TmsButton>
-          <TmsButton size="sm" variant="destructive" data-testid="intake-delete-confirm" disabled={busy} onClick={() => { void run() }}>Delete</TmsButton>
+          <TmsButton size="sm" variant="destructive" data-testid="intake-delete-confirm" disabled={busy} onClick={() => { void run() }}>{verb}</TmsButton>
         </div>
       )}
     >
@@ -93,11 +99,14 @@ const MAX_PROS_SHOWN = 3
  * "Already built — PRO 20043": this e-mail's reference is already on a shipment with a PRO. A reference from the parsed fields is a firm
  * match; a number only found in the subject says "May already be built". Owner/ADMIN get "Not the same load" and the delete.
  */
-export function BuiltNotice({ row, matches, isAdmin, onDelete, onChanged }: {
+export function BuiltNotice({ row, matches, isAdmin, canReview = isAdmin, onDelete, onDismiss, onChanged }: {
   row: IntakeLoadRecord
   matches: BuiltMatch[]
   isAdmin: boolean
+  /** Anyone who reviews Intake may dismiss a firm "Already built" row. */
+  canReview?: boolean
   onDelete: () => void
+  onDismiss?: () => void
   onChanged: (row: IntakeLoadRecord) => void
 }) {
   const [busy, setBusy] = useState(false)
@@ -128,6 +137,7 @@ export function BuiltNotice({ row, matches, isAdmin, onDelete, onChanged }: {
       {shown.map((m) => (
         <Link key={m.shipmentId} className="tms-intake-dup-link" to={shipmentEditorPath(m.shipmentId)} data-testid="intake-built-link">Open PRO {m.number}</Link>
       ))}
+      {canReview && firm && onDismiss ? <TmsButton size="sm" variant="destructive" data-testid="intake-built-dismiss" disabled={busy} onClick={onDismiss}>Dismiss (already built)</TmsButton> : null}
       {isAdmin ? <TmsButton size="sm" variant="destructive" data-testid="intake-built-delete" disabled={busy} onClick={onDelete}>Delete (already built)</TmsButton> : null}
       {isAdmin ? <TmsButton size="sm" variant="ghost" data-testid="intake-built-not" disabled={busy} onClick={() => { void notSame() }}>Not the same load</TmsButton> : null}
     </div>
@@ -226,7 +236,7 @@ export function IntakeRowFlags({ row, dup, built, onOpen }: {
 }
 
 /** A queue row's dialog: the duplicate / already-built details with the admin actions, and the team notes. */
-export function IntakeItemDialog({ row, dup, built, isAdmin, canReview, onClose, onDelete, onChanged }: {
+export function IntakeItemDialog({ row, dup, built, isAdmin, canReview, onClose, onDelete, onDismissBuilt, onChanged }: {
   row: IntakeLoadRecord
   dup: DuplicateInfo | undefined
   built: BuiltMatch[] | undefined
@@ -234,6 +244,7 @@ export function IntakeItemDialog({ row, dup, built, isAdmin, canReview, onClose,
   canReview: boolean
   onClose: () => void
   onDelete: () => void
+  onDismissBuilt?: () => void
   onChanged: (row: IntakeLoadRecord) => void
 }) {
   // The dialog keeps the newest copy it was handed back, so a second note in a row carries the right version.
@@ -256,7 +267,7 @@ export function IntakeItemDialog({ row, dup, built, isAdmin, canReview, onClose,
     >
       <div className="tms-intake-item">
         {dup ? <DuplicateNotice row={row} info={dup} isAdmin={isAdmin} onDelete={onDelete} onChanged={changed} /> : null}
-        {built && built.length > 0 ? <BuiltNotice row={row} matches={built} isAdmin={isAdmin} onDelete={onDelete} onChanged={changed} /> : null}
+        {built && built.length > 0 ? <BuiltNotice row={row} matches={built} isAdmin={isAdmin} canReview={canReview} onDelete={onDelete} onDismiss={onDismissBuilt} onChanged={changed} /> : null}
         <IntakeNotes row={row} canReview={canReview} onChanged={changed} />
       </div>
     </TmsDialog>

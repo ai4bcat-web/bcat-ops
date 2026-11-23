@@ -125,6 +125,7 @@ export function IntakeBoard() {
   const { divisions } = useOwnershipDivisions()
   const { isOwnerOrAdmin, canReview } = useIntakePermissions()
   const [deleting, setDeleting] = useState<IntakeLoadRecord | null>(null)
+  const [dismissingBuilt, setDismissingBuilt] = useState(false)
   const [itemId, setItemId] = useState<string | null>(null)
   const [hideBanner, setHideBanner] = useState(bannerHidden)
   const [markingBuilt, setMarkingBuilt] = useState<IntakeLoadRecord | null>(null)
@@ -512,7 +513,8 @@ export function IntakeBoard() {
             isAdmin={isOwnerOrAdmin}
             canReview={canReview}
             onClose={() => setItemId(null)}
-            onDelete={() => setDeleting(item)}
+            onDelete={() => { setDismissingBuilt(false); setDeleting(item) }}
+            onDismissBuilt={() => { setDismissingBuilt(true); setDeleting(item) }}
             onChanged={() => open.refresh()}
           />
         ) : null
@@ -528,6 +530,7 @@ export function IntakeBoard() {
       {deleting ? (
         <DeleteIntakeDialog
           row={deleting}
+          dismissBuilt={dismissingBuilt}
           open
           onOpenChange={(o) => { if (!o) setDeleting(null) }}
           onDeleted={() => { setDeleting(null); setItemId(null); open.refresh() }}

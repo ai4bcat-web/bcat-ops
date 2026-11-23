@@ -735,7 +735,7 @@ describe('intake authorization', () => {
     username: 'rev',
     claims: { email: 'reviewer@bcatcorp.com', 'cognito:groups': ['page-intakeReview'] },
   }
-  const actions = ['INTAKE_SAVE_DRAFT', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS']
+  const actions = ['INTAKE_SAVE_DRAFT', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS', 'INTAKE_DISMISS_BUILT']
 
   it.each(actions)('lets the owner, an ADMIN and the intake reviewer reach %s', async (action) => {
     for (const who of [OWNER, ADMIN, REVIEWER]) {

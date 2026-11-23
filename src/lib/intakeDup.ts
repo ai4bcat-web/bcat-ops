@@ -43,8 +43,12 @@ export function isSameEmail(a: DupProbe, b: DupProbe, windowMs = DUP_WINDOW_MS):
 
 /** Why a deleted intake row says it was dismissed: an admin removed it. A repeat e-mail for it never brings it back (a plain dismissal does). */
 export const INTAKE_DELETED_REASON = 'Deleted by admin'
-export const isDeletedIntake = (row: { status?: string | null; dismissReason?: string | null }): boolean =>
-  row.status === 'DISMISSED' && String(row.dismissReason ?? '').startsWith(INTAKE_DELETED_REASON)
+/** Same effect, by any reviewer: the load was already built, so the e-mail was cleared (INTAKE_DISMISS_BUILT). */
+export const INTAKE_DISMISSED_BUILT_REASON = 'Dismissed, already built'
+export const isDeletedIntake = (row: { status?: string | null; dismissReason?: string | null }): boolean => {
+  const reason = String(row.dismissReason ?? '')
+  return row.status === 'DISMISSED' && (reason.startsWith(INTAKE_DELETED_REASON) || reason.startsWith(INTAKE_DISMISSED_BUILT_REASON))
+}
 
 /** Kept in the row's `confirmed` list (survives every save): a person looked and said "not a duplicate". */
 export const NOT_DUPLICATE_TOKEN = 'notDuplicate'

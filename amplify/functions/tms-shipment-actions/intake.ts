@@ -39,11 +39,11 @@ import {
   toCreateShipmentInput,
 } from '../../../src/lib/intakeLoad'
 import { requiresApptProofs } from '../../../src/lib/apptQueue'
-import { INTAKE_DELETED_REASON, NOT_DUPLICATE_TOKEN } from '../../../src/lib/intakeDup'
+import { INTAKE_DELETED_REASON, INTAKE_DISMISSED_BUILT_REASON, NOT_DUPLICATE_TOKEN, isDeletedIntake } from '../../../src/lib/intakeDup'
 import { autoLinkTarget, builtMatchesFor, keyTokens, needsBuiltCheck, normRef, refCandidates, type BuiltShipment } from '../../../src/lib/intakeBuilt'
 import type { IntakeFields, IntakeLoadRecord, IntakeMeta, IntakeNote } from '../../../src/types/intake'
 
-export const INTAKE_ACTIONS = ['INTAKE_SAVE_DRAFT', 'INTAKE_MARK_REVIEWED', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS', 'INTAKE_LINK_SHIPMENT', 'INTAKE_ATTACH_FILES', 'INTAKE_DELETE', 'INTAKE_NOT_DUPLICATE', 'INTAKE_ADD_NOTE', 'INTAKE_AUTOLINK_BUILT', 'INTAKE_UNLINK_SHIPMENT'] as const
+export const INTAKE_ACTIONS = ['INTAKE_SAVE_DRAFT', 'INTAKE_MARK_REVIEWED', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS', 'INTAKE_LINK_SHIPMENT', 'INTAKE_ATTACH_FILES', 'INTAKE_DELETE', 'INTAKE_DISMISS_BUILT', 'INTAKE_NOT_DUPLICATE', 'INTAKE_ADD_NOTE', 'INTAKE_AUTOLINK_BUILT', 'INTAKE_UNLINK_SHIPMENT'] as const
 export type IntakeAction = (typeof INTAKE_ACTIONS)[number]
 
 /** A PROMOTING row with no shipment older than this was abandoned (Lambda timeout is shorter). */
@@ -302,6 +302,57 @@ export async function intakeDelete(deps: IntakeDeps, input: Row, caller: Caller)
     updatedBy: caller.email,
   })
   await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_DELETE', caller, { reason: note, runId: row.runId ?? null, previousStatus: row.status ?? null })
+  return intakeRecordOf(saved) as unknown as Row
+}
+
+// ── INTAKE_DISMISS_BUILT (any intake reviewer) ───────────────────────────────
+
+/**
+ * Ryne 2026-11-23: anyone who reviews Intake can clear an e-mail whose load is already built; only a delete of a load that is NOT built
+ * stays owner/ADMIN. The server decides "built" itself, never the browser: the row already became a shipment, or its parsed reference,
+ * pickup or delivery number is on a live shipment (a firm `reference` match, the same check the "Already built" notice shows). A subject-only
+ * "May already be built" is not enough. The row is then handled like a delete (DISMISSED with a reason that keeps repeat e-mails from reopening
+ * it) and the audit entry records who, when, the e-mail and the PRO(s). The shipment is never read for writing or touched.
+ */
+export async function intakeDismissBuilt(deps: IntakeDeps, input: Row, caller: Caller): Promise<Row> {
+  const intakeId = assertString(input.intakeId, 'intakeId')
+  const note = optionalString(input.reason, 500)
+  const row = await loadRow(deps, intakeId)
+  assertExpectedVersion(row, input)
+  if (row.status === 'DISMISSED' && isDeletedIntake({ status: row.status, dismissReason: row.dismissReason as string | null })) return intakeRecordOf(row) as unknown as Row
+  const record = intakeRecordOf(row)
+  const built: { number: string; shipmentId: string }[] = []
+  if (record.shipmentId && (row.status === 'MOVED' || row.status === 'PROMOTING')) {
+    built.push({ number: optionalString(row.shipmentNumber, 100) ?? '', shipmentId: record.shipmentId })
+  } else if (row.status === 'OPEN' && deps.findShipmentsBySearchKeys) {
+    const values = [...new Set(refCandidates(record).map((c) => c.value.toLowerCase()))]
+    const found = new Map<string, BuiltShipment>()
+    for (let i = 0; i < values.length; i += 25) {
+      for (const s of await deps.findShipmentsBySearchKeys(values.slice(i, i + 25))) found.set(String(s.id), builtShipmentOf(s))
+    }
+    for (const m of builtMatchesFor(record, [...found.values()], new Map())) {
+      if (m.source === 'reference') built.push({ number: m.number, shipmentId: m.shipmentId })
+    }
+  }
+  if (built.length === 0) throw new Error('This load is not built yet: only an owner or ADMIN can delete a load that is not built')
+  const now = deps.now()
+  const pros = built.map((b) => b.number).filter(Boolean).join(', ')
+  const saved = await writeIntake(deps, row, {
+    status: 'DISMISSED',
+    dismissedBy: caller.email,
+    dismissedAt: now,
+    dismissReason: note ? `${INTAKE_DISMISSED_BUILT_REASON}: ${note}` : INTAKE_DISMISSED_BUILT_REASON,
+    updatedBy: caller.email,
+  })
+  await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_DISMISS_BUILT', caller, {
+    reason: note,
+    runId: row.runId ?? null,
+    previousStatus: row.status ?? null,
+    subject: optionalString(row.subject, 300),
+    source: optionalString(row.source, 100),
+    builtShipments: built,
+    builtPros: pros || null,
+  })
   return intakeRecordOf(saved) as unknown as Row
 }
 
@@ -671,6 +722,8 @@ export function runIntakeAction(deps: IntakeDeps, action: IntakeAction, input: R
       return intakeAttachFiles(deps, input, caller)
     case 'INTAKE_DELETE':
       return intakeDelete(deps, input, caller)
+    case 'INTAKE_DISMISS_BUILT':
+      return intakeDismissBuilt(deps, input, caller)
     case 'INTAKE_NOT_DUPLICATE':
       return intakeNotDuplicate(deps, input, caller)
     case 'INTAKE_ADD_NOTE':

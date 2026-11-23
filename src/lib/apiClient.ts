@@ -3305,6 +3305,11 @@ export async function deleteIntake(input: { intakeId: string; expectedVersion: n
   return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_DELETE', input))
 }
 
+/** Anyone who reviews Intake: clear an e-mail whose load is already built (the server verifies that; the shipment is never touched; audited). */
+export async function dismissBuiltIntake(input: { intakeId: string; expectedVersion: number; reason?: string }): Promise<IntakeLoadRecord> {
+  return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_DISMISS_BUILT', input))
+}
+
 /** "Not a duplicate": the badge stays away from this row. */
 export async function markIntakeNotDuplicate(input: { intakeId: string; expectedVersion: number }): Promise<IntakeLoadRecord> {
   return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_NOT_DUPLICATE', input))

@@ -9,6 +9,7 @@ import type { TransactWriteItem } from '@aws-sdk/client-dynamodb'
 
 import { INTAKE_CONFLICT_MESSAGE, PROMOTING_STALE_MS, reconcileOpenIntake, runIntakeAction, type IntakeDeps } from './intake'
 import { emptyIntakeFields } from '../../../src/lib/intakeLoad'
+import { isDeletedIntake } from '../../../src/lib/intakeDup'
 import type { Caller } from '../_shared/actionInputs'
 
 type Row = Record<string, unknown>
@@ -228,6 +229,83 @@ describe('INTAKE_DELETE', () => {
 
   it('needs the current version', async () => {
     await expect(runIntakeAction(deps(), 'INTAKE_DELETE', { intakeId: 'il:r1', expectedVersion: 1 }, admin)).rejects.toThrow(INTAKE_CONFLICT_MESSAGE)
+  })
+})
+
+describe('INTAKE_DISMISS_BUILT', () => {
+  const builtDeps = (): IntakeDeps => ({
+    ...deps(),
+    findShipmentsBySearchKeys: async (values) =>
+      [...rows(T.shipment).values()].filter((r) => values.some((v) => String(r.searchKey ?? '').includes(v))),
+  })
+  const runBuilt = (input: Row, who: Caller = caller) => runIntakeAction(builtDeps(), 'INTAKE_DISMISS_BUILT', input, who)
+  const SHIPMENT = { id: 'shp-9', number: '20054', customerId: 'cus-1', customerName: 'Acme', searchKey: '20054 acme po-77001', updatedAt: '2026-11-03T11:00:00.000Z', version: 4 }
+  const withRef = (over: Row = {}) =>
+    seedIntake({ subject: 'Tender PO-77001', source: 'IVAN_CARTAGE', fields: JSON.stringify({ ...JSON.parse(String(intake().fields)), reference: 'PO-77001', pickupNumber: null, deliveryNumber: null }), ...over })
+  beforeEach(() => { seedIntake(); withRef() })
+
+  it('lets a reviewer who is not an admin dismiss a load whose reference is on a live shipment, and audits who, what and which PRO', async () => {
+    rows(T.shipment).set('shp-9', { ...SHIPMENT })
+    await runBuilt({ intakeId: 'il:r1', expectedVersion: 3, reason: 'built by hand' })
+    expect(intake()).toMatchObject({ status: 'DISMISSED', dismissedBy: caller.email, dismissReason: 'Dismissed, already built: built by hand' })
+    expect(isDeletedIntake(intake() as never)).toBe(true)
+    expect(audits).toHaveLength(1)
+    expect(audits[0]).toMatchObject({
+      type: 'INTAKE_LOAD',
+      id: 'il:r1',
+      action: 'INTAKE_DISMISS_BUILT',
+      changes: { reason: 'built by hand', subject: 'Tender PO-77001', source: 'IVAN_CARTAGE', previousStatus: 'OPEN', builtPros: '20054', builtShipments: [{ number: '20054', shipmentId: 'shp-9' }] },
+    })
+  })
+
+  it('never touches the shipment or writes an audit row against it', async () => {
+    rows(T.shipment).set('shp-9', { ...SHIPMENT })
+    await runBuilt({ intakeId: 'il:r1', expectedVersion: 3 })
+    expect(rows(T.shipment).get('shp-9')).toEqual(SHIPMENT)
+    expect(audits.every((a) => a.type === 'INTAKE_LOAD')).toBe(true)
+    expect(createShipment).not.toHaveBeenCalled()
+  })
+
+  it('refuses a load that is not built, however it is asked: nothing written, nothing audited', async () => {
+    const before = { ...intake() }
+    await expect(runBuilt({ intakeId: 'il:r1', expectedVersion: 3 })).rejects.toThrow(/not built yet/)
+    expect(intake()).toEqual(before)
+    expect(audits).toHaveLength(0)
+  })
+
+  it('refuses a subject-only "may already be built", a voided shipment, and another customer\'s shipment', async () => {
+    rows(T.shipment).set('shp-9', { ...SHIPMENT, searchKey: '20054 acme' })
+    seedIntake({ subject: 'Tender PO-77001 again', fields: JSON.stringify({ ...JSON.parse(String(intake().fields)), reference: null }) })
+    rows(T.shipment).set('shp-9', { ...SHIPMENT, searchKey: '20054 acme po-77001' })
+    await expect(runBuilt({ intakeId: 'il:r1', expectedVersion: 3 })).rejects.toThrow(/not built yet/)
+
+    withRef()
+    rows(T.shipment).set('shp-9', { ...SHIPMENT, voidedAt: '2026-11-02T00:00:00.000Z' })
+    await expect(runBuilt({ intakeId: 'il:r1', expectedVersion: 3 })).rejects.toThrow(/not built yet/)
+
+    rows(T.shipment).set('shp-9', { ...SHIPMENT, customerId: 'cus-2' })
+    await expect(runBuilt({ intakeId: 'il:r1', expectedVersion: 3 })).rejects.toThrow(/not built yet/)
+    expect(intake().status).toBe('OPEN')
+  })
+
+  it('refuses a row someone marked "not the same load"', async () => {
+    rows(T.shipment).set('shp-9', { ...SHIPMENT })
+    withRef({ confirmed: ['notDuplicate'] })
+    await expect(runBuilt({ intakeId: 'il:r1', expectedVersion: 3 })).rejects.toThrow(/not built yet/)
+  })
+
+  it('needs the current version and is idempotent once dismissed', async () => {
+    rows(T.shipment).set('shp-9', { ...SHIPMENT })
+    await expect(runBuilt({ intakeId: 'il:r1', expectedVersion: 1 })).rejects.toThrow(INTAKE_CONFLICT_MESSAGE)
+    await runBuilt({ intakeId: 'il:r1', expectedVersion: 3 })
+    await runBuilt({ intakeId: 'il:r1', expectedVersion: 4 })
+    expect(audits).toHaveLength(1)
+  })
+
+  it('INTAKE_DELETE of the same load is still owner/ADMIN only', async () => {
+    rows(T.shipment).set('shp-9', { ...SHIPMENT })
+    await expect(run('INTAKE_DELETE', { intakeId: 'il:r1', expectedVersion: 3 })).rejects.toThrow(/Forbidden: INTAKE_DELETE requires owner or ADMIN/)
+    expect(intake().status).toBe('OPEN')
   })
 })
 
