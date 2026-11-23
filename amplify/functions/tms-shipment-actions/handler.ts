@@ -614,6 +614,7 @@ type Action =
   | 'INTAKE_UNLINK_SHIPMENT'
   | 'INTAKE_ATTACH_FILES'
   | 'INTAKE_DELETE'
+  | 'INTAKE_DISMISS_BUILT'
   | 'INTAKE_NOT_DUPLICATE'
   | 'INTAKE_ADD_NOTE'
   | 'INTAKE_AUTOLINK_BUILT'
@@ -10002,6 +10003,7 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
     case 'INTAKE_LINK_SHIPMENT':
     case 'INTAKE_ATTACH_FILES':
     case 'INTAKE_DELETE':
+    case 'INTAKE_DISMISS_BUILT':
     case 'INTAKE_NOT_DUPLICATE':
     case 'INTAKE_ADD_NOTE':
     case 'INTAKE_AUTOLINK_BUILT':

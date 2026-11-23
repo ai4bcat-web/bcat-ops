@@ -92,6 +92,7 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
   const [dismissOpen, setDismissOpen] = useState(false)
   const [markBuiltOpen, setMarkBuiltOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [dismissBuilt, setDismissBuilt] = useState(false)
   const { isOwnerOrAdmin } = useIntakePermissions()
   const queue = useIntakeLoads({ status: 'OPEN', enabled: row.status === 'OPEN' })
   const dupInfo = useMemo(() => duplicateGroups(queue.rows).get(row.id), [queue.rows, row.id])
@@ -300,7 +301,9 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
             row={row}
             matches={builtMatches}
             isAdmin={isOwnerOrAdmin}
-            onDelete={() => setDeleteOpen(true)}
+            canReview={canReview}
+            onDelete={() => { setDismissBuilt(false); setDeleteOpen(true) }}
+            onDismiss={() => { setDismissBuilt(true); setDeleteOpen(true) }}
             onChanged={(next) => { onRow(next); queue.refresh() }}
           />
         ) : null}
@@ -515,6 +518,7 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
       </TmsDialog>
       <DeleteIntakeDialog
         row={row}
+        dismissBuilt={dismissBuilt}
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         onDeleted={() => navigate('/tms/shipments/intake')}

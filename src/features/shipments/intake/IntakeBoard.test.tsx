@@ -19,7 +19,7 @@ let divisions: OwnershipDivisionRecord[] = []
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({
   useOwnershipDivisions: () => ({ divisions, loading: false, error: null, refresh: () => undefined }),
 }))
-vi.mock('@/lib/apiClient', () => ({ listIntakeLoads: vi.fn(), countOpenIntakeLoads: vi.fn().mockResolvedValue(0), batchShipmentTask: vi.fn(), dismissIntake: vi.fn(), deleteIntake: vi.fn(), markIntakeNotDuplicate: vi.fn(), addIntakeNote: vi.fn(), listShipmentsBySearchKeys: vi.fn(), autolinkIntakeBuilt: vi.fn().mockResolvedValue({ linked: 0 }) }))
+vi.mock('@/lib/apiClient', () => ({ listIntakeLoads: vi.fn(), countOpenIntakeLoads: vi.fn().mockResolvedValue(0), batchShipmentTask: vi.fn(), dismissIntake: vi.fn(), deleteIntake: vi.fn(), dismissBuiltIntake: vi.fn(), markIntakeNotDuplicate: vi.fn(), addIntakeNote: vi.fn(), listShipmentsBySearchKeys: vi.fn(), autolinkIntakeBuilt: vi.fn().mockResolvedValue({ linked: 0 }) }))
 
 function Where() {
   const loc = useLocation()
@@ -450,5 +450,45 @@ describe('IntakeBoard: already built as a PRO', () => {
     await screen.findByText('Tender for Mesa')
     await waitFor(() => expect(api.listShipmentsBySearchKeys).toHaveBeenCalled())
     expect(screen.queryByTestId('intake-flag-built')).not.toBeInTheDocument()
+  })
+})
+
+describe('IntakeBoard: any reviewer dismisses an already-built load', () => {
+  const SHIPMENT = { id: 'shp-43', number: '20043', customerId: 'c1', customerName: 'C.H. ROBINSON', searchKey: '20043 c.h. robinson mesa az 573570079', voidedAt: null, deletedAt: null }
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    resetBuiltMatchCache()
+    resetAutolinkTried()
+    vi.mocked(api.autolinkIntakeBuilt).mockResolvedValue({ linked: 0 })
+    vi.mocked(api.deleteIntake).mockClear()
+    vi.mocked(api.dismissBuiltIntake).mockClear()
+    divisions = [division('BRK', 'Brokerage')]
+    vi.mocked(api.listIntakeLoads).mockImplementation(async () => [
+      intakeRow({ id: 'il:a', subject: 'Tender for Mesa', fields: intakeFields({ reference: '573570079' }) }),
+    ])
+    vi.mocked(api.listShipmentsBySearchKeys).mockResolvedValue([SHIPMENT])
+  })
+
+  it('a reviewer who is not owner/ADMIN gets Dismiss, not Delete, and the confirm says the shipment is untouched and it is audited', async () => {
+    vi.mocked(api.dismissBuiltIntake).mockResolvedValue(intakeRow({ id: 'il:a', status: 'DISMISSED' }))
+    renderBoard('/tms/shipments/intake', false)
+    const dialog = await openFlag('intake-flag-built')
+    expect(within(dialog).queryByTestId('intake-built-delete')).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByTestId('intake-built-dismiss'))
+    const confirm = await screen.findByText('Dismiss this load from Intake?')
+    expect(confirm).toBeInTheDocument()
+    expect(screen.getByText(/the shipment is not touched/)).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('intake-delete-confirm'))
+    await waitFor(() => expect(api.dismissBuiltIntake).toHaveBeenCalledWith({ intakeId: 'il:a', expectedVersion: 1 }))
+    expect(api.deleteIntake).not.toHaveBeenCalled()
+  })
+
+  it('a subject-only "May already be built" offers no Dismiss', async () => {
+    vi.mocked(api.listIntakeLoads).mockImplementation(async () => [
+      intakeRow({ id: 'il:a', subject: 'Rate Confirmation for Load: 573570079', fields: intakeFields({ reference: null, pickupNumber: null, deliveryNumber: null }) }),
+    ])
+    renderBoard('/tms/shipments/intake', false)
+    const dialog = await openFlag('intake-flag-built')
+    expect(within(dialog).queryByTestId('intake-built-dismiss')).not.toBeInTheDocument()
   })
 })
