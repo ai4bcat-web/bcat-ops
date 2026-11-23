@@ -3310,6 +3310,11 @@ export async function dismissBuiltIntake(input: { intakeId: string; expectedVers
   return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_DISMISS_BUILT', input))
 }
 
+/** Anyone on the Build tab: clear an open load off Intake with a picked reason. Intake row only; a built shipment is never touched; audited. */
+export async function clearIntake(input: { intakeId: string; expectedVersion: number; reasonCode: string; reason?: string }): Promise<IntakeLoadRecord> {
+  return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_CLEAR', input))
+}
+
 /** "Not a duplicate": the badge stays away from this row. */
 export async function markIntakeNotDuplicate(input: { intakeId: string; expectedVersion: number }): Promise<IntakeLoadRecord> {
   return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_NOT_DUPLICATE', input))

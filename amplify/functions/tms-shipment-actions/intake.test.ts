@@ -309,6 +309,77 @@ describe('INTAKE_DISMISS_BUILT', () => {
   })
 })
 
+describe('INTAKE_CLEAR', () => {
+  const builtDeps = (): IntakeDeps => ({
+    ...deps(),
+    findShipmentsBySearchKeys: async (values) =>
+      [...rows(T.shipment).values()].filter((r) => values.some((v) => String(r.searchKey ?? '').includes(v))),
+  })
+  const clear = (input: Row, who: Caller = caller) => runIntakeAction(builtDeps(), 'INTAKE_CLEAR', input, who)
+  const SHIPMENT = { id: 'shp-9', number: '20054', customerId: 'cus-1', customerName: 'Acme', searchKey: '20054 acme po-77001', updatedAt: '2026-11-03T11:00:00.000Z', version: 4 }
+  const withRef = (over: Row = {}) =>
+    seedIntake({ subject: 'Tender PO-77001', source: 'IVAN_CARTAGE', fields: JSON.stringify({ ...JSON.parse(String(intake().fields)), reference: 'PO-77001', pickupNumber: null, deliveryNumber: null }), ...over })
+  beforeEach(() => { seedIntake() })
+
+  it('clears an open load with a listed reason for a non-admin, keeps repeat e-mails from reopening it, and audits who, when, what and why', async () => {
+    const out = await clear({ intakeId: 'il:r1', expectedVersion: 3, reasonCode: 'DUPLICATE' })
+    expect(out).toMatchObject({ status: 'DISMISSED', dismissedBy: caller.email })
+    expect(intake()).toMatchObject({ status: 'DISMISSED', dismissedBy: caller.email, dismissReason: 'Cleared from Intake: Duplicate' })
+    expect(isDeletedIntake(intake() as never)).toBe(true)
+    expect(audits).toHaveLength(1)
+    expect(audits[0]).toMatchObject({
+      type: 'INTAKE_LOAD',
+      id: 'il:r1',
+      action: 'INTAKE_CLEAR',
+      changes: { reasonCode: 'DUPLICATE', reason: 'Duplicate', previousStatus: 'OPEN', builtShipments: [], builtPros: null },
+    })
+  })
+
+  it('keeps a typed note with a listed reason, and needs one for Other', async () => {
+    await expect(clear({ intakeId: 'il:r1', expectedVersion: 3, reasonCode: 'OTHER' })).rejects.toThrow(/Say why/)
+    expect(intake().status).toBe('OPEN')
+    await clear({ intakeId: 'il:r1', expectedVersion: 3, reasonCode: 'CANCELED', reason: 'customer called' })
+    expect(intake().dismissReason).toBe('Cleared from Intake: Canceled by customer: customer called')
+    seedIntake()
+    await clear({ intakeId: 'il:r1', expectedVersion: 3, reasonCode: 'OTHER', reason: 'wrong mailbox' })
+    expect(intake().dismissReason).toBe('Cleared from Intake: wrong mailbox')
+  })
+
+  it('refuses an unknown reason code and a missing one', async () => {
+    await expect(clear({ intakeId: 'il:r1', expectedVersion: 3, reasonCode: 'BECAUSE' })).rejects.toThrow(/reasonCode must be one of/)
+    await expect(clear({ intakeId: 'il:r1', expectedVersion: 3 })).rejects.toThrow(/reasonCode/)
+    expect(intake().status).toBe('OPEN')
+    expect(audits).toHaveLength(0)
+  })
+
+  it('on an already-built load, records the PRO(s) and never touches the shipment', async () => {
+    withRef()
+    rows(T.shipment).set('shp-9', { ...SHIPMENT })
+    await clear({ intakeId: 'il:r1', expectedVersion: 3, reasonCode: 'ALREADY_HANDLED' })
+    expect(intake().status).toBe('DISMISSED')
+    expect(audits[0]!.changes).toMatchObject({ reasonCode: 'ALREADY_HANDLED', builtPros: '20054', builtShipments: [{ number: '20054', shipmentId: 'shp-9' }] })
+    expect(rows(T.shipment).get('shp-9')).toEqual(SHIPMENT)
+    expect(audits.every((a) => a.type === 'INTAKE_LOAD')).toBe(true)
+    expect(createShipment).not.toHaveBeenCalled()
+  })
+
+  it('refuses a load that already became a shipment, and needs the current version', async () => {
+    await expect(clear({ intakeId: 'il:r1', expectedVersion: 1, reasonCode: 'DUPLICATE' })).rejects.toThrow(INTAKE_CONFLICT_MESSAGE)
+    seedIntake({ status: 'MOVED', shipmentId: 'shp-1', shipmentNumber: 'S000123' })
+    await expect(clear({ intakeId: 'il:r1', expectedVersion: 3, reasonCode: 'DUPLICATE' })).rejects.toThrow(/already became a shipment/)
+    expect(intake().status).toBe('MOVED')
+    expect(audits).toHaveLength(0)
+  })
+
+  it('is idempotent once cleared, and Delete of an uncleared load is still owner/ADMIN only', async () => {
+    await clear({ intakeId: 'il:r1', expectedVersion: 3, reasonCode: 'NOT_A_LOAD' })
+    await clear({ intakeId: 'il:r1', expectedVersion: 4, reasonCode: 'NOT_A_LOAD' })
+    expect(audits).toHaveLength(1)
+    seedIntake()
+    await expect(run('INTAKE_DELETE', { intakeId: 'il:r1', expectedVersion: 3 })).rejects.toThrow(/Forbidden: INTAKE_DELETE requires owner or ADMIN/)
+  })
+})
+
 describe('INTAKE_NOT_DUPLICATE', () => {
   const owner: Caller = { email: 'ryne@bcatcorp.com', sub: 'sub-admin', groups: ['ADMIN'], isAdmin: true }
   const asAdmin = (input: Row) => runIntakeAction(deps(), 'INTAKE_NOT_DUPLICATE', input, owner)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { INTAKE_DELETED_REASON, dupBodyKey, dupSubjectKey, isDeletedIntake, isSameEmail, isSameTender } from './intakeDup'
+import { INTAKE_CLEARED_REASON, INTAKE_DELETED_REASON, dupBodyKey, dupSubjectKey, isDeletedIntake, isSameEmail, isSameTender } from './intakeDup'
 
 const mail = (over: Record<string, unknown> = {}) => ({ subject: 'Fwd: Rate Confirmation for Load: 69902922', bodyText: 'Please see attached rate con.\n\nThanks', receivedAt: '2026-11-11T14:19:00Z', ...over })
 
@@ -55,5 +55,10 @@ describe('isDeletedIntake', () => {
     expect(isDeletedIntake({ status: 'DISMISSED', dismissReason: `${INTAKE_DELETED_REASON}: spam` })).toBe(true)
     expect(isDeletedIntake({ status: 'DISMISSED', dismissReason: 'spam' })).toBe(false)
     expect(isDeletedIntake({ status: 'OPEN', dismissReason: INTAKE_DELETED_REASON })).toBe(false)
+  })
+
+  it('a team member\'s "Clear from Intake" counts too, so a repeat e-mail does not reopen it', () => {
+    expect(isDeletedIntake({ status: 'DISMISSED', dismissReason: `${INTAKE_CLEARED_REASON}: Duplicate` })).toBe(true)
+    expect(isDeletedIntake({ status: 'OPEN', dismissReason: INTAKE_CLEARED_REASON })).toBe(false)
   })
 })

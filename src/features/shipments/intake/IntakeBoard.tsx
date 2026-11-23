@@ -36,7 +36,7 @@ import { formatDateTime } from '@/lib/date'
 import { intakeCounts } from '@/lib/intakeLoad'
 import { isDeletedIntake } from '@/lib/intakeDup'
 import { duplicateGroups } from '@/lib/intakeDuplicates'
-import { DeleteIntakeDialog, IntakeItemDialog, IntakeRowFlags } from './DuplicateParts'
+import { ClearIntakeDialog, DeleteIntakeDialog, IntakeItemDialog, IntakeRowFlags } from './DuplicateParts'
 import { useAutolinkBuilt, useBuiltMatches } from './useBuiltMatches'
 import type { IntakeLoadRecord } from '@/types/intake'
 import {
@@ -126,6 +126,7 @@ export function IntakeBoard() {
   const { isOwnerOrAdmin, canReview } = useIntakePermissions()
   const [deleting, setDeleting] = useState<IntakeLoadRecord | null>(null)
   const [dismissingBuilt, setDismissingBuilt] = useState(false)
+  const [clearing, setClearing] = useState<IntakeLoadRecord | null>(null)
   const [itemId, setItemId] = useState<string | null>(null)
   const [hideBanner, setHideBanner] = useState(bannerHidden)
   const [markingBuilt, setMarkingBuilt] = useState<IntakeLoadRecord | null>(null)
@@ -503,7 +504,7 @@ export function IntakeBoard() {
           empty={open.loading ? <TmsBadge tone="gray">Loading…</TmsBadge> : rows.length > 0 ? 'No tender e-mails match the column filters.' : emptyBody}
         />
       </div>
-      {itemId && !deleting ? (() => {
+      {itemId && !deleting && !clearing ? (() => {
         const item = open.rows.find((r) => r.id === itemId)
         return item ? (
           <IntakeItemDialog
@@ -515,6 +516,7 @@ export function IntakeBoard() {
             onClose={() => setItemId(null)}
             onDelete={() => { setDismissingBuilt(false); setDeleting(item) }}
             onDismissBuilt={() => { setDismissingBuilt(true); setDeleting(item) }}
+            onClear={() => setClearing(item)}
             onChanged={() => open.refresh()}
           />
         ) : null
@@ -525,6 +527,15 @@ export function IntakeBoard() {
           open
           onOpenChange={(o) => { if (!o) setMarkingBuilt(null) }}
           onLinked={() => { setMarkingBuilt(null); open.refresh() }}
+        />
+      ) : null}
+      {clearing ? (
+        <ClearIntakeDialog
+          row={clearing}
+          builtPros={(built.get(clearing.id) ?? []).filter((m) => m.source === 'reference').map((m) => m.number)}
+          open
+          onOpenChange={(o) => { if (!o) setClearing(null) }}
+          onCleared={() => { setClearing(null); setItemId(null); open.refresh() }}
         />
       ) : null}
       {deleting ? (
