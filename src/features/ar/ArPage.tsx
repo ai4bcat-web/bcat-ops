@@ -92,6 +92,7 @@ import { DOCS_LOCKED_MESSAGE, DOC_FIXABLE, docsLockedReason } from './arDocument
 import { ArDocumentsDrawer } from './components/ArDocumentsDrawer'
 import type { InvoiceAttachmentPlanRow } from '@/lib/invoiceDelivery'
 import type { FactoringItem } from '@/types'
+import { noBuyColumnText, otrNoBuyByCustomer, type OtrNoBuyByCustomer } from '@/lib/otrNoBuy'
 import { AccountingReportsDialog } from '@/features/finance/AccountingReportsDialog'
 import type { AccountingReportKind } from '@/features/finance/accountingReports'
 import { useDeliveredNotReady } from './useDeliveredNotReady'
@@ -490,6 +491,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     : null
 
   const customerById = new Map(customers.map((c) => [c.id, c]))
+  const noBuy = useMemo(() => otrNoBuyByCustomer(factoringItems), [factoringItems])
   // The Aging report: same invoices as Open AR, aged from the invoice date like the statement.
   const lastPaidByCustomer = new Map<string, string>()
   for (const inv of [...recentPaid, ...filteredOpen]) {
@@ -535,6 +537,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     // eslint-disable-next-line react-hooks/refs
     tab === 'ready' || tab === 'invoiced' ? queueView({
       status: QUEUE_TAB_STATUS[tab],
+      noBuy,
       rows: queue[QUEUE_TAB_STATUS[tab]],
       groupBy,
       groupControl,
@@ -939,12 +942,14 @@ function dateCol<T>(key: string, header: string, of: (row: T) => string | null, 
 }
 
 function queueView({
-  status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, factorByItemId, customerById,
+  status, noBuy, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, factorByItemId, customerById,
   attachmentPlans, boardById, shipmentsById, months, month, paidLoading, onMonth, onSelect, invoiceErrors, invoicesRunning, onRetryInvoice, onBatchGenerate, onReview, onEdit,
   onStatement, onPastDue, paymentFacts,
   factorReadiness, onBatchFactor, onWhy, onDocs, onEditCustomer, onChangeMethod, onEditAmount, editedIds,
 }: {
   status: ArQueueStatus
+  /** Customers OTR has ever refused (staff-only column; never on a customer-facing document). */
+  noBuy: OtrNoBuyByCustomer
   rows: ArQueueRow[]
   groupBy: ArGroupBy
   groupControl: ReactNode
@@ -1095,6 +1100,11 @@ function queueView({
       text: (row) => invoiceEmailsOf(row).to.join(', ') || (row.factored ? '' : 'No AP email'),
     },
     { key: 'customer', header: 'Customer', group: 'Shipment', text: (row) => row.customerName, filter: 'multi', optionsOf: (row) => opt(row.customerName) },
+    {
+      key: 'noBuy', header: 'OTR no buy', group: 'Customer',
+      text: (row) => noBuyColumnText(row.customerId ? noBuy.get(row.customerId) : undefined) || '—',
+      filter: 'multi', optionsOf: (row) => opt(noBuyColumnText(row.customerId ? noBuy.get(row.customerId) : undefined) || 'Not flagged'),
+    } as Col<ArQueueRow>,
     ...(ready ? [
       { key: 'billing', header: 'Payment method', group: 'Customer', text: billingText, filter: 'multi', optionsOf: (row: ArQueueRow) => opt(billingText(row)) } as Col<ArQueueRow>,
       { key: 'mc', header: 'MC #', group: 'Customer', text: mcText } as Col<ArQueueRow>,
@@ -1159,6 +1169,10 @@ function queueView({
 
   const renderCell = (row: ArQueueRow, key: string): ReactNode => {
     switch (key) {
+      case 'noBuy': {
+        const events = row.customerId ? noBuy.get(row.customerId) : undefined
+        return events ? <TmsBadge tone="red" title={`OTR said No buy on PRO ${events.map((e) => e.pro).join(', ')}`}>No buy</TmsBadge> : '—'
+      }
       case 'select':
         if (invoiced) {
           return canRemind(row) ? (
