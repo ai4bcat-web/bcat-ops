@@ -6395,6 +6395,9 @@ const COMPLIANCE_OVERRIDABLE: ReadonlySet<string> = new Set([
   'INSURANCE_EXPIRED', 'INSURANCE_UNVERIFIED', 'CARGO_VALUE_EXCEEDS_INSURANCE', 'MCP_UNACCEPTABLE', 'SETUP_NOT_STARTED',
 ])
 
+/** Admin-only insurance warnings that the same typed override reason also covers (no further tick). */
+const COMPLIANCE_OVERRIDE_WARNINGS: ReadonlySet<string> = new Set(['INSURANCE_UNVERIFIED', 'CARGO_VALUE_EXCEEDS_INSURANCE'])
+
 /** The admin's reason for booking past the compliance findings, or null when none was asked for. */
 export function complianceOverrideReason(input: Row, caller: Pick<Caller, 'isAdmin'>): string | null {
   if (input.overrideReason == null) return null
@@ -6531,6 +6534,15 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
     }
   }
   const acknowledgedKeys = new Set(acknowledged)
+  // Ryne 2026-11-24: one typed reason waves through every insurance finding, not only the "no policy covers the pickup" blocks.
+  // The admin-only "no cargo insurance on file" / "cargo value over the limit" warnings are the same paperwork question, so they
+  // no longer need a second tick after the override. Each is recorded individually, next to the blocks, in the booking warnings,
+  // the load-carrier audit and the shipment's Activity. Other warnings (a MyCarrierPackets rating, a top-spend limit) still need their own tick.
+  const overriddenWarnings = overrideWhy && caller.isAdmin
+    ? warnings.filter((w) => COMPLIANCE_OVERRIDE_WARNINGS.has(w.reason) && !acknowledgedKeys.has(w.key))
+    : []
+  for (const w of overriddenWarnings) acknowledgedKeys.add(w.key)
+  overridden = [...overridden, ...overriddenWarnings]
   const unacknowledged = warnings.filter((w) => !acknowledgedKeys.has(w.key))
   if (unacknowledged.length > 0) {
     // The trailing [ack:KEY,KEY] is machine-readable: the Cover dialog turns it into a checkbox and sends those keys back.
