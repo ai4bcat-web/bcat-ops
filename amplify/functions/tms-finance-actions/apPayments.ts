@@ -390,6 +390,8 @@ export async function recordApPayment(input: Row, caller: Caller): Promise<Poste
   const creditApplications = assertCreditApplications(input.creditApplications, 'creditApplications')
   const { suppressRemittance, note } = remittanceOptions(input.suppressRemittance, optionalString(input.note, MAX_NOTE))
   const clientRequestId = optionalString(input.clientRequestId, 64)
+  // A payment posted as one leg of a pay-to group does not e-mail on its own: the group sends one remittance for all of them.
+  const deferRemittance = input.deferRemittance === true
 
   const id = paymentId('app', carrierId, clientRequestId)
   const existing = await getById(AP_PAYMENT_TABLE_NAME, id)
@@ -475,13 +477,14 @@ export async function recordApPayment(input: Row, caller: Caller): Promise<Poste
       applications: stored,
       creditApplications,
       ...(suppressRemittance ? { remittanceSuppressed: true } : {}),
+      ...(deferRemittance ? { remittanceDeferredToGroup: true } : {}),
     })
     // The advice is rendered after the money is recorded, never before: a renderer
     // that throws must not stop a payment that has already gone out of the bank.
     await storeRemittance(id, caller)
     // Then the carrier is told, once. A failure here never touches the payment (see autoSendRemittance).
     // A historical payment recorded with `suppressRemittance` tells nobody.
-    if (!suppressRemittance) await autoSendRemittance(id, caller)
+    if (!suppressRemittance && !deferRemittance) await autoSendRemittance(id, caller)
   }
   return readBack(id, billIds, duplicate)
 }
@@ -1040,6 +1043,251 @@ export async function sendRemittance(input: Row, caller: Caller): Promise<Row> {
     to,
     cc,
     downloads,
+  }
+}
+
+// ── paying one pay-to across several carriers ───────────────────────────────
+
+/** Who a carrier's bills are paid to, and where the advice goes: what two carriers must share to be paid together. */
+export interface PayToIdentity {
+  carrierId: string
+  payTo: string
+  /** Normalized pay-to name; a carrier with no name on file keys to itself so it never groups by accident. */
+  key: string
+  to: string[]
+}
+
+export function payToIdentityOf(context: Omit<Parameters<typeof remitRecipientsFor>[0], 'payment'> & { carrierId: string }): PayToIdentity {
+  const active = context.methods.filter((row) => row.status !== 'INACTIVE')
+  const named = context.methods.find((row) => row.id === context.bills[0]?.paymentMethodId)
+  const method = named ?? active.find((row) => row.isPreferred) ?? active[0] ?? null
+  const withPayment = { ...context, payment: {} as Row }
+  const payTo = payToNameOfContext(withPayment, method)
+  return {
+    carrierId: context.carrierId,
+    payTo,
+    key: factorKeyOf(payTo) || `CARRIER:${context.carrierId}`,
+    to: remitRecipientsFor(withPayment),
+  }
+}
+
+const addressKey = (to: readonly string[]) => [...to].map((email) => email.trim().toLowerCase()).sort().join(',')
+
+/**
+ * Bills of different carriers are paid together only when the money goes to the same pay-to and the advice to the
+ * same address. The Pay selected button reads the same rule (`selectionPayTo`), and the server never trusts it.
+ */
+export function assertSamePayTo(identities: readonly PayToIdentity[]): void {
+  if (identities.length < 2) return
+  const names = new Map<string, string>()
+  for (const identity of identities) if (!names.has(identity.key)) names.set(identity.key, identity.payTo || 'no pay-to on file')
+  if (names.size > 1) {
+    throw new Error(`These bills are paid to different payees (${[...names.values()].join('; ')}); pay each payee separately`)
+  }
+  const addresses = new Set(identities.map((identity) => addressKey(identity.to)))
+  if (addresses.size > 1) {
+    throw new Error(`These carriers are paid to ${identities[0].payTo} but have different remittance e-mail addresses; set one address for that pay-to first`)
+  }
+}
+
+/**
+ * Pay the full balance of bills that may belong to several carriers, all paid to the same pay-to. Each carrier
+ * still gets its own payment row (a payment is one carrier's), then ONE remittance e-mail goes to the pay-to
+ * listing every bill. Retrying with the same `clientRequestId` finishes whatever a failed attempt left undone.
+ */
+export async function recordApPaymentGroup(input: Row, caller: Caller): Promise<Row> {
+  const billIds = [...new Set(assertArrayOf<string>(input.billIds, 'billIds', (item, index) => assertString(item, `billIds[${index}]`), 100))]
+  if (billIds.length === 0) throw new Error('Pick at least one bill to pay')
+  const paidAt = paidAtOf(input.paidAt)
+  const method = optionalEnum(input.method, METHODS, 'method') ?? 'OTHER'
+  const reference = optionalString(input.reference, 120)
+  const note = optionalString(input.note, MAX_NOTE)
+  const clientRequestId = assertString(input.clientRequestId, 'clientRequestId')
+  const suppressRemittance = input.suppressRemittance === true
+
+  // A retry finds the payments an earlier attempt already posted and leaves their bills alone.
+  const requestIdFor = (carrierId: string) => `${clientRequestId.slice(0, 20)}-${carrierId.slice(0, 40)}`
+  const rows: Row[] = []
+  for (const billId of billIds) {
+    const row = await getById(CARRIER_BILL_TABLE_NAME, billId)
+    if (!row) throw new Error(`Bill not found: ${billId}`)
+    if (!String(row.carrierId ?? '')) throw new Error(`Bill ${billId} has no carrier`)
+    rows.push(row)
+  }
+  const posted0 = new Set<string>()
+  for (const carrierId of new Set(rows.map((row) => String(row.carrierId)))) {
+    if (await getById(AP_PAYMENT_TABLE_NAME, paymentId('app', carrierId, requestIdFor(carrierId)))) posted0.add(carrierId)
+  }
+
+  const byCarrier = new Map<string, { billId: string; cents: number }[]>()
+  const billRows: CarrierBillRecord[] = []
+  for (const row of rows) {
+    const billId = String(row.id)
+    const carrierId = String(row.carrierId)
+    const label = String(row.billNumber ?? billId)
+    let cents = numberOrNull(row.balanceCents) ?? 0
+    if (posted0.has(carrierId)) {
+      const stored = await getById(AP_PAYMENT_TABLE_NAME, paymentId('app', carrierId, requestIdFor(carrierId)))
+      cents = ((stored?.applications as ApPaymentApplication[] | undefined) ?? []).find((a) => a.billId === billId)?.amountCents ?? cents
+    } else {
+      const status = String(row.status ?? '')
+      if (status !== 'TO_BE_PAID' && status !== 'PARTIAL' && status !== 'IN_REVIEW') throw new Error(`Bill ${label} is not open for payment`)
+      if (cents <= 0) throw new Error(`Bill ${label} has nothing left to pay`)
+    }
+    byCarrier.set(carrierId, [...(byCarrier.get(carrierId) ?? []), { billId, cents }])
+    billRows.push(row as unknown as CarrierBillRecord)
+  }
+  for (const [carrierId, list] of byCarrier) {
+    if (list.length > 40) throw new Error(`Too many bills for one carrier (${carrierId}); pay at most 40 at a time`)
+  }
+
+  const factorEmails = parseFactorRemitMap((await getSettings()).factorRemitEmails)
+  const identities: PayToIdentity[] = []
+  for (const carrierId of byCarrier.keys()) {
+    const [carrier, methods, contacts] = await Promise.all([
+      getById(CARRIER_TABLE_NAME, carrierId),
+      queryIndex(CARRIER_PAYMENT_METHOD_TABLE_NAME, IDX_PAYMENT_METHODS_BY_CARRIER, 'carrierId', carrierId),
+      queryIndex(CARRIER_CONTACT_TABLE_NAME, IDX_CONTACTS_BY_CARRIER, 'carrierId', carrierId),
+    ])
+    identities.push(payToIdentityOf({
+      carrierId,
+      bills: billRows.filter((bill) => bill.carrierId === carrierId),
+      carrier: carrier as unknown as CarrierRecord | null,
+      methods: methods as unknown as CarrierPaymentMethodRecord[],
+      contacts: contacts as unknown as CarrierContactRecord[],
+      factorEmails,
+    }))
+  }
+  assertSamePayTo(identities)
+  // Every payee is checked before any money is recorded, so a group never half-posts for want of bank info.
+  await assertBillsPayable(billIds)
+
+  const posted: PostedRow[] = []
+  for (const [carrierId, list] of byCarrier) {
+    posted.push(await recordApPayment({
+      carrierId,
+      paidAt,
+      method,
+      reference,
+      amountCents: list.reduce((sum, item) => sum + item.cents, 0),
+      applications: list.map((item) => ({ billId: item.billId, amountCents: item.cents })),
+      creditApplications: [],
+      note,
+      clientRequestId: requestIdFor(carrierId),
+      suppressRemittance,
+      deferRemittance: true,
+    }, caller))
+  }
+
+  const paymentIds = posted.map((row) => String(row.payment.id))
+  const remittance = suppressRemittance || posted.every((row) => row.duplicate)
+    ? { status: 'SKIPPED' as const, to: [] as string[] }
+    : await sendGroupedRemittance(paymentIds, identities[0].to, caller)
+  return { payments: posted.map((row) => row.payment), bills: posted.flatMap((row) => row.bills), duplicate: posted.every((row) => row.duplicate), remittance }
+}
+
+/**
+ * The one e-mail for a pay-to group: every bill of every payment in a single table, the advice PDFs attached.
+ * Never throws (the money is already out): a refused send is logged and left on each payment as an attempt.
+ */
+async function sendGroupedRemittance(paymentIds: string[], recipients: string[], caller: Caller): Promise<{ status: string; to: string[] }> {
+  try {
+    if (String(process.env.AP_AUTO_REMITTANCE ?? '').toLowerCase() === 'off') return { status: 'SKIPPED', to: [] }
+    const contexts = await Promise.all(paymentIds.map((id) => readRemittanceContext(id)))
+    const sendable = contexts.every((context) => (
+      context.payment.kind === 'PAYMENT'
+      && !context.payment.reversedByPaymentId
+      && context.bills.length > 0
+      && !((numberOrNull(context.payment.remittanceAttempts) ?? 0) > 0 || context.payment.remittanceSentAt || context.payment.markedSentAt)
+    ))
+    if (!sendable) return { status: 'SKIPPED', to: [] }
+    if (recipients.length === 0) {
+      for (const id of paymentIds) await writeAudit('ApPayment', id, 'AUTO_REMITTANCE_SKIPPED', caller, { reason: 'NO_REMIT_EMAIL', grouped: true })
+      return { status: 'SKIPPED', to: [] }
+    }
+
+    const settings = await getSettings()
+    const to = recipients
+    const cc = remittanceCcFor(settings.remittanceCcEmails as string[] | null | undefined, to)
+    const first = contexts[0]
+    const bills = contexts.flatMap((context) => context.bills)
+    const applications = contexts.flatMap((context) => (context.payment.applications as ApPaymentApplication[] | undefined) ?? [])
+    const reference = String(first.payment.reference ?? first.payment.id)
+    const brokerName = first.division?.name ?? 'BCAT'
+    const table = renderRemittanceTableEmail({
+      payment: {
+        id: String(first.payment.id),
+        reference: String(first.payment.reference ?? '') || null,
+        paidAt: String(first.payment.paidAt ?? ''),
+        amountCents: contexts.reduce((sum, context) => sum + (numberOrNull(context.payment.amountCents) ?? 0), 0),
+        applications,
+        remitTo: null,
+      } as unknown as Parameters<typeof renderRemittanceTableEmail>[0]['payment'],
+      bills,
+      brokerName,
+      carrierName: null,
+    })
+
+    const attachments: { filename: string; bytes: Uint8Array; contentType: string }[] = []
+    for (const [index, context] of contexts.entries()) {
+      const key = typeof context.payment.pdfKey === 'string' ? context.payment.pdfKey : null
+      if (!key) continue
+      const name = contexts.length > 1 ? `${reference}-${index + 1}` : reference
+      attachments.push({
+        filename: remittanceFilename(name, numberOrNull(context.payment.pdfVersion) ?? 1),
+        bytes: (await s3Bytes(key)).bytes,
+        contentType: 'application/pdf',
+      })
+    }
+
+    const attempt = Math.max(...contexts.map((context) => numberOrNull(context.payment.remittanceAttempts) ?? 0)) + 1
+    const noticeId = `remit:${paymentIds[0]}:${attempt}`
+    const delivered = await deliverNotice({
+      db: dynamo,
+      ses,
+      tableName: SHIPMENT_NOTICE_TABLE_NAME,
+      from: FROM_ADDRESS,
+      attachments,
+      htmlBody: table.html,
+      draft: {
+        id: noticeId,
+        shipmentId: bills[0].shipmentId,
+        loadId: bills[0].loadId,
+        loadCarrierId: bills[0].loadCarrierId,
+        kind: 'REMITTANCE',
+        channel: 'EMAIL',
+        to,
+        cc,
+        subject: table.subject,
+        body: table.body,
+        attachments: attachments.map((a) => ({ documentId: a.filename, name: a.filename, sizeBytes: a.bytes.byteLength })),
+        createdBy: caller.email,
+      },
+    })
+
+    const now = nowIso()
+    await transact(
+      contexts.map((context) => updateTx(AP_PAYMENT_TABLE_NAME, String(context.payment.id), {
+        remittanceAttempts: attempt,
+        ...(delivered.status === 'SENT'
+          ? {
+              remittanceSentAt: now,
+              remittanceSentTo: to.join(', '),
+              remittanceSentCc: cc.length > 0 ? cc.join(', ') : null,
+              remittanceCount: (numberOrNull(context.payment.remittanceCount) ?? 0) + 1,
+              lastNoticeId: noticeId,
+            }
+          : {}),
+        updatedAt: now,
+        updatedBy: caller.email,
+      })),
+      'grouped remittance send',
+    )
+    for (const id of paymentIds) await writeAudit('ApPayment', id, 'SEND_REMITTANCE', caller, { to, cc, status: delivered.status, grouped: true, paymentIds })
+    return { status: delivered.status, to }
+  } catch (err) {
+    console.error('[tms-finance-actions] grouped remittance failed', paymentIds.join(','), String(err))
+    return { status: 'FAILED', to: [] }
   }
 }
 

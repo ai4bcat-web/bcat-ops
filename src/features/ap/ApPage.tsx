@@ -49,7 +49,7 @@ import {
   billsAging, billsExpected, billsSelected, canSelectForPayment, invoiceAgeBuckets, isOwnFleet, paidBills,
   paidInMonth, paidMonthOptions, visiblePaidBills,
   paymentInfoFor, payeeNameFor, isFactorPaid, payToStatusFor, paymentGapFor, isPaymentGap, payToWorklist, PAY_TO_STATUS_LABEL, PAY_TO_STATUS_TITLE, quickPayLabel, setFactorNamesForLabels, setPayeeRemitForLabels, payeeCopies, remitEmailOf, remitEmailOfPayment, remittanceStatusOf, selectionBalanceCents,
-  selectionCarrierId, sharedProLabel, sharedProIndex, multiCarrierLoadIds, withLegSuffix, type ApTabKey, type SharedProIndex, type ToBePaidFilters,
+  selectionPayTo, sharedProLabel, sharedProIndex, multiCarrierLoadIds, withLegSuffix, type ApTabKey, type SharedProIndex, type ToBePaidFilters,
 } from './apViews'
 import { ApCreditDialog } from './components/ApCreditDialog'
 import { AmountMismatchChip } from './components/AmountMismatchChip'
@@ -60,6 +60,7 @@ import { PayCarrierDialog } from './components/PayCarrierDialog'
 import { paymentGapMessage } from '@/lib/paymentInfo'
 import { RemitEmailDialog } from './components/RemitEmailDialog'
 import { PayToDialog } from './components/PayToDialog'
+import { PayToGroupDialog } from './components/PayToGroupDialog'
 import { PayToWorklistDialog } from './components/PayToWorklistDialog'
 import { RemitToCell } from './components/RemitToCell'
 import { applyFactorRemit, factorNameIndex, summarizeFactors } from '@/lib/factorRemit'
@@ -131,6 +132,8 @@ type ApDialog =
   | { kind: 'clear-review'; shipmentId: string }
   | { kind: 'charges'; loadCarrierId: string; shipmentId: string; bill?: CarrierBillRecord }
   | { kind: 'pay'; carrierId: string; billIds?: string[] }
+  /** Bills of several carriers paid to one pay-to: one payment per carrier, one remittance. */
+  | { kind: 'pay-group'; billIds: string[]; payTo: string }
   | { kind: 'credit'; carrierId: string }
   | { kind: 'remittance'; payment: ApPaymentRecord }
   | { kind: 'delete'; bill: CarrierBillRecord }
@@ -580,7 +583,9 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onSelect: setSelected,
       onInfo: (bill) => setDialog({ kind: 'payinfo', bill }),
       onPay: (bill) => setDialog({ kind: 'pay', carrierId: bill.carrierId, billIds: [bill.id] }),
-      onPaySelected: (carrierId) => setDialog({ kind: 'pay', carrierId, billIds: selected }),
+      onPaySelected: (carrierIds, payTo) => setDialog(carrierIds.length === 1
+        ? { kind: 'pay', carrierId: carrierIds[0]!, billIds: selected }
+        : { kind: 'pay-group', billIds: selected, payTo }),
       onDelete: (bill) => setDialog({ kind: 'delete', bill }),
       onSelectForPayment: runSelect,
       onUnselect: runUnselect,
@@ -807,6 +812,29 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
             return blocks
           })()}
           preselectBillIds={dialog.billIds}
+          onOpenChange={(o) => { if (!o) setDialog(null) }}
+          onDone={closeAndRefresh}
+        />
+      )}
+      {dialog?.kind === 'pay-group' && (
+        <PayToGroupDialog
+          open
+          payTo={dialog.payTo}
+          legs={legs}
+          bills={open.bills.filter((b) => dialog.billIds.includes(b.id))}
+          remitEmail={(() => {
+            const lead = open.bills.find((b) => dialog.billIds.includes(b.id))
+            return lead ? remitEmailOf(lead, payInfos) : ''
+          })()}
+          payBlocks={(() => {
+            const blocks: Record<string, string> = {}
+            for (const bill of open.bills) {
+              if (!dialog.billIds.includes(bill.id)) continue
+              const gap = paymentGapFor(bill, payInfos)
+              if (gap) blocks[bill.id] = paymentGapMessage(gap, payeeNameFor(bill, payInfos), paymentInfoFor(bill, payInfos)?.method)
+            }
+            return blocks
+          })()}
           onOpenChange={(o) => { if (!o) setDialog(null) }}
           onDone={closeAndRefresh}
         />
@@ -1461,7 +1489,7 @@ function payableView({
   onSelect: (ids: string[]) => void
   onInfo: (bill: CarrierBillRecord) => void
   onPay: (bill: CarrierBillRecord) => void
-  onPaySelected: (carrierId: string) => void
+  onPaySelected: (carrierIds: string[], payTo: string) => void
   onDelete: (bill: CarrierBillRecord) => void
   onSelectForPayment: (ids: string[]) => void
   onUnselect: (ids: string[]) => void
@@ -1472,9 +1500,9 @@ function payableView({
   /** Opens the Chase ACH file dialog for the bills; null hides the button and the bank column. */
   onChaseAch: ((ids: string[]) => void) | null
 }): ListView {
-  // One payment is one carrier's: a selection spanning two of them cannot be posted as
-  // one row, and the button says so instead of failing in the dialog.
-  const payCarrierId = selectionCarrierId(bills, selected)
+  // One pay run is one PAY TO: carriers paid to the same payee are paid together (one payment per carrier, one
+  // remittance), and a selection spanning two payees says so here instead of failing in the dialog.
+  const payTo = selectionPayTo(bills, selected, infos)
   const carrierName = billCarrierOptions(allBills).find((c) => c.id === filters.carrierId)?.name ?? null
   const dueLabel: Record<string, string> = { OVERDUE: 'Overdue', WEEK: 'Due within 7 days', LATER: 'Later' }
   const tickable = (bill: CarrierBillRecord) => mode === 'selected' || canSelectForPayment(bill)
@@ -1737,8 +1765,11 @@ function payableView({
           </TmsButton>
         ) : (
           <>
-            {selected.length > 0 && !payCarrierId && (
-              <span className="text-xs tms-muted">One payment covers one carrier; narrow the selection.</span>
+            {selected.length > 0 && !payTo.ok && payTo.reason === 'PAY_TO' && (
+              <span className="text-xs tms-muted">One payment covers one pay-to; these are paid to {payTo.payTos.join(', ')}. Narrow the selection.</span>
+            )}
+            {selected.length > 0 && !payTo.ok && payTo.reason === 'EMAIL' && (
+              <span className="text-xs tms-muted">These carriers are paid to {payTo.payTos[0]} but carry different remit e-mails. Set one address for that pay-to first.</span>
             )}
             <TmsButton
               size="sm"
@@ -1755,8 +1786,8 @@ function payableView({
               variant="primary"
               aria-label="Record payment for selected bills"
               title={AP_ACTION_COPY.recordPayment.hint}
-              disabled={busy || selected.length === 0 || !payCarrierId}
-              onClick={() => { if (payCarrierId) onPaySelected(payCarrierId) }}
+              disabled={busy || selected.length === 0 || !payTo.ok}
+              onClick={() => { if (payTo.ok) onPaySelected(payTo.carrierIds, payTo.payTo) }}
             >
               {AP_ACTION_COPY.recordPayment.label}
             </TmsButton>

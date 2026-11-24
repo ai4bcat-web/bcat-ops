@@ -52,6 +52,7 @@ import {
   createApCredit,
   markRemittanceSent,
   recordApPayment,
+  recordApPaymentGroup,
   renderRemittancePdf,
   reverseApPayment,
   sendRemittance,
@@ -130,6 +131,7 @@ type Action =
   | 'SELECT_BILLS_FOR_PAYMENT'
   | 'UNSELECT_BILLS'
   | 'RECORD_AP_PAYMENT'
+  | 'RECORD_AP_PAYMENT_GROUP'
   | 'CREATE_AP_CREDIT'
   | 'REVERSE_AP_PAYMENT'
   | 'SEND_REMITTANCE'
@@ -189,6 +191,7 @@ const AP_ACTIONS: Record<string, true> = {
   SELECT_BILLS_FOR_PAYMENT: true,
   UNSELECT_BILLS: true,
   RECORD_AP_PAYMENT: true,
+  RECORD_AP_PAYMENT_GROUP: true,
   CREATE_AP_CREDIT: true,
   REVERSE_AP_PAYMENT: true,
   SEND_REMITTANCE: true,
@@ -391,6 +394,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return unselectBills(input, caller)
     case 'RECORD_AP_PAYMENT':
       return recordApPayment(input, caller) as unknown as Promise<Row>
+    case 'RECORD_AP_PAYMENT_GROUP':
+      return recordApPaymentGroup(input, caller)
     case 'CREATE_AP_CREDIT':
       return createApCredit(input, caller) as unknown as Promise<Row>
     case 'REVERSE_AP_PAYMENT':

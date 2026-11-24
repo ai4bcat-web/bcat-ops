@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CarrierBillRecord, CarrierPaymentMethodRecord } from '../../../src/types/tms'
-import { autoRemittanceDecision, remitRecipientsFor, remittanceOptions } from './apPayments'
+import { assertSamePayTo, autoRemittanceDecision, payToIdentityOf, remitRecipientsFor, remittanceOptions } from './apPayments'
 
 type Ctx = Parameters<typeof remitRecipientsFor>[0]
 
@@ -118,5 +118,50 @@ describe('remittanceOptions (historical payments)', () => {
     expect(remittanceOptions(undefined, 'x')).toEqual({ suppressRemittance: false, note: 'x' })
     expect(remittanceOptions('true', null).suppressRemittance).toBe(false)
     expect(remittanceOptions(1, null).suppressRemittance).toBe(false)
+  })
+})
+
+describe('assertSamePayTo (paying carriers together)', () => {
+  const id = (carrierId: string, payTo: string, to: string[]) => ({ carrierId, payTo, key: payTo.toUpperCase().replace(/[^A-Z0-9 ]/g, ''), to })
+
+  it('lets carriers paid to the same pay-to at the same address go together', () => {
+    expect(() => assertSamePayTo([id('c1', 'Triumph Capital', ['AP@triumph.test']), id('c2', 'Triumph Capital', ['ap@triumph.test'])])).not.toThrow()
+  })
+
+  it('lets a single carrier through whatever its pay-to', () => {
+    expect(() => assertSamePayTo([id('c1', 'Blue Line', ['a@b.test'])])).not.toThrow()
+  })
+
+  it('refuses different pay-tos and names them', () => {
+    expect(() => assertSamePayTo([id('c1', 'Triumph Capital', ['a@t.test']), id('c2', 'OTR Capital', ['a@o.test'])]))
+      .toThrow(/different payees \(Triumph Capital; OTR Capital\)/)
+  })
+
+  it('refuses one pay-to with two remit addresses', () => {
+    expect(() => assertSamePayTo([id('c1', 'Triumph Capital', ['a@t.test']), id('c2', 'Triumph Capital', ['b@t.test'])]))
+      .toThrow(/different remittance e-mail/)
+  })
+})
+
+describe('payToIdentityOf', () => {
+  it('reads a factor-paid carrier as the factor, and a direct one as itself', () => {
+    const factored = payToIdentityOf({
+      carrierId: 'c1',
+      bills: [{ id: 'b1', carrierId: 'c1', paymentMethodId: 'pm1', carrierName: 'Blue Line' } as CarrierBillRecord],
+      carrier: null,
+      contacts: [],
+      methods: [{ id: 'pm1', carrierId: 'c1', status: 'ACTIVE', recipientType: 'FACTOR', factorName: 'Triumph Capital LLC', payeeEmail: 'ap@t.test' } as CarrierPaymentMethodRecord],
+    })
+    expect(factored.payTo).toBe('Triumph Capital LLC')
+    expect(factored.to).toEqual(['ap@t.test'])
+    const direct = payToIdentityOf({
+      carrierId: 'c2',
+      bills: [{ id: 'b2', carrierId: 'c2', paymentMethodId: 'pm2', carrierName: 'Red Line' } as CarrierBillRecord],
+      carrier: null,
+      contacts: [],
+      methods: [{ id: 'pm2', carrierId: 'c2', status: 'ACTIVE', payeeEmail: 'ap@r.test' } as CarrierPaymentMethodRecord],
+    })
+    expect(direct.payTo).toBe('Red Line')
+    expect(direct.key).not.toBe(factored.key)
   })
 })
