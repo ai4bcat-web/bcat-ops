@@ -493,4 +493,19 @@ describe('selectionPayTo (one pay run is one pay-to, not one carrier)', () => {
     expect(selectionPayTo(bills, ['b1', 'b2'], [])).toMatchObject({ ok: false, reason: 'EMAIL' })
     expect(selectionPayTo(bills, [], [])).toMatchObject({ ok: false, reason: 'EMPTY' })
   })
+
+  it('treats a pay-to typed two ways as one once a profile lists the second spelling, and not before', () => {
+    const bills = [
+      b('b1', 'c1', { name: 'Triumph Capital', factorName: 'Triumph Capital', payeeEmail: 'ap@t.test' }, 'FACTOR'),
+      b('b2', 'c2', { name: 'Triumph Capital Funding', factorName: 'Triumph Capital Funding', payeeEmail: 'ap@t.test' }, 'FACTOR'),
+    ]
+    setPayeeRemitForLabels(null)
+    expect(selectionPayTo(bills, ['b1', 'b2'], [])).toMatchObject({ ok: false, reason: 'PAY_TO' })
+    setPayeeRemitForLabels({ 'TRIUMPH CAPITAL': { name: 'Triumph Capital', email: 'ap@t.test', aliases: ['Triumph Capital Funding'] } })
+    try {
+      expect(selectionPayTo(bills, ['b1', 'b2'], [])).toMatchObject({ ok: true, carrierIds: ['c1', 'c2'] })
+    } finally {
+      setPayeeRemitForLabels(null)
+    }
+  })
 })

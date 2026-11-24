@@ -80,6 +80,17 @@ describe('buildNavSections', () => {
     expect(profiles({ isAdmin: true })).toEqual(expect.arrayContaining(['Drivers', 'Assets']))
   })
 
+  it('Profiles lists only Drivers and Assets for someone limited to the fleet profiles, whatever else they hold', () => {
+    const profiles = (opts: { fleetProfilesOnly?: boolean; isAdmin?: boolean }) => {
+      const row = buildNavSections({ divisions: FOUR, hasPageAccess: () => true, ...opts }).pinned.find((i) => i.label === 'Profiles')
+      return { labels: row?.children?.map((c) => c.label) ?? [], to: row?.to }
+    }
+    expect(profiles({ fleetProfilesOnly: true })).toEqual({ labels: ['Drivers', 'Assets'], to: '/profiles/drivers' })
+    // Everyone else is unchanged: a rep with every grant still has no Drivers or Assets, an admin has all five.
+    expect(profiles({}).labels).toEqual(['Customers', 'Carriers', 'Locations'])
+    expect(profiles({ isAdmin: true }).labels).toEqual(['Customers', 'Carriers', 'Locations', 'Drivers', 'Assets'])
+  })
+
   it('has no Open questions entry: those moved into Accounts Receivable → Needs review (Ryne 2026-11-16)', () => {
     const accounting = (opts: { isOwner?: boolean; isAdmin?: boolean }) =>
       buildNavSections({ divisions: FOUR, hasPageAccess: () => true, ...opts }).pinned.find((i) => i.label === 'Accounting')?.children?.map((c) => c.label) ?? []

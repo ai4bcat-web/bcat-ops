@@ -16,6 +16,7 @@ import {
   getFactorRemitEmails, graphqlErrorText, listCarrierRemitEmails, setFactorRemitEmail,
 } from '@/lib/apiClient'
 import { applyFactorRemit, factorNameIndex, isRemitEmail, summarizeFactors, summarizePayees, type FactorRemitMap, type PayeeSummary } from '@/lib/factorRemit'
+import { PayToProfileDialog } from './PayToProfileDialog'
 import {
   CARRIER_PAID_FILTERS, FACTOR_SOURCE_LABEL, FACTOR_STATUS_FILTERS, PAYEE_KIND_FILTERS, PAYEE_KIND_LABEL, carrierMatchesPaidFilter, carrierNeedsRemit, carrierRemitRows,
   factorNeedsRemit, matchesSearch,
@@ -90,6 +91,7 @@ export function RemitDirectoryPage() {
   const [payeeKind, setPayeeKind] = useState<PayeeKindFilter>('ALL')
   const [carrierPaid, setCarrierPaid] = useState<CarrierPaidFilter>('ALL')
   const [editing, setEditing] = useState<string | null>(null)
+  const [profileKey, setProfileKey] = useState<string | null>(null)
 
   useEffect(() => {
     let live = true
@@ -174,7 +176,8 @@ export function RemitDirectoryPage() {
       key: 'name', header: 'Pay to', width: 320,
       render: (r) => (
         <span title={r.otherNames.length ? `Also spelled: ${r.otherNames.join('; ')}` : undefined}>
-          {r.name}{r.otherNames.length > 0 && <span className="tms-muted"> +{r.otherNames.length} spelling{r.otherNames.length === 1 ? '' : 's'}</span>}
+          <button type="button" className="tms-link" onClick={() => setProfileKey(r.key)}>{r.name}</button>
+          {r.otherNames.length > 0 && <span className="tms-muted"> +{r.otherNames.length} spelling{r.otherNames.length === 1 ? '' : 's'}</span>}
         </span>
       ),
       text: (r) => r.name,
@@ -233,6 +236,7 @@ export function RemitDirectoryPage() {
     },
   ]
 
+  const profilePayee = profileKey ? payeeRows.find((r) => r.key === profileKey) ?? null : null
   const busy = loading || methods === null
   const rows = kind === 'carriers' ? shownCarriers : shownPayees
   const total = kind === 'carriers' ? carrierRows.length : payeeRows.length
@@ -306,6 +310,20 @@ export function RemitDirectoryPage() {
           rowKey={(r) => r.key}
           emptyText={busy ? 'Loading…' : 'No payees match.'}
           page={{ from: shownPayees.length ? 1 : 0, to: shownPayees.length, total: shownPayees.length, pageSize: shownPayees.length }}
+        />
+      )}
+      {profilePayee && (
+        <PayToProfileDialog
+          key={profilePayee.key}
+          payee={profilePayee}
+          carriers={carriers}
+          methods={methods ?? []}
+          map={factorEmails}
+          payees={payeeRows}
+          canEdit={canEdit}
+          open
+          onOpenChange={(o) => { if (!o) setProfileKey(null) }}
+          onSaved={() => { setProfileKey(null); reload() }}
         />
       )}
     </TmsPage>

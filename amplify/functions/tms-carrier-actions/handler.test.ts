@@ -478,6 +478,24 @@ describe('UPSERT_CARRIER clears index keys by removing them', () => {
 
 // ── Creating a carrier ───────────────────────────────────────────────────────
 
+describe('Profiles access limited to Assets and Drivers (Jason)', () => {
+  const JASON = { sub: 'sub-jason', username: 'jason', claims: { email: 'jason@bcatcorp.com', 'cognito:groups': ['page-tms', 'page-carriers'] } }
+
+  for (const action of ['UPSERT_CONTACT', 'ARCHIVE_CONTACT', 'UPSERT_PAYMENT_METHOD', 'ARCHIVE_PAYMENT_METHOD', 'SET_BANK_DETAILS', 'CLEAR_BANK_DETAILS', 'SET_CARRIER_STATUS', 'PREPARE_DOCUMENT', 'DELETE_DOCUMENT', 'GET_TAX_ID_STATUS']) {
+    it(`${action} is refused for him, even with the carrier and TMS page grants`, async () => {
+      await expect(call(action, { carrierId: 'car-1' }, JASON)).rejects.toThrow('limited to Assets and Drivers')
+    })
+  }
+
+  it('still lets a carrier be added while a load is covered (UPSERT_CARRIER is not closed to him by this rule)', async () => {
+    await expect(call('UPSERT_CARRIER', carrier(), JASON)).rejects.not.toThrow('limited to Assets and Drivers')
+  })
+
+  it('does not limit another carrier-page user', async () => {
+    await expect(call('GET_TAX_ID_STATUS', { carrierId: 'car-1' }, CARRIER_USER)).resolves.toBeDefined()
+  })
+})
+
 describe('UPSERT_CARRIER create (admin data fix only; carriers enter through MyCarrierPackets)', () => {
   it('opens a carrier that has neither an MC nor a DOT number on file', async () => {
     // The numbers arrive with the packet. Writing those two index keys as NULL fails the PutItem

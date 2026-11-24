@@ -3,12 +3,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
-import { LandingRedirect, RequirePage } from './RequirePage'
+import { LandingRedirect, RequireDirectoryProfiles, RequireFleetProfiles, RequirePage } from './RequirePage'
 
 const auth = vi.hoisted(() => ({
   hasPageAccess: (_key: string) => false,
   isOwner: false,
   isAdmin: false,
+  user: null as { email: string; groups: string[] } | null,
 }))
 
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => auth }))
@@ -155,5 +156,47 @@ describe('RequirePage', () => {
       renderGuarded('/dashboard')
       expect(screen.getByText('No page access')).toBeInTheDocument()
     })
+  })
+})
+
+
+describe('Profiles limited to Assets and Drivers', () => {
+  beforeEach(() => {
+    auth.hasPageAccess = () => true
+    auth.isOwner = false
+    auth.isAdmin = false
+    auth.user = { email: 'jason@bcatcorp.com', groups: ['page-tms'] }
+  })
+
+  function renderAt(path: string) {
+    return render(
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/tms/carriers" element={<RequireDirectoryProfiles page={['carriers', 'tms']}><span data-testid="carriers" /></RequireDirectoryProfiles>} />
+          <Route path="/profiles/drivers" element={<RequireFleetProfiles><span data-testid="drivers" /></RequireFleetProfiles>} />
+          <Route path="*" element={<CurrentPath />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+  }
+
+  it('sends Jason from a directory profile to Drivers, and lets him open Drivers', () => {
+    renderAt('/tms/carriers')
+    expect(screen.getByTestId('drivers')).toBeInTheDocument()
+    expect(screen.queryByTestId('carriers')).toBeNull()
+  })
+
+  it('keeps Carriers open for someone else with the grant, and closes Drivers to them', () => {
+    auth.user = { email: 'ruben@bcatcorp.com', groups: ['page-tms'] }
+    renderAt('/tms/carriers')
+    expect(screen.getByTestId('carriers')).toBeInTheDocument()
+    expect(screen.queryByTestId('drivers')).toBeNull()
+  })
+
+  it('does not limit the owner or an ADMIN, even on Jason\'s address', () => {
+    auth.user = { email: 'jason@bcatcorp.com', groups: ['ADMIN'] }
+    auth.isAdmin = true
+    renderAt('/tms/carriers')
+    expect(screen.getByTestId('carriers')).toBeInTheDocument()
   })
 })

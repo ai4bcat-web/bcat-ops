@@ -9,6 +9,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { TmsShell } from '@/features/tms/TmsShell'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { TMS_PAGE_KEY, buildNavSections, companyOptions, tmsBreadcrumb } from '@/lib/navSections'
+import { isFleetProfilesOnly } from '@/lib/profileAccess'
 import { useAuth } from '@/hooks/useAuth'
 import { NotificationsDrawer } from '@/features/tms/notifications/NotificationsDrawer'
 import { useNotifications } from '@/features/tms/notifications/useNotifications'
@@ -82,8 +83,8 @@ export function TmsLayout() {
   const navigate = useNavigate()
 
   const { pinned, sections, businesses } = useMemo(
-    () => buildNavSections({ divisions, hasPageAccess, isOwner, isAdmin }),
-    [divisions, hasPageAccess, isOwner, isAdmin],
+    () => buildNavSections({ divisions, hasPageAccess, isOwner, isAdmin, fleetProfilesOnly: isFleetProfilesOnly(user?.email, user?.groups) }),
+    [divisions, hasPageAccess, isOwner, isAdmin, user?.email, user?.groups],
   )
 
   const badgeCounts = useShellBadgeCounts({ shipments })

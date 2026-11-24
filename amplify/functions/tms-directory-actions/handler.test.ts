@@ -4035,6 +4035,26 @@ describe('customer delete / merge / restore — permissions', () => {
   })
 })
 
+describe('Profiles access limited to Assets and Drivers (Jason)', () => {
+  beforeEach(() => { send.mockReset(); cognitoSend.mockReset() })
+  const jason = () => identity({ email: 'jason@bcatcorp.com', groups: ['page-tms', 'page-customers', 'page-locations'] })
+
+  for (const action of ['SET_CUSTOMER_STATUS', 'ARCHIVE_CUSTOMER', 'ARCHIVE_LOCATION', 'PREVIEW_MERGE_LOCATIONS', 'MERGE_LOCATIONS', 'PREVIEW_DELETE_CUSTOMER', 'DELETE_CUSTOMER', 'MERGE_CUSTOMER', 'RESTORE_CUSTOMER', 'SYNC_CUSTOMER_NAME']) {
+    it(`${action} is refused for him before anything is read`, async () => {
+      await expect(handler(event(action, { id: 'c1' }, jason()))).rejects.toThrow('limited to Assets and Drivers')
+      expect(send).not.toHaveBeenCalled()
+    })
+  }
+
+  it('does not block what the shipment form needs, so loads still build for him', async () => {
+    await expect(handler(event('UPSERT_LOCATION', { name: 'X' }, jason()))).rejects.not.toThrow('limited to Assets and Drivers')
+  })
+
+  it('leaves the owner and an ADMIN on the same address untouched', async () => {
+    await expect(handler(event('ARCHIVE_CUSTOMER', { id: 'c1' }, identity({ email: 'jason@bcatcorp.com', groups: ['ADMIN'] })))).rejects.not.toThrow('limited to Assets and Drivers')
+  })
+})
+
 // ── Settings > Cost to run: fixed monthly costs ───────────────────────────────
 describe('validateCostManualEntries', () => {
   it('keeps a valid entry and normalises the optional fields', () => {

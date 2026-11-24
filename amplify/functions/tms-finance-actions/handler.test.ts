@@ -2303,6 +2303,22 @@ describe('two carriers on one load (Step AT)', () => {
       expect(rawOf().to).toEqual(['remit@wheeler.test'])
     })
 
+    it('pays carriers whose factor is typed two ways as one pay-to once a profile joins the spellings, to the profile\'s e-mail', async () => {
+      seedSecondCarrier()
+      factor(CARRIER_ID, 'cpm-1', 'one@triumph.test')
+      factor(SECOND_CARRIER, 'cpm-2', 'two@triumph.test')
+      table(TABLES.carrierMethod).set('cpm-2', { ...table(TABLES.carrierMethod).get('cpm-2')!, factorName: 'Triumph Capital Funding LLC' })
+      const a = await recordFor(LOAD_CARRIER_ID, { approve: true })
+      const b = await recordFor(SECOND_LC, { approve: true })
+      // Typed two ways, they are two pay-tos until a profile says they are one.
+      await expect(group([a.id, b.id])).rejects.toThrow(/paid to different payees/)
+      await call('SET_PAYTO_PROFILE', { payeeName: 'Triumph Capital', email: 'remit@triumph.test', aliases: ['Triumph Capital Funding'] })
+      const out = await group([a.id, b.id], { clientRequestId: 'grp-alias' })
+      expect(out.payments.length).toBe(2)
+      expect(sesSend).toHaveBeenCalledTimes(1)
+      expect(rawOf().to).toEqual(['remit@triumph.test'])
+    })
+
     it('refuses carriers paid to different payees, and records nothing', async () => {
       seedSecondCarrier()
       const a = await recordFor(LOAD_CARRIER_ID, { approve: true })
@@ -3242,6 +3258,72 @@ describe('one remit e-mail per factoring company', () => {
       amountCents: 180_000, applications: [{ billId: bill.id, amountCents: 180_000 }],
     })
     expect(sesSend).toHaveBeenCalledTimes(1)
+    const input = sesSend.mock.calls[0][0] as { input: { Destination: { ToAddresses: string[] } } }
+    expect(input.input.Destination.ToAddresses).toEqual(['remit@otr.test'])
+  })
+})
+
+describe('pay-to profiles', () => {
+  const mapOf = () => (table(TABLES.settings).get('default') as Row | undefined)?.factorRemitEmails as Record<string, Row> | undefined
+
+  it('saves one profile with aliases, remit address and payment method, and keeps e-mail-only saves working', async () => {
+    await call('SET_PAYTO_PROFILE', {
+      payeeName: 'OTR Capital LLC', email: 'remit@otr.test', remitAddress: ' 1 Main St,   Dallas TX 75001 ',
+      paymentMethod: 'ach', aliases: ['OTR Capital', 'OTR CAPITAL LLC DBA OTR', 'otr capital'],
+    })
+    expect(mapOf()?.['OTR CAPITAL']).toMatchObject({
+      name: 'OTR Capital LLC', email: 'remit@otr.test', remitAddress: '1 Main St, Dallas TX 75001', paymentMethod: 'ACH',
+      aliases: ['OTR CAPITAL LLC DBA OTR'],
+    })
+    // An e-mail-only save does not wipe the rest of the profile.
+    await call('SET_FACTOR_REMIT_EMAIL', { factorName: 'OTR Capital', email: 'new@otr.test' })
+    expect(mapOf()?.['OTR CAPITAL']).toMatchObject({ email: 'new@otr.test', remitAddress: '1 Main St, Dallas TX 75001', paymentMethod: 'ACH' })
+    const audit = [...table(TABLES.audit).values()].filter((row) => row.entityType === 'FACTOR_REMIT_EMAIL')
+    expect(audit.some((row) => row.action === 'SET_PAYTO_PROFILE')).toBe(true)
+    // No bank numbers anywhere in the stored profile or its audit trail.
+    expect(JSON.stringify([mapOf(), audit])).not.toMatch(/routing|account number|bankCipher/i)
+  })
+
+  it('files an e-mail set under an alias on the profile that owns the alias', async () => {
+    await call('SET_PAYTO_PROFILE', { payeeName: 'RTS Financial', email: 'cash@rts.test', aliases: ['RTS FINANCIAL SERVICES'] })
+    await call('SET_FACTOR_REMIT_EMAIL', { factorName: 'RTS Financial Services', email: 'ap@rts.test' })
+    expect(Object.keys(mapOf() ?? {})).toEqual(['RTS FINANCIAL'])
+    expect(mapOf()?.['RTS FINANCIAL']).toMatchObject({ email: 'ap@rts.test' })
+  })
+
+  it('refuses a spelling another profile already owns, a bad method, a bad e-mail, and a user who may only invoice', async () => {
+    await call('SET_PAYTO_PROFILE', { payeeName: 'RTS Financial', email: 'cash@rts.test', aliases: ['RTS Fin'] })
+    await call('SET_PAYTO_PROFILE', { payeeName: 'OTR Capital', email: 'a@otr.test' })
+    await expect(call('SET_PAYTO_PROFILE', { payeeName: 'OTR Capital', aliases: ['rts fin'] })).rejects.toThrow(/already belongs/)
+    await expect(call('SET_PAYTO_PROFILE', { payeeName: 'OTR Capital', aliases: ['RTS Financial'] })).rejects.toThrow(/already/)
+    await expect(call('SET_PAYTO_PROFILE', { payeeName: 'OTR Capital', paymentMethod: 'BITCOIN' })).rejects.toThrow(/payment method/)
+    await expect(call('SET_PAYTO_PROFILE', { payeeName: 'OTR Capital', email: 'a@b.com, c@d.com' })).rejects.toThrow(/valid e-mail/)
+    await expect(call('SET_PAYTO_PROFILE', { payeeName: 'OTR Capital', email: 'a@otr.test' }, BILLER)).rejects.toThrow(/Forbidden/)
+  })
+
+  it('moves a carrier to another pay-to without touching its bank details or its own e-mail copy', async () => {
+    seedAssignment()
+    const before = { ...(table(TABLES.carrierMethod).get('cpm-1') as Row) }
+    await call('SET_CARRIER_PAYTO', { carrierId: CARRIER_ID, payToName: 'OTR Capital' })
+    const moved = table(TABLES.carrierMethod).get('cpm-1') as Row
+    expect(moved).toMatchObject({ recipientType: 'FACTOR', factorName: 'OTR Capital' })
+    expect(moved.accountLast4).toBe(before.accountLast4)
+    expect(moved.payeeEmail).toBe(before.payeeEmail)
+    expect(moved.bankCipher).toEqual(before.bankCipher)
+    await call('SET_CARRIER_PAYTO', { carrierId: CARRIER_ID, payToName: 'Wheeler Trucking' })
+    expect(table(TABLES.carrierMethod).get('cpm-1')).toMatchObject({ recipientType: 'CARRIER', factorName: null })
+    await expect(call('SET_CARRIER_PAYTO', { carrierId: CARRIER_ID, payToName: 'OTR Capital' }, BILLER)).rejects.toThrow(/Forbidden/)
+  })
+
+  it('e-mails the profile\'s address for a carrier whose factor is typed as one of the profile\'s aliases', async () => {
+    seedAssignment({ method: { recipientType: 'FACTOR', factorName: 'OTR CAPITAL INC', payeeEmail: 'old@otr.test' } })
+    await call('SET_PAYTO_PROFILE', { payeeName: 'OTR Capital LLC', email: 'remit@otr.test', aliases: ['OTR Capital Funding'] })
+    await call('SET_CARRIER_PAYTO', { carrierId: CARRIER_ID, payToName: 'OTR Capital Funding' })
+    const bill = await recordBill({ approve: true })
+    await call('RECORD_AP_PAYMENT', {
+      carrierId: CARRIER_ID, paidAt: '2026-10-25', method: 'ACH', reference: 'ACH-9',
+      amountCents: 180_000, applications: [{ billId: bill.id, amountCents: 180_000 }],
+    })
     const input = sesSend.mock.calls[0][0] as { input: { Destination: { ToAddresses: string[] } } }
     expect(input.input.Destination.ToAddresses).toEqual(['remit@otr.test'])
   })

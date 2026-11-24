@@ -5,6 +5,7 @@ import { NAV_ITEMS } from '@/lib/navItems'
 import { flatNavDefs } from '@/lib/navSections'
 import { LIFECYCLE_TABS } from '@/lib/lifecycleTabs'
 import { pathIsDormant } from '@/lib/dormantPages'
+import { isFleetProfilesOnly } from '@/lib/profileAccess'
 
 /**
  * Route-level access control. `hasPageAccess` is the SAME allowlist the sidebar uses,
@@ -110,12 +111,30 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
 }
 
 /**
+ * Guards the Customers, Carriers and Locations profile pages (and Pay to / Remit e-mails): someone limited to the fleet
+ * profiles is sent to Drivers, whatever page grants they hold. Everyone else keeps the guard they had.
+ */
+export function RequireDirectoryProfiles({ page, children }: { page: string | string[]; children: ReactNode }) {
+  const { user } = useAuth()
+  if (isFleetProfilesOnly(user?.email, user?.groups)) return <Navigate to="/profiles/drivers" replace />
+  return <RequirePage page={page}>{children}</RequirePage>
+}
+
+/** Guards Drivers and Assets: the owner and ADMIN, plus the people limited to the fleet profiles. */
+export function RequireFleetProfiles({ children }: { children: ReactNode }) {
+  const { isAdmin, isOwner, hasPageAccess, user } = useAuth()
+  if (isOwner || isAdmin || isFleetProfilesOnly(user?.email, user?.groups)) return <>{children}</>
+  const fallback = preferredLandingPath(hasPageAccess)
+  return fallback ? <Navigate to={fallback} replace /> : <NoAccess />
+}
+
+/**
  * The old standalone /drivers address: an owner or ADMIN lands on the driver profiles; anyone else keeps going to Files, as before.
  * (Files itself is part of Fleet management and is not redirected.)
  */
 export function DriversAliasRedirect() {
-  const { isAdmin, isOwner } = useAuth()
-  return <Navigate to={isOwner || isAdmin ? '/profiles/drivers' : '/files'} replace />
+  const { isAdmin, isOwner, user } = useAuth()
+  return <Navigate to={isOwner || isAdmin || isFleetProfilesOnly(user?.email, user?.groups) ? '/profiles/drivers' : '/files'} replace />
 }
 
 /** Sends "/" and `/tms` to the user's landing page (see `LANDING_PRIORITY`). */

@@ -2,11 +2,15 @@
  * Rows for Carriers › Remit e-mails: who each carrier's remittance goes to, and each factoring company's
  * one address. Pure, so the page stays a thin shell and the rules are tested without a DOM.
  */
-import { canonicalFactorName, factorKeyOf, payeeEmailFor, paysThroughFactor, type FactorNameIndex, type FactorRemitMap, type FactorSummary, type PayeeKind, type PayeeSummary } from '@/lib/factorRemit'
+import { canonicalFactorName, payToKeyFor, payeeEmailFor, paysThroughFactor, type FactorNameIndex, type FactorRemitMap, type FactorSummary, type PayeeKind, type PayeeSummary } from '@/lib/factorRemit'
 import { isValidEmail } from '@/lib/billingMethod'
 
 export interface RemitMethod {
+  id?: string | null
   carrierId: string
+  /** Masked: the last four only, and whether full numbers are on file. Full numbers never reach the browser. */
+  accountLast4?: string | null
+  bankDetailsOnFileAt?: string | null
   payeeEmail?: string | null
   recipientType?: string | null
   factorName?: string | null
@@ -72,7 +76,7 @@ export function carrierRemitRows(
       status: carrier.status ?? '',
       paidVia: !method ? '' : factored ? canonicalFactorName(factorNames, method.factorName) : 'Direct',
       payTo: !method ? '' : factored ? canonicalFactorName(factorNames, method.factorName) : carrier.name.trim(),
-      factorKey: factored ? factorKeyOf(method?.factorName) : null,
+      factorKey: factored ? payToKeyFor(payeeEmails, method?.factorName) : null,
       email,
       state,
       carrierEmail: (carrier.email ?? '').trim(),

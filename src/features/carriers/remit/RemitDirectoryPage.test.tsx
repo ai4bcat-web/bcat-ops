@@ -9,6 +9,8 @@ const api = vi.hoisted(() => ({
   getFactorRemitEmails: vi.fn(),
   setFactorRemitEmail: vi.fn(),
   setPayeeRemitEmail: vi.fn(),
+  setPayToProfile: vi.fn(),
+  setCarrierPayTo: vi.fn(),
 }))
 const auth = vi.hoisted(() => ({ isAdmin: true, hasPageAccess: (_: string) => true }))
 
@@ -45,6 +47,8 @@ beforeEach(() => {
   api.getFactorRemitEmails.mockResolvedValue({})
   api.setFactorRemitEmail.mockResolvedValue({ factorKey: 'RTS FINANCIAL', factorName: 'RTS Financial', email: 'new@rts.test' })
   api.setPayeeRemitEmail.mockResolvedValue({ paymentMethodId: 'p', carrierId: 'c3', email: 'ap@x.test' })
+  api.setPayToProfile.mockResolvedValue({ key: 'RTS FINANCIAL', name: 'RTS Financial', profile: null })
+  api.setCarrierPayTo.mockResolvedValue({ carrierId: 'c2', paymentMethodId: 'p', payTo: 'Direct Haul', via: 'DIRECT' })
 })
 
 describe('RemitDirectoryPage', () => {
@@ -162,5 +166,64 @@ describe('RemitDirectoryPage', () => {
     await screen.findByText('ap@direct.test')
     expect(screen.queryByRole('button', { name: /Edit|Add remit e-mail|Add at/ })).toBeNull()
     auth.hasPageAccess = () => true
+  })
+
+  describe('pay-to profile', () => {
+    async function openRts() {
+      api.listCarrierRemitEmails.mockResolvedValue([
+        ...methods.map((m) => (m.carrierId === 'c2' ? { ...m, id: 'm2', bankDetailsOnFileAt: '2026-11-01T00:00:00Z', accountLast4: '4321' } : m)),
+      ])
+      api.getFactorRemitEmails.mockResolvedValue({
+        'RTS FINANCIAL': { name: 'RTS Financial', email: 'cash@rts.test', aliases: ['RTS Fin'], remitAddress: '9 Elm St, Tulsa OK', paymentMethod: 'ACH' },
+      })
+      renderPage()
+      await screen.findByText('cash@rts.test')
+      fireEvent.click(screen.getByRole('tab', { name: /Pay to/ }))
+      fireEvent.click(await screen.findByRole('button', { name: 'RTS Financial' }))
+      return screen.findByRole('dialog')
+    }
+
+    it('opens the profile with its fields, linked carriers and a bank status that shows only the last four', async () => {
+      const dialog = await openRts()
+      expect((within(dialog).getByLabelText('Remit address') as HTMLInputElement).value).toBe('9 Elm St, Tulsa OK')
+      expect((within(dialog).getByLabelText('Payment method') as HTMLSelectElement).value).toBe('ACH')
+      expect(within(dialog).getByText('RTS Fin')).toBeTruthy()
+      expect(within(dialog).getByText('Complete')).toBeTruthy()
+      expect(within(dialog).getByText(/account ending 4321/)).toBeTruthy()
+      expect(within(dialog).getByText('Linked carriers (1)')).toBeTruthy()
+      expect(within(dialog).getByText('Factored Freight')).toBeTruthy()
+    })
+
+    it('saves the edited fields and an added spelling in one call', async () => {
+      const dialog = await openRts()
+      fireEvent.change(within(dialog).getByLabelText('Remit address'), { target: { value: '1 New Rd, Dallas TX' } })
+      fireEvent.change(within(dialog).getByLabelText('Add another spelling'), { target: { value: 'RTS Financial Services' } })
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Add spelling' }))
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save profile' }))
+      await waitFor(() => expect(api.setPayToProfile).toHaveBeenCalledTimes(1))
+      expect(api.setPayToProfile).toHaveBeenCalledWith({
+        payeeName: 'RTS Financial', name: 'RTS Financial', email: 'cash@rts.test',
+        aliases: ['RTS Fin', 'RTS Financial Services'], remitAddress: '1 New Rd, Dallas TX', paymentMethod: 'ACH',
+      })
+    })
+
+    it('refuses a bad e-mail in the form, and moves a carrier without sending any bank field', async () => {
+      const dialog = await openRts()
+      fireEvent.change(within(dialog).getByLabelText('Remit e-mail'), { target: { value: 'not an address' } })
+      expect((within(dialog).getByRole('button', { name: 'Save profile' }) as HTMLButtonElement).disabled).toBe(true)
+      fireEvent.change(within(dialog).getByLabelText('Remit e-mail'), { target: { value: 'cash@rts.test' } })
+      fireEvent.change(within(dialog).getByLabelText('Move Factored Freight to another pay to'), { target: { value: 'Direct Haul' } })
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }))
+      await waitFor(() => expect(api.setCarrierPayTo).toHaveBeenCalledWith({ carrierId: 'c2', payToName: 'Direct Haul' }))
+    })
+
+    it('is read-only for someone who cannot pay carriers', async () => {
+      auth.isAdmin = false
+      auth.hasPageAccess = () => false
+      const dialog = await openRts()
+      expect(within(dialog).queryByRole('button', { name: 'Save profile' })).toBeNull()
+      expect((within(dialog).getByLabelText('Remit address') as HTMLInputElement).disabled).toBe(true)
+      auth.hasPageAccess = () => true
+    })
   })
 })
