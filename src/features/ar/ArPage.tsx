@@ -1086,8 +1086,8 @@ function queueView({
     } as Col<ArQueueRow>] : []),
     ...(invoiced && onPastDue ? [{
       key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 32,
-      // Select all: the shown invoices a past due reminder can go out for.
-      renderHeader: (shown) => <SelectAllBox ids={shown.filter(canRemind).map((row) => row.orderId)} selected={selected} onSelect={onSelect} noun="invoices" />,
+      // Select all: every shown invoice (Export selected takes any row; the past due reminder still goes only to the eligible ones).
+      renderHeader: (shown) => <SelectAllBox ids={shown.map((row) => row.orderId)} selected={selected} onSelect={onSelect} noun="invoices" />,
     } as Col<ArQueueRow>] : []),
     { key: 'shipment', header: 'PRO', group: 'Shipment', text: (row) => row.shipmentNumber ?? row.shipmentId, extraPx: 16 },
     { key: 'invoice', header: 'Invoice #', group: 'Invoice', text: (row) => row.invoiceNumber ?? '—' },
@@ -1175,9 +1175,9 @@ function queueView({
       }
       case 'select':
         if (invoiced) {
-          return canRemind(row) ? (
-            <input type="checkbox" aria-label={`Select invoice ${row.invoiceNumber ?? row.orderId} for a past due reminder`} checked={selected.includes(row.orderId)} onChange={() => toggle(row.orderId)} />
-          ) : null
+          return (
+            <input type="checkbox" aria-label={`Select invoice ${row.invoiceNumber ?? row.orderId}`} checked={selected.includes(row.orderId)} onChange={() => toggle(row.orderId)} />
+          )
         }
         return (
           <span className="flex items-center gap-1">
@@ -1487,6 +1487,7 @@ function queueView({
       columns,
       rows,
       rowKey: (row) => row.key,
+      selection: ready || invoiced ? { ids: selected, idOf: (row) => row.orderId, filename: ready ? 'ready-to-invoice-selected' : 'invoiced-selected' } : undefined,
       renderCell,
       cardLayout: { title: 'shipment', party: 'customer', amount: invoiced ? 'balance' : 'amount', pills: ready ? ['factorReady'] : ['status'] },
       empty: ready

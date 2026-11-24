@@ -7,8 +7,10 @@
  * Mount it with `key={view}`: filters belong to one view's columns and are dropped with it.
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Search } from 'lucide-react'
-import { TmsInput } from '@/features/tms/kit'
+import { Download, Search } from 'lucide-react'
+import { TmsButton, TmsInput } from '@/features/tms/kit'
+import { downloadCsv } from '@/lib/directoryCsv'
+import { selectedRowsCsv } from '../selectedExport'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
 import type { DenseCardLayout } from '@/features/tms/grid/denseCardLayout'
 import {
@@ -44,6 +46,11 @@ export interface ArGrid<T> {
   onFiltered?: (rows: T[]) => void
   /** The columns shown before anyone changes the layout (default: every movable one). */
   defaultColumns?: string[]
+  /**
+   * "Export selected": the ticked rows (ids as `idOf` reads them) as a CSV of the columns shown, in the grid's order.
+   * The button appears only when this is set; with nothing ticked it stays disabled.
+   */
+  selection?: { ids: readonly string[]; idOf: (row: T) => string; filename: string }
   /** Optional grouping: rows are re-ordered by group after sort and filter, a header row per group. */
   group?: {
     keyOf: (row: T) => string
@@ -59,7 +66,7 @@ export function ArDenseTable<T>({ grid, pageFilters }: {
   pageFilters?: { count: number; onClear: () => void }
 }) {
   const email = useAuthUser()?.email ?? ''
-  const { gridId, label, columns: catalogAll, rows, rowKey, renderCell, empty, kpis, group, cardLayout, onRowClick, onFiltered, defaultColumns } = grid
+  const { gridId, label, columns: catalogAll, rows, rowKey, renderCell, empty, kpis, group, cardLayout, onRowClick, onFiltered, defaultColumns, selection } = grid
   const [filters, setFilters] = useState<DenseFilters>({})
   const [search, setSearch] = useState('')
 
@@ -105,6 +112,19 @@ export function ArDenseTable<T>({ grid, pageFilters }: {
   ].map((c) => (c.renderHeader ? { ...c, headerContent: c.renderHeader(filtered) } : c)),
   [leading, movable, trailing, prefs.columns, filtered])
 
+  const exportSelected = () => {
+    if (!selection) return
+    const picked = new Set(selection.ids)
+    const out = filtered.filter((row) => picked.has(selection.idOf(row)))
+    const shown = prefs.columns.map((k) => movable.find((c) => c.key === k)).filter((c): c is ArColumn<T> => c != null)
+    downloadCsv(`${selection.filename}-${new Date().toISOString().slice(0, 10)}.csv`, selectedRowsCsv(shown, out))
+  }
+  const selectedShown = useMemo(() => {
+    if (!selection) return 0
+    const picked = new Set(selection.ids)
+    return filtered.filter((row) => picked.has(selection.idOf(row))).length
+  }, [selection, filtered])
+
   return (
     <div className="tms-dense-page" data-testid={`ar-grid-${gridId}`}>
       <div className="tms-dense-bar">
@@ -116,6 +136,12 @@ export function ArDenseTable<T>({ grid, pageFilters }: {
           onClear={() => { setFilters({}); pageFilters?.onClear() }}
         />
         <span className="tms-dense-spacer" />
+        {selection ? (
+          <TmsButton aria-label="Export selected rows" data-testid="ar-export-selected" disabled={selectedShown === 0}
+            title={selectedShown === 0 ? 'Tick rows to export just those' : 'Download the ticked rows as a CSV'} onClick={exportSelected}>
+            <Download size={14} aria-hidden="true" /> Export selected{selectedShown ? ` (${selectedShown})` : ''}
+          </TmsButton>
+        ) : null}
         <ColumnsButton sharedWithAll={prefs.layoutSharedWithAll}
           catalog={movable}
           columns={prefs.columns}
