@@ -1605,7 +1605,7 @@ function payableView({
                     size="sm"
                     aria-label={`Record payment for bill ${bill.billNumber ?? bill.id}`}
                     title={gap ? paymentGapMessage(gap, payeeNameFor(bill, infos), paymentInfoFor(bill, infos)?.method) : AP_ACTION_COPY.recordPayment.hint}
-                    disabled={busy || gap != null}
+                    disabled={busy}
                     onClick={() => onPay(bill)}
                   >
                     {AP_ACTION_COPY.recordPayment.label}

@@ -207,6 +207,32 @@ describe('PayCarrierDialog', () => {
     expect(postButton().disabled).toBe(true)
   })
 
+  it('lets a blocked payee be recorded once "Already paid outside the app" is ticked, and says how', async () => {
+    recordApPayment.mockClear()
+    recordApPayment.mockResolvedValue({ payment: { amountCents: 100000 }, bills: [], duplicate: false })
+    render(
+      <PayCarrierDialog
+        carrierId="car-1"
+        payBlocks={{ [BILLS[0].id]: 'Blue Line Trucking has no bank details on file for ACH.' }}
+        open
+        onOpenChange={vi.fn()}
+        onDone={vi.fn()}
+      />,
+    )
+    await screen.findByLabelText('Payment amount')
+    type('Payment amount', '1000.00')
+    type('Apply to bill BLT-1001', '1000.00')
+    await waitFor(() => expect(total('Applied total')).toBe('$1,000.00'))
+    expect(screen.getByTestId('pay-dialog-payment-info-blocked').textContent).toMatch(/Check 'Already paid outside the app' to record a payment you made elsewhere\./)
+    expect(postButton().disabled).toBe(true)
+    fireEvent.click(screen.getByLabelText(/Already paid outside the app/))
+    await waitFor(() => expect(postButton().disabled).toBe(false))
+    expect(screen.queryByTestId('pay-dialog-payment-info-blocked')).toBeNull()
+    fireEvent.click(postButton())
+    await waitFor(() => expect(recordApPayment).toHaveBeenCalledTimes(1))
+    expect(recordApPayment.mock.calls[0][0]).toMatchObject({ suppressRemittance: true })
+  })
+
   it('shows no pay-to notice when the carrier has one', async () => {
     await openForm()
     expect(screen.queryByTestId('pay-dialog-payto-needed')).toBeNull()

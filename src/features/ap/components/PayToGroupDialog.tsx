@@ -17,6 +17,7 @@ import { formatDateInput } from '@/lib/date'
 import { withLegSuffix, type LegIndex } from '../apViews'
 import type { ApPaymentMethod, CarrierBillRecord } from '@/types/tms'
 
+const PAID_OUTSIDE_HINT = "Check 'Already paid outside the app' to record a payment you made elsewhere."
 const METHODS: ApPaymentMethod[] = ['ACH', 'CHECK', 'WIRE', 'ZELLE', 'CARD', 'VENMO', 'EFT', 'OTHER']
 const METHOD_LABEL: Record<ApPaymentMethod, string> = { ACH: 'ACH', CHECK: 'Paper check', WIRE: 'Wire', ZELLE: 'Zelle', VENMO: 'Venmo', EFT: 'EFT', CARD: 'Credit card (Amex)', OTHER: 'Other' }
 
@@ -50,7 +51,9 @@ export function PayToGroupDialog({ payTo, bills, legs, payBlocks, remitEmail, op
   const rows = useMemo(() => withLegSuffix(bills, legs), [bills, legs])
   const totalCents = rows.reduce((sum, row) => sum + row.balanceCents, 0)
   const carriers = new Set(rows.map((row) => row.carrierId)).size
-  const blocked = [...new Set(rows.map((row) => payBlocks?.[row.id]).filter((m): m is string => !!m))]
+  const missing = [...new Set(rows.map((row) => payBlocks?.[row.id]).filter((m): m is string => !!m))]
+  // Already paid outside the app: the app moves no money, so missing bank details do not hold the recording.
+  const blocked = alreadyPaid ? [] : missing
   const checkNumberMissing = method === 'CHECK' && reference.trim() === ''
 
   const submit = () => {
@@ -97,7 +100,12 @@ export function PayToGroupDialog({ payTo, bills, legs, payBlocks, remitEmail, op
         {blocked.length > 0 && (
           <div className="p-2 tms-tint tms-tint-red text-xs" role="alert" data-testid="pay-group-blocked">
             <strong>This payment cannot be posted yet.</strong> {blocked.map((m) => <span key={m}>{m} </span>)}
-            Take those bills off the selection, or fix the payee first.
+            Take those bills off the selection, or fix the payee first. {PAID_OUTSIDE_HINT}
+          </div>
+        )}
+        {missing.length > 0 && alreadyPaid && (
+          <div className="p-2 tms-tint tms-tint-orange text-xs" data-testid="pay-group-blocked-bypassed">
+            No bank details are on file for this payee. This is recorded as paid outside the app: nothing is sent to the bank or the payee.
           </div>
         )}
         <p className="m-0 text-sm tms-muted" data-testid="pay-group-explainer">

@@ -33,7 +33,7 @@ import {
 } from '../_shared/actionInputs'
 import { deliverNotice } from '../_shared/shipmentNotices'
 import { apFundingSplit, billStatusAfter } from '../../../src/lib/carrierBill'
-import { assertBillsPayable } from './paymentInfoGate'
+import { assertBillsPayable, billPayableProblems } from './paymentInfoGate'
 import { autoApproveBill } from './bills'
 import {
   planPayment,
@@ -409,8 +409,13 @@ export async function recordApPayment(input: Row, caller: Caller): Promise<Poste
 
   // Nobody pays a payee that has no bank info (Ryne 2026-11-19). A credit-only application moves no money, so it
   // is not held to this; a replay of an already-posted payment returned above.
+  // A payment recorded as already paid outside the app (`suppressRemittance`) moves no money, so it needs no bank
+  // details: it is let through and the audit entry says no payee info was on file.
+  let payeeInfoMissing = false
   if (amountCents > 0) {
-    await assertBillsPayable(applications.filter((application) => application.amountCents > 0).map((application) => application.billId))
+    const paidBills = applications.filter((application) => application.amountCents > 0).map((application) => application.billId)
+    if (suppressRemittance) payeeInfoMissing = (await billPayableProblems(paidBills)).length > 0
+    else await assertBillsPayable(paidBills)
   }
 
   const { documents, credits, before } = await readPlanInputs(applications, creditApplications)
@@ -480,7 +485,8 @@ export async function recordApPayment(input: Row, caller: Caller): Promise<Poste
       appliedCents: plan.appliedCents,
       applications: stored,
       creditApplications,
-      ...(suppressRemittance ? { remittanceSuppressed: true } : {}),
+      ...(suppressRemittance ? { remittanceSuppressed: true, recordedPaidOutsideApp: true } : {}),
+      ...(payeeInfoMissing ? { payeeInfoMissingOnFile: true } : {}),
       ...(deferRemittance ? { remittanceDeferredToGroup: true } : {}),
     })
     // The advice is rendered after the money is recorded, never before: a renderer
@@ -1212,13 +1218,15 @@ const addressKey = (to: readonly string[]) => [...to].map((email) => email.trim(
  * Bills of different carriers are paid together only when the money goes to the same pay-to and the advice to the
  * same address. The Pay selected button reads the same rule (`selectionPayTo`), and the server never trusts it.
  */
-export function assertSamePayTo(identities: readonly PayToIdentity[]): void {
+export function assertSamePayTo(identities: readonly PayToIdentity[], opts: { paidOutside?: boolean } = {}): void {
   if (identities.length < 2) return
   const names = new Map<string, string>()
   for (const identity of identities) if (!names.has(identity.key)) names.set(identity.key, identity.payTo || 'no pay-to on file')
   if (names.size > 1) {
     throw new Error(`These bills are paid to different payees (${[...names.values()].join('; ')}); pay each payee separately`)
   }
+  // Different remit addresses only matter when ONE e-mail is about to go out; a payment already made outside the app sends none.
+  if (opts.paidOutside) return
   const addresses = new Set(identities.map((identity) => addressKey(identity.to)))
   if (addresses.size > 1) {
     throw new Error(`These carriers are paid to ${identities[0].payTo} but have different remittance e-mail addresses; set one address for that pay-to first`)
@@ -1293,9 +1301,10 @@ export async function recordApPaymentGroup(input: Row, caller: Caller): Promise<
       factorEmails,
     }))
   }
-  assertSamePayTo(identities)
+  assertSamePayTo(identities, { paidOutside: suppressRemittance })
   // Every payee is checked before any money is recorded, so a group never half-posts for want of bank info.
-  await assertBillsPayable(billIds)
+  // Already paid outside the app: no bank details needed (recordApPayment audits it).
+  if (!suppressRemittance) await assertBillsPayable(billIds)
 
   const posted: PostedRow[] = []
   for (const [carrierId, list] of byCarrier) {

@@ -7,6 +7,11 @@
  * The rule itself is `paymentInfoGap` (src/lib/paymentInfo.ts), the same one the AP board flags rows with. The
  * method is read live, so fixing the payee's Payment methods clears the block at once. Only whether the bank
  * numbers are on file is read (the item carries a `bankCipher`); the numbers are never decrypted or returned here.
+ *
+ * The one way past it is a payment recorded as already paid outside the app (the "Already paid outside the app"
+ * box, `suppressRemittance`): the app moves no money, so no bank details are needed, and the payment never feeds
+ * the Chase file (paid bills leave the Selected tab). The caller uses `billPayableProblems` to put "no payee info
+ * on file" on that payment's audit entry instead of refusing it.
  */
 import type { CarrierBillRecord, CarrierPaymentMethodRecord } from '../../../src/types/tms'
 import { effectiveBillPayee } from '../../../src/lib/carrierBill'
@@ -28,6 +33,15 @@ const MAX_NAMED = 5
  * missing, already paid or void are not this rule's business: the payment planner refuses those on its own.
  */
 export async function assertBillsPayable(billIds: readonly string[]): Promise<void> {
+  const problems = await billPayableProblems(billIds)
+  if (problems.length === 0) return
+  const shown = problems.slice(0, MAX_NAMED).join(' ')
+  const more = problems.length > MAX_NAMED ? ` And ${problems.length - MAX_NAMED} more payees.` : ''
+  throw new Error(`Cannot record this payment. ${shown}${more} If you already paid it outside the app, tick 'Already paid outside the app' and post again.`)
+}
+
+/** The sentences `assertBillsPayable` would throw, one per payee and problem; empty when every payee can be paid. */
+export async function billPayableProblems(billIds: readonly string[]): Promise<string[]> {
   const carriers = new Map<string, Row | null>()
   const methodsByCarrier = new Map<string, CarrierPaymentMethodRecord[]>()
   const problems: string[] = []
@@ -74,8 +88,5 @@ export async function assertBillsPayable(billIds: readonly string[]): Promise<vo
     problems.push(paymentGapMessage(gap, payeeName, method))
   }
 
-  if (problems.length === 0) return
-  const shown = problems.slice(0, MAX_NAMED).join(' ')
-  const more = problems.length > MAX_NAMED ? ` And ${problems.length - MAX_NAMED} more payees.` : ''
-  throw new Error(`Cannot record this payment. ${shown}${more}`)
+  return problems
 }
