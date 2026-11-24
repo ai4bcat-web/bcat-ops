@@ -24,6 +24,7 @@ import { useLoads } from '@/hooks/useLoads'
 import { useResolveLoads } from '@/hooks/useResolveLoads'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAuth } from '@/hooks/useAuth'
+import { useCanCreateDirectoryRecords } from '@/hooks/useCanCreateDirectoryRecords'
 import { LoadPods } from '@/features/pods/LoadPods'
 import { LoadDriverDocs } from './LoadDriverDocs'
 import { LoadPodNotes } from './LoadPodNotes'
@@ -97,6 +98,8 @@ function EditLoadDialog({
   // The reusable address book: facility names suggest as you type.
   const directory = useDirectory()
   const [createLocationFor, setCreateLocationFor] = useState<{ initial?: { name?: string; city?: string }; stopIndex: number } | null>(null)
+  // Someone limited to the fleet profiles picks the locations that exist; the office adds a new one.
+  const canCreateRecords = useCanCreateDirectoryRecords()
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose() }}>
@@ -176,7 +179,7 @@ function EditLoadDialog({
               setValue={setValue}
               drivers={activeDrivers}
               locations={directory.locations}
-              onCreateLocation={(initial, stopIndex) => setCreateLocationFor({ initial, stopIndex })}
+              onCreateLocation={canCreateRecords ? (initial, stopIndex) => setCreateLocationFor({ initial, stopIndex }) : undefined}
             />
 
             {/* ── Section 5: Financials ──────────────────────────────── */}

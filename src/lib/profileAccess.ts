@@ -24,3 +24,15 @@ export const FLEET_PROFILE_PATHS = ['/profiles/drivers', '/profiles/assets'] as 
 
 /** The refusal a directory Lambda throws for them. */
 export const FLEET_PROFILES_ONLY_MESSAGE = 'Forbidden: your Profiles access is limited to Assets and Drivers'
+
+/**
+ * Creating a customer, location or carrier is closed to them too (Ryne 2026-11-24): they use the records that exist while a
+ * load is built, and the office adds a new one. The owner and ADMIN never are limited.
+ */
+export function canCreateDirectoryRecords(email: string | null | undefined, groups?: readonly string[] | null): boolean {
+  return !isFleetProfilesOnly(email, groups)
+}
+
+/** What the screens say where an "add new" would be, and the refusal the Lambdas throw. */
+export const FLEET_PROFILES_NO_CREATE_HINT = 'Ask the office to add this'
+export const FLEET_PROFILES_NO_CREATE_MESSAGE = 'Forbidden: ask the office to add this. Your access does not include adding customers, locations or carriers'

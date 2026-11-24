@@ -9,6 +9,8 @@ import { toast } from 'sonner'
 import { CarrierLookupCard } from '@/features/carriers/lookup/CarrierLookupCard'
 import { useCarriers } from '@/hooks/useCarriers'
 import { mcpAddCarrier, mcpPreviewCarrier, mcpSendInvite } from '@/lib/apiClient'
+import { useCanCreateDirectoryRecords } from '@/hooks/useCanCreateDirectoryRecords'
+import { FLEET_PROFILES_NO_CREATE_HINT } from '@/lib/profileAccess'
 import type { McpLookupResult } from '@/lib/apiClient'
 import { matchDirectoryCarrier } from '@/lib/integrations/mcpReview'
 import type { LookupDirectoryRow } from '@/features/carriers/lookup/lookupModel'
@@ -29,6 +31,7 @@ export function CarrierLookupPanel({ lookup, shipmentId, loadId, carrierName, on
   nowIso?: string
 }) {
   const { carriers, loading: carriersLoading, error: carriersError, refresh } = useCarriers()
+  const canAddCarrier = useCanCreateDirectoryRecords()
   const [result, setResult] = useState<McpLookupResult | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -57,6 +60,8 @@ export function CarrierLookupPanel({ lookup, shipmentId, loadId, carrierName, on
   }, [carriers, result, lookup.mcNumber, lookup.dotNumber])
 
   const send = async (emails: string[]) => {
+    // An invitation to a carrier that is not in the directory also adds it: not for someone who may not add carriers.
+    if (!carrier && !canAddCarrier) { toast.error(FLEET_PROFILES_NO_CREATE_HINT); return }
     setBusy(true)
     try {
       const card = result?.card
@@ -105,7 +110,7 @@ export function CarrierLookupPanel({ lookup, shipmentId, loadId, carrierName, on
           heading={carrierName}
           busy={busy}
           onSendPacket={send}
-          onAddToDirectory={add}
+          onAddToDirectory={canAddCarrier ? add : undefined}
           onCover={onCover}
           testId="cs-lookup-card"
         />

@@ -48,7 +48,7 @@ import {
   EMPTY_TO_BE_PAID_FILTERS, applyToBePaidFilters, avgDaysToPayBills, awaitingInvoiceTotals, billCarrierOptions,
   billsAging, billsExpected, billsSelected, canSelectForPayment, invoiceAgeBuckets, isOwnFleet, paidBills,
   paidInMonth, paidMonthOptions, visiblePaidBills,
-  paymentInfoFor, payeeNameFor, isFactorPaid, payToStatusFor, paymentGapFor, isPaymentGap, payToWorklist, PAY_TO_STATUS_LABEL, PAY_TO_STATUS_TITLE, quickPayLabel, setFactorNamesForLabels, setPayeeRemitForLabels, payeeCopies, remitEmailOf, remitEmailOfPayment, remittanceStatusOf, selectionBalanceCents,
+  paymentInfoFor, payeeNameFor, isFactorPaid, payToStatusFor, paymentGapFor, isPaymentGap, payToWorklist, PAY_TO_STATUS_LABEL, PAY_TO_STATUS_TITLE, quickPayLabel, setFactorNamesForLabels, setPayeeRemitForLabels, payeeCopies, remitEmailOf, remitEmailOfPayment, remitAddressOf, remitAddressOfPayment, remittanceStatusOf, selectionBalanceCents,
   selectionPayTo, sharedProLabel, sharedProIndex, multiCarrierLoadIds, withLegSuffix, type ApTabKey, type SharedProIndex, type ToBePaidFilters,
 } from './apViews'
 import { ApCreditDialog } from './components/ApCreditDialog'
@@ -1083,7 +1083,7 @@ function remitToColumn(
     'remitEmail',
     'REMIT TO',
     (bill) => remitEmailOf(bill, infos) || 'No remit e-mail',
-    (bill) => <RemitToCell email={remitEmailOf(bill, infos)} label={payeeNameFor(bill, infos)} onAdd={() => onAddRemit(bill)} />,
+    (bill) => <RemitToCell email={remitEmailOf(bill, infos)} label={payeeNameFor(bill, infos)} address={remitAddressOf(bill, infos)} onAdd={() => onAddRemit(bill)} />,
     { extraPx: 60 },
   )
 }
@@ -2090,7 +2090,7 @@ function paymentsView({
     moneyCol<ApPaymentRecord>('unapplied', 'UNAPPLIED', (p) => p.unappliedCents),
     facetCol<ApPaymentRecord>('remitTo', 'REMIT TO', (p) => remitEmailOfPayment(p, infos, carrier?.name) || 'No remit e-mail', (p) => (
       p.kind === 'PAYMENT'
-        ? <RemitToCell email={remitEmailOfPayment(p, infos, carrier?.name)} label={carrier?.name ?? 'this payee'} onAdd={() => onAddRemit(p)} />
+        ? <RemitToCell email={remitEmailOfPayment(p, infos, carrier?.name)} label={carrier?.name ?? 'this payee'} address={remitAddressOfPayment(p, infos, carrier?.name)} onAdd={() => onAddRemit(p)} />
         : <span className="tms-muted">—</span>
     ), { extraPx: 60 }),
     facetCol('remittance', 'REMITTANCE', remittanceText, (p) => (

@@ -384,3 +384,57 @@ export function linkedCarriers(
   }
   return out.sort((a, b) => a.name.localeCompare(b.name))
 }
+
+// ── The remit address ────────────────────────────────────────────────────────
+
+/** One line for an address object ("street, city, ST zip"), or '' when it holds nothing. */
+export function addressLineOf(address: object | null | undefined): string {
+  if (!address) return ''
+  const fields = address as Record<string, unknown>
+  const text = (key: string) => (typeof fields[key] === 'string' ? (fields[key] as string).trim() : '')
+  const stateZip = [text('state'), text('zip')].filter(Boolean).join(' ')
+  return [text('street'), text('street2'), text('city'), stateZip].filter(Boolean).join(', ')
+}
+
+/**
+ * A profile keeps its remit address as one line; a document prints street and city lines. "123 Main St, Dallas, TX 75001"
+ * splits into its parts; anything else prints whole on the street line, so nothing typed is ever dropped.
+ */
+export function remitAddressFromLine(line: string | null | undefined): { street: string; city: string | null; state: string | null; zip: string | null } | null {
+  const text = String(line ?? '').trim().replace(/\s+/g, ' ')
+  if (!text) return null
+  const parts = /^(.+),\s*([^,]+),\s*([A-Za-z]{2})\.?,?\s+(\d{5}(?:-\d{4})?)$/.exec(text)
+  if (parts) return { street: parts[1]!.trim(), city: parts[2]!.trim(), state: parts[3]!.toUpperCase(), zip: parts[4]! }
+  return { street: text, city: null, state: null, zip: null }
+}
+
+interface RemitToLike {
+  name?: string | null
+  factorName?: string | null
+  payeeEmail?: string | null
+  address?: object | null
+}
+
+/**
+ * The remit address for a pay-to: the profile's own wins, and the address the carrier (or the bill) carries stays as the
+ * fallback, so a pay-to with no profile address reads exactly what it did before.
+ */
+export function remitAddressFor(map: FactorRemitMap | null | undefined, payTo: string | null | undefined, fallback?: object | null): string {
+  return payToProfileFor(map, payTo)?.remitAddress?.trim() || addressLineOf(fallback)
+}
+
+/**
+ * What a document prints as "remit to": the same frozen snapshot, with the pay-to profile's address and e-mail laid over it.
+ * Resolved when the page is drawn, never written back, so a recorded bill keeps what it was recorded with.
+ */
+export function withPayToProfile<T extends RemitToLike>(remitTo: T | null | undefined, map: FactorRemitMap | null | undefined): T | null {
+  if (!remitTo) return null
+  const profile = payToProfileFor(map, remitTo.factorName?.trim() || remitTo.name)
+  if (!profile) return remitTo
+  const address = remitAddressFromLine(profile.remitAddress)
+  return {
+    ...remitTo,
+    ...(address ? { address } : {}),
+    ...(profile.email?.trim() ? { payeeEmail: profile.email.trim() } : {}),
+  } as T
+}

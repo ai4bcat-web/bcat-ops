@@ -127,7 +127,7 @@ export function PayToProfileDialog({ payee, carriers, methods, map, payees, canE
           <TmsInput aria-label="Remit e-mail" type="email" value={email} disabled={!canEdit} placeholder="ap@company.com" onChange={(e) => setEmail(e.target.value)} />
         </TmsField>
         <TmsField label="Remit address">
-          <TmsInput aria-label="Remit address" value={address} disabled={!canEdit} placeholder="Street, city, state ZIP" onChange={(e) => setAddress(e.target.value)} />
+          <TmsInput aria-label="Remit address" value={address} disabled={!canEdit} placeholder="123 Main St, Dallas, TX 75001" onChange={(e) => setAddress(e.target.value)} />
         </TmsField>
       </div>
       {!emailOk && <p className="mt-1 text-xs" style={{ color: 'var(--tms-badge-red)' }}>Enter one valid e-mail address.</p>}

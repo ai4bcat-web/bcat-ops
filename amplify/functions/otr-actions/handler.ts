@@ -42,6 +42,7 @@ import { localStatusFor } from '../../../src/lib/otrInvoiceStatus'
 import { decideResubmit, sameInvoiceBack, withPriorInvoice } from '../../../src/lib/factoringResubmit'
 import { checkOtrInvoiceUnshared } from '../../../src/lib/otrSharedInvoice'
 import { accountingAccessMessage, hasAccountingPage } from '../../../src/lib/accountingAccess'
+import { isFleetProfilesOnly } from '../../../src/lib/profileAccess'
 import { customerLookupFrom, type CustomerLookupResult } from './customerLookup'
 import { normalizePro } from '../../../src/lib/proNumber'
 import {
@@ -1035,6 +1036,7 @@ function auditCustomer(user: string, before: Row | null, after: Row, reason: str
 
 /** The page groups that may create customers (UPSERT_CUSTOMER's own gate), plus the accounting pages. */
 function mayCreateCustomers(groups: readonly string[], email: string): boolean {
+  if (isFleetProfilesOnly(email, groups)) return false
   if (hasAccountingPage(groups, email, 'factoring')) return true
   return ['page-customers', 'page-locations', 'page-loads', 'page-tms'].some((g) => groups.includes(g))
 }

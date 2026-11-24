@@ -145,6 +145,8 @@ export async function linkStopsToDirectory(
     createLocation: (input: NonNullable<ReturnType<typeof locationInputForStop>>) => Promise<LocationRecord>
     refresh?: () => void
     notify?: (message: string) => void
+    /** False for someone who may not add locations: a typed stop with no match stays unlinked instead of being filed. */
+    canCreate?: boolean
   },
 ): Promise<Stop[]> {
   let filed = 0
@@ -155,7 +157,7 @@ export async function linkStopsToDirectory(
     const hit = matchStopLocation(stop, known)
     if (hit) { out.push({ ...stop, locationId: hit.id, address: stop.address ?? bookedAddressSnapshot(hit) }); continue }
     const input = locationInputForStop(stop)
-    if (!input) { out.push(stop); continue }
+    if (!input || o.canCreate === false) { out.push(stop); continue }
     try {
       const created = await o.createLocation(input)
       known = [...known, created]

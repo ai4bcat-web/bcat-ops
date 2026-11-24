@@ -362,7 +362,7 @@ function StopCard({
   setValue: UseFormSetValue<LoadFormValues>
   onAutoFillCity: (city: string) => void
   /** Inline "+": open the location create dialog prefilled for this stop. */
-  onCreateLocation: (initial: { name?: string; city?: string }) => void
+  onCreateLocation?: (initial: { name?: string; city?: string }) => void
 }) {
   const stopErr = errors.stops?.[index]
   const stopName = useWatch({ control, name: `stops.${index}.name` })
@@ -427,7 +427,7 @@ function StopCard({
                 locations={locations}
                 placeholder="Link to directory location…"
                 onChange={(id, record) => linkStop(record && 'name' in record && id ? (record as LocationRecord) : null)}
-                onCreateNew={(initial) => onCreateLocation({ name: initial.name || stopName || undefined, city: stopCity || undefined })}
+                onCreateNew={onCreateLocation ? (initial) => onCreateLocation({ name: initial.name || stopName || undefined, city: stopCity || undefined }) : undefined}
               />
             </Field>
           )}
@@ -546,7 +546,7 @@ export function LegStopsSection({
   setValue: UseFormSetValue<LoadFormValues>
   drivers: Array<{ id: string; name: string }>
   locations: LocationRecord[]
-  onCreateLocation: (initial: { name?: string; city?: string }, stopIndex: number) => void
+  onCreateLocation?: (initial: { name?: string; city?: string }, stopIndex: number) => void
 }) {
   const { fields: stopFields, append, remove } = useFieldArray({ control, name: 'stops' })
   const [milesLoading, setMilesLoading] = useState(false)
@@ -636,7 +636,7 @@ export function LegStopsSection({
         <StopCard
           locations={locations}
           onAutoFillCity={(city) => setValue(`stops.${i}.city`, city, { shouldDirty: true })}
-          onCreateLocation={(initial) => onCreateLocation(initial, i)}
+          onCreateLocation={onCreateLocation ? (initial) => onCreateLocation(initial, i) : undefined}
           key={f.id}
           index={i}
           control={control}

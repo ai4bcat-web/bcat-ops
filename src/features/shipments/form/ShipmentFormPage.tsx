@@ -47,6 +47,7 @@ import { SummaryRail } from './SummaryRail'
 import { useFormActions } from './useFormActions'
 import { useShipmentForm, type RunKind } from './useShipmentForm'
 import { isFactoredLoad } from '@/lib/factorBilling'
+import { canCreateDirectoryRecords } from '@/lib/profileAccess'
 import { blockingIssues, issueSummary, missingDocIssues, missingOnLoadIssues } from './validation'
 import { reqsAsIssues, type BoardReq } from '../boardReqs'
 import { useOwnBoardReqs } from './useOwnBoardReqs'
@@ -100,7 +101,8 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   // True while Submit for Review runs the order submit on a draft, so that submit does not redirect away from the form.
   const { user, isAdmin, isOwner, hasPageAccess } = useAuth()
   // Same door as the directory's create action: owner, ADMIN, or the Shipments / Locations / Loads page grants.
-  const canCreateLocation = Boolean(isAdmin || isOwner || hasPageAccess('tms') || hasPageAccess('loads') || hasPageAccess('locations'))
+  // Not for someone limited to the fleet profiles (Jason): they pick the records that exist.
+  const canCreateLocation = canCreateDirectoryRecords(user?.email, user?.groups) && Boolean(isAdmin || isOwner || hasPageAccess('tms') || hasPageAccess('loads') || hasPageAccess('locations'))
   const email = user?.email ?? ''
   const directory = useDirectory({ locations: false })
   // The locations table is 3,000+ rows: read it once, the first time a stop is searched or saved.
@@ -138,7 +140,8 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     actorName: email,
     refreshDirectory: () => { locationsRead.current = null; void directory.refresh() },
     onNotice: (msg: string) => { toast.message(msg) },
-  }), [directory, locations, loadLocations, settings, email, ownFleetRoster])
+    canCreateLocation: canCreateDirectoryRecords(user?.email, user?.groups),
+  }), [directory, locations, loadLocations, settings, email, ownFleetRoster, user?.email, user?.groups])
 
   // Scroll to and focus the control whose `data-testid` is `fieldKey`, opening its More tab first; the field flashes for 1.5 s.
   const focusField = useCallback((fieldKey: string) => {

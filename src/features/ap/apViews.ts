@@ -14,7 +14,7 @@ import { approvalReadiness, billPayee, PENDING_DATES_BLOCK, type ApprovalWarning
 import { daysLate } from '@/lib/arAging'
 import { PAYMENT_GAP_LABEL, paymentInfoGap, type PaymentInfoGap } from '@/lib/paymentInfo'
 import { chicagoDateStr } from '@/lib/date'
-import { canonicalFactorName, payToKeyFor, payeeEmailFor, paysThroughFactor, type FactorNameIndex, type FactorRemitMap } from '@/lib/factorRemit'
+import { canonicalFactorName, payToKeyFor, payeeEmailFor, paysThroughFactor, remitAddressFor, type FactorNameIndex, type FactorRemitMap } from '@/lib/factorRemit'
 import type { ApWorklistRow } from '@/hooks/useApWorklist'
 import type { CarrierPaymentInfo } from '@/lib/apiClient'
 import type {
@@ -404,6 +404,35 @@ export function remitEmailOf(
   const live = info?.payeeEmail?.trim() || ''
   if (paysThroughFactor(info) && live) return live
   return bill.remitTo?.payeeEmail?.trim() || live
+}
+
+/**
+ * Where checks and notices go, as one line, by PAY TO: the address on the pay-to's profile wins; a pay-to with none falls
+ * back to the address frozen on the bill, then the one on the payment method (the factor's, or the payee's own). '' when
+ * nothing is on file.
+ */
+export function remitAddressOf(
+  bill: Pick<CarrierBillRecord, 'remitTo' | 'carrierId' | 'paymentMethodId' | 'payeeKind' | 'carrierName'>,
+  infos: readonly CarrierPaymentInfo[],
+): string {
+  const info = paymentInfoFor(bill, infos)
+  const live = info ? (paysThroughFactor(info) ? info.factorAddress ?? info.remitToAddress : info.remitToAddress) : null
+  return remitAddressFor(payeeRemit, payeeNameFor(bill, infos), bill.remitTo?.address ?? live)
+}
+
+/** `remitAddressOf` for a payment row: the profile's address, else the one frozen when it was paid. */
+export function remitAddressOfPayment(
+  payment: { carrierId: string; remitTo?: { name?: string | null; factorName?: string | null; address?: object | null } | null },
+  infos: readonly CarrierPaymentInfo[],
+  carrierName?: string | null,
+): string {
+  const mine = infos.filter((i) => i.carrierId === payment.carrierId && i.status !== 'INACTIVE')
+  const info = mine.find((i) => i.isPreferred) ?? mine[0]
+  const payTo = paysThroughFactor(info)
+    ? canonicalFactorName(factorNames, info?.factorName)
+    : payment.remitTo?.factorName?.trim() || payment.remitTo?.name?.trim() || carrierName
+  const live = info ? (paysThroughFactor(info) ? info.factorAddress ?? info.remitToAddress : info.remitToAddress) : null
+  return remitAddressFor(payeeRemit, payTo, payment.remitTo?.address ?? live)
 }
 
 /**

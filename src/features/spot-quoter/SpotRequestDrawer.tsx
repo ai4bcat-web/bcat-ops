@@ -15,6 +15,8 @@ import {
   TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsDrawer, TmsField, TmsInput, TmsSelect, TmsTextarea,
 } from '@/features/tms/kit'
 import { useAuth } from '@/hooks/useAuth'
+import { useCanCreateDirectoryRecords } from '@/hooks/useCanCreateDirectoryRecords'
+import { FLEET_PROFILES_NO_CREATE_HINT } from '@/lib/profileAccess'
 import { createCustomer, getQuote, markQuoteLost, markQuoteWon, saveQuote, sendQuote, spotAction } from '@/lib/apiClient'
 import { LOST_REASONS, isOpenQuoteStatus } from '@/lib/quotes'
 import { QUOTE_LINE_CODES } from '@/lib/spot/accessorials'
@@ -76,6 +78,7 @@ function RequestPanel({
   reload: () => void
 }) {
   const { user, isAdmin } = useAuth()
+  const canAddCustomer = useCanCreateDirectoryRecords()
   const isManager = isAdmin || !!user?.groups.includes('role-MANAGER')
   const ex = request.extraction ?? null
   const [form, setForm] = useState<Form>(() => formFrom(ex))
@@ -422,7 +425,7 @@ function RequestPanel({
             {!request.customerId ? (
               <div className="tms-spot-actions">
                 <TmsInput data-testid="spot-prospect-name" aria-label="Prospect name" value={prospectName} placeholder={domain || 'Company name'} onChange={(e) => setProspectName(e.target.value)} />
-                <TmsButton data-testid="spot-create-prospect" disabled={busy || !(prospectName.trim() || domain)} onClick={() => void createProspect()}>
+                <TmsButton data-testid="spot-create-prospect" disabled={busy || !canAddCustomer || !(prospectName.trim() || domain)} title={canAddCustomer ? undefined : FLEET_PROFILES_NO_CREATE_HINT} onClick={() => void createProspect()}>
                   Create prospect
                 </TmsButton>
                 {domain && !FREEMAIL.includes(domain) ? <span className="tms-muted">Domain {domain} will be linked to it.</span> : null}

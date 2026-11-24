@@ -39,6 +39,8 @@ export interface PipelineCtx {
   isBatory: boolean
   refreshDirectory?: () => void
   onNotice?: (message: string) => void
+  /** False for someone who may not add locations (limited to the fleet profiles): a typed stop is left unlinked, never filed. */
+  canCreateLocation?: boolean
 }
 
 export interface PipelineStep { step: string; ok: boolean; message?: string }
@@ -137,7 +139,7 @@ async function applyRoles(r: Runner, values: ShipmentFormValues, skipTag = false
 async function linkedValues(values: ShipmentFormValues, ctx: PipelineCtx): Promise<ShipmentFormValues> {
   try {
     const linked = await linkStopsToDirectory(toStops(values), ctx.loadLocations ? await ctx.loadLocations() : ctx.locations, {
-      createLocation, refresh: ctx.refreshDirectory, notify: ctx.onNotice,
+      createLocation, refresh: ctx.refreshDirectory, notify: ctx.onNotice, canCreate: ctx.canCreateLocation !== false,
     })
     return {
       ...values,

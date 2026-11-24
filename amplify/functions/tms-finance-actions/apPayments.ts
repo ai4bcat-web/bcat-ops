@@ -685,6 +685,7 @@ async function storeRemittance(paymentRowId: string, caller: Caller): Promise<Ro
         bills: context.bills,
         carrier: context.carrier,
         division: context.division,
+        payToProfiles: context.factorEmails,
       }),
     )
     const key = remittancePdfKey(String(context.payment.carrierId ?? ''), paymentRowId, version)
