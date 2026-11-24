@@ -3,6 +3,7 @@ import { PDFDocument, PDFArray, PDFRawStream, decodePDFRawStream } from 'pdf-lib
 import { buildRemittancePdf, remittanceData, remittanceFilename } from './remittancePdf'
 import type { RemittanceDataInput } from './remittancePdf'
 import type { ApPaymentRecord, CarrierBillRecord } from '../types/tms'
+import { parseFactorRemitMap } from './factorRemit'
 
 /**
  * pdf-lib has no text layer, so the drawn strings are read back out of the page content
@@ -167,6 +168,23 @@ describe('remittanceData', () => {
     expect(built.totals.paidCents).toBe(392_500)
   })
 
+  it("prints the pay-to profile's remit address and e-mail in place of the frozen copy, and leaves the payment as recorded", () => {
+    const profiles = parseFactorRemitMap({ 'BLUE LINE TRUCKING': { name: 'Blue Line Trucking', email: 'remit@blueline.test', remitAddress: '500 Lockbox Way, Aurora, IL 60505' } })
+    const recorded = payment()
+    const built = data({ payment: recorded, payToProfiles: profiles })
+    expect(built.remitTo?.address).toEqual({ street: '500 Lockbox Way', city: 'Aurora', state: 'IL', zip: '60505' })
+    expect(built.remitTo?.payeeEmail).toBe('remit@blueline.test')
+    expect(recorded.remitTo?.address?.street).toBe('22 Depot St')
+    expect(recorded.remitTo?.payeeEmail).toBe('ap@blueline.test')
+  })
+
+  it('keeps the frozen address when the pay-to has no profile, or no address on it', () => {
+    const none = data({ payToProfiles: parseFactorRemitMap({ 'SOMEBODY ELSE': { name: 'Somebody Else', email: 'x@y.test', remitAddress: '1 A St, B, CA 90001' } }) })
+    expect(none.remitTo?.address?.street).toBe('22 Depot St')
+    const noAddress = data({ payToProfiles: parseFactorRemitMap({ 'BLUE LINE TRUCKING': { name: 'Blue Line Trucking', email: 'remit@blueline.test' } }) })
+    expect(noAddress.remitTo?.address?.street).toBe('22 Depot St')
+  })
+
   it('falls back to the payment id when no check or trace number was typed', () => {
     expect(data({ payment: payment({ reference: '   ' }) }).reference).toBe('ap-1')
     expect(data({ payment: payment({ reference: null }) }).reference).toBe('ap-1')
@@ -180,6 +198,16 @@ describe('buildRemittancePdf pay to column', () => {
     const text = (await pageTexts(await buildRemittancePdf(mixed))).join('\n')
     expect(text).toContain('PAY TO')
     expect(text).toContain('OTR Capital LLC')
+  })
+})
+
+describe('buildRemittancePdf remit address from the pay-to profile', () => {
+  it("draws the profile's address on the page, not the one frozen on the bill", async () => {
+    const profiles = parseFactorRemitMap({ 'BLUE LINE TRUCKING': { name: 'Blue Line Trucking', email: 'remit@blueline.test', remitAddress: '500 Lockbox Way, Aurora, IL 60505' } })
+    const text = (await pageTexts(await buildRemittancePdf(data({ payToProfiles: profiles })))).join('\n')
+    expect(text).toContain('500 Lockbox Way')
+    expect(text).toContain('Aurora, IL 60505')
+    expect(text).not.toContain('22 Depot St')
   })
 })
 

@@ -25,6 +25,7 @@ import type {
   CarrierRecord,
   Division,
 } from '../types/tms'
+import { withPayToProfile, type FactorRemitMap } from './factorRemit'
 
 const PAGE = { w: 612, h: 792 } // US Letter, points
 const M = 40
@@ -215,6 +216,11 @@ export interface RemittanceDataInput {
     Division,
     'name' | 'legalName' | 'mcNumber' | 'dotNumber' | 'remitToName' | 'remitToAddress' | 'remitToEmail'
   > | null
+  /**
+   * The pay-to profiles (`TmsSettings.factorRemitEmails`). A profile's remit address and e-mail print on the "remit to" block in place of the
+   * copy frozen on the bill; the bill itself is not changed.
+   */
+  payToProfiles?: FactorRemitMap | null
 }
 
 /** The division block, in `carrierRateCon`'s `brokerLines` shape. */
@@ -271,7 +277,7 @@ export function remittanceData(input: RemittanceDataInput): RemittanceData {
   }
 
   const first = rows.length > 0 ? billById.get(rows[0].billId) : undefined
-  const remitTo = payment.remitTo ?? first?.remitTo ?? null
+  const remitTo = withPayToProfile(payment.remitTo ?? first?.remitTo ?? null, input.payToProfiles)
   const carrierId = payment.carrierId
   const carrierName = input.carrier?.name || first?.carrierName || ''
   const mcNumber = input.carrier?.mcNumber ?? first?.carrierMc ?? null

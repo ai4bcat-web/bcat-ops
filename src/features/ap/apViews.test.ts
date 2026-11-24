@@ -4,7 +4,7 @@ import { applyFactorRemit, factorNameIndex, factorKeyOf } from '@/lib/factorRemi
 import type { CarrierBillRecord } from '@/types/tms'
 import {
   billsInReview, sharedProIndex, sharedProLabel, siblingCarriers, awaitingInvoiceTotals,
-  billsExpected, billsAging, billsSelected, canSelectForPayment, invoiceAgeBuckets, payToLabel, paymentInfoFor, remitEmailOf, remitEmailOfPayment, remittanceStatusOf, AP_TABS,
+  billsExpected, billsAging, billsSelected, canSelectForPayment, invoiceAgeBuckets, payToLabel, paymentInfoFor, remitAddressOf, remitAddressOfPayment, remitEmailOf, remitEmailOfPayment, remittanceStatusOf, AP_TABS,
   payeeCopies, setPayeeRemitForLabels,
   billGates, applyToBePaidFilters, EMPTY_TO_BE_PAID_FILTERS, factorNameFor, isFactorPaid, payeeNameFor, payToLabelFor, setFactorNamesForLabels,
   payToStatusFor, payToWorklist, PAY_TO_STATUS_LABEL,
@@ -507,5 +507,35 @@ describe('selectionPayTo (one pay run is one pay-to, not one carrier)', () => {
     } finally {
       setPayeeRemitForLabels(null)
     }
+  })
+})
+
+describe('the remit address on the Remit to column', () => {
+  const infos = [
+    { id: 'p1', carrierId: 'car1', recipientType: 'FACTOR', factorName: 'Triumph Capital Funding LLC', factorAddress: { street: '9 Old Rd', city: 'Gary', state: 'IN', zip: '46402' }, payeeEmail: 'old@triumph.test', isPreferred: true, status: 'ACTIVE' },
+    { id: 'p2', carrierId: 'car2', recipientType: 'CARRIER', remitToAddress: { street: '5 Own St', city: 'Joliet', state: 'IL', zip: '60431' }, isPreferred: true, status: 'ACTIVE' },
+  ] as never
+  const bill = (carrierId: string, carrierName: string, over: Record<string, unknown> = {}) =>
+    ({ carrierId, carrierName, payeeKind: 'CARRIER', paymentMethodId: null, remitTo: null, ...over }) as unknown as CarrierBillRecord
+  afterEach(() => setPayeeRemitForLabels(null))
+
+  it("reads the pay-to profile's address, by name or alias, over the bill's snapshot and the method's own", () => {
+    setPayeeRemitForLabels({ 'TRIUMPH CAPITAL': { name: 'Triumph Capital', email: 'ap@triumph.test', aliases: ['Triumph Capital Funding LLC'], remitAddress: '1 Main St, Dallas, TX 75001' } })
+    const snapshot = { name: 'Blue Line', factorName: 'Triumph Capital Funding LLC', address: { street: '2 Frozen Ave', city: 'Gary', state: 'IN', zip: '46402' } }
+    expect(remitAddressOf(bill('car1', 'Blue Line', { remitTo: snapshot }), infos)).toBe('1 Main St, Dallas, TX 75001')
+  })
+
+  it('falls back to what the bill was recorded with, then the payment method, when the pay-to has no profile address', () => {
+    setPayeeRemitForLabels({ 'TRIUMPH CAPITAL': { name: 'Triumph Capital', email: 'ap@triumph.test', aliases: ['Triumph Capital Funding LLC'] } })
+    const snapshot = { name: 'Blue Line', factorName: 'Triumph Capital Funding LLC', address: { street: '2 Frozen Ave', city: 'Gary', state: 'IN', zip: '46402' } }
+    expect(remitAddressOf(bill('car1', 'Blue Line', { remitTo: snapshot }), infos)).toBe('2 Frozen Ave, Gary, IN 46402')
+    expect(remitAddressOf(bill('car1', 'Blue Line'), infos)).toBe('9 Old Rd, Gary, IN 46402')
+    expect(remitAddressOf(bill('car2', 'Own Haul'), infos)).toBe('5 Own St, Joliet, IL 60431')
+    expect(remitAddressOf(bill('nobody', 'Nobody'), infos)).toBe('')
+  })
+
+  it('gives a payment row the same address its pay-to has', () => {
+    setPayeeRemitForLabels({ 'TRIUMPH CAPITAL': { name: 'Triumph Capital', email: 'ap@triumph.test', aliases: ['Triumph Capital Funding LLC'], remitAddress: '1 Main St, Dallas, TX 75001' } })
+    expect(remitAddressOfPayment({ carrierId: 'car1', remitTo: { name: 'Blue Line', factorName: 'Triumph Capital Funding LLC' } }, infos, 'Blue Line')).toBe('1 Main St, Dallas, TX 75001')
   })
 })

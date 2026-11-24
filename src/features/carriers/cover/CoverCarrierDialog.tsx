@@ -11,6 +11,8 @@
  * There is deliberately no "add to carriers" here: a carrier only enters our directory through MyCarrierPackets.
  */
 import { useAuth } from '@/hooks/useAuth'
+import { useCanCreateDirectoryRecords } from '@/hooks/useCanCreateDirectoryRecords'
+import { FLEET_PROFILES_NO_CREATE_HINT } from '@/lib/profileAccess'
 import { useEffect, useMemo, useState } from 'react'
 import { Search } from 'lucide-react'
 import { toast } from 'sonner'
@@ -98,6 +100,8 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
   const stub = preview?.mode === 'STUB'
   const route = coverRoute(selected)
   const { isAdmin: callerIsAdmin, isOwner: callerIsOwner } = useAuth()
+  // A carrier that is not in the directory yet is added by the invitation: not for someone who may not add carriers.
+  const canAddCarrier = useCanCreateDirectoryRecords()
   const gate = coverGate(selected ? selected.mcpStatus : card?.packet.status, selected?.status, callerIsAdmin || callerIsOwner, selected?.mcpRiskScore ?? card?.risk.totalPoints)
   const needsMcp = !selected || selected.status !== 'ACTIVE'
   // The server refused this carrier: don't leave a green "Ready to cover" panel or a Cover button saying the opposite. An admin
@@ -329,8 +333,8 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
               <TmsButton
                 variant="primary"
                 data-testid="cover-send-packet"
-                disabled={!assignable || !card || previewing}
-                title={stub ? 'MyCarrierPackets is not LIVE here (STUB): a packet cannot be sent' : undefined}
+                disabled={!assignable || !card || previewing || (!selected && !canAddCarrier)}
+                title={!selected && !canAddCarrier ? FLEET_PROFILES_NO_CREATE_HINT : stub ? 'MyCarrierPackets is not LIVE here (STUB): a packet cannot be sent' : undefined}
                 onClick={() => setInviteOpen(true)}
               >
                 {mainLabel}

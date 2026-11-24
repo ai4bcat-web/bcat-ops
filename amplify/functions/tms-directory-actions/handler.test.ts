@@ -4046,12 +4046,24 @@ describe('Profiles access limited to Assets and Drivers (Jason)', () => {
     })
   }
 
-  it('does not block what the shipment form needs, so loads still build for him', async () => {
-    await expect(handler(event('UPSERT_LOCATION', { name: 'X' }, jason()))).rejects.not.toThrow('limited to Assets and Drivers')
+  it('cannot add a location or a customer: the office adds a new one', async () => {
+    await expect(handler(event('UPSERT_LOCATION', { name: 'X' }, jason()))).rejects.toThrow('ask the office to add this')
+    await expect(handler(event('UPSERT_CUSTOMER', { name: 'Y' }, jason()))).rejects.toThrow('ask the office to add this')
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ input: expect.objectContaining({ ConditionExpression: 'attribute_not_exists(id)' }) }))
+  })
+
+  it('cannot add a carrier through MyCarrierPackets, by Add or by an invitation that also makes the row', async () => {
+    await expect(handler(event('MCP_ADD_CARRIER', { mcNumber: '123456' }, jason()))).rejects.toThrow('ask the office to add this')
+    await expect(handler(event('MCP_SEND_INVITE', { mcNumber: '123456', ensureCarrier: true, emails: ['a@b.co'] }, jason()))).rejects.toThrow('ask the office to add this')
+  })
+
+  it('still lets him use what exists: an invitation to a carrier already in the directory is not a create', async () => {
+    await expect(handler(event('MCP_SEND_INVITE', { mcNumber: '123456', carrierId: 'car-1', ensureCarrier: true, emails: ['a@b.co'] }, jason()))).rejects.not.toThrow('ask the office to add this')
   })
 
   it('leaves the owner and an ADMIN on the same address untouched', async () => {
     await expect(handler(event('ARCHIVE_CUSTOMER', { id: 'c1' }, identity({ email: 'jason@bcatcorp.com', groups: ['ADMIN'] })))).rejects.not.toThrow('limited to Assets and Drivers')
+    await expect(handler(event('UPSERT_LOCATION', { name: 'X' }, identity({ email: 'jason@bcatcorp.com', groups: ['ADMIN'] })))).rejects.not.toThrow('ask the office to add this')
   })
 })
 

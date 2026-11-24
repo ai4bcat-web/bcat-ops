@@ -22,7 +22,7 @@ vi.mock('@/hooks/useCarriers', () => ({
   useCarriers: () => ({ carriers: mocks.carriers, loading: false, error: null, refresh: vi.fn(), replace: vi.fn() }),
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
-vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ isAdmin: false, isOwner: false }) }))
+vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ isAdmin: false, isOwner: false }), useAuthUser: () => null }))
 vi.mock('@/features/quotes/components/AcceptOfferDialog', () => ({
   AcceptOfferDialog: ({ quote }: { quote: { id: string } }) => <div data-testid="accept-dialog">{quote.id}</div>,
 }))

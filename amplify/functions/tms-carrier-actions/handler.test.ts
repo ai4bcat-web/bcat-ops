@@ -487,8 +487,9 @@ describe('Profiles access limited to Assets and Drivers (Jason)', () => {
     })
   }
 
-  it('still lets a carrier be added while a load is covered (UPSERT_CARRIER is not closed to him by this rule)', async () => {
-    await expect(call('UPSERT_CARRIER', carrier(), JASON)).rejects.not.toThrow('limited to Assets and Drivers')
+  it('cannot add or edit a carrier either (UPSERT_CARRIER is closed to him like every carrier action)', async () => {
+    await expect(call('UPSERT_CARRIER', carrier(), JASON)).rejects.toThrow('limited to Assets and Drivers')
+    await expect(call('UPSERT_CARRIER', { ...carrier(), id: 'car-1', expectedUpdatedAt: 'x' }, JASON)).rejects.toThrow('limited to Assets and Drivers')
   })
 
   it('does not limit another carrier-page user', async () => {

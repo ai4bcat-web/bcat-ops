@@ -12,7 +12,7 @@
  * (updateLoad) with IAM auth so subscriptions fire.
  */
 import { splitEmailText } from '../../../src/lib/apEmails'
-import { FLEET_PROFILES_ONLY_MESSAGE, isFleetProfilesOnly } from '../../../src/lib/profileAccess'
+import { FLEET_PROFILES_NO_CREATE_MESSAGE, FLEET_PROFILES_ONLY_MESSAGE, isFleetProfilesOnly } from '../../../src/lib/profileAccess'
 import { getAmplifyDataClientConfig, type DataClientEnv } from '@aws-amplify/backend-function/runtime'
 import { Amplify } from 'aws-amplify'
 import { generateClient } from 'aws-amplify/data'
@@ -289,13 +289,18 @@ const PROFILE_PAGE_ONLY_ACTIONS: ReadonlySet<string> = new Set([
   'PREVIEW_DELETE_CUSTOMER', 'DELETE_CUSTOMER', 'MERGE_CUSTOMER', 'RESTORE_CUSTOMER', 'SYNC_CUSTOMER_NAME',
 ])
 
+/** Someone limited to the fleet profiles uses the customers, locations and carriers that exist; the office adds a new one. */
+function assertMayCreate(caller: Caller): void {
+  if (isFleetProfilesOnly(caller.email, caller.groups)) throw new Error(FLEET_PROFILES_NO_CREATE_MESSAGE)
+}
+
 async function authorize(action: Action, identity?: AppSyncIdentity | null): Promise<Caller> {
   if (!identity) throw new Error('Unauthorized: missing identity')
   const email = await getCallerEmail(identity)
   if (!email) throw new Error('Unauthorized: could not resolve caller email')
   const groups = getGroups(identity)
   // Jason's Profiles access is Assets and Drivers only: the actions only the Customers and Locations profile pages use are closed to him.
-  // Creating a customer or location (UPSERT_*) stays open: the shipment form creates them while a load is built.
+  // Adding a customer or location (a create through UPSERT_*) is closed to him too: see assertMayCreate.
   if (PROFILE_PAGE_ONLY_ACTIONS.has(action) && isFleetProfilesOnly(email, groups)) throw new Error(FLEET_PROFILES_ONLY_MESSAGE)
   const isOwner = email === OWNER_EMAIL
   const isAdmin = groups.includes(ADMIN_GROUP)
@@ -1252,6 +1257,7 @@ async function upsertCustomer(
     existing = null
     id = newId()
     isCreate = true
+    if (!opts.imported) assertMayCreate(caller)
   }
 
   const enforceNewRules = isCreate && !opts.imported && !isLeadStatus(optionalEnumStrict(rawInput.status, CUSTOMER_STATUSES, 'status'))
@@ -1793,6 +1799,7 @@ async function upsertLocation(input: Record<string, unknown>, caller: Caller): P
     existing = null
     id = newId()
     isCreate = true
+    assertMayCreate(caller)
   }
 
   if (existing) {
@@ -3941,6 +3948,8 @@ export const handler = async (event: AppSyncEvent, context?: { getRemainingTimeI
   }
 
   if (isMcpFindAction(action)) {
+    // Adding a carrier through MyCarrierPackets, whether by Add or by an invitation that also makes the row, is a create.
+    if (action === 'MCP_ADD_CARRIER' || (action === 'MCP_SEND_INVITE' && input.ensureCarrier === true && !input.carrierId)) assertMayCreate(caller)
     return (await runMcpFindAction(action, input, caller, mcpFindDeps)) as Record<string, unknown>
   }
 

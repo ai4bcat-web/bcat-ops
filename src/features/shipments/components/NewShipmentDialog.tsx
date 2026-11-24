@@ -32,6 +32,7 @@ import {
   bookedAddressSnapshot, emptyStopForms, stopFormToStop, tenderNotes, tenderStopForms,
 } from '@/features/loads/legFields'
 import { useAuth } from '@/hooks/useAuth'
+import { canCreateDirectoryRecords, FLEET_PROFILES_NO_CREATE_HINT } from '@/lib/profileAccess'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useTrucks } from '@/hooks/useTrucks'
@@ -118,6 +119,8 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
   // read as free. The server's claim is the rule either way.
   const { allLoads } = useLoads()
   const { user } = useAuth()
+  // Someone limited to the fleet profiles picks the customers and locations that exist; the office adds a new one.
+  const canCreateRecords = canCreateDirectoryRecords(user?.email, user?.groups)
 
   const [mode, setMode] = useState<ShipmentMode>(defaultMode)
   const [pro, setPro] = useState('')
@@ -277,6 +280,7 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
     createLocation,
     refresh: () => { void directory.refresh() },
     notify: (message) => { toast.message(message) },
+    canCreate: canCreateRecords,
   })
 
   const onSubmit = async (values: LoadFormValues) => {
@@ -458,7 +462,8 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
                       if (id) { setUseTypedCustomer(false); setError(null) }
                       if (record?.name && !typedCustomer) setTypedCustomer(record.name)
                     }}
-                    onCreateNew={(initial) => setCreateCustomerFor(initial)}
+                    onCreateNew={canCreateRecords ? (initial) => setCreateCustomerFor(initial) : undefined}
+                    noMatchHint={canCreateRecords ? undefined : FLEET_PROFILES_NO_CREATE_HINT}
                   />
                 </Field>
                 <Field label="Mode">
@@ -545,7 +550,7 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
               setValue={setValue}
               drivers={drivers.filter((d) => d.active && d.type !== 'broker')}
               locations={directory.locations}
-              onCreateLocation={(initial, stopIndex) => setCreateLocationFor({ initial, stopIndex })}
+              onCreateLocation={canCreateRecords ? (initial, stopIndex) => setCreateLocationFor({ initial, stopIndex }) : undefined}
             />
 
             {/* ── Financials ──────────────────────────────────────────── */}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyFactorRemit, canonicalFactorName, effectivePayeeEmail, factorEmailFor, factorNameIndex, factorKeyOf, linkedCarriers, parseFactorRemitMap, payeeEmailFor, payToDisplayName, payToKeyFor, payToNameFor, payToProfileFor, summarizeFactors, summarizePayees } from './factorRemit'
+import { addressLineOf, applyFactorRemit, canonicalFactorName, effectivePayeeEmail, factorEmailFor, factorNameIndex, factorKeyOf, linkedCarriers, parseFactorRemitMap, payeeEmailFor, payToDisplayName, payToKeyFor, payToNameFor, payToProfileFor, remitAddressFor, remitAddressFromLine, summarizeFactors, summarizePayees, withPayToProfile } from './factorRemit'
 
 const map = parseFactorRemitMap({ 'OTR CAPITAL': { name: 'OTR Capital LLC', email: 'remit@otr.test' } })
 
@@ -227,5 +227,51 @@ describe('pay-to profiles: one resolver for name and alias', () => {
     const linked = linkedCarriers('TRIUMPH CAPITAL', carriers, infos, map)
     expect(linked.map((c) => [c.name, c.via])).toEqual([['Second Haul', 'FACTOR'], ['Triumph Cap', 'DIRECT'], ['Wheeler', 'FACTOR']])
     expect(linked[0]!.typedName).toBe('Triumph Capital Funding LLC')
+  })
+})
+
+describe('the remit address of a pay-to', () => {
+  const profiles = parseFactorRemitMap({
+    'TRIUMPH CAPITAL': { name: 'Triumph Capital', email: 'ap@triumph.test', aliases: ['Triumph Capital Funding LLC'], remitAddress: '1 Main St, Dallas, TX 75001' },
+    'OTR CAPITAL': { name: 'OTR Capital', email: 'remit@otr.test' },
+  })
+
+  it('writes an address object as one line, and splits a typed line back into street, city, state and zip', () => {
+    expect(addressLineOf({ street: '22 Depot St', city: 'Joliet', state: 'IL', zip: '60431' })).toBe('22 Depot St, Joliet, IL 60431')
+    expect(addressLineOf(null)).toBe('')
+    expect(remitAddressFromLine('1 Main St, Dallas, TX 75001')).toEqual({ street: '1 Main St', city: 'Dallas', state: 'TX', zip: '75001' })
+    expect(remitAddressFromLine('PO Box 9, Suite 4, Dallas, TX 75001-1234')).toEqual({ street: 'PO Box 9, Suite 4', city: 'Dallas', state: 'TX', zip: '75001-1234' })
+  })
+
+  it('keeps a line it cannot split whole on the street line, so nothing typed is lost', () => {
+    expect(remitAddressFromLine('Lockbox 5521 Dallas')).toEqual({ street: 'Lockbox 5521 Dallas', city: null, state: null, zip: null })
+    expect(remitAddressFromLine('   ')).toBeNull()
+    expect(remitAddressFromLine(undefined)).toBeNull()
+  })
+
+  it("prefers the profile's address, by name or alias, and falls back to the carrier's own", () => {
+    const carrierCopy = { street: '9 Old Rd', city: 'Gary', state: 'IN', zip: '46402' }
+    expect(remitAddressFor(profiles, 'Triumph Capital Funding LLC', carrierCopy)).toBe('1 Main St, Dallas, TX 75001')
+    expect(remitAddressFor(profiles, 'OTR Capital', carrierCopy)).toBe('9 Old Rd, Gary, IN 46402')
+    expect(remitAddressFor(profiles, 'Somebody Else', carrierCopy)).toBe('9 Old Rd, Gary, IN 46402')
+    expect(remitAddressFor(profiles, 'Somebody Else', null)).toBe('')
+  })
+
+  it('lays the profile over a frozen remit-to without changing the original', () => {
+    const frozen = { name: 'Wheeler Haul', factorName: 'Triumph Capital Funding LLC', payeeEmail: 'old@triumph.test', address: { street: '9 Old Rd', city: 'Gary', state: 'IN', zip: '46402' } }
+    const out = withPayToProfile(frozen, profiles)
+    expect(out?.address).toEqual({ street: '1 Main St', city: 'Dallas', state: 'TX', zip: '75001' })
+    expect(out?.payeeEmail).toBe('ap@triumph.test')
+    expect(frozen.address.street).toBe('9 Old Rd')
+    expect(frozen.payeeEmail).toBe('old@triumph.test')
+  })
+
+  it('keeps the frozen address when the profile has none, and returns null for no remit-to', () => {
+    const frozen = { name: 'OTR Capital', payeeEmail: '', address: { street: '9 Old Rd', city: 'Gary', state: 'IN', zip: '46402' } }
+    const out = withPayToProfile(frozen, profiles)
+    expect(out?.address).toEqual(frozen.address)
+    expect(out?.payeeEmail).toBe('remit@otr.test')
+    expect(withPayToProfile(null, profiles)).toBeNull()
+    expect(withPayToProfile(frozen, null)).toBe(frozen)
   })
 })
