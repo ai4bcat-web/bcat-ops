@@ -20,7 +20,7 @@ import {
   activeFilterCount, filterRows, nextSort, reorderKeys, searchRows, sortDenseRows,
   type DenseColumn, type DenseColumnFilter, type DenseFilters,
 } from '@/features/tms/grid/denseGridModel'
-import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
+import { useDenseGridPrefs, type IntroducedColumn } from '@/features/tms/grid/useDenseGridPrefs'
 import { useAuthUser } from '@/hooks/useAuth'
 
 /** A column that may draw its own header cell (a select-all checkbox), given the rows the grid shows after search and filters. */
@@ -46,6 +46,8 @@ export interface ArGrid<T> {
   onFiltered?: (rows: T[]) => void
   /** The columns shown before anyone changes the layout (default: every movable one). */
   defaultColumns?: string[]
+  /** Columns added after people saved their layouts: shown once in a saved layout, then theirs to hide. */
+  introduceColumns?: IntroducedColumn[]
   /**
    * "Export selected": the ticked rows (ids as `idOf` reads them) as a CSV of the columns shown, in the grid's order.
    * The button appears only when this is set; with nothing ticked it stays disabled.
@@ -66,7 +68,7 @@ export function ArDenseTable<T>({ grid, pageFilters }: {
   pageFilters?: { count: number; onClear: () => void }
 }) {
   const email = useAuthUser()?.email ?? ''
-  const { gridId, label, columns: catalogAll, rows, rowKey, renderCell, empty, kpis, group, cardLayout, onRowClick, onFiltered, defaultColumns, selection } = grid
+  const { gridId, label, columns: catalogAll, rows, rowKey, renderCell, empty, kpis, group, cardLayout, onRowClick, onFiltered, defaultColumns, introduceColumns, selection } = grid
   const [filters, setFilters] = useState<DenseFilters>({})
   const [search, setSearch] = useState('')
 
@@ -87,6 +89,7 @@ export function ArDenseTable<T>({ grid, pageFilters }: {
     defaultColumns: defaultColumns ? defaultColumns.filter((k) => movable.some((c) => c.key === k)) : movable.map((c) => c.key),
     validKeys: movable.map((c) => c.key),
     defaultSort: null,
+    introduce: introduceColumns,
   })
   const setFilter = useCallback((key: string, next: DenseColumnFilter | null) => {
     setFilters((prev) => {

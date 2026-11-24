@@ -13,6 +13,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useStaff } from '@/hooks/useStaff'
 import { useCrmAccounts } from '@/features/crm/useCrmAccounts'
 import { isCrmManager, isOverdue, kindLabel, relativeDay } from '@/features/crm/format'
+import { formatDay } from '@/features/ar/arViews'
 import { useDirectory, type CustomerRecord, type LocationRecord } from '@/hooks/useDirectory'
 import { downloadCsv, recordsToFullCsv } from '@/lib/directoryCsv'
 import { UnlinkedLoadsPanel } from './components/UnlinkedLoadsPanel'
@@ -44,6 +45,8 @@ import {
   type DenseFilters,
 } from '@/features/tms/grid/denseGridModel'
 import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
+import { useOtrNoBuyState } from '@/hooks/useOtrNoBuy'
+import { noBuyColumnText, noBuySummary, NO_BUY_LABEL, type OtrNoBuyEvent } from '@/lib/otrNoBuy'
 import type { CrmListAccountRow } from '@/lib/crm/types'
 import {
   graphqlErrorText,
@@ -115,6 +118,10 @@ interface CustomerRow {
   ownerName: string
   teamName: string
   divisionName: string
+  /** OTR's No buy history for this customer, from the factoring queue; undefined when never flagged. */
+  noBuy: OtrNoBuyEvent[] | undefined
+  /** The factoring queue was read, so an empty `noBuy` really means "not flagged". */
+  noBuyKnown: boolean
 }
 
 /** apEmail first, then the extra To addresses, de-duplicated. */
@@ -125,7 +132,7 @@ const billingEmailCount = (c: CustomerRecord) => (c.billingEmail ?? '').split(/[
 const yesNo = (v: boolean | null | undefined) => (v === true ? 'Yes' : 'No')
 const opt = (v: string | null | undefined) => (v ? [{ value: v, label: v }] : [])
 
-const DEFAULT_COLUMNS = ['name', 'status', 'billingMethod', 'factorFlag', 'invoiceEmail', 'noaEmail', 'shipments', 'owner', 'lastTouch', 'nextStep', 'credit', 'terms', 'contact', 'city']
+const DEFAULT_COLUMNS = ['name', 'status', 'billingMethod', 'factorFlag', 'otrNoBuy', 'invoiceEmail', 'noaEmail', 'shipments', 'owner', 'lastTouch', 'nextStep', 'credit', 'terms', 'contact', 'city']
 /** Columns fed by CRM_LIST_ACCOUNTS `withActivity`. */
 const ACTIVITY_COLUMN_KEYS = ['openAr', 'lastShipment', 'shipments']
 const ALL_COLUMN_KEYS = [
@@ -223,6 +230,15 @@ const gridCatalog: Array<DenseColumn<CustomerRow>> = [
       ],
     },
     { key: 'dot', header: 'DOT', group: 'Authority', text: (r) => r.record.dotNumber ?? '' },
+    {
+      // Ryne 2026-11-24: any customer OTR has ever said No buy on, as a column with a filter (worked out from the factoring queue, never stored).
+      key: 'otrNoBuy', header: 'OTR no buy', group: 'Billing',
+      text: (r) => (r.noBuyKnown ? noBuyColumnText(r.noBuy) : ''),
+      filter: 'multi',
+      fixedOptions: [{ value: NO_BUY_LABEL, label: NO_BUY_LABEL }, { value: 'Not flagged', label: 'Not flagged' }],
+      optionsOf: (r) => (r.noBuyKnown ? [{ value: noBuyColumnText(r.noBuy) || 'Not flagged', label: noBuyColumnText(r.noBuy) || 'Not flagged' }] : []),
+      sortValue: (r) => (r.noBuy && r.noBuy.length > 0 ? 1 : 0),
+    },
     { key: ACTIONS_KEY, header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 110 },
 ]
 
@@ -256,7 +272,9 @@ export function CustomersPage() {
     defaultColumns: DEFAULT_COLUMNS,
     validKeys: ALL_COLUMN_KEYS,
     defaultSort: { key: 'name', dir: 'asc' },
+    introduce: [{ key: 'otrNoBuy', after: 'factorFlag' }],
   })
+  const noBuyState = useOtrNoBuyState()
   // Open AR and Last shipment cost server queries, so they are fetched only while a column shows them.
   const withActivity = prefs.columns.some((k) => ACTIVITY_COLUMN_KEYS.includes(k))
   const crm = useCrmAccounts(isManager ? scope : 'mine', withActivity)
@@ -311,9 +329,11 @@ export function CustomersPage() {
           ownerName: row?.ownerId ? nameOf(row.ownerId) : '',
           teamName: c.teamKey ? (teamNames.get(c.teamKey) ?? c.teamKey) : '',
           divisionName: c.defaultDivisionKey ? (divisionNames.get(c.defaultDivisionKey) ?? c.defaultDivisionKey) : '',
+          noBuy: noBuyState.map.get(c.id),
+          noBuyKnown: noBuyState.loaded,
         }
       })
-  }, [dir.customers, crm.loaded, crm.byCustomer, isManager, scope, nameOf, teamNames, divisionNames])
+  }, [dir.customers, crm.loaded, crm.byCustomer, isManager, scope, nameOf, teamNames, divisionNames, noBuyState])
 
   const counts = useMemo(() => ({
     leads: rowsWithStatus.filter((r) => r.tab === 'leads').length,
@@ -441,6 +461,10 @@ export function CustomersPage() {
         if (!flag) return null
         return <TmsBadge tone={flag === 'MISSING_MC' ? 'red' : 'orange'} data-testid={`factor-flag-${c.id}`}>{flag === 'MISSING_MC' ? 'Missing MC' : 'Type not set'}</TmsBadge>
       }
+      case 'otrNoBuy': {
+        if (!row.noBuy) return row.noBuyKnown ? <span className="tms-muted">—</span> : null
+        return <TmsBadge tone="red" title={noBuySummary(row.noBuy, formatDay)} data-testid={`otr-no-buy-${c.id}`}>{NO_BUY_LABEL}</TmsBadge>
+      }
       case 'noaEmail': return c.noaEmail?.trim() ? <span title="Notice of assignment">{c.noaEmail}</span> : <span className="tms-muted">—</span>
       case 'billingMethod': return <BillingMethodBadge customer={c} />
       case 'name':
@@ -450,6 +474,7 @@ export function CustomersPage() {
             {c.apptWorkflow === 'BATORY' && <TmsBadge tone="blue">BATORY</TmsBadge>}
             {c.active === false && <TmsBadge>ARCHIVED</TmsBadge>}
             <PossibleDuplicateBadge info={duplicates.get(c.id)} />
+            {row.noBuy && !prefs.columns.includes('otrNoBuy') && <TmsBadge tone="red" title={noBuySummary(row.noBuy, formatDay)}>OTR no buy</TmsBadge>}
             {!prefs.columns.includes('invoiceEmail') && ['MISSING', 'INVALID', 'FACTORED_QUEUE_ONLY'].includes(customerInvoiceEmailState(c)) && <InvoiceEmailBadge customer={c} />}
             {!prefs.columns.includes('billingMethod') && billingStateOf(c) === 'NOT_SET' && <BillingMethodBadge customer={c} />}
           </span>

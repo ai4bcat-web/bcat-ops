@@ -30,6 +30,7 @@ const authState: { isAdmin: boolean; user: { email: string; groups?: string[] };
 const crmRows = vi.hoisted(() => ({ value: [] as unknown[] }))
 const crmAction = vi.hoisted(() => vi.fn())
 const listUnlinkedShipments = vi.hoisted(() => vi.fn())
+const noBuyState = vi.hoisted(() => ({ value: { map: new Map<string, Array<{ pro: string; at: string | null; reason: string }>>(), loaded: false } }))
 
 const setCustomerStatus = vi.fn(async (current: CustomerRecord) => current)
 const saveCustomer = vi.fn(async (_current: CustomerRecord, patch: Partial<CustomerRecord>) => patch as CustomerRecord)
@@ -111,6 +112,10 @@ vi.mock('@/hooks/useDirectory', () => ({
     archiveLocation: vi.fn(),
   }),
 }))
+vi.mock('@/hooks/useOtrNoBuy', () => ({
+  useOtrNoBuyState: () => noBuyState.value,
+  useOtrNoBuy: () => noBuyState.value.map,
+}))
 vi.mock('@/hooks/useCustomerOrders', () => ({
   useCustomerOrders: () => ({
     orders: [], shipments: [], loads: [], legacyLoads: [], lastLoadAt: null,
@@ -160,6 +165,7 @@ describe('DirectoryPages', () => {
     authState.isAdmin = true
     authState.user = { email: 'admin@bcatcorp.com' }
     crmRows.value = []
+    noBuyState.value = { map: new Map(), loaded: false }
     localStorage.clear()
     listUnlinkedShipments.mockReset()
     listUnlinkedShipments.mockResolvedValue({ rows: [], total: 0 })
@@ -330,6 +336,22 @@ describe('DirectoryPages', () => {
       const zeta = screen.getByText('Zeta Active').closest('tr') as HTMLElement
       expect(zeta.textContent).toContain('$5,000')
       expect(zeta.textContent).toContain('Net 30')
+    })
+
+    it('flags a customer OTR has said No buy on in its own column, and shows nothing when the queue cannot be read', async () => {
+      noBuyState.value = { map: new Map([['c-active', [{ pro: '14114', at: '2026-11-03T12:00:00.000Z', reason: 'OTR will not buy' }]]]), loaded: true }
+      renderCustomers()
+      await waitFor(() => expect(names()).toContain('Active Co'))
+      expect(header('OTR no buy')).toBeTruthy()
+      const flagged = screen.getByText('Active Co').closest('tr') as HTMLElement
+      expect(within(flagged).getByTestId('otr-no-buy-c-active').textContent).toBe('No buy')
+      const other = screen.getByText('Pending Co').closest('tr') as HTMLElement
+      expect(within(other).queryByTestId('otr-no-buy-c-pending')).toBeNull()
+      cleanup()
+      noBuyState.value = { map: new Map(), loaded: false }
+      renderCustomers()
+      await waitFor(() => expect(names()).toContain('Active Co'))
+      expect(screen.queryByTestId('otr-no-buy-c-active')).toBeNull()
     })
 
     it('a header type-ahead filter narrows the rows', async () => {
