@@ -585,6 +585,35 @@ export function selectionCarrierId(bills: readonly CarrierBillRecord[], selected
   return ids.size === 1 ? [...ids][0]! : null
 }
 
+/**
+ * What a selection is paid to. One pay run is one PAY TO, not one carrier: bills of different carriers can be paid
+ * together when the money goes to the same payee and the advice to the same address. `carrierIds` has more than
+ * one entry then, and the payment is posted as a group (one payment per carrier, one remittance e-mail).
+ * Not ok: nothing ticked, several pay-tos (listed), or one pay-to whose carriers carry different remit addresses.
+ */
+export type SelectionPayTo =
+  | { ok: true; carrierIds: string[]; payTo: string }
+  | { ok: false; reason: 'EMPTY' | 'PAY_TO' | 'EMAIL'; payTos: string[] }
+
+export function selectionPayTo(
+  bills: readonly CarrierBillRecord[],
+  selected: readonly string[],
+  infos: readonly CarrierPaymentInfo[],
+): SelectionPayTo {
+  const ticked = bills.filter((b) => selected.includes(b.id))
+  if (ticked.length === 0) return { ok: false, reason: 'EMPTY', payTos: [] }
+  const keyOf = (bill: CarrierBillRecord) => factorKeyOf(payeeNameFor(bill, infos)) || `CARRIER:${bill.carrierId}`
+  const names = new Map<string, string>()
+  for (const bill of ticked) if (!names.has(keyOf(bill))) names.set(keyOf(bill), payeeNameFor(bill, infos) || bill.carrierName || bill.carrierId)
+  if (names.size > 1) return { ok: false, reason: 'PAY_TO', payTos: [...names.values()] }
+  const carrierIds = [...new Set(ticked.map((b) => b.carrierId))]
+  if (carrierIds.length > 1) {
+    const emails = new Set(ticked.map((b) => remitEmailOf(b, infos).toLowerCase()))
+    if (emails.size > 1) return { ok: false, reason: 'EMAIL', payTos: [...names.values()] }
+  }
+  return { ok: true, carrierIds, payTo: [...names.values()][0]! }
+}
+
 /** What the ticked bills still owe, as the balances already say. */
 export function selectionBalanceCents(bills: readonly CarrierBillRecord[], selected: readonly string[]): number {
   return bills.reduce((sum, b) => (selected.includes(b.id) ? sum + b.balanceCents : sum), 0)

@@ -553,6 +553,7 @@ describe('the AP board', () => {
       const a = bill({ id: 'cb:lc1:1', billNumber: 'BL-1', balanceCents: 150_000 })
       const b = bill({
         id: 'cb:lc2:1', loadCarrierId: 'lc2', carrierId: 'car2', carrierName: 'Red Line Freight',
+        remitTo: { name: 'Red Line Freight', method: 'ACH' },
         billNumber: 'RL-1', balanceCents: 80_000, grossCents: 80_000, netCents: 80_000, billedCents: 80_000,
       })
       return [a, b]
@@ -631,12 +632,33 @@ describe('the AP board', () => {
         expect((screen.getByLabelText('Select bill RL-1') as HTMLInputElement).checked).toBe(true)
       })
 
-      it('keeps the one-carrier warning and the disabled Pay selected when the selection spans two carriers', async () => {
+      it('keeps the warning and the disabled Pay selected when the selection spans two different pay-tos', async () => {
         await setup({ bills: two().map((b) => ({ ...b, selectedForPayment: true })) })
         fireEvent.click(screen.getByRole('tab', { name: /^Selected/ }))
         fireEvent.click(header())
-        expect(screen.getByText(/One payment covers one carrier/)).toBeTruthy()
+        expect(screen.getByText(/One payment covers one pay-to; these are paid to Blue Line Trucking, Red Line Freight/)).toBeTruthy()
         expect((screen.getByRole('button', { name: 'Record payment for selected bills' }) as HTMLButtonElement).disabled).toBe(true)
+      })
+
+      it('pays carriers that share one pay-to together, in one group dialog', async () => {
+        const factored = (patch: Partial<CarrierBillRecord>) => bill({
+          selectedForPayment: true, payeeKind: 'FACTOR',
+          remitTo: { name: 'Blue Line Trucking', factorName: 'Triumph Capital', payeeEmail: 'ap@triumph.test', method: 'ACH' },
+          ...patch,
+        })
+        await setup({ bills: [
+          factored({ id: 'cb:lc1:1', billNumber: 'BL-1', balanceCents: 150_000 }),
+          factored({ id: 'cb:lc2:1', loadCarrierId: 'lc2', carrierId: 'car2', carrierName: 'Red Line Freight', billNumber: 'RL-1', balanceCents: 80_000, shipmentNumber: 'S-1002' }),
+        ] })
+        fireEvent.click(screen.getByRole('tab', { name: /^Selected/ }))
+        fireEvent.click(header())
+        expect(screen.queryByText(/One payment covers one pay-to/)).toBeNull()
+        const pay = screen.getByRole('button', { name: 'Record payment for selected bills' }) as HTMLButtonElement
+        expect(pay.disabled).toBe(false)
+        fireEvent.click(pay)
+        expect(await screen.findByTestId('pay-group-explainer')).toBeTruthy()
+        expect(screen.getByText(/2 bills from 2 carriers, all paid to Triumph Capital/)).toBeTruthy()
+        expect(screen.getByLabelText('Payment total').textContent).toBe('$2,300.00')
       })
     })
 
@@ -653,7 +675,7 @@ describe('the AP board', () => {
       fireEvent.click(screen.getByLabelText('Select bill BL-1'))
       expect((screen.getByRole('button', { name: 'Record payment for selected bills' }) as HTMLButtonElement).disabled).toBe(false)
       fireEvent.click(screen.getByLabelText('Select bill RL-1'))
-      expect(screen.getByText(/One payment covers one carrier/)).toBeTruthy()
+      expect(screen.getByText(/One payment covers one pay-to/)).toBeTruthy()
       expect((screen.getByRole('button', { name: 'Record payment for selected bills' }) as HTMLButtonElement).disabled).toBe(true)
     })
 

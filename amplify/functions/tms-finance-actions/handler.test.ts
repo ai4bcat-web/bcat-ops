@@ -2241,6 +2241,103 @@ describe('two carriers on one load (Step AT)', () => {
     expect((table(TABLES.carrierBill).get(b.id as string) as Row).status).toBe('TO_BE_PAID')
   })
 
+  describe('paying one pay-to across carriers (RECORD_AP_PAYMENT_GROUP)', () => {
+    /** Both carriers are paid through the same factor, at the same address. */
+    const factor = (carrierId: string, cpm: string, email = 'remit@triumph.test') => {
+      table(TABLES.carrierMethod).set(cpm, {
+        ...table(TABLES.carrierMethod).get(cpm)!,
+        recipientType: 'FACTOR', factorName: 'Triumph Capital', payeeEmail: email,
+        factorAddress: { line1: '1 Main St', city: 'Dallas', state: 'TX', postalCode: '75201' },
+      })
+      expect(carrierId).toBeTruthy()
+    }
+    const group = (billIds: unknown[], over: Row = {}) => call('RECORD_AP_PAYMENT_GROUP', {
+      billIds, paidAt: '2026-10-25', method: 'ACH', reference: 'ACH-1', clientRequestId: 'grp-1', ...over,
+    }) as Promise<{ payments: Row[]; remittance: { status: string; to: string[] } }>
+    const rawOf = (callIndex = 0) => {
+      const input = sesSend.mock.calls[callIndex][0] as { input: { Content: { Raw: { Data: Uint8Array } }; Destination: { ToAddresses: string[]; CcAddresses?: string[] } } }
+      return { raw: new TextDecoder().decode(input.input.Content.Raw.Data), to: input.input.Destination.ToAddresses, cc: input.input.Destination.CcAddresses }
+    }
+
+    it('pays two carriers with the same pay-to as two payments and ONE remittance e-mail', async () => {
+      seedSecondCarrier()
+      factor(CARRIER_ID, 'cpm-1')
+      factor(SECOND_CARRIER, 'cpm-2')
+      const a = await recordFor(LOAD_CARRIER_ID, { approve: true })
+      const b = await recordFor(SECOND_LC, { approve: true })
+
+      const out = await group([a.id, b.id])
+
+      expect(out.payments.length).toBe(2)
+      expect((table(TABLES.carrierBill).get(String(a.id)) as Row).status).toBe('PAID')
+      expect((table(TABLES.carrierBill).get(String(b.id)) as Row).status).toBe('PAID')
+      expect(sesSend).toHaveBeenCalledTimes(1)
+      const { raw, to, cc } = rawOf()
+      expect(to).toEqual(['remit@triumph.test'])
+      expect(cc).toEqual(['billing@bcatcorp.com'])
+      // One table: both carriers' bills and the combined total; the carrier's own invoice number is not printed.
+      expect(raw.match(/filename="ACH-1-[12]-v1\.pdf"/g)?.length).toBe(2)
+      const [notice] = [...table(TABLES.notice).values()] as Row[]
+      expect(table(TABLES.notice).size).toBe(1)
+      expect(String(notice.body)).toContain('Wheeler Trucking')
+      expect(String(notice.body)).toContain('Second Haul Inc')
+      expect(String(notice.body)).toMatch(/2,?400\.00/)
+      for (const payment of out.payments) {
+        const row = table(TABLES.apPayment).get(String(payment.id)) as Row
+        expect(row.remittanceSentTo).toBe('remit@triumph.test')
+        expect(row.remittanceCount).toBe(1)
+      }
+      // Replaying the same request pays and sends nothing more.
+      sesSend.mockClear()
+      const again = (await group([a.id, b.id])) as unknown as { duplicate: boolean }
+      expect(again.duplicate).toBe(true)
+      expect(sesSend).not.toHaveBeenCalled()
+    })
+
+    it('one carrier alone still pays and sends one remittance (unchanged)', async () => {
+      seedSecondCarrier()
+      const a = await recordFor(LOAD_CARRIER_ID, { approve: true })
+      const out = await group([a.id])
+      expect(out.payments.length).toBe(1)
+      expect(sesSend).toHaveBeenCalledTimes(1)
+      expect(rawOf().to).toEqual(['remit@wheeler.test'])
+    })
+
+    it('refuses carriers paid to different payees, and records nothing', async () => {
+      seedSecondCarrier()
+      const a = await recordFor(LOAD_CARRIER_ID, { approve: true })
+      const b = await recordFor(SECOND_LC, { approve: true })
+      await expect(group([a.id, b.id])).rejects.toThrow(/paid to different payees \(Wheeler Trucking; Second Haul Inc\)/)
+      expect(table(TABLES.apPayment).size).toBe(0)
+      expect((table(TABLES.carrierBill).get(String(a.id)) as Row).status).toBe('TO_BE_PAID')
+      expect(sesSend).not.toHaveBeenCalled()
+    })
+
+    it('refuses one pay-to whose carriers carry different remit e-mails', async () => {
+      seedSecondCarrier()
+      factor(CARRIER_ID, 'cpm-1', 'one@triumph.test')
+      factor(SECOND_CARRIER, 'cpm-2', 'two@triumph.test')
+      const a = await recordFor(LOAD_CARRIER_ID, { approve: true })
+      const b = await recordFor(SECOND_LC, { approve: true })
+      await expect(group([a.id, b.id])).rejects.toThrow(/different remittance e-mail addresses/)
+      expect(table(TABLES.apPayment).size).toBe(0)
+    })
+
+    it('posts the payments but sends nothing when the pay-to has no e-mail on file', async () => {
+      seedSecondCarrier()
+      table(TABLES.carrier).set(CARRIER_ID, { ...table(TABLES.carrier).get(CARRIER_ID)!, email: null })
+      factor(CARRIER_ID, 'cpm-1', '')
+      factor(SECOND_CARRIER, 'cpm-2', '')
+      table(TABLES.carrier).set(SECOND_CARRIER, { ...table(TABLES.carrier).get(SECOND_CARRIER)!, email: null })
+      const a = await recordFor(LOAD_CARRIER_ID, { approve: true })
+      const b = await recordFor(SECOND_LC, { approve: true })
+      const out = await group([a.id, b.id])
+      expect(out.payments.length).toBe(2)
+      expect(out.remittance.status).toBe('SKIPPED')
+      expect(sesSend).not.toHaveBeenCalled()
+    })
+  })
+
   it("voiding A's bill leaves B's bill and rung untouched", async () => {
     seedSecondCarrier()
     const a = await recordFor(LOAD_CARRIER_ID)

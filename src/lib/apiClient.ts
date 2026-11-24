@@ -8526,6 +8526,29 @@ export async function recordApPayment(input: {
   return financeAction<ApPostedRow>('RECORD_AP_PAYMENT', input)
 }
 
+/**
+ * Pay the full balance of bills from several carriers that share one pay-to: one payment per carrier, one remittance
+ * e-mail to the pay-to. The server refuses a selection whose pay-to (or remit address) differs.
+ */
+export interface ApPostedGroup {
+  payments: ApPaymentRecord[]
+  bills: CarrierBillRecord[]
+  duplicate: boolean
+  remittance: { status: string; to: string[] }
+}
+
+export async function recordApPaymentGroup(input: {
+  billIds: string[]
+  paidAt: string
+  method: ApPaymentMethod
+  reference?: string
+  note?: string
+  clientRequestId: string
+  suppressRemittance?: boolean
+}): Promise<ApPostedGroup> {
+  return financeAction<ApPostedGroup>('RECORD_AP_PAYMENT_GROUP', input)
+}
+
 /** Money the carrier owes us back — a TONU adjustment, a claim — held against them. */
 export async function createApCredit(input: {
   carrierId: string

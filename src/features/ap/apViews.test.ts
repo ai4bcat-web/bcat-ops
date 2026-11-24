@@ -9,7 +9,7 @@ import {
   billGates, applyToBePaidFilters, EMPTY_TO_BE_PAID_FILTERS, factorNameFor, isFactorPaid, payeeNameFor, payToLabelFor, setFactorNamesForLabels,
   payToStatusFor, payToWorklist, PAY_TO_STATUS_LABEL,
   paidBills, paidInMonth, paidMonthOf, paidMonthOptions, visiblePaidBills,
-  legIndex, legLabel, legSuffixOf, multiCarrierLoadIds, withLegSuffix,
+  legIndex, legLabel, legSuffixOf, multiCarrierLoadIds, withLegSuffix, selectionPayTo,
 } from './apViews'
 import { billMonthsSince } from './useAllPaidBills'
 
@@ -465,5 +465,32 @@ describe('remittance is mapped to the pay to, not the carrier (Ryne 2026-11-19)'
     expect(payeeCopies('RTS Financial', bills, infos)).toEqual({ carriers: 2, emails: ['old1@rts.test', 'old2@rts.test'] })
     expect(payeeCopies('Green Haul Inc', bills, infos)).toEqual({ carriers: 1, emails: ['ap@green.test'] })
     expect(payeeCopies('', bills, infos)).toEqual({ carriers: 0, emails: [] })
+  })
+})
+
+describe('selectionPayTo (one pay run is one pay-to, not one carrier)', () => {
+  const b = (id: string, carrierId: string, remitTo: Record<string, unknown>, payeeKind: 'CARRIER' | 'FACTOR' = 'CARRIER') =>
+    ({ id, carrierId, carrierName: `Carrier ${carrierId}`, payeeKind, remitTo, paymentMethodId: null }) as unknown as CarrierBillRecord
+  const factor = (email = 'ap@triumph.test') => ({ name: 'Triumph Capital', factorName: 'Triumph Capital', payeeEmail: email })
+
+  it('keeps one carrier as it was', () => {
+    const bills = [b('b1', 'c1', { name: 'Carrier c1' }), b('b2', 'c1', { name: 'Carrier c1' })]
+    expect(selectionPayTo(bills, ['b1', 'b2'], [])).toEqual({ ok: true, carrierIds: ['c1'], payTo: 'Carrier c1' })
+  })
+
+  it('lets two carriers paid to the same pay-to go together', () => {
+    const bills = [b('b1', 'c1', factor(), 'FACTOR'), b('b2', 'c2', { ...factor(), name: 'Other' }, 'FACTOR')]
+    expect(selectionPayTo(bills, ['b1', 'b2'], [])).toEqual({ ok: true, carrierIds: ['c1', 'c2'], payTo: 'Triumph Capital' })
+  })
+
+  it('blocks different pay-tos and lists them', () => {
+    const bills = [b('b1', 'c1', { name: 'Blue Line' }), b('b2', 'c2', { name: 'Red Line' })]
+    expect(selectionPayTo(bills, ['b1', 'b2'], [])).toEqual({ ok: false, reason: 'PAY_TO', payTos: ['Blue Line', 'Red Line'] })
+  })
+
+  it('blocks one pay-to whose carriers carry different remit e-mails, and an empty selection', () => {
+    const bills = [b('b1', 'c1', factor('one@t.test'), 'FACTOR'), b('b2', 'c2', factor('two@t.test'), 'FACTOR')]
+    expect(selectionPayTo(bills, ['b1', 'b2'], [])).toMatchObject({ ok: false, reason: 'EMAIL' })
+    expect(selectionPayTo(bills, [], [])).toMatchObject({ ok: false, reason: 'EMPTY' })
   })
 })
