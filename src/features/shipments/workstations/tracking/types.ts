@@ -52,6 +52,8 @@ export interface TrackingBoardProps {
   onRequestCheckCall: (row: ShipmentRow) => Promise<void>
   onRequestPod: (row: ShipmentRow) => Promise<void>
   onLogCheckCall: (row: ShipmentRow) => Promise<void>
+  /** Status, stop times and the POD from the row, without opening the shipment. */
+  onQuickUpdate?: (row: ShipmentRow) => Promise<void>
   onSnooze: (row: ShipmentRow) => Promise<void>
   onReviewDocs: (row: ShipmentRow) => void
   onAssignTracker: (shipmentIds: string[], trackerId: string | null) => Promise<void>

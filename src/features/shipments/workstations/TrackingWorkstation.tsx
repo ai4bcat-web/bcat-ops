@@ -42,6 +42,7 @@ import { effectiveTrackingPrefs } from '@/lib/trackingPrefs'
 import { DocumentReviewDialog } from '@/features/documents/DocumentReviewDialog'
 import { CustomerLinkDialog } from '../components/CustomerLinkDialog'
 import { LogCheckCallDialog } from '../components/LogCheckCallDialog'
+import { TrackingQuickUpdate } from './tracking/TrackingQuickUpdate'
 import { TrackingBoard } from './tracking/TrackingBoard'
 import { TrackingDrawer } from './tracking/TrackingDrawer'
 import {
@@ -97,6 +98,7 @@ export function TrackingWorkstation() {
   )
   const [customerLinkTarget, setCustomerLinkTarget] = useState<CustomerLinkDialogTarget | null>(null)
   const [logCallTarget, setLogCallTarget] = useState<LogCallTarget | null>(null)
+  const [quickBundle, setQuickBundle] = useState<ShipmentBundle | null>(null)
   const [logBusy, setLogBusy] = useState(false)
   const [reviewTarget, setReviewTarget] = useState<{ id: string; number: string } | null>(null)
   const [settings, setSettings] = useState<TmsSettings | null>(null)
@@ -209,6 +211,14 @@ export function TrackingWorkstation() {
     }
   }, [])
 
+  const handleQuickUpdate = useCallback(async (row: ShipmentRow) => {
+    try {
+      setQuickBundle(await getShipmentBundle(row.id))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not open the update form')
+    }
+  }, [])
+
   const handleSnooze = useCallback(async (row: ShipmentRow) => {
     try {
       const { loads } = await getShipmentBundle(row.id)
@@ -310,6 +320,7 @@ export function TrackingWorkstation() {
           onRequestCheckCall={handleRequestCheckCall}
           onRequestPod={handleRequestPod}
           onLogCheckCall={handleLogCheckCall}
+          onQuickUpdate={handleQuickUpdate}
           onSnooze={handleSnooze}
           onReviewDocs={(row) => setReviewTarget({ id: row.id, number: row.number })}
           onAssignTracker={handleAssignTracker}
@@ -350,6 +361,13 @@ export function TrackingWorkstation() {
             if (!logCarrier) return
             await textDriver({ loadCarrierId: logCarrier.id, body })
           }}
+        />
+      )}
+      {quickBundle && (
+        <TrackingQuickUpdate
+          bundle={quickBundle}
+          onClose={() => { setQuickBundle(null); void refreshShipments() }}
+          onChanged={() => { void refreshShipments() }}
         />
       )}
       {reviewTarget && (
