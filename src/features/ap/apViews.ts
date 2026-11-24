@@ -14,7 +14,7 @@ import { approvalReadiness, billPayee, PENDING_DATES_BLOCK, type ApprovalWarning
 import { daysLate } from '@/lib/arAging'
 import { PAYMENT_GAP_LABEL, paymentInfoGap, type PaymentInfoGap } from '@/lib/paymentInfo'
 import { chicagoDateStr } from '@/lib/date'
-import { canonicalFactorName, factorKeyOf, payeeEmailFor, paysThroughFactor, type FactorNameIndex, type FactorRemitMap } from '@/lib/factorRemit'
+import { canonicalFactorName, payToKeyFor, payeeEmailFor, paysThroughFactor, type FactorNameIndex, type FactorRemitMap } from '@/lib/factorRemit'
 import type { ApWorklistRow } from '@/hooks/useApWorklist'
 import type { CarrierPaymentInfo } from '@/lib/apiClient'
 import type {
@@ -416,11 +416,11 @@ export function payeeCopies(
   bills: ReadonlyArray<Parameters<typeof payeeNameFor>[0]>,
   infos: readonly CarrierPaymentInfo[],
 ): { carriers: number; emails: string[] } {
-  const key = factorKeyOf(payTo)
+  const key = payToKeyFor(payeeRemit, payTo)
   const carriers = new Set<string>()
   if (!key) return { carriers: 0, emails: [] }
-  for (const bill of bills) if (factorKeyOf(payeeNameFor(bill, infos)) === key) carriers.add(bill.carrierId)
-  for (const info of infos) if (info.status !== 'INACTIVE' && paysThroughFactor(info) && factorKeyOf(info.factorName) === key) carriers.add(info.carrierId)
+  for (const bill of bills) if (payToKeyFor(payeeRemit, payeeNameFor(bill, infos)) === key) carriers.add(bill.carrierId)
+  for (const info of infos) if (info.status !== 'INACTIVE' && paysThroughFactor(info) && payToKeyFor(payeeRemit, info.factorName) === key) carriers.add(info.carrierId)
   const emails = new Map<string, string>()
   for (const id of carriers) {
     const mine = infos.filter((i) => i.carrierId === id && i.status !== 'INACTIVE')
@@ -602,7 +602,7 @@ export function selectionPayTo(
 ): SelectionPayTo {
   const ticked = bills.filter((b) => selected.includes(b.id))
   if (ticked.length === 0) return { ok: false, reason: 'EMPTY', payTos: [] }
-  const keyOf = (bill: CarrierBillRecord) => factorKeyOf(payeeNameFor(bill, infos)) || `CARRIER:${bill.carrierId}`
+  const keyOf = (bill: CarrierBillRecord) => payToKeyFor(payeeRemit, payeeNameFor(bill, infos)) || `CARRIER:${bill.carrierId}`
   const names = new Map<string, string>()
   for (const bill of ticked) if (!names.has(keyOf(bill))) names.set(keyOf(bill), payeeNameFor(bill, infos) || bill.carrierName || bill.carrierId)
   if (names.size > 1) return { ok: false, reason: 'PAY_TO', payTos: [...names.values()] }

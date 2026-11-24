@@ -58,6 +58,8 @@ import {
   sendRemittance,
   setPayeeRemitEmail,
   setFactorRemitEmail,
+  setPayToProfile,
+  setCarrierPayTo,
 } from './apPayments'
 import { archiveApPaymentsThrough, unarchiveApPayments } from './archivePayments'
 import { repointInvoicedCustomer } from './repoint'
@@ -137,6 +139,8 @@ type Action =
   | 'SEND_REMITTANCE'
   | 'SET_REMIT_EMAIL'
   | 'SET_FACTOR_REMIT_EMAIL'
+  | 'SET_PAYTO_PROFILE'
+  | 'SET_CARRIER_PAYTO'
   | 'RENDER_REMITTANCE_PDF'
   | 'MARK_REMITTANCE_SENT'
   | 'SAVE_AP_SETTINGS'
@@ -197,6 +201,8 @@ const AP_ACTIONS: Record<string, true> = {
   SEND_REMITTANCE: true,
   SET_REMIT_EMAIL: true,
   SET_FACTOR_REMIT_EMAIL: true,
+  SET_PAYTO_PROFILE: true,
+  SET_CARRIER_PAYTO: true,
   RENDER_REMITTANCE_PDF: true,
   MARK_REMITTANCE_SENT: true,
   SAVE_AP_SETTINGS: true,
@@ -406,6 +412,10 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return setPayeeRemitEmail(input, caller)
     case 'SET_FACTOR_REMIT_EMAIL':
       return setFactorRemitEmail(input, caller)
+    case 'SET_PAYTO_PROFILE':
+      return setPayToProfile(input, caller)
+    case 'SET_CARRIER_PAYTO':
+      return setCarrierPayTo(input, caller)
     case 'RENDER_REMITTANCE_PDF':
       return renderRemittancePdf(input, caller)
     case 'MARK_REMITTANCE_SENT':

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { NAV_ITEMS } from '@/lib/navItems'
 import { LIFECYCLE_TABS } from '@/lib/lifecycleTabs'
+import { FLEET_PROFILE_PATHS } from '@/lib/profileAccess'
 import { SEED_DIVISIONS, topLevelOf } from '@/lib/ownership'
 import type { OwnershipDivisionRecord } from '@/types/tms'
 import type { TmsBreadcrumbItem, TmsCompanyOption, TmsNavChild, TmsNavItem, TmsNavSection } from '@/features/tms/TmsShell'
@@ -371,11 +372,14 @@ export function buildNavSections({
   hasPageAccess,
   isOwner = false,
   isAdmin = false,
+  fleetProfilesOnly = false,
 }: {
   divisions: OwnershipDivisionRecord[] | null
   hasPageAccess: (pageKey: string) => boolean
   isOwner?: boolean
   isAdmin?: boolean
+  /** Profiles lists Assets and Drivers only (`isFleetProfilesOnly`). */
+  fleetProfilesOnly?: boolean
 }): NavSectionsResult {
   // Null means "the divisions have not loaded (or the table is not deployed yet)". The
   // seeds are the same four the Lambda writes, so the rail looks right either way.
@@ -414,7 +418,10 @@ export function buildNavSections({
     const ownVisible = !def.group && visible(def)
     if (def.showWithPath && !pinned.some((p) => p.to === def.showWithPath)) continue
     // A row that is a page in its own right only lists its children when the person can open that page.
-    const children = (def.group || ownVisible ? def.children ?? [] : []).filter(visible).map<TmsNavChild>(toChild)
+    const children = (def.group || ownVisible ? def.children ?? [] : [])
+      // Profiles for someone limited to the fleet: Drivers and Assets, whatever their other grants say.
+      .filter((c) => (def.children === PROFILES_CHILDREN && fleetProfilesOnly ? (FLEET_PROFILE_PATHS as readonly string[]).includes(c.to) : visible(c)))
+      .map<TmsNavChild>(toChild)
     // A group (Accounting) lists its labeled sub-lists (Payroll) on their own page grants: someone with Box Truck Settlements and no accounting page still gets the entry (Ryne 2026-11-11, Ruben).
     const groups = (def.group || ownVisible ? def.childGroups ?? [] : [])
       .map((g) => ({ label: g.label, children: g.children.filter(visible).map<TmsNavChild>(toChild) }))

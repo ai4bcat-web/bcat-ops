@@ -13,7 +13,7 @@ import type { RateConSnapshot } from '@/lib/rateConRevision'
 import type { McpReviewCard } from '@/lib/integrations/mcpReview'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 import { fuelDedupKey } from '@/lib/driverFuel'
-import { parseFactorRemitMap, type FactorRemitMap } from '@/lib/factorRemit'
+import { parseFactorRemitMap, type FactorRemitEntry, type FactorRemitMap } from '@/lib/factorRemit'
 import { fileContentType } from '@/lib/disputeFiles'
 import { fixOfRow, loadPingKey, type TrackingFix } from '@/lib/trackingPings'
 import type { FixedExpenseInput } from './driverPay'
@@ -4283,10 +4283,10 @@ export async function listCarrierDocuments(): Promise<CarrierDocumentRecord[]> {
 }
 
 /** One paginated directory read for remit flags; no bank details or per-carrier requests. */
-export interface CarrierPayInfo { carrierId: string; payeeEmail?: string | null; recipientType?: string | null; factorName?: string | null; accountName?: string | null; method?: string | null; isPreferred?: boolean | null; status?: string | null }
+export interface CarrierPayInfo { id?: string | null; accountLast4?: string | null; bankDetailsOnFileAt?: string | null; carrierId: string; payeeEmail?: string | null; recipientType?: string | null; factorName?: string | null; accountName?: string | null; method?: string | null; isPreferred?: boolean | null; status?: string | null }
 export async function listCarrierRemitEmails(): Promise<CarrierPayInfo[]> {
   if (!modelAvailable('CarrierPaymentMethod')) throw new Error('Carrier payment methods are unavailable')
-  return listAll('listCarrierPaymentMethods', 'carrierId payeeEmail recipientType factorName accountName method isPreferred status', 1000)
+  return listAll('listCarrierPaymentMethods', 'id carrierId payeeEmail recipientType factorName accountName method accountLast4 bankDetailsOnFileAt isPreferred status', 1000)
 }
 
 /**
@@ -8621,6 +8621,26 @@ export async function getFactorRemitEmails(): Promise<FactorRemitMap> {
 /** Set (or clear, with '') a pay-to's remittance e-mail (a factor's or a direct payee's). One address serves every carrier paid to that name. */
 export async function setFactorRemitEmail(input: { factorName?: string; payeeName?: string; email: string }): Promise<{ factorKey: string; factorName: string; email: string | null }> {
   return financeAction<{ factorKey: string; factorName: string; email: string | null }>('SET_FACTOR_REMIT_EMAIL', input)
+}
+
+/** A pay-to profile as the editor sends it: only the fields given change, '' (or an empty list) clears. */
+export interface PayToProfileInput {
+  payeeName: string
+  name?: string
+  email?: string
+  aliases?: string[]
+  remitAddress?: string
+  paymentMethod?: string
+}
+
+/** Save a pay-to profile: name, other spellings, remit address, remit e-mail and payment method. */
+export async function setPayToProfile(input: PayToProfileInput): Promise<{ key: string; name: string; profile: FactorRemitEntry | null }> {
+  return financeAction<{ key: string; name: string; profile: FactorRemitEntry | null }>('SET_PAYTO_PROFILE', input)
+}
+
+/** Move one carrier to a different pay-to (its factor, or itself for direct pay). Bank details are not touched. */
+export async function setCarrierPayTo(input: { carrierId: string; payToName: string }): Promise<{ carrierId: string; paymentMethodId: string; payTo: string; via: 'FACTOR' | 'DIRECT' }> {
+  return financeAction<{ carrierId: string; paymentMethodId: string; payTo: string; via: 'FACTOR' | 'DIRECT' }>('SET_CARRIER_PAYTO', input)
 }
 
 export async function renderRemittancePdf(input: { paymentId: string }): Promise<{ payment: ApPaymentRecord }> {

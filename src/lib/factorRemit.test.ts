@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyFactorRemit, canonicalFactorName, effectivePayeeEmail, factorNameIndex, factorKeyOf, parseFactorRemitMap, payeeEmailFor, payToNameFor, summarizeFactors, summarizePayees } from './factorRemit'
+import { applyFactorRemit, canonicalFactorName, effectivePayeeEmail, factorEmailFor, factorNameIndex, factorKeyOf, linkedCarriers, parseFactorRemitMap, payeeEmailFor, payToDisplayName, payToKeyFor, payToNameFor, payToProfileFor, summarizeFactors, summarizePayees } from './factorRemit'
 
 const map = parseFactorRemitMap({ 'OTR CAPITAL': { name: 'OTR Capital LLC', email: 'remit@otr.test' } })
 
@@ -155,5 +155,77 @@ describe('the remit e-mail belongs to the pay to (Ryne 2026-11-19)', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ kind: 'DIRECT', carrierCount: 2, source: 'CONFLICT', email: '' })
     expect(rows[0]!.conflicting.sort()).toEqual(['a@twin.test', 'b@twin.test'])
+  })
+})
+
+
+describe('pay-to profiles: one resolver for name and alias', () => {
+  const map = parseFactorRemitMap({
+    'TRIUMPH CAPITAL': {
+      name: 'Triumph Capital', email: 'ap@triumph.test', aliases: ['Triumph Capital Funding LLC', 'TRIUMPH CAP'],
+      remitAddress: ' 1 Main St, Dallas TX ', paymentMethod: 'ACH',
+    },
+    'RTS FINANCIAL': { name: 'RTS Financial', email: 'cash@rts.test' },
+    'ALIAS ONLY': { name: 'Alias Only', email: '', aliases: ['AO'] },
+    JUNK: { name: 'Junk', email: '' },
+  })
+
+  it('keeps entries that have a profile but no e-mail, and drops empty ones', () => {
+    expect(Object.keys(map).sort()).toEqual(['ALIAS ONLY', 'RTS FINANCIAL', 'TRIUMPH CAPITAL'])
+    expect(map['TRIUMPH CAPITAL']).toMatchObject({ remitAddress: '1 Main St, Dallas TX', paymentMethod: 'ACH' })
+  })
+
+  it('resolves a name, an alias and a differently punctuated spelling to the same key', () => {
+    for (const name of ['Triumph Capital', 'TRIUMPH CAPITAL, INC.', 'triumph capital funding', 'Triumph Cap']) {
+      expect(payToKeyFor(map, name)).toBe('TRIUMPH CAPITAL')
+    }
+    expect(payToKeyFor(map, 'Somebody Else')).toBe('SOMEBODY ELSE')
+    expect(payToKeyFor(null, 'Triumph Capital Funding')).toBe('TRIUMPH CAPITAL FUNDING')
+    expect(payToKeyFor(map, '  ')).toBe('')
+  })
+
+  it('reads the profile\'s e-mail and name through any of its spellings', () => {
+    expect(factorEmailFor(map, 'Triumph Capital Funding LLC')).toBe('ap@triumph.test')
+    expect(payeeEmailFor(map, 'TRIUMPH CAP')).toBe('ap@triumph.test')
+    expect(payToDisplayName(map, 'triumph cap')).toBe('Triumph Capital')
+    expect(payToDisplayName(map, 'Unfiled Payee')).toBe('Unfiled Payee')
+    expect(payToProfileFor(map, 'AO')?.key).toBe('ALIAS ONLY')
+    expect(factorEmailFor(map, 'AO')).toBe('')
+  })
+
+  it('lays the profile address over a carrier typed with an alias, and leaves other carriers alone', () => {
+    const methods = [
+      { carrierId: 'c1', recipientType: 'FACTOR', factorName: 'Triumph Capital Funding LLC', payeeEmail: 'old@a.test' },
+      { carrierId: 'c2', recipientType: 'FACTOR', factorName: 'Elsewhere Finance', payeeEmail: 'old@b.test' },
+    ]
+    const out = applyFactorRemit(methods, map)
+    expect(out[0]!.payeeEmail).toBe('ap@triumph.test')
+    expect(out[1]!.payeeEmail).toBe('old@b.test')
+  })
+
+  it('rolls carriers typed under an alias into one row, with the profile attached', () => {
+    const infos = [
+      { carrierId: 'c1', recipientType: 'FACTOR', factorName: 'Triumph Capital', payeeEmail: '', status: 'ACTIVE' },
+      { carrierId: 'c2', recipientType: 'FACTOR', factorName: 'Triumph Capital Funding LLC', payeeEmail: '', status: 'ACTIVE' },
+    ]
+    const rows = summarizeFactors(infos, map)
+    const triumph = rows.filter((r) => r.key === 'TRIUMPH CAPITAL')
+    expect(triumph).toHaveLength(1)
+    expect(triumph[0]).toMatchObject({ carrierCount: 2, email: 'ap@triumph.test', source: 'SET' })
+    expect(triumph[0]!.profile?.remitAddress).toBe('1 Main St, Dallas TX')
+    expect(canonicalFactorName(factorNameIndex(rows), 'TRIUMPH CAP')).toBe('Triumph Capital')
+  })
+
+  it('lists the carriers paid to a profile, through a factor or directly, by name or alias', () => {
+    const carriers = [{ id: 'c1', name: 'Wheeler' }, { id: 'c2', name: 'Second Haul' }, { id: 'c3', name: 'Triumph Cap' }, { id: 'c4', name: 'Nobody' }]
+    const infos = [
+      { carrierId: 'c1', recipientType: 'FACTOR', factorName: 'Triumph Capital', status: 'ACTIVE', isPreferred: true },
+      { carrierId: 'c2', recipientType: 'FACTOR', factorName: 'Triumph Capital Funding LLC', status: 'ACTIVE', isPreferred: true },
+      { carrierId: 'c3', recipientType: 'CARRIER', status: 'ACTIVE', isPreferred: true },
+      { carrierId: 'c4', recipientType: 'CARRIER', status: 'INACTIVE' },
+    ]
+    const linked = linkedCarriers('TRIUMPH CAPITAL', carriers, infos, map)
+    expect(linked.map((c) => [c.name, c.via])).toEqual([['Second Haul', 'FACTOR'], ['Triumph Cap', 'DIRECT'], ['Wheeler', 'FACTOR']])
+    expect(linked[0]!.typedName).toBe('Triumph Capital Funding LLC')
   })
 })

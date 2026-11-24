@@ -537,7 +537,7 @@ export interface TmsSettings {
   /** Where a factored customer pays. Printed instead of the division's remit-to. */
   factorRemitTo?: RemitTo | null
   /** One remittance e-mail per factoring company, keyed by normalized factor name (src/lib/factorRemit.ts). */
-  factorRemitEmails?: Record<string, { name: string; email: string; updatedAt?: string | null; updatedBy?: string | null }> | null
+  factorRemitEmails?: Record<string, { name: string; email: string; aliases?: string[]; remitAddress?: string; paymentMethod?: string; updatedAt?: string | null; updatedBy?: string | null }> | null
   /** OTR's fee on a factored invoice in basis points (200 = 2%). Unset means 200. */
   factorFeeBps?: number | null
   /** A payment difference (short or over) this many cents or smaller is accepted as paid in full without ticking it. Unset/0 = never. */

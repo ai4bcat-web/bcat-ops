@@ -12,6 +12,7 @@
  * (updateLoad) with IAM auth so subscriptions fire.
  */
 import { splitEmailText } from '../../../src/lib/apEmails'
+import { FLEET_PROFILES_ONLY_MESSAGE, isFleetProfilesOnly } from '../../../src/lib/profileAccess'
 import { getAmplifyDataClientConfig, type DataClientEnv } from '@aws-amplify/backend-function/runtime'
 import { Amplify } from 'aws-amplify'
 import { generateClient } from 'aws-amplify/data'
@@ -283,11 +284,19 @@ function isMcpFindAction(action: Action): action is McpFindActionName {
   return Object.prototype.hasOwnProperty.call(MCP_FIND_ACTIONS, action)
 }
 
+const PROFILE_PAGE_ONLY_ACTIONS: ReadonlySet<string> = new Set([
+  'SET_CUSTOMER_STATUS', 'ARCHIVE_CUSTOMER', 'ARCHIVE_LOCATION', 'PREVIEW_MERGE_LOCATIONS', 'MERGE_LOCATIONS', 'RESUME_MERGE',
+  'PREVIEW_DELETE_CUSTOMER', 'DELETE_CUSTOMER', 'MERGE_CUSTOMER', 'RESTORE_CUSTOMER', 'SYNC_CUSTOMER_NAME',
+])
+
 async function authorize(action: Action, identity?: AppSyncIdentity | null): Promise<Caller> {
   if (!identity) throw new Error('Unauthorized: missing identity')
   const email = await getCallerEmail(identity)
   if (!email) throw new Error('Unauthorized: could not resolve caller email')
   const groups = getGroups(identity)
+  // Jason's Profiles access is Assets and Drivers only: the actions only the Customers and Locations profile pages use are closed to him.
+  // Creating a customer or location (UPSERT_*) stays open: the shipment form creates them while a load is built.
+  if (PROFILE_PAGE_ONLY_ACTIONS.has(action) && isFleetProfilesOnly(email, groups)) throw new Error(FLEET_PROFILES_ONLY_MESSAGE)
   const isOwner = email === OWNER_EMAIL
   const isAdmin = groups.includes(ADMIN_GROUP)
 

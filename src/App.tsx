@@ -80,7 +80,7 @@ import { VendorApPage } from '@/features/vendor-ap/VendorApPage'
 import { PaymentsReceivedPage } from '@/features/payments/PaymentsReceivedPage'
 import { DispatchPage } from '@/features/dispatch/DispatchPage'
 import { PodsPage } from '@/features/pods/PodsPage'
-import { RequirePage, RequireAdmin, LandingRedirect, DriversAliasRedirect } from '@/components/RequirePage'
+import { RequirePage, RequireAdmin, RequireDirectoryProfiles, RequireFleetProfiles, LandingRedirect, DriversAliasRedirect } from '@/components/RequirePage'
 import { DormantPage } from '@/components/RequireModels'
 import { BrokeragePage } from '@/features/tms/brokerage/BrokeragePage'
 import { DriverAuthProvider } from '@/features/driver-app/DriverAuthContext'
@@ -181,20 +181,20 @@ export default function App() {
                   <Route path="invoicing/invoices/:id" element={<RequirePage page={['invoicing']}><DormantPage page="invoicingAr"><InvoiceDetail /></DormantPage></RequirePage>} />
                   <Route path="invoicing/payable" element={<RequirePage page={['carrierPay']}><DormantPage page="invoicingAp"><InvoicingPage /></DormantPage></RequirePage>} />
                   <Route path="invoicing/payable/bills/:id" element={<RequirePage page={['carrierPay']}><DormantPage page="invoicingAp"><BillDetail /></DormantPage></RequirePage>} />
-                  <Route path="carriers" element={<RequirePage page={['carriers', 'tms']}><DormantPage page="carriers"><CarriersHub tab="list" /></DormantPage></RequirePage>} />
-                  <Route path="carriers/find" element={<RequirePage page={['carriers', 'loads', 'tms']}><DormantPage page="carriers"><CarriersHub tab="find" /></DormantPage></RequirePage>} />
-                  <Route path="carriers/remit" element={<RequirePage page={['carriers', 'tms']}><DormantPage page="carriers"><CarriersHub tab="remit" /></DormantPage></RequirePage>} />
-                  <Route path="carriers/:id" element={<RequirePage page={['carriers', 'tms']}><DormantPage page="carrierProfile"><CarriersPage /></DormantPage></RequirePage>} />
+                  <Route path="carriers" element={<RequireDirectoryProfiles page={['carriers', 'tms']}><DormantPage page="carriers"><CarriersHub tab="list" /></DormantPage></RequireDirectoryProfiles>} />
+                  <Route path="carriers/find" element={<RequireDirectoryProfiles page={['carriers', 'loads', 'tms']}><DormantPage page="carriers"><CarriersHub tab="find" /></DormantPage></RequireDirectoryProfiles>} />
+                  <Route path="carriers/remit" element={<RequireDirectoryProfiles page={['carriers', 'tms']}><DormantPage page="carriers"><CarriersHub tab="remit" /></DormantPage></RequireDirectoryProfiles>} />
+                  <Route path="carriers/:id" element={<RequireDirectoryProfiles page={['carriers', 'tms']}><DormantPage page="carrierProfile"><CarriersPage /></DormantPage></RequireDirectoryProfiles>} />
                   <Route path="invoicing/factored" element={<RequirePage page={['factoring']}><DormantPage page="invoicingAr"><InvoicingPage /></DormantPage></RequirePage>} />
                   <Route path="factors" element={<Navigate to="/tms/invoicing/factored" replace />} />
                   {/* The To factor tab moved into Ready to invoice (Ryne 2026-11-14). */}
                   <Route path="invoicing/to-factor" element={<Navigate to="/tms/invoicing" replace />} />
                   <Route path="invoicing/factored/to-factor" element={<Navigate to="/tms/invoicing" replace />} />
-                  <Route path="customers" element={<RequirePage page={['customers', 'tms']}><CustomersPage /></RequirePage>} />
+                  <Route path="customers" element={<RequireDirectoryProfiles page={['customers', 'tms']}><CustomersPage /></RequireDirectoryProfiles>} />
                   {/* Step AW D.2: who is billed how. Same grant as the Customers list. */}
-                  <Route path="customers/billing-setup" element={<RequirePage page={['customers', 'tms']}><DormantPage page="billingSetup"><BillingSetupPage /></DormantPage></RequirePage>} />
+                  <Route path="customers/billing-setup" element={<RequireDirectoryProfiles page={['customers', 'tms']}><DormantPage page="billingSetup"><BillingSetupPage /></DormantPage></RequireDirectoryProfiles>} />
                   <Route path="customers/follow-ups" element={<Navigate to="/tms/customers" replace />} />
-                  <Route path="locations" element={<RequirePage page={['locations', 'tms']}><LocationsPage /></RequirePage>} />
+                  <Route path="locations" element={<RequireDirectoryProfiles page={['locations', 'tms']}><LocationsPage /></RequireDirectoryProfiles>} />
                   {/* Every payment received, credit and debit, all customers (Ryne 2026-11-15); was Receivable's Payments & credits tab. */}
                   <Route path="payments-received" element={<RequirePage page={['invoicing']}><PaymentsReceivedPage /></RequirePage>} />
                   <Route path="invoicing/payments" element={<Navigate to="/tms/payments-received" replace />} />
@@ -265,12 +265,12 @@ export default function App() {
               <Route path="/driver-view/:driverId" element={<RequirePage page="ownerOperatorPay"><DriverAppViewPage /></RequirePage>} />
               <Route path="/disputes" element={<RequirePage page="disputes"><DisputesPage /></RequirePage>} />
               <Route path="/files" element={<RequirePage page="files"><FilesPage /></RequirePage>} />
-              <Route path="/profiles/drivers" element={<RequireAdmin><DriversListPage /></RequireAdmin>} />
-              <Route path="/profiles/drivers/new" element={<RequireAdmin><NewDriverWizard /></RequireAdmin>} />
-              <Route path="/profiles/drivers/:id" element={<RequireAdmin><DriverProfilePage /></RequireAdmin>} />
-              <Route path="/profiles/assets" element={<RequireAdmin><AssetsListPage /></RequireAdmin>} />
-              <Route path="/profiles/assets/new" element={<RequireAdmin><NewAssetWizard /></RequireAdmin>} />
-              <Route path="/profiles/assets/:id" element={<RequireAdmin><AssetProfilePage /></RequireAdmin>} />
+              <Route path="/profiles/drivers" element={<RequireFleetProfiles><DriversListPage /></RequireFleetProfiles>} />
+              <Route path="/profiles/drivers/new" element={<RequireFleetProfiles><NewDriverWizard /></RequireFleetProfiles>} />
+              <Route path="/profiles/drivers/:id" element={<RequireFleetProfiles><DriverProfilePage /></RequireFleetProfiles>} />
+              <Route path="/profiles/assets" element={<RequireFleetProfiles><AssetsListPage /></RequireFleetProfiles>} />
+              <Route path="/profiles/assets/new" element={<RequireFleetProfiles><NewAssetWizard /></RequireFleetProfiles>} />
+              <Route path="/profiles/assets/:id" element={<RequireFleetProfiles><AssetProfilePage /></RequireFleetProfiles>} />
               {/* Open to every signed-in user (no page grant) — it is where staff report problems. */}
               <Route path="/feedback" element={<FeedbackPage />} />
               <Route path="/settings" element={<ParamRedirect to="/tms/brokerage" />} />

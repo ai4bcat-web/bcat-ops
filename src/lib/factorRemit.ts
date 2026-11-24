@@ -17,9 +17,18 @@ export interface FactorRemitEntry {
   /** The factor's name as it was first typed, for display. */
   name: string
   email: string
+  /** Other spellings of this pay-to. A carrier or bill that names one of them is paid to this profile. */
+  aliases?: string[]
+  /** Where checks and notices go, as one line. */
+  remitAddress?: string
+  /** How this pay-to is paid (ACH, WIRE, CHECK, ...). Bank numbers never live here: carriers' own methods hold those. */
+  paymentMethod?: string
   updatedAt?: string | null
   updatedBy?: string | null
 }
+
+export const PAY_TO_METHODS = ['ACH', 'WIRE', 'CHECK', 'ZELLE', 'VENMO', 'EFT', 'CARD'] as const
+export const MAX_PAY_TO_ALIASES = 12
 
 export type FactorRemitMap = Record<string, FactorRemitEntry>
 
@@ -61,10 +70,18 @@ export function parseFactorRemitMap(raw: unknown): FactorRemitMap {
     if (!entry || typeof entry !== 'object') continue
     const e = entry as Record<string, unknown>
     const email = typeof e.email === 'string' ? e.email.trim() : ''
-    if (!key || !email) continue
+    const aliases = Array.isArray(e.aliases)
+      ? e.aliases.filter((a): a is string => typeof a === 'string' && a.trim() !== '').map((a) => a.trim())
+      : []
+    const remitAddress = typeof e.remitAddress === 'string' ? e.remitAddress.trim() : ''
+    const paymentMethod = typeof e.paymentMethod === 'string' ? e.paymentMethod.trim() : ''
+    if (!key || !(email || aliases.length || remitAddress || paymentMethod)) continue
     out[key] = {
       name: typeof e.name === 'string' && e.name ? e.name : key,
       email,
+      ...(aliases.length ? { aliases } : {}),
+      ...(remitAddress ? { remitAddress } : {}),
+      ...(paymentMethod ? { paymentMethod } : {}),
       updatedAt: typeof e.updatedAt === 'string' ? e.updatedAt : null,
       updatedBy: typeof e.updatedBy === 'string' ? e.updatedBy : null,
     }
@@ -72,10 +89,36 @@ export function parseFactorRemitMap(raw: unknown): FactorRemitMap {
   return out
 }
 
+/**
+ * THE resolver: a pay-to name to the key of the profile it belongs to. A name that is its own profile, or one of a
+ * profile's aliases, resolves to that profile; any other name is its own key. The Pay to column, the group payment
+ * match and the remittance e-mail all go through here, so they cannot disagree about who is paid.
+ */
+export function payToKeyFor(map: FactorRemitMap | null | undefined, name: string | null | undefined): string {
+  const key = factorKeyOf(name)
+  if (!key || !map) return key
+  if (map[key]) return key
+  for (const [profileKey, entry] of Object.entries(map)) {
+    if (entry.aliases?.some((alias) => factorKeyOf(alias) === key)) return profileKey
+  }
+  return key
+}
+
+/** The profile a pay-to name resolves to (by name or alias), or null when none is filed. */
+export function payToProfileFor(map: FactorRemitMap | null | undefined, name: string | null | undefined): (FactorRemitEntry & { key: string }) | null {
+  const key = payToKeyFor(map, name)
+  const entry = key ? map?.[key] : undefined
+  return entry ? { ...entry, key } : null
+}
+
+/** The name a pay-to is shown under: its profile's own spelling when it has one, else as typed. */
+export function payToDisplayName(map: FactorRemitMap | null | undefined, name: string | null | undefined): string {
+  return payToProfileFor(map, name)?.name?.trim() || String(name ?? '').trim()
+}
+
 /** The address set for this factor, or ''. */
 export function factorEmailFor(map: FactorRemitMap | null | undefined, factorName: string | null | undefined): string {
-  const key = factorKeyOf(factorName)
-  return (key && map?.[key]?.email?.trim()) || ''
+  return payToProfileFor(map, factorName)?.email?.trim() || ''
 }
 
 interface PayeeLike {
@@ -134,6 +177,8 @@ export interface FactorSummary {
   source: FactorEmailSource
   /** Different addresses the carriers carry today, when there is no address set on the factor. */
   conflicting: string[]
+  /** The profile filed for this pay-to (aliases, remit address, method), or null when only an address or nothing is set. */
+  profile: FactorRemitEntry | null
 }
 
 /** One row per factoring company, from the payment methods that name one and any address already set. */
@@ -145,7 +190,7 @@ export function summarizeFactors(
   const byKey = new Map<string, Acc>()
   for (const info of infos) {
     if (!paysThroughFactor(info) || info.status === 'INACTIVE') continue
-    const key = factorKeyOf(info.factorName)
+    const key = payToKeyFor(map, info.factorName)
     const acc = byKey.get(key) ?? { names: new Map(), carriers: new Set(), emails: new Map() }
     const name = String(info.factorName).trim()
     acc.names.set(name, (acc.names.get(name) ?? 0) + 1)
@@ -181,6 +226,7 @@ export function summarizeFactors(
       email,
       source,
       conflicting: source === 'CONFLICT' ? carrierEmails : [],
+      profile: map?.[key] ?? null,
     })
   }
   return rows.sort((a, b) => b.carrierCount - a.carrierCount || a.name.localeCompare(b.name))
@@ -192,9 +238,11 @@ export type FactorNameIndex = ReadonlyMap<string, string>
 /** A key with the spaces gone, so "First Line Funding" and "FIRSTLINE FUNDING" meet. Filed under a `~` prefix. */
 const compactKey = (key: string) => `~${key.replace(/ /g, '')}`
 
-export function factorNameIndex(summaries: readonly Pick<FactorSummary, 'key' | 'name'>[]): FactorNameIndex {
+export function factorNameIndex(summaries: readonly (Pick<FactorSummary, 'key' | 'name'> & { profile?: FactorRemitEntry | null })[]): FactorNameIndex {
   const index = new Map<string, string>()
   for (const s of summaries) index.set(s.key, s.name)
+  // A profile's alternate spellings show under the profile's own name.
+  for (const s of summaries) for (const alias of s.profile?.aliases ?? []) if (!index.has(factorKeyOf(alias))) index.set(factorKeyOf(alias), s.name)
   for (const s of summaries) if (!index.has(compactKey(s.key))) index.set(compactKey(s.key), s.name)
   return index
 }
@@ -254,7 +302,7 @@ export function summarizePayees(
   for (const carrier of carriers) {
     const method = effectiveMethod(byCarrier.get(carrier.id) ?? [])
     if (!method || paysThroughFactor(method)) continue
-    const key = payeeKeyOf(carrier.name)
+    const key = payToKeyFor(map, carrier.name)
     if (!key || taken.has(key)) continue
     const acc = direct.get(key) ?? { names: new Map(), carriers: new Set(), carrierNames: new Set(), emails: new Map() }
     const name = carrier.name.trim()
@@ -294,7 +342,45 @@ export function summarizePayees(
       conflicting: source === 'CONFLICT' ? carrierEmails : [],
       kind: 'DIRECT',
       carrierNames: [...acc.carrierNames].slice(0, 5),
+      profile: map?.[key] ?? null,
     })
   }
   return rows.sort((a, b) => b.carrierCount - a.carrierCount || a.name.localeCompare(b.name))
+}
+
+export interface LinkedCarrier {
+  id: string
+  name: string
+  /** How the carrier reaches this pay-to: through a factor it names, or paid directly as itself. */
+  via: 'FACTOR' | 'DIRECT'
+  /** The name the carrier's own payment method carries (a factor's typed spelling), when it differs from the profile's. */
+  typedName: string
+}
+
+/** Every carrier paid to this profile, by its name or any alias: through a factor it names, or directly as itself. */
+export function linkedCarriers(
+  key: string,
+  carriers: ReadonlyArray<{ id: string; name: string }>,
+  infos: ReadonlyArray<PayeeLike & { carrierId?: string | null; status?: string | null; isPreferred?: boolean | null }>,
+  map: FactorRemitMap | null | undefined,
+): LinkedCarrier[] {
+  const byCarrier = new Map<string, Array<(typeof infos)[number]>>()
+  for (const info of infos) {
+    const id = String(info.carrierId ?? '')
+    if (!id) continue
+    const list = byCarrier.get(id)
+    if (list) list.push(info)
+    else byCarrier.set(id, [info])
+  }
+  const out: LinkedCarrier[] = []
+  for (const carrier of carriers) {
+    const method = effectiveMethod(byCarrier.get(carrier.id) ?? [])
+    if (!method) continue
+    if (paysThroughFactor(method)) {
+      if (payToKeyFor(map, method.factorName) === key) out.push({ id: carrier.id, name: carrier.name, via: 'FACTOR', typedName: String(method.factorName).trim() })
+    } else if (payToKeyFor(map, carrier.name) === key) {
+      out.push({ id: carrier.id, name: carrier.name, via: 'DIRECT', typedName: carrier.name.trim() })
+    }
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name))
 }

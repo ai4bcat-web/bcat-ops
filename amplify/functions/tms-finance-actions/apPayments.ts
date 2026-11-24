@@ -56,6 +56,10 @@ import {
   payeeEmailFor,
   factorKeyOf,
   isRemitEmail,
+  MAX_PAY_TO_ALIASES,
+  PAY_TO_METHODS,
+  payToKeyFor,
+  type FactorRemitEntry,
   parseFactorRemitMap,
   paysThroughFactor,
   type FactorRemitMap,
@@ -867,26 +871,66 @@ export async function setPayeeRemitEmail(input: Row, caller: Caller): Promise<Ro
   return { paymentMethodId: method.id, carrierId, email, payeeName: saved.name }
 }
 
+/** The fields of a pay-to profile a save may change. Omitted fields stay as they are; '' (or an empty list) clears. */
+interface PayToPatch {
+  email?: string
+  aliases?: string[]
+  remitAddress?: string
+  paymentMethod?: string
+  name?: string
+}
+
 /**
- * Set (or clear, with an empty address) the one remittance e-mail a PAY TO is paid at: a factoring company or a
- * direct payee. It is kept on the settings row, keyed by the normalized pay-to name, and read in front of every
- * carrier's own copy.
+ * Set the one profile a PAY TO is paid under: a factoring company or a direct payee. It is kept on the settings row,
+ * keyed by the normalized pay-to name (an alias of a profile resolves to that profile), and read in front of every
+ * carrier's own copy. Bank numbers are never kept here.
  * Written against the map as it was read, so two people saving different factors at once cannot lose one.
  */
-async function writeFactorRemitEmail(
+async function writePayToProfile(
   factorName: string,
-  email: string,
+  patch: PayToPatch,
   caller: Caller,
-): Promise<{ key: string; name: string; email: string }> {
-  const key = factorKeyOf(factorName)
-  if (!key) throw new Error('Name who is paid')
+): Promise<{ key: string; name: string; email: string; entry: FactorRemitEntry | null }> {
+  if (!factorKeyOf(factorName)) throw new Error('Name who is paid')
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const settings = await getSettings()
     const current = parseFactorRemitMap(settings.factorRemitEmails)
+    const key = payToKeyFor(current, factorName)
     const previous = current[key] ?? null
     const next: FactorRemitMap = { ...current }
-    if (email) {
-      next[key] = { name: previous?.name ?? factorName.trim(), email, updatedAt: nowIso(), updatedBy: caller.email }
+
+    if (patch.aliases) {
+      const seen = new Set<string>()
+      for (const alias of patch.aliases) {
+        const aliasKey = factorKeyOf(alias)
+        if (!aliasKey) continue
+        if (aliasKey === key) continue
+        if (seen.has(aliasKey)) continue
+        // A spelling can belong to one profile only, or two profiles would claim the same carriers.
+        const owner = payToKeyFor(current, alias)
+        if (owner !== aliasKey && owner !== key) throw new Error(`"${alias.trim()}" already belongs to ${current[owner]?.name ?? owner}`)
+        if (current[aliasKey] && aliasKey !== key) throw new Error(`"${alias.trim()}" is its own pay-to already`)
+        seen.add(aliasKey)
+      }
+    }
+    const aliases = patch.aliases
+      ? [...new Map(patch.aliases.map((a) => a.trim()).filter((a) => factorKeyOf(a) && factorKeyOf(a) !== key).map((a) => [factorKeyOf(a), a])).values()]
+      : previous?.aliases ?? []
+    const email = patch.email !== undefined ? patch.email : previous?.email ?? ''
+    const remitAddress = patch.remitAddress !== undefined ? patch.remitAddress : previous?.remitAddress ?? ''
+    const paymentMethod = patch.paymentMethod !== undefined ? patch.paymentMethod : previous?.paymentMethod ?? ''
+    const name = (patch.name?.trim() || previous?.name || factorName).trim()
+
+    if (email || aliases.length || remitAddress || paymentMethod) {
+      next[key] = {
+        name,
+        email,
+        ...(aliases.length ? { aliases } : {}),
+        ...(remitAddress ? { remitAddress } : {}),
+        ...(paymentMethod ? { paymentMethod } : {}),
+        updatedAt: nowIso(),
+        updatedBy: caller.email,
+      }
     } else {
       delete next[key]
     }
@@ -907,15 +951,23 @@ async function writeFactorRemitEmail(
       if (attempt < 2 && /cancel|conditional/i.test(String(err))) continue
       throw err
     }
-    await writeAudit('FACTOR_REMIT_EMAIL', key, 'SET_FACTOR_REMIT_EMAIL', caller, {
+    // The audit entry names the fields that changed and the e-mail; bank numbers never reach this record.
+    await writeAudit('FACTOR_REMIT_EMAIL', key, patch.email !== undefined && Object.keys(patch).length === 1 ? 'SET_FACTOR_REMIT_EMAIL' : 'SET_PAYTO_PROFILE', caller, {
       factorName,
+      changed: Object.keys(patch),
       previous: previous?.email ?? null,
       email: email || null,
+      aliases,
+      remitAddress: remitAddress || null,
+      paymentMethod: paymentMethod || null,
     })
-    return { key, name: previous?.name ?? factorName.trim(), email }
+    return { key, name, email, entry: next[key] ?? null }
   }
   throw new Error('Could not save: the factor list changed while saving. Try again.')
 }
+
+const writeFactorRemitEmail = (factorName: string, email: string, caller: Caller) =>
+  writePayToProfile(factorName, { email }, caller)
 
 /** Save a pay-to's remittance e-mail (a factoring company's, or a direct payee's) from the Remit e-mails list. An empty address clears it. */
 export async function setFactorRemitEmail(input: Row, caller: Caller): Promise<Row> {
@@ -924,6 +976,88 @@ export async function setFactorRemitEmail(input: Row, caller: Caller): Promise<R
   if (raw && !isRemitEmail(raw)) throw new Error('Enter one valid e-mail address')
   const saved = await writeFactorRemitEmail(factorName, raw, caller)
   return { factorKey: saved.key, factorName: saved.name, email: saved.email || null }
+}
+
+/**
+ * Save a pay-to profile from the Pay to editor: its display name, aliases (other spellings), remit address, remit
+ * e-mail and payment method. Only the fields sent change. Aliases resolve a carrier or bill that names that spelling
+ * to this profile, with no change to the carriers themselves.
+ */
+export async function setPayToProfile(input: Row, caller: Caller): Promise<Row> {
+  const payeeName = assertString(input.payeeName, 'payeeName').trim()
+  const patch: PayToPatch = {}
+  if (input.email !== undefined) {
+    const email = typeof input.email === 'string' ? input.email.trim() : ''
+    if (email && !isRemitEmail(email)) throw new Error('Enter one valid e-mail address')
+    patch.email = email
+  }
+  if (input.remitAddress !== undefined) {
+    const address = typeof input.remitAddress === 'string' ? input.remitAddress.trim().replace(/\s+/g, ' ') : ''
+    if (address.length > 300) throw new Error('The remit address is too long')
+    patch.remitAddress = address
+  }
+  if (input.paymentMethod !== undefined) {
+    const method = typeof input.paymentMethod === 'string' ? input.paymentMethod.trim().toUpperCase() : ''
+    if (method && !(PAY_TO_METHODS as readonly string[]).includes(method)) throw new Error('Pick a payment method from the list')
+    patch.paymentMethod = method
+  }
+  if (input.aliases !== undefined) {
+    if (!Array.isArray(input.aliases)) throw new Error('aliases must be a list')
+    const list = input.aliases.map((a) => (typeof a === 'string' ? a.trim() : '')).filter(Boolean)
+    if (list.length > MAX_PAY_TO_ALIASES) throw new Error(`At most ${MAX_PAY_TO_ALIASES} other spellings`)
+    if (list.some((a) => a.length > 120)) throw new Error('A spelling is too long')
+    patch.aliases = list
+  }
+  if (input.name !== undefined) {
+    const name = typeof input.name === 'string' ? input.name.trim() : ''
+    if (!name || name.length > 120) throw new Error('Enter the pay-to name')
+    patch.name = name
+  }
+  const saved = await writePayToProfile(payeeName, patch, caller)
+  return { key: saved.key, name: saved.name, profile: (saved.entry ?? null) as unknown as Row | null }
+}
+
+/**
+ * Move one carrier to a different pay-to: its preferred active payment method now names that pay-to as its factor,
+ * or, when the target is the carrier's own name, pays the carrier directly. Bank details stay on the method as they
+ * were; the method's own remit address is left alone (the profile's takes precedence while it has one).
+ */
+export async function setCarrierPayTo(input: Row, caller: Caller): Promise<Row> {
+  const carrierId = assertString(input.carrierId, 'carrierId')
+  const payTo = assertString(input.payToName, 'payToName').trim()
+  const carrier = await getById(CARRIER_TABLE_NAME, carrierId)
+  if (!carrier) throw new Error('Carrier not found')
+  const methods = (await queryIndex(
+    CARRIER_PAYMENT_METHOD_TABLE_NAME,
+    IDX_PAYMENT_METHODS_BY_CARRIER,
+    'carrierId',
+    carrierId,
+  )) as unknown as CarrierPaymentMethodRecord[]
+  const active = methods.filter((row) => row.status !== 'INACTIVE')
+  const method = active.find((row) => row.isPreferred) ?? active[0] ?? null
+  if (!method) throw new Error('This carrier has no payment info on file. Add it on the carrier profile first.')
+  const settings = await getSettings()
+  const map = parseFactorRemitMap(settings.factorRemitEmails)
+  const targetKey = payToKeyFor(map, payTo)
+  if (!targetKey) throw new Error('Name who is paid')
+  const own = payToKeyFor(map, String(carrier.name ?? '')) === targetKey
+  const profileName = map[targetKey]?.name ?? payTo
+  const patch = own
+    ? { recipientType: 'CARRIER', factorName: null }
+    : { recipientType: 'FACTOR', factorName: profileName }
+  const now = nowIso()
+  await transact(
+    [updateTx(CARRIER_PAYMENT_METHOD_TABLE_NAME, method.id, { ...patch, updatedAt: now, updatedBy: caller.email })],
+    'carrier pay-to',
+  )
+  await writeAudit('CARRIER_PAYMENT_METHOD', method.id, 'SET_CARRIER_PAYTO', caller, {
+    carrierId,
+    previousRecipientType: method.recipientType ?? null,
+    previousFactorName: method.factorName ?? null,
+    recipientType: patch.recipientType,
+    factorName: patch.factorName,
+  })
+  return { carrierId, paymentMethodId: method.id, payTo: own ? String(carrier.name ?? '') : profileName, via: own ? 'DIRECT' : 'FACTOR' }
 }
 
 export async function sendRemittance(input: Row, caller: Caller): Promise<Row> {
@@ -1066,7 +1200,7 @@ export function payToIdentityOf(context: Omit<Parameters<typeof remitRecipientsF
   return {
     carrierId: context.carrierId,
     payTo,
-    key: factorKeyOf(payTo) || `CARRIER:${context.carrierId}`,
+    key: payToKeyFor(context.factorEmails, payTo) || `CARRIER:${context.carrierId}`,
     to: remitRecipientsFor(withPayment),
   }
 }

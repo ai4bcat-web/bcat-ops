@@ -63,6 +63,7 @@ import {
   type BankVaultDeps,
 } from '../_shared/bankVault'
 import { hasAccountingPage } from '../../../src/lib/accountingAccess'
+import { FLEET_PROFILES_ONLY_MESSAGE, isFleetProfilesOnly } from '../../../src/lib/profileAccess'
 
 import {
   CARRIER_STATUSES,
@@ -218,6 +219,9 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
   if (!email) throw new Error('Unauthorized: could not resolve caller email')
   const groups = getGroups(identity)
   const isAdmin = email === OWNER_EMAIL || groups.includes(ADMIN_GROUP)
+  // Jason's Profiles access is Assets and Drivers only: the carrier profile (contacts, payment info, bank, documents, status) is closed to him.
+  // UPSERT_CARRIER stays open: a carrier is added while a load is covered.
+  if (action !== 'UPSERT_CARRIER' && isFleetProfilesOnly(email, groups)) throw new Error(FLEET_PROFILES_ONLY_MESSAGE)
 
   // Org-wide booking rules are not a carrier edit: they decide who every dispatcher
   // may book tomorrow, so they stay with the people who own the configuration.
