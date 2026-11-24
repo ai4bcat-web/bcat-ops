@@ -201,7 +201,7 @@ export interface RemittanceData {
   /** `YYYY-MM-DD` of the payment. */
   date: string
   method: ApPaymentMethod | null
-  /** The check or trace number, falling back to the payment id so a row is always named. */
+  /** The check or trace number; empty when none was entered. The internal payment id is never shown in its place. */
   reference: string
   rows: RemittanceRow[]
   totals: RemittanceTotals
@@ -288,7 +288,7 @@ export function remittanceData(input: RemittanceDataInput): RemittanceData {
     remitTo,
     date: payment.paidAt.slice(0, 10),
     method: payment.method ?? null,
-    reference: payment.reference?.trim() || payment.id,
+    reference: payment.reference?.trim() || '',
     rows,
     totals,
   }
@@ -337,7 +337,7 @@ function drawHeader(d: Doc, data: RemittanceData): void {
   textAt(d, fit(d.bold, data.payer.name, 16, CONTENT_W - 220), M, 34, 16, d.bold, WHITE)
   if (data.payer.ids) textAt(d, data.payer.ids, M, 50, 9, d.font, BAND_TEXT)
   rightAt(d, 'REMITTANCE ADVICE', PAGE.w - M, 32, 13, d.bold, WHITE)
-  rightAt(d, `Reference ${data.reference}`, PAGE.w - M, 48, 10, d.font, BAND_TEXT)
+  if (data.reference) rightAt(d, `Reference ${data.reference}`, PAGE.w - M, 48, 10, d.font, BAND_TEXT)
 }
 
 function newPage(d: Doc, data: RemittanceData): void {
@@ -392,7 +392,7 @@ function drawMeta(d: Doc, data: RemittanceData): void {
   const cells: Array<[string, string]> = [
     ['PAYMENT DATE', formatDate(data.date)],
     ['METHOD', data.method ? METHOD_LABEL[data.method] : '-'],
-    ['REFERENCE', data.reference],
+    ...(data.reference ? [['REFERENCE', data.reference] as [string, string]] : []),
     ['TOTAL PAID', cents(data.totals.paidCents)],
   ]
   const cellW = CONTENT_W / cells.length
@@ -475,9 +475,12 @@ function drawTotals(d: Doc, data: RemittanceData): void {
 /** Who to talk to when the money does not match the bills. */
 function drawFooterNote(d: Doc, data: RemittanceData): void {
   const contact = data.payer.lines.find((line) => line.includes('@'))
+  const quote = data.reference ? ` Please quote reference ${data.reference}.` : ''
   const note = contact
-    ? `Questions about this payment: ${contact}. Please quote reference ${data.reference}.`
-    : `Please quote reference ${data.reference} when asking about this payment.`
+    ? `Questions about this payment: ${contact}.${quote}`
+    : data.reference
+      ? `Please quote reference ${data.reference} when asking about this payment.`
+      : 'Please contact us with any questions about this payment.'
   const wrapped = wrapText(d.font, note, 8, CONTENT_W)
   room(d, data, wrapped.length * 10 + 24)
   sectionLabel(d, 'REMITTANCE')
@@ -511,9 +514,9 @@ export async function buildRemittancePdf(data: RemittanceData): Promise<Uint8Arr
   const pdf = await PDFDocument.create()
   const font = await pdf.embedFont(StandardFonts.Helvetica)
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold)
-  pdf.setTitle(ascii(`Remittance ${data.reference}`))
+  pdf.setTitle(ascii(data.reference ? `Remittance ${data.reference}` : 'Remittance'))
   pdf.setAuthor(ascii(data.payer.name))
-  pdf.setSubject(ascii(`Remittance ${data.reference} - ${data.remitTo?.name || data.payee.name}`))
+  pdf.setSubject(ascii(`Remittance${data.reference ? ` ${data.reference}` : ''} - ${data.remitTo?.name || data.payee.name}`))
 
   const d: Doc = { pdf, font, bold, page: pdf.addPage([PAGE.w, PAGE.h]), y: BODY_TOP }
   drawHeader(d, data)
@@ -535,4 +538,14 @@ export function remittanceFilename(reference: string, version: number): string {
     .replace(/^[-.]+|-+$/g, '')
   const v = Math.max(1, Math.trunc(Number.isFinite(version) ? version : 1))
   return `${safe || 'remittance'}-v${v}.pdf`
+}
+
+/**
+ * What names the attachment: the check or trace number when there is one, otherwise the payment date and the
+ * payee. The internal payment id is never used.
+ */
+export function remittanceFileLabel(reference: string | null | undefined, paidAt: string, payeeName: string): string {
+  const ref = reference?.trim()
+  if (ref) return ref
+  return `remittance-${paidAt.slice(0, 10)}-${payeeName}`
 }

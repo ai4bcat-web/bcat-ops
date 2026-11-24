@@ -279,12 +279,22 @@ describe('renderRemittanceEmail', () => {
     expect(body).toContain('Payment ACH-88120 for $3925.00 has been sent.')
   })
 
-  it('falls back to the payment id when no check or trace number was typed', () => {
+  it('shows nothing in the reference slot when no check or trace number was typed', () => {
     const { subject, body } = remittance({
       payment: { id: 'ap-1', reference: '  ', paidAt: '2026-02-10T12:00:00.000Z', method: 'CHECK', amountCents: 1_000, applications: [] },
     })
-    expect(subject).toBe('Remittance ap-1 · BCAT Logistics')
-    expect(body).toContain('Payment ap-1')
+    expect(subject).toBe('Remittance · BCAT Logistics')
+    expect(body).not.toContain('ap-1')
+    expect(body).toContain('Payment for $10.00 has been sent.')
+  })
+
+  it('drops the reference slot from a custom template too', () => {
+    const { body } = remittance({
+      payment: { id: 'ap-1', reference: null, paidAt: '2026-02-10T12:00:00.000Z', method: 'CHECK', amountCents: 1_000, applications: [] },
+      template: 'Ref {reference} / {total} sent.',
+    })
+    expect(body).toContain('Ref / $10.00 sent.')
+    expect(body).not.toContain('ap-1')
   })
 })
 
@@ -410,5 +420,22 @@ describe('renderRemittanceTableEmail', () => {
     const mail = renderRemittanceTableEmail({ payment, bills: [{ ...bills[0], shipmentNumber: '<b>x</b>' }, bills[1]], brokerName: 'BCAT' })
     expect(mail.html).not.toContain('<b>x</b>')
     expect(mail.html).toContain('&lt;b&gt;')
+  })
+})
+
+describe('renderRemittanceTableEmail without a reference', () => {
+  it('has no internal id in the subject, text or html, and keeps the reference when there is one', () => {
+    const base = {
+      id: 'app-3976ef59792c2d35c2f466a293a13f94',
+      paidAt: '2026-11-24T12:00:00.000Z',
+      amountCents: 115_000,
+      applications: [{ billId: 'b1', amountCents: 115_000 }],
+    }
+    const bills = [{ id: 'b1', billNumber: 'X', billDate: '2026-10-16', shipmentNumber: '14614', loadNumber: '14614', netCents: 115_000 }]
+    const none = renderRemittanceTableEmail({ payment: { ...base, reference: null }, bills, brokerName: 'BCAT Logistics' })
+    expect(none.subject).toBe('Remittance · BCAT Logistics')
+    expect(`${none.subject}${none.body}${none.html}`).not.toContain('app-3976')
+    const withRef = renderRemittanceTableEmail({ payment: { ...base, reference: 'TRACE-9' }, bills, brokerName: 'BCAT Logistics' })
+    expect(withRef.subject).toBe('Remittance TRACE-9 · BCAT Logistics')
   })
 })
