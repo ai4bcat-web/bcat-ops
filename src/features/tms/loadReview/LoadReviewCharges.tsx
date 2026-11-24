@@ -16,7 +16,7 @@ import { RailSaveContext, useRailPending } from './railSave'
 import { getCarrierBundle, getShipmentBundle, getTmsSettings, recalcCharges, sendRateCon, voidRateCon } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
 import type { CarrierBundle, ChargeCalc, ShipmentBundle, TmsSettings } from '@/types/tms'
-import { amountsOf, centsFromInput, chargeSignature, draftsOf, groupsOf, newLine, QUICK_CHARGES, toRecalc, totalsOf, type ChargeDraft, type ChargeGroup } from './chargesEdit'
+import { amountsOf, centsFromInput, chargeSignature, draftsOf, groupsOf, hasLineHaul, LINEHAUL_PRESET, newLine, QUICK_CHARGES, toRecalc, totalsOf, type ChargeDraft, type ChargeGroup } from './chargesEdit'
 
 const CALC_LABEL: Record<ChargeCalc, string> = { FLAT: 'Flat', PER_MILE: 'Per mile', PER_CWT: 'Per cwt', PERCENT: '% of rate' }
 
@@ -120,6 +120,18 @@ export function LoadReviewCharges({ shipmentId, readOnly = false, disabled = fal
     setFocusKey(base.key)
     setEditing(true)
   }
+  /** The line haul goes first, as the shipment form writes it, with its rate box ready for the amount. */
+  function addLineHaul(group: ChargeGroup) {
+    const groupOf = (d: ChargeDraft) => (d.side === 'CUSTOMER' ? 'CUSTOMER' : d.loadCarrierId ?? group.key)
+    const base = newLine(bundle!, group, 0)
+    setDrafts((prev) => {
+      const at = prev.findIndex((d) => groupOf(d) === group.key)
+      const line = { ...base, ...LINEHAUL_PRESET }
+      return (at < 0 ? [...prev, line] : [...prev.slice(0, at), line, ...prev.slice(at)]).map((d, i) => ({ ...d, sortOrder: i }))
+    })
+    setFocusKey(base.key)
+    setEditing(true)
+  }
   function cancel() { setDrafts(draftsOf(bundle!)); setEditing(false); setError(null) }
 
   async function save() {
@@ -182,7 +194,11 @@ export function LoadReviewCharges({ shipmentId, readOnly = false, disabled = fal
         </ul>
         {editing && !groupLocked && <TmsButton size="sm" variant="ghost" onClick={() => add(group)}><Plus size={14} />Add line</TmsButton>}
         {group.side === 'CUSTOMER' && !editing && !groupLocked && !disabled && <div className="lr-charge-quick" data-testid="lr-charge-quick" role="group" aria-label="Add a charge to the customer">
+          {!hasLineHaul(group) && <TmsButton size="sm" variant="ghost" onClick={() => addLineHaul(group)}><Plus size={14} />Line haul</TmsButton>}
           {QUICK_CHARGES.map((preset) => <TmsButton key={preset.label} size="sm" variant="ghost" onClick={() => quickAdd(group, preset)}><Plus size={14} />{preset.label}</TmsButton>)}
+        </div>}
+        {group.side === 'CARRIER' && !groupLocked && !disabled && !hasLineHaul(group) && <div className="lr-charge-quick" data-testid="lr-carrier-quick" role="group" aria-label={`Add a line haul to ${group.title}`}>
+          <TmsButton size="sm" variant="ghost" onClick={() => addLineHaul(group)}><Plus size={14} />Line haul</TmsButton>
         </div>}
         {group.locked && <p className="tms-muted text-xs">{group.locked}</p>}
         {group.side === 'CARRIER' && !group.locked && !readOnly && <p className="tms-muted text-xs" data-testid="lr-ap-note">
