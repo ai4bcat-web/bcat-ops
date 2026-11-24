@@ -1485,6 +1485,8 @@ function queueView({
       gridId,
       label: AR_QUEUE_STATUS_LABEL[status],
       columns,
+      // OTR no buy arrived after people saved their column layouts: it is put into each one once, beside Customer.
+      introduceColumns: [{ key: 'noBuy', after: 'customer' }],
       rows,
       rowKey: (row) => row.key,
       selection: ready || invoiced ? { ids: selected, idOf: (row) => row.orderId, filename: ready ? 'ready-to-invoice-selected' : 'invoiced-selected' } : undefined,

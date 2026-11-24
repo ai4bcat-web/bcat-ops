@@ -23,6 +23,15 @@ export interface DensePrefs {
   widthsFit?: number
   /** updatedAt of the owner's shared layout this person last took; a newer one replaces their columns once. */
   orgSeenAt?: string | null
+  /** Columns this person has already been offered once (see `introduce`); one they removed afterwards stays removed. */
+  introduced?: string[]
+}
+
+/** A column added to a grid after people saved their layouts: shown once to everyone, then theirs to hide. */
+export interface IntroducedColumn {
+  key: string
+  /** Placed right after this column when it is shown, else at the end. */
+  after?: string
 }
 
 export interface UseDensePrefsOptions {
@@ -34,6 +43,11 @@ export interface UseDensePrefsOptions {
   validKeys: readonly string[]
   defaultSort: DenseSort | null
   defaultGroupBy?: string | null
+  /**
+   * Columns added after people saved a layout: each is put into a saved layout once (not into a layout that
+   * already holds it, and not again after the person removes it), without touching their other choices.
+   */
+  introduce?: readonly IntroducedColumn[]
   /**
    * Whether this grid takes part in the owner's shared layout (default true). The Shipments board
    * has its own team layout (teamColumnLayout.ts) and opts out.
@@ -67,6 +81,27 @@ export function densePrefsKey(gridId: string, email: string | null | undefined):
   return `tms:grid:${gridId}:${email ?? 'anon'}:v${VERSION}`
 }
 
+/**
+ * `prefs` with each introduced column the person has not been offered yet added to their columns, and marked offered.
+ * Returns the same object when there is nothing to add, so callers can compare by identity.
+ */
+export function withIntroducedColumns(prefs: DensePrefs, introduce: readonly IntroducedColumn[] | undefined, validKeys: readonly string[]): DensePrefs {
+  if (!introduce || introduce.length === 0) return prefs
+  const valid = new Set(validKeys)
+  const offered = new Set(prefs.introduced ?? [])
+  const pending = introduce.filter((c) => valid.has(c.key) && !offered.has(c.key))
+  if (pending.length === 0) return prefs
+  const columns = [...prefs.columns]
+  for (const c of pending) {
+    offered.add(c.key)
+    if (columns.includes(c.key)) continue
+    const at = c.after ? columns.indexOf(c.after) : -1
+    if (at >= 0) columns.splice(at + 1, 0, c.key)
+    else columns.push(c.key)
+  }
+  return { ...prefs, columns, introduced: [...offered] }
+}
+
 function read(key: string, opts: UseDensePrefsOptions): DensePrefs {
   const defaults: DensePrefs = {
     columns: [...opts.defaultColumns],
@@ -77,6 +112,8 @@ function read(key: string, opts: UseDensePrefsOptions): DensePrefs {
     groupBy: opts.defaultGroupBy ?? null,
     kpiOpen: false,
     widthsFit: WIDTHS_FIT,
+    // A person with no saved layout starts from the defaults, which already hold every introduced column.
+    introduced: (opts.introduce ?? []).map((c) => c.key),
   }
   try {
     const raw = window.localStorage.getItem(key)
@@ -84,7 +121,7 @@ function read(key: string, opts: UseDensePrefsOptions): DensePrefs {
     const stored = JSON.parse(raw) as Partial<DensePrefs>
     const valid = new Set(opts.validKeys)
     const columns = Array.isArray(stored.columns) ? stored.columns.filter((k) => valid.has(k)) : []
-    return {
+    const loaded: DensePrefs = {
       columns: columns.length > 0 ? columns : defaults.columns,
       widths: stored.widthsFit === WIDTHS_FIT && stored.widths && typeof stored.widths === 'object' ? stored.widths : {},
       widthsFit: WIDTHS_FIT,
@@ -94,7 +131,9 @@ function read(key: string, opts: UseDensePrefsOptions): DensePrefs {
       groupBy: stored.groupBy === undefined ? defaults.groupBy : stored.groupBy,
       kpiOpen: stored.kpiOpen === true,
       orgSeenAt: typeof stored.orgSeenAt === 'string' ? stored.orgSeenAt : null,
+      introduced: Array.isArray(stored.introduced) ? stored.introduced.filter((k): k is string => typeof k === 'string') : [],
     }
+    return withIntroducedColumns(loaded, opts.introduce, opts.validKeys)
   } catch {
     return defaults
   }
@@ -157,6 +196,20 @@ export function useDenseGridPrefs(opts: UseDensePrefsOptions): UseDensePrefsResu
       window.localStorage.setItem(current.key, JSON.stringify(current.prefs))
     } catch {
       /* private mode */
+    }
+  }
+
+  // A column added since this person saved their layout appears once (also after taking the owner's shared layout).
+  {
+    const withNew = withIntroducedColumns(current.prefs, opts.introduce, opts.validKeys)
+    if (withNew !== current.prefs) {
+      current = { key: current.key, prefs: withNew }
+      setState(current)
+      try {
+        window.localStorage.setItem(current.key, JSON.stringify(current.prefs))
+      } catch {
+        /* private mode */
+      }
     }
   }
 
