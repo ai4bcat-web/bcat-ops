@@ -587,6 +587,29 @@ describe('effectiveBillPayee', () => {
     expect(out.payee).toMatchObject({ kind: 'CARRIER', paymentMethodId: 'pm-1', remitTo: { method: 'ACH', payeeEmail: 'remit@guzy.test' } })
   })
 
+  describe('a bill that carries only the payee name (Aljex import)', () => {
+    const factorMethod = { id: 'pm-f', carrierId: 'car-1', method: 'CHECK', recipientType: 'FACTOR', factorName: 'TBK Bank, SSB DBA Triumph', status: 'ACTIVE', isPreferred: true } as never
+    const nameOnly = (name: string) => ({ payeeKind: 'FACTOR', paymentMethodId: null, remitTo: { name } }) as never
+
+    it('is judged by the live method when it names the same payee spelled differently', () => {
+      const out = effectiveBillPayee(nameOnly('TBK BANK  SSB DBA TRIUMPH'), carrier, [factorMethod])
+      expect(out.payee.paymentMethodId).toBe('pm-f')
+      expect(out.payee.remitTo).toMatchObject({ method: 'CHECK' })
+    })
+
+    it('never swaps in a different payee', () => {
+      const out = effectiveBillPayee(nameOnly('Some Other Factor LLC'), carrier, [factorMethod])
+      expect(out.adopted).toBe(false)
+      expect(out.payee.paymentMethodId).toBeNull()
+      expect(out.payee.remitTo?.method).toBeUndefined()
+    })
+
+    it('leaves a snapshot that already has a method alone', () => {
+      const withMethod = { payeeKind: 'FACTOR', paymentMethodId: null, remitTo: { name: 'TBK Bank, SSB DBA Triumph', method: 'ACH' } } as never
+      expect(effectiveBillPayee(withMethod, carrier, [factorMethod]).payee.remitTo?.method).toBe('ACH')
+    })
+  })
+
   it('adopts nothing when the carrier has no method, or several with none chosen', () => {
     const empty = { payeeKind: 'CARRIER', paymentMethodId: null, remitTo: null } as never
     expect(effectiveBillPayee(empty, carrier, []).adopted).toBe(false)

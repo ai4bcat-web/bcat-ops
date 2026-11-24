@@ -2339,6 +2339,20 @@ describe('two carriers on one load (Step AT)', () => {
       expect(table(TABLES.apPayment).size).toBe(0)
     })
 
+    it('a group already paid outside the app posts even when the carriers hold different remit e-mails, and sends nothing', async () => {
+      seedSecondCarrier()
+      factor(CARRIER_ID, 'cpm-1', 'one@triumph.test')
+      factor(SECOND_CARRIER, 'cpm-2', 'two@triumph.test')
+      const a = await recordFor(LOAD_CARRIER_ID, { approve: true })
+      const b = await recordFor(SECOND_LC, { approve: true })
+      sesSend.mockClear()
+      const out = await group([a.id, b.id], { suppressRemittance: true })
+      expect(out.payments).toHaveLength(2)
+      expect(out.remittance.status).toBe('SKIPPED')
+      expect(sesSend).not.toHaveBeenCalled()
+      // Different payees are still refused: that is not a payee-info gap, it is a different payee.
+    })
+
     it('posts the payments but sends nothing when the pay-to has no e-mail on file', async () => {
       seedSecondCarrier()
       table(TABLES.carrier).set(CARRIER_ID, { ...table(TABLES.carrier).get(CARRIER_ID)!, email: null })
@@ -2727,6 +2741,66 @@ describe('RECORD_AP_PAYMENT', () => {
       })
       const paid = (await pay(bill.id)) as { bills: Row[] }
       expect(paid.bills[0].status).toBe('PAID')
+    })
+
+    describe('already paid outside the app (no bank details needed)', () => {
+      const noBank = () => table(TABLES.carrierMethod).set('cpm-1', { ...table(TABLES.carrierMethod).get('cpm-1')!, bankCipher: undefined })
+
+      it('records the payment without bank details, sends nothing, and audits it', async () => {
+        const bill = await approvedBill()
+        noBank()
+        sesSend.mockClear()
+        const paid = (await call('RECORD_AP_PAYMENT', {
+          carrierId: CARRIER_ID, paidAt: '2026-10-25', method: 'ACH', amountCents: 180_000,
+          applications: [{ billId: bill.id, amountCents: 180_000 }], suppressRemittance: true,
+        })) as { bills: Row[] }
+        expect(paid.bills[0].status).toBe('PAID')
+        expect(sesSend).not.toHaveBeenCalled()
+        const audit = [...table(TABLES.audit).values()].find((row) => row.action === 'RECORD_AP_PAYMENT')!
+        const details = JSON.parse(String(audit.changes ?? '{}')) as Row
+        expect(details.recordedPaidOutsideApp).toBe(true)
+        expect(details.payeeInfoMissingOnFile).toBe(true)
+        // Paid, so the bill is off the Selected tab: the Chase file never lists it again.
+        expect((table(TABLES.carrierBill).get(String(bill.id)) as Row).status).toBe('PAID')
+      })
+
+      it('a payee with no payment method at all is let through too, and the refusal tells how', async () => {
+        const bill = await approvedBill()
+        table(TABLES.carrierMethod).delete('cpm-1')
+        table(TABLES.carrierBill).set(String(bill.id), { ...table(TABLES.carrierBill).get(String(bill.id))!, remitTo: { name: 'TBK BANK  SSB DBA TRIUMPH' }, paymentMethodId: undefined })
+        const input = { carrierId: CARRIER_ID, paidAt: '2026-10-25', method: 'ACH', amountCents: 180_000, applications: [{ billId: bill.id, amountCents: 180_000 }] }
+        await expect(call('RECORD_AP_PAYMENT', input)).rejects.toThrow(/has no payment method on file.*tick 'Already paid outside the app'/)
+        const paid = (await call('RECORD_AP_PAYMENT', { ...input, suppressRemittance: true })) as { bills: Row[] }
+        expect(paid.bills[0].status).toBe('PAID')
+        const audit = [...table(TABLES.audit).values()].find((row) => row.action === 'RECORD_AP_PAYMENT')!
+        expect(JSON.parse(String(audit.changes))).toMatchObject({ recordedPaidOutsideApp: true, payeeInfoMissingOnFile: true })
+      })
+
+      it('still refuses without the flag, and only a literal true counts', async () => {
+        const bill = await approvedBill()
+        noBank()
+        await expect(call('RECORD_AP_PAYMENT', {
+          carrierId: CARRIER_ID, paidAt: '2026-10-25', method: 'ACH', amountCents: 180_000,
+          applications: [{ billId: bill.id, amountCents: 180_000 }], suppressRemittance: 'true',
+        })).rejects.toThrow(/no bank details on file for ACH/)
+        expect([...table(TABLES.apPayment).values()]).toHaveLength(0)
+      })
+
+      it('a pay-to group with no bank details posts when paid outside the app, and still refuses otherwise', async () => {
+        const bill = await approvedBill()
+        noBank()
+        const run = (over: Row) => call('RECORD_AP_PAYMENT_GROUP', {
+          billIds: [bill.id], paidAt: '2026-10-25', method: 'ACH', clientRequestId: 'grp-nb', ...over,
+        }) as Promise<{ payments: Row[]; remittance: { status: string } }>
+        await expect(run({})).rejects.toThrow(/no bank details on file for ACH/)
+        expect([...table(TABLES.apPayment).values()]).toHaveLength(0)
+        sesSend.mockClear()
+        const out = await run({ suppressRemittance: true })
+        expect(out.payments).toHaveLength(1)
+        expect(out.remittance.status).toBe('SKIPPED')
+        expect(sesSend).not.toHaveBeenCalled()
+        expect((table(TABLES.carrierBill).get(String(bill.id)) as Row).status).toBe('PAID')
+      })
     })
 
     it('needs the Zelle contact', async () => {

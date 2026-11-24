@@ -880,7 +880,7 @@ describe('Pay-to needed: bills whose carrier has nowhere to send money (Ryne 202
     }
   })
 
-  it('flags a payee with a method but no bank info, and will not let the bill be paid until it is on file (Ryne 2026-11-19)', async () => {
+  it('flags a payee with a method but no bank info; the dialog holds the payment unless it was already paid outside the app (Ryne 2026-11-19)', async () => {
     const ach = { id: 'pm1', carrierId: 'car1', method: 'ACH', recipientType: 'CARRIER', accountLast4: '9545', isPreferred: true, status: 'ACTIVE' }
     vi.mocked(listCarrierPaymentInfo).mockResolvedValue([ach] as never)
     try {
@@ -889,7 +889,8 @@ describe('Pay-to needed: bills whose carrier has nowhere to send money (Ryne 202
       fireEvent.click(screen.getByRole('tab', { name: /^Selected/ }))
       const row = screen.getByLabelText('Select bill OK-1').closest('tr') as HTMLElement
       expect(within(row).getByRole('button', { name: /No bank info for/ })).toBeTruthy()
-      expect((within(row).getByRole('button', { name: 'Record payment for bill OK-1' }) as HTMLButtonElement).disabled).toBe(true)
+      // The button opens the dialog: it holds a new payment, but a payment made in Chase can still be recorded there.
+      expect((within(row).getByRole('button', { name: 'Record payment for bill OK-1' }) as HTMLButtonElement).disabled).toBe(false)
     } finally {
       vi.mocked(listCarrierPaymentInfo).mockResolvedValue([])
     }

@@ -19,6 +19,7 @@
  */
 import { agingBucket, daysLate } from './arAging'
 import { dueDateFor } from './invoiceBuild'
+import { factorKeyOf } from './factorRemit'
 import { liveCarriersOf, primaryCarrierOf } from './carrierTotals'
 import { quickPayFee } from './quickPay'
 import { DOCUMENT_TYPE_LABELS } from './shipmentDocuments'
@@ -247,6 +248,18 @@ export function effectiveBillPayee(
   methods: Parameters<typeof billPayee>[1],
 ): { payee: BillPayee; adopted: boolean } {
   if (bill.remitTo) {
+    // A bill imported from an Aljex sheet can carry only the payee's NAME (no method, no method id), spelled its own
+    // way ("TBK BANK  SSB DBA TRIUMPH"). Left alone it reads as "no payment method on file" even when the carrier's
+    // factor method is set up under the same name spelled differently ("TBK Bank, SSB DBA Triumph"). When the live
+    // method names the same payee (same normalized name), judge the bill by that method. A different payee is never
+    // swapped in: the money does not move to a name the bill did not carry.
+    const frozen = bill.remitTo
+    if (!frozen.method && !bill.paymentMethodId) {
+      const live = billPayee(carrier, methods)
+      if (live.remitTo?.method && factorKeyOf(live.remitTo.name) !== '' && factorKeyOf(live.remitTo.name) === factorKeyOf(frozen.name)) {
+        return { payee: live, adopted: true }
+      }
+    }
     return { payee: { kind: bill.payeeKind, paymentMethodId: bill.paymentMethodId ?? null, remitTo: bill.remitTo }, adopted: false }
   }
   const live = billPayee(carrier, methods)

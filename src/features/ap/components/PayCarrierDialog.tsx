@@ -216,9 +216,11 @@ export function PayCarrierDialog({ carrierId, payeeName, payToNeeded, payBlocks,
   const checkNumberMissing = method === 'CHECK' && reference.trim() === ''
 
   // Nobody pays a payee that has no bank info (Ryne 2026-11-19): money applied to a blocked bill cannot be posted.
-  const blockedMessages = [...new Set(
+  // Already paid outside the app: the app moves no money, so missing bank details do not hold the recording.
+  const missingMessages = [...new Set(
     applications.filter((application) => application.amountCents > 0).map((application) => payBlocks?.[application.billId]).filter((m): m is string => !!m),
   )]
+  const blockedMessages = alreadyPaid ? [] : missingMessages
   const payBlocked = blockedMessages.length > 0
 
   const submit = () => {
@@ -280,7 +282,12 @@ export function PayCarrierDialog({ carrierId, payeeName, payToNeeded, payBlocks,
             <div className="p-2 tms-tint tms-tint-red text-xs" data-testid="pay-dialog-payment-info-blocked" role="alert">
               <strong>This payment cannot be posted yet.</strong>{' '}
               {blockedMessages.map((message) => <span key={message}>{message} </span>)}
-              Take the bill off this payment, or fix the payee first.
+              Take the bill off this payment, or fix the payee first. Check &apos;Already paid outside the app&apos; to record a payment you made elsewhere.
+            </div>
+          )}
+          {missingMessages.length > 0 && alreadyPaid && (
+            <div className="p-2 tms-tint tms-tint-orange text-xs" data-testid="pay-dialog-payment-info-bypassed">
+              No bank details are on file for this payee. This is recorded as paid outside the app: nothing is sent to the bank or the payee.
             </div>
           )}
           {payToNeeded && (
