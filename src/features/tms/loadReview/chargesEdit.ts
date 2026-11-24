@@ -128,6 +128,14 @@ export const QUICK_CHARGES: readonly { code: string; label: string }[] = [
   { code: 'STOPOFF', label: 'Stop-off' },
 ]
 
+/** The main freight line, as the shipment form writes it (same code and label, first in the set), so a line added here reads as the form's own. */
+export const LINEHAUL_PRESET: { code: string; label: string } = { code: 'LINEHAUL', label: 'Linehaul' }
+
+/** Whether the group already carries its line haul (the quick button then has nothing to add). */
+export function hasLineHaul(group: Pick<ChargeGroup, 'lines'>): boolean {
+  return group.lines.some((l) => l.code.trim().toUpperCase() === LINEHAUL_PRESET.code)
+}
+
 /** A blank FLAT line for one group, tied to the order (customer) or the assignment (carrier). */
 export function newLine(bundle: ShipmentBundle, group: Pick<ChargeGroup, 'side' | 'loadCarrier'>, sortOrder: number): ChargeDraft {
   const load = bundle.loads[0]

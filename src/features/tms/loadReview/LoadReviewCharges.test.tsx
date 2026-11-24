@@ -121,6 +121,44 @@ describe('LoadReviewCharges', () => {
     expect(sent.find((c) => c.code === 'FSC')).toMatchObject({ side: 'CUSTOMER', label: 'Fuel surcharge', rateCents: 32587, isRate: true })
   })
 
+  it('adds a line haul for both sides on a load with no charges, written like the shipment form', async () => {
+    const empty = { ...bundle, charges: [] } as unknown as ShipmentBundle
+    mocks.bundle.mockResolvedValue(empty)
+    render(<LoadReviewCharges shipmentId="shp-1" onChanged={vi.fn(async () => {})} />)
+    const customer = await screen.findByRole('region', { name: 'Charge customer' })
+    fireEvent.click(within(customer).getByRole('button', { name: /Line haul/ }))
+    let rates = within(customer).getAllByLabelText('Rate')
+    fireEvent.change(rates[0], { target: { value: '1250' } })
+    fireEvent.blur(rates[0])
+    const carrier = screen.getByRole('region', { name: 'Pay SHERIFAJ TRUCKING INC' })
+    fireEvent.click(within(carrier).getByRole('button', { name: /Line haul/ }))
+    rates = within(carrier).getAllByLabelText('Rate')
+    fireEvent.change(rates[0], { target: { value: '1000' } })
+    fireEvent.blur(rates[0])
+    fireEvent.click(screen.getByRole('button', { name: 'Save charges' }))
+    await waitFor(() => expect(mocks.recalc).toHaveBeenCalledTimes(1))
+    const sent = mocks.recalc.mock.calls[0][0].charges as { code: string; label: string | null; side: string; rateCents: number; isRate: boolean; loadCarrierId: string | null; orderId: string | null }[]
+    expect(sent.map((c) => [c.side, c.code, c.label, c.rateCents, c.isRate])).toEqual([
+      ['CUSTOMER', 'LINEHAUL', 'Linehaul', 125000, true], ['CARRIER', 'LINEHAUL', 'Linehaul', 100000, true],
+    ])
+    expect(sent[0].orderId).toBe('o-1')
+    expect(sent[1].loadCarrierId).toBe('lc-1')
+  })
+
+  it('offers no line haul button once the side has one, and none on a carrier with a recorded bill', async () => {
+    render(<LoadReviewCharges shipmentId="shp-1" onChanged={vi.fn(async () => {})} />)
+    await screen.findByText('Charge customer')
+    expect(screen.queryByRole('button', { name: /^Line haul/ })).toBeNull()
+    cleanup()
+    const locked = { ...bundle, charges: [], loadCarriers: [{ ...bundle.loadCarriers[0], chargesFinalizedAt: 't' }] } as unknown as ShipmentBundle
+    mocks.bundle.mockResolvedValue(locked)
+    render(<LoadReviewCharges shipmentId="shp-1" onChanged={vi.fn(async () => {})} />)
+    const customer = await screen.findByRole('region', { name: 'Charge customer' })
+    expect(within(customer).getByRole('button', { name: /Line haul/ })).toBeTruthy()
+    const carrier = screen.getByRole('region', { name: 'Pay SHERIFAJ TRUCKING INC' })
+    expect(within(carrier).queryByRole('button', { name: /Line haul/ })).toBeNull()
+  })
+
   it('saves with the shipment version as it is now when only another section moved it', async () => {
     mocks.bundle.mockResolvedValueOnce(bundle).mockResolvedValue({ ...bundle, shipment: { ...bundle.shipment, version: 9 } } as ShipmentBundle)
     render(<LoadReviewCharges shipmentId="shp-1" onChanged={vi.fn(async () => {})} />)
