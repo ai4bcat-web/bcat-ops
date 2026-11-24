@@ -454,6 +454,8 @@ export type EntityType =
   | 'Integration'
   | 'WorkflowRun'
   | 'Equipment'
+  | 'FuelTransaction'
+  | 'ExpenseRecord'
 export type AuditAction = 'create' | 'update' | 'delete'
 
 export interface AuditLogEntry {

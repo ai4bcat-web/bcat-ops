@@ -18,6 +18,13 @@ vi.mock('@/hooks/useFuelTransactions', () => ({
   useFuelTransactions: () => ({ transactions: [], loading: false, addTransactions: vi.fn(), refresh: vi.fn() }),
 }))
 vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: () => false }))
+vi.mock('@/hooks/useAuth', () => ({
+  useAuth: () => ({ user: { email: 'ryne@bcatcorp.com', groups: [] }, isOwner: true, isAdmin: false, hasPageAccess: () => true }),
+  useAuthUser: () => ({ email: 'ryne@bcatcorp.com', groups: [] }),
+}))
+vi.mock('@/hooks/useExpenseData', () => ({
+  useExpenseData: () => ({ expenseTypes: [], records: [], allocations: [], recurring: [], loading: false, error: null, refresh: vi.fn() }),
+}))
 vi.mock('@/features/dashboard/DieselPriceWidget', () => ({ DieselPriceWidget: () => <div>diesel-stub</div> }))
 vi.mock('@/features/expenses/FuelUploadModal', () => ({ FuelUploadModal: () => <div>upload-modal-stub</div> }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))

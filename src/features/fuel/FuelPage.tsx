@@ -13,10 +13,13 @@ import { useFuelTransactions, type FuelTransaction } from '@/hooks/useFuelTransa
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { DieselPriceWidget } from '@/features/dashboard/DieselPriceWidget'
 import { FuelUploadModal } from '@/features/expenses/FuelUploadModal'
+import { ManualExpensesSection } from './ManualExpenses'
+import { useAuth } from '@/hooks/useAuth'
+import { isManualFuelTx, canManageManualExpenses, canDeleteManualExpenses } from '@/lib/manualExpense'
 import { detectFuelAnomalies } from '@/lib/fuelAnomalies'
 import type { Equipment } from '@/types/equipment'
 
-interface Agg { spend: number; gallons: number; count: number }
+interface Agg { spend: number; gallons: number; count: number; pricedSpend: number }
 
 // Fuel = ULSD + FUEL (generic diesel) + DEF + biodiesel — same definition used across the app.
 const FUEL_TYPES = new Set(['ULSD', 'FUEL', 'DEFD', 'BIO', 'B5', 'B20', 'REG', 'PREM', 'DSL'])
@@ -79,12 +82,16 @@ export function FuelPage() {
   const initialRange = (RANGES.find((r) => r.key === params.get('range'))?.key ?? 'this-month') as RangeKey
   const [rangeKey, setRangeKey] = useState<RangeKey>(initialRange)
   const [uploadOpen, setUploadOpen] = useState(false)
+  const [addExpenseOpen, setAddExpenseOpen] = useState(false)
 
   const { transactions, loading, addTransactions, refresh } = useFuelTransactions()
   const equipment = useAppStore((s) => s.equipment)
   const drivers = useAppStore((s) => s.drivers)
   const updateEquipment = useAppStore((s) => s.updateEquipment)
   const isMobile = useIsMobile()
+  const { user, isOwner, isAdmin, hasPageAccess } = useAuth()
+  const canManageExpenses = canManageManualExpenses(user, Boolean(isOwner || isAdmin), hasPageAccess('finances'))
+  const canDeleteExpenses = canDeleteManualExpenses(user, Boolean(isOwner || isAdmin))
 
   const [assignSel, setAssignSel] = useState<Record<string, string>>({})
   // Card numbers hidden from the unmapped list (typos / phantom cards), kept per-browser.
@@ -166,14 +173,17 @@ export function FuelPage() {
 
   const spend = current.reduce((s, t) => s + t.amount, 0)
   const gallons = current.reduce((s, t) => s + t.quantity, 0)
-  const avgPerGal = gallons > 0 ? spend / gallons : 0
+  // Hand-entered fuel has no gallons, so the blended price per gallon leaves its dollars out.
+  const pricedSpend = current.filter((t) => !isManualFuelTx(t)).reduce((s, t) => s + t.amount, 0)
+  const avgPerGal = gallons > 0 ? pricedSpend / gallons : 0
   const prevSpend = previous.reduce((s, t) => s + t.amount, 0)
   const spendDelta = prev && prevSpend > 0 ? Math.round(((spend - prevSpend) / prevSpend) * 100) : null
 
   const addTo = (map: Map<string, Agg>, key: string, t: FuelTransaction) => {
     const c = map.get(key)
-    if (c) { c.spend += t.amount; c.gallons += t.quantity; c.count += 1 }
-    else map.set(key, { spend: t.amount, gallons: t.quantity, count: 1 })
+    const priced = isManualFuelTx(t) ? 0 : t.amount
+    if (c) { c.spend += t.amount; c.gallons += t.quantity; c.count += 1; c.pricedSpend += priced }
+    else map.set(key, { spend: t.amount, gallons: t.quantity, count: 1, pricedSpend: priced })
   }
 
   // Every truck in the fleet, even with $0 fuel this period.
@@ -181,7 +191,7 @@ export function FuelPage() {
     const agg = new Map<string, Agg>()
     for (const t of current) { const tr = truckForTx(t); addTo(agg, tr ? tr.id : '__unmapped__', t) }
     const rows: TruckFuelRow[] = trucks.filter((tr) => !excludedTruckIds.has(tr.id)).map((tr) => {
-      const a = agg.get(tr.id) ?? { spend: 0, gallons: 0, count: 0 }
+      const a = agg.get(tr.id) ?? { spend: 0, gallons: 0, count: 0, pricedSpend: 0 }
       const dn = driverNameForTruck(tr.id)
       return { label: `#${tr.unitNumber}`, driver: dn, noDriver: !dn, spend: a.spend, gallons: a.gallons }
     })
@@ -215,14 +225,15 @@ export function FuelPage() {
   // Amazon vs Ivan (LOCAL) fleet, via each transaction's truck fleetGroup.
   const byFleet = useMemo(() => {
     const g: Record<'AMAZON' | 'LOCAL' | 'UNKNOWN', Agg> = {
-      AMAZON:  { spend: 0, gallons: 0, count: 0 },
-      LOCAL:   { spend: 0, gallons: 0, count: 0 },
-      UNKNOWN: { spend: 0, gallons: 0, count: 0 },
+      AMAZON:  { spend: 0, gallons: 0, count: 0, pricedSpend: 0 },
+      LOCAL:   { spend: 0, gallons: 0, count: 0, pricedSpend: 0 },
+      UNKNOWN: { spend: 0, gallons: 0, count: 0, pricedSpend: 0 },
     }
     for (const t of current) {
       const truck = truckForTx(t)
       const key = truck?.fleetGroup === 'AMAZON' ? 'AMAZON' : truck?.fleetGroup === 'LOCAL' ? 'LOCAL' : 'UNKNOWN'
       g[key].spend += t.amount; g[key].gallons += t.quantity; g[key].count += 1
+      if (!isManualFuelTx(t)) g[key].pricedSpend += t.amount
     }
     return g
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -231,7 +242,7 @@ export function FuelPage() {
   // ── Fuel anomalies (same logic as fuel-anomaly-check.sh / detectFuelAnomalies.mjs) ──
   const anomalyResult = useMemo(() => {
     if (!current.length) return null
-    return detectFuelAnomalies(current, 15)
+    return detectFuelAnomalies(current.filter((t) => !isManualFuelTx(t)), 15)
   }, [current])
 
   function assignCard(card: string, truckId: string) {
@@ -267,6 +278,9 @@ export function FuelPage() {
               </button>
             ))}
           </div>
+          {canManageExpenses && (
+            <TmsButton onClick={() => setAddExpenseOpen(true)}>Add expense</TmsButton>
+          )}
           <TmsButton variant="primary" onClick={() => setUploadOpen(true)}>
             <Upload size={14} /> Upload EFS
           </TmsButton>
@@ -302,7 +316,7 @@ export function FuelPage() {
               { key: 'LOCAL',  label: 'Ivan (Local)', color: 'var(--tms-chart-4)', agg: byFleet.LOCAL },
               ...(byFleet.UNKNOWN.spend > 0 ? [{ key: 'UNKNOWN', label: 'Unassigned truck', color: 'var(--tms-chart-9)', agg: byFleet.UNKNOWN }] : []),
             ] as const).map((f) => {
-              const perGal = f.agg.gallons > 0 ? f.agg.spend / f.agg.gallons : 0
+              const perGal = f.agg.gallons > 0 ? f.agg.pricedSpend / f.agg.gallons : 0
               return (
                 <div key={f.key} style={{ background: 'var(--tms-card)', padding: '16px 20px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }}>
@@ -406,6 +420,18 @@ export function FuelPage() {
           money leaving on a date, not fuel burned in a period.
         */}
         <TruckMpgTable />
+
+        {/* One-time expenses the cards don't capture (Zelle fuel, repairs, tolls, lumpers). Staff with Finances only. */}
+        <ManualExpensesSection
+          trucks={trucks}
+          drivers={drivers}
+          transactions={transactions}
+          onFuelChanged={refresh}
+          addOpen={addExpenseOpen}
+          onAddOpenChange={setAddExpenseOpen}
+          canManage={canManageExpenses}
+          canDelete={canDeleteExpenses}
+        />
 
         {/* Unmapped fuel cards — not attached to any truck (all time) */}
         {(unmappedCards.length > 0 || ignoredCards.length > 0) && (
