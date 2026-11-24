@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { PDFDocument, PDFArray, PDFRawStream, decodePDFRawStream } from 'pdf-lib'
-import { buildRemittancePdf, remittanceData, remittanceFilename } from './remittancePdf'
+import { buildRemittancePdf, remittanceData, remittanceFileLabel, remittanceFilename } from './remittancePdf'
 import type { RemittanceDataInput } from './remittancePdf'
 import type { ApPaymentRecord, CarrierBillRecord } from '../types/tms'
 import { parseFactorRemitMap } from './factorRemit'
@@ -185,9 +185,9 @@ describe('remittanceData', () => {
     expect(noAddress.remitTo?.address?.street).toBe('22 Depot St')
   })
 
-  it('falls back to the payment id when no check or trace number was typed', () => {
-    expect(data({ payment: payment({ reference: '   ' }) }).reference).toBe('ap-1')
-    expect(data({ payment: payment({ reference: null }) }).reference).toBe('ap-1')
+  it('leaves the reference empty when no check or trace number was typed', () => {
+    expect(data({ payment: payment({ reference: '   ' }) }).reference).toBe('')
+    expect(data({ payment: payment({ reference: null }) }).reference).toBe('')
   })
 })
 
@@ -319,5 +319,24 @@ describe('remittanceFilename', () => {
   it('never names a version below one', () => {
     expect(remittanceFilename('ACH-1', 0)).toBe('ACH-1-v1.pdf')
     expect(remittanceFilename('ACH-1', -3)).toBe('ACH-1-v1.pdf')
+  })
+})
+
+describe('remittance with no reference number', () => {
+  it('prints no reference and never the internal payment id in the PDF', async () => {
+    const bytes = await buildRemittancePdf(data({ payment: payment({ reference: null }) }))
+    const text = (await pageTexts(bytes)).join('\n')
+    expect(text).not.toContain('ap-1')
+    expect(text).not.toMatch(/REFERENCE/i)
+    const doc = await PDFDocument.load(bytes)
+    expect(doc.getTitle()).toBe('Remittance')
+    expect(doc.getSubject() ?? '').not.toContain('ap-1')
+  })
+
+  it('names the attachment from the date and payee, not the payment id', () => {
+    const label = remittanceFileLabel(null, '2026-11-24T12:00:00.000Z', 'Muddy River Trucking')
+    expect(label).toBe('remittance-2026-11-24-Muddy River Trucking')
+    expect(remittanceFilename(label, 1)).toBe('remittance-2026-11-24-Muddy-River-Trucking-v1.pdf')
+    expect(remittanceFileLabel('ACH-88120', '2026-11-24', 'X')).toBe('ACH-88120')
   })
 })

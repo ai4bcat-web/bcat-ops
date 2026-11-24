@@ -49,7 +49,7 @@ import {
   renderRemittanceEmail,
   renderRemittanceTableEmail,
 } from '../../../src/lib/shipmentNotices'
-import { buildRemittancePdf, remittanceData, remittanceFilename } from '../../../src/lib/remittancePdf'
+import { buildRemittancePdf, remittanceData, remittanceFileLabel, remittanceFilename } from '../../../src/lib/remittancePdf'
 import { normalizeCcList, remittanceCcFor } from '../../../src/lib/remittanceCc'
 import {
   effectivePayeeEmail,
@@ -1111,8 +1111,10 @@ export async function sendRemittance(input: Row, caller: Caller): Promise<Row> {
   const body = message ? `${message}\n\n${rendered.body}` : rendered.body
 
   const pdfKey = typeof context.payment.pdfKey === 'string' ? context.payment.pdfKey : null
-  const reference = String(context.payment.reference ?? paymentRowId)
-  const filename = remittanceFilename(reference, numberOrNull(context.payment.pdfVersion) ?? 1)
+  const filename = remittanceFilename(
+    remittanceFileLabel(context.payment.reference as string | null | undefined, String(context.payment.paidAt ?? ''), context.carrier?.name ?? ''),
+    numberOrNull(context.payment.pdfVersion) ?? 1,
+  )
   const attachments = pdfKey
     ? [{ filename, bytes: (await s3Bytes(pdfKey)).bytes, contentType: 'application/pdf' }]
     : []
@@ -1356,7 +1358,6 @@ async function sendGroupedRemittance(paymentIds: string[], recipients: string[],
     const first = contexts[0]
     const bills = contexts.flatMap((context) => context.bills)
     const applications = contexts.flatMap((context) => (context.payment.applications as ApPaymentApplication[] | undefined) ?? [])
-    const reference = String(first.payment.reference ?? first.payment.id)
     const brokerName = first.division?.name ?? 'BCAT'
     const table = renderRemittanceTableEmail({
       payment: {
@@ -1376,7 +1377,12 @@ async function sendGroupedRemittance(paymentIds: string[], recipients: string[],
     for (const [index, context] of contexts.entries()) {
       const key = typeof context.payment.pdfKey === 'string' ? context.payment.pdfKey : null
       if (!key) continue
-      const name = contexts.length > 1 ? `${reference}-${index + 1}` : reference
+      const label = remittanceFileLabel(
+        context.payment.reference as string | null | undefined,
+        String(context.payment.paidAt ?? ''),
+        context.carrier?.name ?? '',
+      )
+      const name = contexts.length > 1 && String(context.payment.reference ?? '').trim() ? `${label}-${index + 1}` : label
       attachments.push({
         filename: remittanceFilename(name, numberOrNull(context.payment.pdfVersion) ?? 1),
         bytes: (await s3Bytes(key)).bytes,

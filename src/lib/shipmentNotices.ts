@@ -382,6 +382,11 @@ export type RemittanceEmailBill = Pick<
   'id' | 'shipmentNumber' | 'loadNumber' | 'netCents'
 >
 
+/** `Remittance <ref> · BCAT` with a reference, `Remittance · BCAT` without one. */
+export function remittanceSubject(reference: string, brokerName: string): string {
+  return `Remittance${reference ? ` ${reference}` : ''} · ${brokerName}`
+}
+
 export interface RemittanceEmailInput {
   payment: Pick<ApPaymentRecord, 'id' | 'reference' | 'paidAt' | 'method' | 'amountCents' | 'applications'>
   bills: RemittanceEmailBill[]
@@ -402,13 +407,15 @@ export interface RemittanceEmailInput {
  */
 export function renderRemittanceEmail(input: RemittanceEmailInput): { subject: string; body: string } {
   const payment = input.payment
-  const reference = payment.reference?.trim() || payment.id
+  // No reference entered means nothing is printed in its place; the internal payment id is never shown.
+  const reference = payment.reference?.trim() || ''
   const date = payment.paidAt.slice(0, 10)
   const total = `$${formatCents(payment.amountCents)}`
-  const subject = `Remittance ${reference} · ${input.brokerName}`
-  const template = templateHasReference(input.template)
+  const subject = remittanceSubject(reference, input.brokerName)
+  const chosen = templateHasReference(input.template)
     ? (input.template as string)
     : DEFAULT_REMITTANCE_EMAIL_TEMPLATE
+  const template = reference ? chosen : chosen.replace(/\s*\{reference\}/g, '')
 
   const appliedById: Record<string, number> = {}
   for (const application of payment.applications ?? []) {
@@ -502,8 +509,7 @@ function htmlEscape(value: string): string {
  */
 export function renderRemittanceTableEmail(input: RemittanceTableInput): { subject: string; body: string; html: string } {
   const { rows, totalCents } = remittanceTableRows(input)
-  const reference = input.payment.reference?.trim() || input.payment.id
-  const subject = `Remittance ${reference} · ${input.brokerName}`
+  const subject = remittanceSubject(input.payment.reference?.trim() || '', input.brokerName)
   const money = (cents: number) => `$${formatCents(cents)}`
   // The carrier's own invoice number is not printed (Ryne 2026-11-18). The PRO is always the base shipment number.
   // The invoice date is left off (Ryne 2026-11-19): PRO #, the carrier, who was paid, what was paid.

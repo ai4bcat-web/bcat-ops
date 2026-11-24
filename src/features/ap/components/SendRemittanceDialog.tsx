@@ -203,7 +203,7 @@ export function SendRemittanceDialog({ payment, open, onOpenChange, onDone }: {
     <TmsDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={`Remittance ${payment.reference ?? payment.id} · ${formatCents(payment.amountCents)}`}
+      title={`Remittance${payment.reference?.trim() ? ` ${payment.reference.trim()}` : ''} · ${formatCents(payment.amountCents)}`}
       className="tms-dialog-wide"
       footer={
         <>
