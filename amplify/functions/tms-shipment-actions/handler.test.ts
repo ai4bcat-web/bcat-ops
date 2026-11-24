@@ -3849,6 +3849,27 @@ describe('UPDATE_CARRIER_CHARGES', () => {
     })
   })
 
+  it('a customer-only save under a recorded bill passes, even when the form rewords the carrier line; a real pay change is still refused (PRO 14588)', async () => {
+    const { shipmentId, loadCarrierId } = await assignedLoad()
+    const assignment = table(TABLES.carrier).get(loadCarrierId)!
+    const stored = carrierLines(loadCarrierId)[0]
+    table(TABLES.charge).set(String(stored.id), { ...stored, label: 'Line haul', sortOrder: 101 })
+    table(TABLES.carrier).set(loadCarrierId, { ...assignment, chargesFinalizedAt: '2026-03-12T00:00:00.000Z', invoiceId: 'cbl-1' })
+    const customer = { side: 'CUSTOMER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: 125_000, count: 1, isRate: true, sortOrder: 0 }
+    // The form rebuilds the carrier line as "Linehaul", sort order 0: same money, different wording.
+    const carrier = (rateCents: number) => ({
+      id: String(stored.id), side: 'CARRIER', code: 'LINEHAUL', label: 'Linehaul', calculatedBy: 'FLAT', rateCents, count: 1, isRate: true,
+      sortOrder: 0, loadCarrierId,
+    })
+    const recalc = (charges: Row[]) => call('RECALC_CHARGES', { shipmentId, expectedVersion: Number(table(TABLES.shipment).get(shipmentId)!.version), charges })
+
+    await recalc([customer, carrier(Number(stored.rateCents))])
+    expect(table(TABLES.charge).get(String(stored.id))).toMatchObject({ label: 'Line haul', sortOrder: 101, rateCents: stored.rateCents })
+    expect(customerLines().map((c) => c.amountCents)).toEqual([125_000])
+
+    await expect(recalc([customer, carrier(Number(stored.rateCents) + 1000)])).rejects.toThrow(/void it first/)
+  })
+
   it('lets AP correct the pay under a bill still in review, re-snapshotting the bill in the same write', async () => {
     const { shipmentId, loadCarrierId } = await assignedLoad()
     const lineId = String(carrierLines(loadCarrierId)[0].id)
@@ -6093,6 +6114,21 @@ describe('READY_TO_INVOICE', () => {
         expect(table(TABLES.shipment).get(good.shipmentId)!.loadReviewPushedAt).toBeTruthy()
         expect(table(TABLES.shipment).get(bad.shipmentId)!.loadReviewPushedAt).toBeUndefined()
         expect((await run()).results[0]).toMatchObject({ ok: true, message: 'Already in Load Review' })
+      })
+
+      it('an edit that auto-pushes the shipment returns the post-push version, so the next Save is not stale (PRO 14588)', async () => {
+        const ids = await reviewable()
+        const res = (await call('UPDATE_STOP', {
+          loadId: ids.loadId,
+          expectedUpdatedAt: table(TABLES.load).get(ids.loadId)!.updatedAt,
+          op: 'SET_APPT',
+          stopId: JSON.parse(String(table(TABLES.load).get(ids.loadId)!.stops))[0].id,
+          patch: { appt: '2020-01-01T13:00:00.000Z' },
+        }, ADMIN)) as { shipment: Row }
+        const row = table(TABLES.shipment).get(ids.shipmentId)!
+        expect(row.loadReviewPushedAt).toBeTruthy()
+        expect(res.shipment.version).toBe(row.version)
+        expect(res.shipment.loadReviewPushedAt).toBeTruthy()
       })
 
       it('moves a load back to Active, holds the auto-push, and a person pushing again lifts the hold (Ryne 2026-11-16)', async () => {

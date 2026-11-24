@@ -461,9 +461,12 @@ const transact = (items: TransactWriteItem[], label: string, options?: TransactO
   storeTransact(dynamo, items, label, options)
 const readBundle = (shipmentId: string) => storeReadBundle(store, shipmentId)
 const rederiveShipmentStatus = async (shipmentId: string, caller: Caller) => {
-  const result = await storeRederiveShipmentStatus(store, shipmentId, caller)
-  await pullBackFromReviewIfNotDelivered(shipmentId, caller)
-  await autoPushToReview(shipmentId, caller)
+  let result = await storeRederiveShipmentStatus(store, shipmentId, caller)
+  const pulledBack = await pullBackFromReviewIfNotDelivered(shipmentId, caller)
+  const pushed = await autoPushToReview(shipmentId, caller)
+  // Both steps bump the shipment's version after the bundle above was read. Hand the client the row as it now stands,
+  // or its next Save sends a stale expectedVersion and is refused with "changed by someone else" (PRO 14588, 2026-11-24).
+  if (pulledBack || pushed) result = (await readBundle(shipmentId)) as unknown as Row
   await reconcileOpenIntake(intakeDeps, shipmentId, caller)
   // A load delivered by its stops, a check call or the driver app is a lane sample too.
   await ensureDeliveredLaneSamples(quoteDeps, result as { loads?: Row[]; shipment?: Row | null; financials?: Row[] })
@@ -3448,13 +3451,13 @@ async function pushToReview(shipmentId: string, caller: Caller): Promise<{ reaso
  * Ryne 2026-11-16: a load in Load Review that is no longer delivered (a leg was re-dispatched, a stop reopened) goes back to Active
  * shipments. Only while its order is still unreleased (DOCS_NEEDED): once it is invoiced or released the stamp is history.
  */
-async function pullBackFromReviewIfNotDelivered(shipmentId: string, caller: Caller): Promise<void> {
+async function pullBackFromReviewIfNotDelivered(shipmentId: string, caller: Caller): Promise<boolean> {
   try {
     const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
-    if (!shipment || !shipment.loadReviewPushedAt || shipment.status === 'DELIVERED') return
-    if (shipment.voidedAt || shipment.deletedAt) return
+    if (!shipment || !shipment.loadReviewPushedAt || shipment.status === 'DELIVERED') return false
+    if (shipment.voidedAt || shipment.deletedAt) return false
     const orders = await queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId)
-    if (orders.some((order) => order.arStatus !== 'DOCS_NEEDED')) return
+    if (orders.some((order) => order.arStatus !== 'DOCS_NEEDED')) return false
     const now = nowIso()
     await transact(
       [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
@@ -3465,8 +3468,10 @@ async function pullBackFromReviewIfNotDelivered(shipmentId: string, caller: Call
       'load review pull back',
     )
     await writeAudit('SHIPMENT', shipmentId, 'PULL_BACK_FROM_LOAD_REVIEW', caller, { reason: `Status is ${String(shipment.status)}, not DELIVERED`, wasPushedAt: shipment.loadReviewPushedAt })
+    return true
   } catch (err) {
     console.error('[shipment-actions] pull back from Load Review failed', shipmentId, err instanceof Error ? err.message : String(err))
+    return false
   }
 }
 
@@ -7823,6 +7828,13 @@ const CHARGE_CONTENT_FIELDS = [
   'rateCents', 'count', 'amountCents', 'isRate', 'release', 'sortOrder', 'note',
 ] as const
 
+/** What a carrier is actually owed on a line: the money and what it is for. Label, order and note are presentation. */
+const OWED_FIELDS = ['side', 'loadCarrierId', 'code', 'calculatedBy', 'rateCents', 'count', 'amountCents', 'isRate', 'release'] as const
+
+function sameOwed(existing: Row, next: Row): boolean {
+  return OWED_FIELDS.every((field) => (existing[field] ?? null) === (next[field] ?? null))
+}
+
 function sameCharge(existing: Row | null, next: Row): boolean {
   if (!existing) return false
   return CHARGE_CONTENT_FIELDS.every((field) => (existing[field] ?? null) === (next[field] ?? null))
@@ -7834,12 +7846,32 @@ function sameCharge(existing: Row | null, next: Row): boolean {
  * not be edited, dropped or added to by any path through here. Voiding the bill
  * clears the stamp and reopens them.
  */
-function assertFinalizedChargesUnchanged(bundle: Bundle, chargeRows: Row[], reopened: string | null = null): void {
-  const finalized = new Set(
+function finalizedCarrierIds(bundle: Bundle, reopened: string | null): Set<string> {
+  return new Set(
     bundle.loadCarriers
       .filter((c) => c.chargesFinalizedAt != null && String(c.id) !== reopened)
       .map((c) => String(c.id)),
   )
+}
+
+/**
+ * The shipment form rebuilds a carrier's linehaul line from its own fields on every save (label "Linehaul", sort order 0), so a
+ * customer-only edit comes back with a carrier line whose wording differs from the stored one while the money is identical.
+ * Under a recorded bill such a line is the stored line, untouched: only a change to what is owed counts as a change.
+ */
+function keepFinalizedLinesAsStored(bundle: Bundle, chargeRows: Row[], reopened: string | null): Row[] {
+  const finalized = finalizedCarrierIds(bundle, reopened)
+  if (finalized.size === 0) return chargeRows
+  const stored = new Map(bundle.charges.map((row) => [String(row.id), row]))
+  return chargeRows.map((row) => {
+    const was = stored.get(String(row.id))
+    if (!was || row.side !== 'CARRIER' || !finalized.has(String(row.loadCarrierId ?? ''))) return row
+    return sameOwed(was, row) ? was : row
+  })
+}
+
+function assertFinalizedChargesUnchanged(bundle: Bundle, chargeRows: Row[], reopened: string | null = null): void {
+  const finalized = finalizedCarrierIds(bundle, reopened)
   if (finalized.size === 0) return
   const theirs = (row: Row): boolean => row.side === 'CARRIER' && finalized.has(String(row.loadCarrierId ?? ''))
   const before = new Map(bundle.charges.filter(theirs).map((row) => [String(row.id), row]))
@@ -7934,13 +7966,13 @@ function repriceShipment(args: {
     marginFloorBpsOf(settings),
   )
 
-  const chargeRows = tagged.map((c, i) => chargeRow(
+  const chargeRows = keepFinalizedLinesAsStored(bundle, tagged.map((c, i) => chargeRow(
     c,
     amounts[i],
     { shipmentId, orderId, loadId },
     caller,
     existingById.get(String(c.id ?? '')) ?? null,
-  ))
+  )), args.reopenedLoadCarrierId ?? null)
   const keptIds = new Set(chargeRows.map((r) => String(r.id)))
   const removed = bundle.charges.filter((r) => !keptIds.has(String(r.id)))
   assertFinalizedChargesUnchanged(bundle, chargeRows, args.reopenedLoadCarrierId ?? null)
