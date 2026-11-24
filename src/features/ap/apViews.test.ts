@@ -9,6 +9,7 @@ import {
   billGates, applyToBePaidFilters, EMPTY_TO_BE_PAID_FILTERS, factorNameFor, isFactorPaid, payeeNameFor, payToLabelFor, setFactorNamesForLabels,
   payToStatusFor, payToWorklist, PAY_TO_STATUS_LABEL,
   paidBills, paidInMonth, paidMonthOf, paidMonthOptions, visiblePaidBills,
+  isPaidRange, paidDayOf, paidInRange, paidRangeCounts, paidRangeStart,
   legIndex, legLabel, legSuffixOf, multiCarrierLoadIds, withLegSuffix, selectionPayTo,
 } from './apViews'
 import { billMonthsSince } from './useAllPaidBills'
@@ -233,6 +234,80 @@ describe('Pay to names the factor when the carrier has one (Ryne 2026-11-18)', (
     expect(direct.map((b) => b.carrierName)).toEqual(['ARCTIC HORIZON INC'])
     // With no methods handed in the filter reads the bill alone, as it did before.
     expect(applyToBePaidFilters(bills, { ...EMPTY_TO_BE_PAID_FILTERS, payeeKind: 'FACTOR' }, '2026-11-18')).toEqual([])
+  })
+})
+
+describe('the Paid tab range tabs', () => {
+  const paid = (id: string, paidAt: string | null, billDate = '2026-01-02') => ({
+    id, status: 'PAID', billDate, billMonth: billDate.slice(0, 7), paidAt,
+  }) as CarrierBillRecord
+  // Wednesday Nov 18, 2026.
+  const TODAY_ = '2026-11-18'
+
+  it('starts each tab on the right day, with weeks beginning Monday', () => {
+    expect(paidRangeStart('today', TODAY_)).toBe('2026-11-18')
+    expect(paidRangeStart('week', TODAY_)).toBe('2026-11-16')
+    expect(paidRangeStart('month', TODAY_)).toBe('2026-11-01')
+    expect(paidRangeStart('last3', TODAY_)).toBe('2026-09-01')
+    expect(paidRangeStart('year', TODAY_)).toBe('2026-01-01')
+  })
+
+  it('puts the week start on the Monday itself and on the Sunday before it', () => {
+    expect(paidRangeStart('week', '2026-11-16')).toBe('2026-11-16') // Monday
+    expect(paidRangeStart('week', '2026-11-22')).toBe('2026-11-16') // Sunday
+    expect(paidRangeStart('week', '2026-11-23')).toBe('2026-11-23') // next Monday
+    // A week that crosses a month and a year.
+    expect(paidRangeStart('week', '2027-01-01')).toBe('2026-12-28')
+  })
+
+  it('wraps last 3 months back over the year edge', () => {
+    expect(paidRangeStart('last3', '2026-01-15')).toBe('2025-11-01')
+    expect(paidRangeStart('last3', '2026-02-01')).toBe('2025-12-01')
+    expect(paidRangeStart('last3', '2026-03-31')).toBe('2026-01-01')
+    expect(paidRangeStart('last3', '2026-12-31')).toBe('2026-10-01')
+  })
+
+  it('files each bill by its Chicago paid day, so a late-evening payment stays on its day', () => {
+    // 9:30 pm Chicago on Nov 17 is Nov 18 in UTC.
+    expect(paidDayOf(paid('late', '2026-11-18T03:30:00.000Z'))).toBe('2026-11-17')
+    expect(paidDayOf(paid('noon', '2026-11-18T12:00:00.000Z'))).toBe('2026-11-18')
+    expect(paidDayOf(paid('none', null, '2026-10-02'))).toBe('2026-10-02')
+  })
+
+  it('keeps a tab from its start through today, by paid date and not bill date', () => {
+    const bills = [
+      paid('today', '2026-11-18T15:00:00.000Z'),
+      paid('mon', '2026-11-16T15:00:00.000Z'),
+      paid('sunBefore', '2026-11-15T15:00:00.000Z'),
+      paid('nov1', '2026-11-01T15:00:00.000Z'),
+      paid('oct31', '2026-10-31T15:00:00.000Z'),
+      paid('sep1', '2026-09-01T15:00:00.000Z'),
+      paid('aug31', '2026-08-31T15:00:00.000Z'),
+      paid('jan1', '2026-01-01T15:00:00.000Z'),
+      paid('dec31', '2025-12-31T15:00:00.000Z', '2026-11-01'),
+      paid('future', '2026-11-19T15:00:00.000Z'),
+    ]
+    const ids = (range: string) => paidInRange(bills, range, TODAY_).map((b) => b.id)
+    expect(ids('today')).toEqual(['today'])
+    expect(ids('week')).toEqual(['today', 'mon'])
+    expect(ids('month')).toEqual(['today', 'mon', 'sunBefore', 'nov1'])
+    expect(ids('last3')).toEqual(['today', 'mon', 'sunBefore', 'nov1', 'oct31', 'sep1'])
+    expect(ids('year')).toEqual(['today', 'mon', 'sunBefore', 'nov1', 'oct31', 'sep1', 'aug31', 'jan1'])
+    // All keeps everything, even a payment dated after today; a YYYY-MM keeps that month.
+    expect(ids('all')).toHaveLength(bills.length)
+    expect(ids('2026-10')).toEqual(['oct31'])
+    // The tab counts match what each tab lists.
+    const counts = paidRangeCounts(bills, TODAY_)
+    expect(counts).toEqual({ today: 1, week: 2, month: 4, last3: 6, year: 8, all: bills.length })
+  })
+
+  it('reads only a tab key or a YYYY-MM as a range', () => {
+    expect(isPaidRange('month')).toBe(true)
+    expect(isPaidRange('2025-06')).toBe(true)
+    expect(isPaidRange('2025-13')).toBe(false)
+    expect(isPaidRange('')).toBe(false)
+    expect(isPaidRange(null)).toBe(false)
+    expect(isPaidRange('forever')).toBe(false)
   })
 })
 

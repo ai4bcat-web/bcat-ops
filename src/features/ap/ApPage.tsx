@@ -18,7 +18,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { Download, FileBarChart } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  TmsBadge, TmsButton, TmsCard, TmsField, TmsSelect, TmsSummaryChips, type TmsTabGroup,
+  TmsBadge, TmsButton, TmsCard, TmsField, TmsSegmentedTabs, TmsSelect, TmsSummaryChips, type TmsTabGroup,
 } from '@/features/tms/kit'
 import { ApChrome, ApDenseList, type ApColumn, type ApListConfig } from './ApDenseList'
 import { useAuth } from '@/hooks/useAuth'
@@ -47,9 +47,9 @@ import {
   AP_PAYMENT_KIND_LABEL, AP_PAYMENT_METHOD_LABEL, AP_PAYEE_KIND_LABEL, AP_TABS, BILL_STATUS_LABEL,
   EMPTY_TO_BE_PAID_FILTERS, applyToBePaidFilters, avgDaysToPayBills, awaitingInvoiceTotals, billCarrierOptions,
   billsAging, billsExpected, billsSelected, canSelectForPayment, invoiceAgeBuckets, isOwnFleet, paidBills,
-  paidInMonth, paidMonthOptions, visiblePaidBills,
+  DEFAULT_PAID_RANGE, PAID_RANGE_TABS, isPaidRange, paidInRange, paidMonthOptions, paidRangeCounts, visiblePaidBills,
   paymentInfoFor, payeeNameFor, isFactorPaid, payToStatusFor, paymentGapFor, isPaymentGap, payToWorklist, PAY_TO_STATUS_LABEL, PAY_TO_STATUS_TITLE, quickPayLabel, setFactorNamesForLabels, setPayeeRemitForLabels, payeeCopies, remitEmailOf, remitEmailOfPayment, remitAddressOf, remitAddressOfPayment, remittanceStatusOf, selectionBalanceCents,
-  selectionPayTo, sharedProLabel, sharedProIndex, multiCarrierLoadIds, withLegSuffix, type ApTabKey, type SharedProIndex, type ToBePaidFilters,
+  selectionPayTo, sharedProLabel, sharedProIndex, multiCarrierLoadIds, withLegSuffix, type ApTabKey, type PaidRangeKey, type SharedProIndex, type ToBePaidFilters,
 } from './apViews'
 import { ApCreditDialog } from './components/ApCreditDialog'
 import { AmountMismatchChip } from './components/AmountMismatchChip'
@@ -327,14 +327,26 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const drawerBill = drawerId ? open.bills.find((b) => b.id === drawerId) ?? null : null
   const agingRows = useMemo(() => applyToBePaidFilters(agingBills, filters, asOf, payInfos), [agingBills, filters, asOf, payInfos])
   const selectedRows = useMemo(() => applyToBePaidFilters(selectedBills, filters, asOf, payInfos), [selectedBills, filters, asOf, payInfos])
-  const [paidMonth, setPaidMonth] = useState('')
+  // The Paid tab's range: a tab key or an older 'YYYY-MM'. It is remembered per user in this browser.
+  const paidRangeKey = `ap.paid.range:${user?.email ?? ''}`
+  const [paidRange, setPaidRangeState] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(paidRangeKey)
+      return isPaidRange(saved) ? saved : DEFAULT_PAID_RANGE
+    } catch {
+      return DEFAULT_PAID_RANGE
+    }
+  })
+  const setPaidRange = useCallback((range: string) => {
+    setPaidRangeState(range)
+    try { localStorage.setItem(paidRangeKey, range) } catch { /* private window or blocked storage: the choice just is not remembered */ }
+  }, [paidRangeKey])
   const paidPool = useMemo(() => paidBills(visiblePaidBills(allPaidBills, isAdmin && includeArchived)), [allPaidBills, isAdmin, includeArchived])
   const archivedPaidCount = useMemo(() => allPaidBills.filter((b) => b.status === 'PAID' && b.archivedAt).length, [allPaidBills])
   const paidMonthChoices = useMemo(() => paidMonthOptions(paidPool), [paidPool])
-  const settled = useMemo(
-    () => paidInMonth(paidPool, paidMonth).filter((b) => byParty(b) && byDivision(b)),
-    [paidPool, paidMonth, byParty, byDivision],
-  )
+  const paidScoped = useMemo(() => paidPool.filter((b) => byParty(b) && byDivision(b)), [paidPool, byParty, byDivision])
+  const paidCounts = useMemo(() => paidRangeCounts(paidScoped, asOf), [paidScoped, asOf])
+  const settled = useMemo(() => paidInRange(paidScoped, paidRange, asOf), [paidScoped, paidRange, asOf])
   const [verifyOnlyPaid, setVerifyOnlyPaid] = useState(false)
   const settledShown = useMemo(() => (verifyOnlyPaid ? settled.filter(isVerifyPaymentBill) : settled), [settled, verifyOnlyPaid])
   // Paid bills from before the summary's three-month window have no facts yet: read them for the Customer ref column, only while the Paid tab is open.
@@ -608,9 +620,10 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onVerifyOnly: setVerifyOnlyPaid,
       shared,
       months: paidMonthChoices,
-      month: paidMonth,
+      range: paidRange,
+      counts: paidCounts,
       loading: allPaid.loading,
-      onMonth: setPaidMonth,
+      onRange: setPaidRange,
       canSeeArchived: isAdmin,
       archivedCount: archivedPaidCount,
       includeArchived: isAdmin && includeArchived,
@@ -1957,15 +1970,18 @@ function paidProText(bill: CarrierBillRecord): string {
   return pro ? `${pro}${bill.legSuffix ?? ''}` : '—'
 }
 
-function paidView({ banner, bills, facts, shared, months, month, loading, onMonth, verifyOnly, verifyCount, onVerifyOnly, infos, lines, onAddRemit, canSeeArchived, archivedCount, includeArchived, onIncludeArchived }: {
+function paidView({ banner, bills, facts, shared, months, range, counts, loading, onRange, verifyOnly, verifyCount, onVerifyOnly, infos, lines, onAddRemit, canSeeArchived, archivedCount, includeArchived, onIncludeArchived }: {
   banner: ReactNode
   bills: CarrierBillRecord[]
   facts: BillFactsIndex
   shared: SharedProIndex
+  /** Every month something was paid in, newest first, for the "Older month" picker. */
   months: string[]
-  month: string
+  /** A range tab key or an older 'YYYY-MM'. */
+  range: string
+  counts: Record<PaidRangeKey, number>
   loading: boolean
-  onMonth: (ym: string) => void
+  onRange: (range: string) => void
   verifyOnly: boolean
   verifyCount: number
   onVerifyOnly: (on: boolean) => void
@@ -2015,14 +2031,21 @@ function paidView({ banner, bills, facts, shared, months, month, loading, onMont
     gridId: 'ap-paid-v4',
     cardLayout: { title: 'bill', party: 'carrier', amount: 'net' },
     kpis: [
-      { label: month ? `Paid in ${monthLabel(month)}` : 'Paid, all time', value: bills.length },
+      { label: `Paid ${paidRangePhrase(range)}`, value: bills.length },
       { label: 'Net paid', value: formatCents(sumCents(bills, (bill) => bill.netCents)) },
       { label: 'Verify payment', value: verifyCount, tone: 'warn' },
     ],
     actions: (
       <>
-        <TmsSelect aria-label="Paid month" value={month} onChange={(e) => onMonth(e.target.value)}>
-          <option value="">All time</option>
+        <TmsSegmentedTabs
+          aria-label="Paid range"
+          size="sm"
+          tabs={PAID_RANGE_TABS.map((t) => ({ key: t.key, label: t.label, count: counts[t.key], title: t.title, testId: `ap-paid-range-${t.key}` }))}
+          active={range}
+          onSelect={onRange}
+        />
+        <TmsSelect aria-label="Older month" value={PAID_RANGE_TABS.some((t) => t.key === range) ? '' : range} onChange={(e) => e.target.value && onRange(e.target.value)}>
+          <option value="">Older month…</option>
           {months.map((ym) => <option key={ym} value={ym}>{monthLabel(ym)}</option>)}
         </TmsSelect>
         <TmsButton
@@ -2046,8 +2069,21 @@ function paidView({ banner, bills, facts, shared, months, month, loading, onMont
     columns,
     rows: bills,
     rowKey: (bill) => bill.id,
-    emptyText: month ? `No carrier was paid in ${monthLabel(month)}.` : 'No carrier has been paid yet.',
+    emptyText: range === 'all' ? 'No carrier has been paid yet.' : `No carrier was paid ${paidRangePhrase(range)}.`,
   })
+}
+
+/** "this month", "in Oct 2026": the range as it reads after "Paid" or "No carrier was paid". */
+function paidRangePhrase(range: string): string {
+  switch (range) {
+    case 'today': return 'today'
+    case 'week': return 'this week'
+    case 'month': return 'this month'
+    case 'last3': return 'in the last 3 months'
+    case 'year': return 'this year'
+    case 'all': return 'all time'
+    default: return `in ${monthLabel(range)}`
+  }
 }
 
 /* ── Payments & credits ──────────────────────────────────────────────────── */
