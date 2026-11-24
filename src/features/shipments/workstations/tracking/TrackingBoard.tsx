@@ -157,6 +157,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
     onRequestCheckCall,
     onRequestPod,
     onLogCheckCall,
+    onQuickUpdate,
     onSnooze,
     onReviewDocs,
     focus,
@@ -301,6 +302,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
               onRequestCheckCall={() => onRequestCheckCall(row)}
               onRequestPod={() => onRequestPod(row)}
               onLogCheckCall={() => onLogCheckCall(row)}
+              onQuickUpdate={onQuickUpdate ? () => onQuickUpdate(row) : undefined}
               onSnooze={() => onSnooze(row)}
               onReviewDocs={() => onReviewDocs(row)}
               onAssignTracker={(trackerId) => onAssignTracker([row.id], trackerId)}
@@ -310,7 +312,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
           return null
       }
     },
-    [favorites, onOpenShipment, onToggleFavorite, onCreateCustomerUrl, onRequestCheckCall, onRequestPod, onLogCheckCall, onSnooze, onReviewDocs, onAssignTracker, nowMs, prefsOf],
+    [favorites, onOpenShipment, onToggleFavorite, onCreateCustomerUrl, onRequestCheckCall, onRequestPod, onLogCheckCall, onQuickUpdate, onSnooze, onReviewDocs, onAssignTracker, nowMs, prefsOf],
   )
 
   const kpis = useMemo<DenseKpi[]>(() => {
@@ -658,6 +660,7 @@ function RowMenu({
   onRequestCheckCall,
   onRequestPod,
   onLogCheckCall,
+  onQuickUpdate,
   onSnooze,
   onReviewDocs,
   onAssignTracker,
@@ -668,6 +671,7 @@ function RowMenu({
   onRequestCheckCall: () => Promise<void>
   onRequestPod: () => Promise<void>
   onLogCheckCall: () => Promise<void>
+  onQuickUpdate?: () => Promise<void>
   onSnooze: () => Promise<void>
   onReviewDocs: () => void
   onAssignTracker: (trackerId: string | null) => Promise<void>
@@ -708,6 +712,18 @@ function RowMenu({
         <button type="button" className="tms-tracking-rowmenu-item" onClick={onOpen}>
           Open shipment
         </button>
+        {onQuickUpdate && (
+          <button
+            type="button"
+            className="tms-tracking-rowmenu-item"
+            data-testid="rowmenu-quick-update"
+            disabled={busy || voided}
+            title={checkCallReason}
+            onClick={() => { void run(onQuickUpdate) }}
+          >
+            Update status, times &amp; POD…
+          </button>
+        )}
         <button type="button" className="tms-tracking-rowmenu-item" onClick={onCreateCustomerUrl}>
           Create customer URL
         </button>
