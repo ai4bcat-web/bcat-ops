@@ -551,6 +551,82 @@ export function paidMonthOptions(bills: readonly CarrierBillRecord[]): string[] 
   return [...new Set(bills.map(paidMonthOf))].sort().reverse()
 }
 
+/** The Paid tab's range tabs. A 'YYYY-MM' (the "Older month" picker) is also a valid range. */
+export type PaidRangeKey = 'today' | 'week' | 'month' | 'last3' | 'year' | 'all'
+
+export const PAID_RANGE_TABS: ReadonlyArray<{ key: PaidRangeKey; label: string; title: string }> = [
+  { key: 'today', label: 'Today', title: 'Paid today' },
+  { key: 'week', label: 'This week', title: 'Paid since Monday' },
+  { key: 'month', label: 'This month', title: 'Paid since the 1st of this month' },
+  { key: 'last3', label: 'Last 3 months', title: 'Paid this month and the 2 months before it' },
+  { key: 'year', label: 'This year', title: 'Paid since January 1' },
+  { key: 'all', label: 'All', title: 'Every payment' },
+]
+
+export const DEFAULT_PAID_RANGE: PaidRangeKey = 'month'
+
+const PAID_RANGE_KEYS = new Set<string>(PAID_RANGE_TABS.map((t) => t.key))
+
+/** A saved or typed range: one of the tabs, or a 'YYYY-MM' month. Anything else is not a range. */
+export function isPaidRange(value: unknown): value is string {
+  return typeof value === 'string' && (PAID_RANGE_KEYS.has(value) || /^\d{4}-(0[1-9]|1[0-2])$/.test(value))
+}
+
+/** The Chicago day a bill was paid, 'YYYY-MM-DD' (the bill date when no paid time was stored). */
+export function paidDayOf(bill: Pick<CarrierBillRecord, 'paidAt' | 'billDate'>): string {
+  return bill.paidAt ? chicagoDateStr(bill.paidAt) : bill.billDate.slice(0, 10)
+}
+
+/** First day (inclusive, 'YYYY-MM-DD') a tab reaches back to as of `asOf`. Weeks start on Monday; 'last 3 months' is this month and the two before it. */
+export function paidRangeStart(key: Exclude<PaidRangeKey, 'all'>, asOf: string): string {
+  const [y, m] = asOf.split('-').map(Number)
+  switch (key) {
+    case 'today':
+      return asOf
+    case 'week': {
+      const d = new Date(`${asOf}T12:00:00Z`)
+      d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7))
+      return d.toISOString().slice(0, 10)
+    }
+    case 'month':
+      return `${asOf.slice(0, 7)}-01`
+    case 'last3': {
+      const index = y * 12 + (m - 1) - 2
+      return `${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, '0')}-01`
+    }
+    case 'year':
+      return `${y}-01-01`
+  }
+}
+
+/**
+ * The bills paid in a range, as of `asOf` (a Chicago day). A tab reaches from its start to today;
+ * 'all' keeps everything; a 'YYYY-MM' keeps that month. Input order is kept.
+ */
+export function paidInRange(bills: readonly CarrierBillRecord[], range: string, asOf: string): CarrierBillRecord[] {
+  if (range === 'all') return [...bills]
+  if (PAID_RANGE_KEYS.has(range)) {
+    const from = paidRangeStart(range as Exclude<PaidRangeKey, 'all'>, asOf)
+    return bills.filter((b) => {
+      const day = paidDayOf(b)
+      return day >= from && day <= asOf
+    })
+  }
+  return paidInMonth(bills, range)
+}
+
+/** How many bills each range tab holds, for the tab labels. */
+export function paidRangeCounts(bills: readonly CarrierBillRecord[], asOf: string): Record<PaidRangeKey, number> {
+  const counts = { today: 0, week: 0, month: 0, last3: 0, year: 0, all: bills.length }
+  const starts = (['today', 'week', 'month', 'last3', 'year'] as const).map((key) => [key, paidRangeStart(key, asOf)] as const)
+  for (const b of bills) {
+    const day = paidDayOf(b)
+    if (day > asOf) continue
+    for (const [key, from] of starts) if (day >= from) counts[key] += 1
+  }
+  return counts
+}
+
 /** '' is every payment ever; a 'YYYY-MM' keeps the bills paid in that month. */
 export function paidInMonth(bills: readonly CarrierBillRecord[], ym: string): CarrierBillRecord[] {
   return ym ? bills.filter((b) => paidMonthOf(b) === ym) : [...bills]

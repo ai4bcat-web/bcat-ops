@@ -231,6 +231,8 @@ beforeEach(() => {
   legsMock.mockResolvedValue(new Map())
   // These tests read the cards; a viewer starts with them folded away (TmsHeadBand.test covers that).
   localStorage.setItem('ap.payables.cards', 'open')
+  // The Paid tab remembers its range per user; each test starts on the default.
+  for (const key of Object.keys(localStorage)) if (key.startsWith('ap.paid.range')) localStorage.removeItem(key)
 })
 
 describe('the AP board', () => {
@@ -769,7 +771,7 @@ describe('the AP board', () => {
 })
 
 describe('the Paid tab', () => {
-  it('lists every payment ever, files each under the month it was paid, and names an imported bill by its PRO', async () => {
+  it('opens on This month, offers range tabs with counts, reaches every payment through All, and names an imported bill by its PRO', async () => {
     const apiClient = await import('@/lib/apiClient')
     const paidThisMonth = bill({
       id: 'cb:lcr-abcc:1', status: 'PAID', billNumber: '14525', shipmentNumber: '14525', balanceCents: 0, paidCents: 95_000, netCents: 95_000,
@@ -785,17 +787,27 @@ describe('the Paid tab', () => {
     ))
     await setup({ bills: [] })
     await act(async () => { fireEvent.click(screen.getByRole('tab', { name: /^Paid/ })) })
-    // All time is the default: the October-dated bill paid today and the 2025 payment both show.
+    // This month is the default: the October-dated bill paid today shows, the 2025 payment does not.
     await waitFor(() => expect(screen.getByText('Matt Hennings Trucki')).toBeTruthy())
+    expect(screen.queryByText('Mmbest Transportation Inc')).toBeNull()
+    const ranges = within(screen.getByRole('tablist', { name: 'Paid range' }))
+    expect(['Today', 'This week', 'This month', 'Last 3 months', 'This year', 'All'].every((l) => ranges.getByRole('tab', { name: new RegExp(`^${l}`) }))).toBe(true)
+    expect(ranges.getByRole('tab', { name: /^This month/ }).getAttribute('aria-selected')).toBe('true')
+    expect(ranges.getByRole('tab', { name: /^Today/ }).textContent).toContain('1')
+    expect(ranges.getByRole('tab', { name: /^All/ }).textContent).toContain('2')
+    // All reaches every payment ever, and an imported bill reads as its PRO.
+    await act(async () => { fireEvent.click(ranges.getByRole('tab', { name: /^All/ })) })
     expect(screen.getByText('Mmbest Transportation Inc')).toBeTruthy()
     expect(screen.getByText('PRO 14375')).toBeTruthy()
     expect(screen.queryByText('cb:lcr-aljex25-14375:1')).toBeNull()
-    // Picking the month it was paid in keeps only that month's payments.
-    const picker = screen.getByLabelText('Paid month') as HTMLSelectElement
+    // The Older month picker still reaches a past month, and keeps only that month's payments.
+    const picker = screen.getByLabelText('Older month') as HTMLSelectElement
     expect([...picker.options].map((o) => o.value)).toEqual(['', TODAY.slice(0, 7), '2025-06'])
-    await act(async () => { fireEvent.change(picker, { target: { value: TODAY.slice(0, 7) } }) })
-    expect(screen.getByText('Matt Hennings Trucki')).toBeTruthy()
-    expect(screen.queryByText('Mmbest Transportation Inc')).toBeNull()
+    await act(async () => { fireEvent.change(picker, { target: { value: '2025-06' } }) })
+    expect(screen.getByText('Mmbest Transportation Inc')).toBeTruthy()
+    expect(screen.queryByText('Matt Hennings Trucki')).toBeNull()
+    // The last choice is remembered for this user.
+    expect(localStorage.getItem('ap.paid.range:')).toBe('2025-06')
   })
 
   it('hides bills paid outside BCAT Ops (archived) and shows them again only to an admin who asks (Ryne 2026-11-18)', async () => {
@@ -830,6 +842,8 @@ describe('the Paid tab', () => {
       expect(screen.queryByText('Old Outside Carrier')).toBeNull()
       const toggle = await screen.findByLabelText(/Include archived \(1\)/)
       await act(async () => { fireEvent.click(toggle) })
+      // The archived 2025 payment is outside This month; All reaches it.
+      await act(async () => { fireEvent.click(screen.getByRole('tab', { name: /^All/ })) })
       expect(screen.getByText('Old Outside Carrier')).toBeTruthy()
     } finally {
       authState.isAdmin = false
