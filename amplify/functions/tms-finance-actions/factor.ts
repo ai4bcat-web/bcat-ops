@@ -58,6 +58,8 @@ import {
   type Row,
 } from './store'
 import { stopsList } from '../../../src/lib/stopPlace'
+import { otrStatusMeta } from '../../../src/lib/otrInvoiceStatus'
+import { withPriorInvoice } from '../../../src/lib/factoringResubmit'
 import { rerenderInvoicePdf } from './invoices'
 
 /**
@@ -417,4 +419,59 @@ async function factorReadyFor(orderId: string, factorRemitToName: string | null)
     invoiceId: invoice?.id ?? null,
     factoringItemId: existingRow?.id ?? null,
   }
+}
+
+/**
+ * Let a queue row OTR no longer holds be handed to the factor again (Ryne 2026-11-25, PRO 20136: invoice deleted at OTR, new bill issued).
+ * Admin only, typed reason. The row must still be waiting (PENDING_WITH_OTR / NEED_TO_FACTOR), OTR's last word on it must be Dead, it must
+ * never have been funded, and it must not be tied to a live invoice. The old OTR invoice moves to otrPriorInvoices, the OTR fields are
+ * cleared and the row goes back to NEED_TO_FACTOR so Send to Factor can link the new invoice. This never calls OTR and sends nothing.
+ */
+export async function releaseDeadOtrSubmission(input: Row, caller: Caller): Promise<Row> {
+  if (!caller.isAdmin) throw new Error('Forbidden: only an admin can release a bill from OTR')
+  const proNumber = assertString(input.proNumber, 'proNumber').trim()
+  const reason = optionalString(input.reason, 2000)
+  if (!reason) throw new Error('Releasing a bill from OTR needs a reason')
+
+  const row = await getById(FACTORING_ITEM_TABLE_NAME, proNumber)
+  if (!row) throw new Error(`Factoring row not found: ${proNumber}`)
+  const oldId = String(row.otrInvoiceId ?? '').trim()
+  if (!oldId) throw new Error(`PRO ${proNumber} was never submitted to OTR, so there is nothing to release`)
+  const status = String(row.status ?? '')
+  if (status !== 'PENDING_WITH_OTR' && status !== 'NEED_TO_FACTOR') {
+    throw new Error(`PRO ${proNumber} is ${status || 'not waiting'} in the queue; only a row still waiting on OTR can be released`)
+  }
+  const meta = otrStatusMeta(row.otrStatus as string | number | null | undefined)
+  if (meta?.code !== 4) {
+    throw new Error(`OTR still holds invoice ${oldId} as ${meta?.label ?? 'an unknown status'}; delete it at OTR and let the status refresh first`)
+  }
+  if (row.factoredAt || (row.otrScheduleId != null && String(row.otrScheduleId).trim() !== '')) {
+    throw new Error(`OTR has already funded invoice ${oldId}; it cannot be released`)
+  }
+  const linkedId = typeof row.invoiceId === 'string' ? row.invoiceId.trim() : ''
+  if (linkedId) {
+    const linked = await getById(INVOICE_TABLE_NAME, linkedId)
+    if (linked && linked.status !== 'VOID') {
+      throw new Error(`PRO ${proNumber} is still tied to invoice ${String(linked.number ?? linkedId)}; void that invoice first`)
+    }
+  }
+
+  const now = nowIso()
+  const prior = withPriorInvoice(row.otrPriorInvoices as never, row as never, caller.email, now)
+  await transact([
+    updateTx(
+      FACTORING_ITEM_TABLE_NAME,
+      proNumber,
+      { status: 'NEED_TO_FACTOR', otrPriorInvoices: prior, updatedAt: now },
+      {
+        remove: ['otrInvoiceId', 'otrStatus', 'otrSubmittedAt', 'otrSubmittedBy', 'otrScheduleId', 'otrAmount', 'otrStatusSyncedAt', 'otrError', 'otrDocsUploaded', 'invoiceId'],
+        condition: 'otrInvoiceId = :old AND #status = :was AND attribute_not_exists(factoredAt)',
+        extraValues: { ':old': { S: oldId }, ':was': { S: status } },
+      },
+    ),
+  ], 'release dead OTR submission')
+  await writeAudit('FactoringItem', proNumber, 'RELEASE_DEAD_OTR_SUBMISSION', caller, {
+    reason, otrInvoiceId: oldId, otrStatusBefore: row.otrStatus ?? null, statusBefore: status,
+  })
+  return { factoringItem: (await getById(FACTORING_ITEM_TABLE_NAME, proNumber)) ?? {} }
 }
