@@ -28,6 +28,7 @@ import {
   reviseInvoice,
   saveArSettings,
   voidInvoice,
+  voidOtrDeletedInvoice,
 } from './invoices'
 import { acceptDifferences, createCredit, recordPayment, reversePayment, writeOffInvoice } from './payments'
 import { previewFactor, previewFactorReady, sendToFactor } from './factor'
@@ -109,6 +110,7 @@ type Action =
   | 'BATCH_EMAIL'
   | 'MARK_SENT'
   | 'VOID_INVOICE'
+  | 'VOID_OTR_DELETED_INVOICE'
   | 'RECORD_PAYMENT'
   | 'CREATE_CREDIT'
   | 'WRITE_OFF'
@@ -329,6 +331,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return markInvoiceSent(input, caller)
     case 'VOID_INVOICE':
       return voidInvoice(input, caller)
+    case 'VOID_OTR_DELETED_INVOICE':
+      return voidOtrDeletedInvoice(input, caller)
     case 'RECORD_PAYMENT':
       return recordPayment(input, caller) as unknown as Promise<Row>
     case 'CREATE_CREDIT':

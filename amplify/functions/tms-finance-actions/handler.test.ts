@@ -1293,6 +1293,58 @@ describe('VOID_INVOICE', () => {
     await call('VOID_INVOICE', { invoiceId, reason: 'rebill' })
     expect(table(TABLES.factoring).get('S000001-1')!.status).toBe('ARCHIVED')
   })
+
+  describe('VOID_OTR_DELETED_INVOICE (deleted at OTR while OTR was waiting)', () => {
+    async function submitted(otr: Record<string, unknown> = {}) {
+      const { invoiceId } = await generate()
+      await call('SEND_TO_FACTOR', { invoiceId })
+      const row = table(TABLES.factoring).get('S000001-1')!
+      table(TABLES.factoring).set('S000001-1', { ...row, status: 'PENDING_WITH_OTR', otrInvoiceId: '99123', otrStatus: 1, otrSubmittedAt: '2026-10-01T00:00:00.000Z', ...otr })
+      return invoiceId
+    }
+
+    it('voids the invoice, unbills the order, unfreezes the load and archives the OTR row without touching the customer', async () => {
+      const invoiceId = await submitted()
+      const customerBefore = JSON.stringify(table(TABLES.customer).get(CUSTOMER_ID))
+      await call('VOID_OTR_DELETED_INVOICE', { invoiceId, reason: 'Deleted invoice 99123 at OTR' })
+      expect(table(TABLES.invoice).get(invoiceId)).toMatchObject({ status: 'VOID', voidReason: 'Deleted invoice 99123 at OTR' })
+      expect(table(TABLES.order).get(ORDER_ID)).toMatchObject({ arStatus: 'UNBILLED' })
+      expect(table(TABLES.order).get(ORDER_ID)!.invoiceId).toBeUndefined()
+      expect(table(TABLES.financials).get(LOAD_ID)!.frozenAt).toBeUndefined()
+      const row = table(TABLES.factoring).get('S000001-1')!
+      expect(row.status).toBe('ARCHIVED')
+      expect(row.invoiceId).toBeUndefined()
+      expect(JSON.stringify(table(TABLES.customer).get(CUSTOMER_ID))).toBe(customerBefore)
+    })
+
+    it('is admin only and needs a reason', async () => {
+      const invoiceId = await submitted()
+      await expect(call('VOID_OTR_DELETED_INVOICE', { invoiceId, reason: 'x' }, JENNY)).rejects.toThrow(/only an admin can void/)
+      await expect(call('VOID_OTR_DELETED_INVOICE', { invoiceId })).rejects.toThrow(/needs a reason/)
+      expect(table(TABLES.invoice).get(invoiceId)!.status).not.toBe('VOID')
+    })
+
+    it('refuses once OTR approved or funded it, and the normal void still refuses an OTR invoice', async () => {
+      const funded = await submitted({ status: 'FACTORED', otrStatus: 3 })
+      await expect(call('VOID_OTR_DELETED_INVOICE', { invoiceId: funded, reason: 'x' })).rejects.toThrow(/cannot be voided here/)
+      expect(table(TABLES.invoice).get(funded)!.status).not.toBe('VOID')
+      await expect(call('VOID_INVOICE', { invoiceId: funded, reason: 'x' })).rejects.toThrow(/cannot be voided here/)
+    })
+
+    it('refuses an invoice that was never submitted to OTR', async () => {
+      const { invoiceId } = await generate()
+      await expect(call('VOID_OTR_DELETED_INVOICE', { invoiceId, reason: 'x' })).rejects.toThrow(/never submitted to OTR/)
+    })
+
+    it('refuses once money has been applied', async () => {
+      const invoiceId = await submitted()
+      await call('RECORD_PAYMENT', {
+        customerId: CUSTOMER_ID, receivedAt: '2026-10-25', method: 'CHECK', amountCents: 50_000,
+        applications: [{ invoiceId, amountCents: 50_000 }], creditApplications: [],
+      })
+      await expect(call('VOID_OTR_DELETED_INVOICE', { invoiceId, reason: 'x' })).rejects.toThrow(/reverse the payment first/i)
+    })
+  })
 })
 
 // ── payments ────────────────────────────────────────────────────────────────

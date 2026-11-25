@@ -7929,6 +7929,11 @@ export async function voidInvoice(input: { invoiceId: string; reason: string }):
   return financeAction<{ invoice: InvoiceRecord }>('VOID_INVOICE', input)
 }
 
+/** An invoice deleted at OTR while OTR was still waiting on it: admin only, reason required. Never changes the customer's billing method. */
+export async function voidOtrDeletedInvoice(input: { invoiceId: string; reason: string }): Promise<{ invoice: InvoiceRecord }> {
+  return financeAction<{ invoice: InvoiceRecord }>('VOID_OTR_DELETED_INVOICE', input)
+}
+
 /**
  * What a posted row leaves behind: the ArPayment itself and every invoice it moved.
  *
