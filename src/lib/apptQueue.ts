@@ -125,12 +125,11 @@ export const rowOutstanding = (r: ApptQueueRow): boolean =>
   !!(r.pickupKind || r.deliveryKind) ||
   r.extraStops.some((s) => (s.status !== null && s.status !== 'confirmed') || !!s.kind)
 
-/** Statuses that represent work on the Appts page (Dennis queue + non-Batory ratecon). */
+/** Statuses that represent work on the Appts page (the Dennis queue). */
 const DENNIS_ACTIONABLE_STATUSES: EffectiveApptStatus[] = [
   'need_request',
   'requested',
   'change_needed',
-  'ratecon_needed',
 ]
 
 /** True when a stop status belongs in the Appts page queue — i.e. Dennis can act on it. */
@@ -169,8 +168,8 @@ export const stopConfirmed = (stop: Stop, customer?: ApptPolicySource): boolean 
     if (stop.apptStatus) return stop.apptStatus === 'confirmed'
     return !!stop.apptProofs?.e2open && !!stop.apptProofs?.email
   }
-  // Non-Batory confirmation now rides the RATECON, judged at the load level in
-  // apptWorkflowStatus — a lone screenshot no longer decides anything here.
+  // Non-Batory confirmation rides the rate con the load was built from (see
+  // apptWorkflowStatus) — a lone screenshot never decides anything here.
   return true
 }
 

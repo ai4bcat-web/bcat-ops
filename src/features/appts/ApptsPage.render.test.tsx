@@ -22,7 +22,6 @@ vi.mock('@/hooks/useDrivers', () => ({
 }))
 vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: () => false }))
 vi.mock('@/hooks/useDirectory', () => ({ useDirectory: () => ({ customers: [], locations: [], loading: false }) }))
-vi.mock('@/lib/rateconUpload', () => ({ uploadRateconAndApply: vi.fn().mockResolvedValue(true) }))
 const listAuditLogsFor = vi.fn<(keys: unknown) => Promise<AuditLogEntry[]>>(() => Promise.resolve([]))
 const sessionAudit = vi.fn<() => AuditLogEntry[]>(() => [])
 const ensureLoadMonths = vi.fn().mockResolvedValue(undefined)
@@ -211,15 +210,16 @@ describe('ApptsPage', () => {
     expect(proIds()).toEqual(['300', '200', '100'])
   })
 
-  it('a booked non-Batory shipment without a ratecon shows RATECON NEEDED and stays open', async () => {
+  it('a booked non-Batory shipment never shows RATECON NEEDED, even with no ratecon key on the load', async () => {
     loads.mockReturnValue([load({
       aljexId: 'BOOKED',
       stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })],
     })])
     await mount()
     const row = screen.getByText('BOOKED').closest('tr')!
-    expect(row.getAttribute('data-outstanding')).toBe('true')
-    expect(row.children[1].textContent).toContain('RATECON NEEDED')
+    expect(row.getAttribute('data-outstanding')).toBe('false')
+    expect(row.textContent).not.toContain('RATECON NEEDED')
+    expect(row.children[1].textContent).toContain('CONFIRMED')
   })
 
   it('a non-Batory booking confirms from the RATECON on the load', async () => {
@@ -266,7 +266,7 @@ describe('ApptsPage', () => {
     loads.mockReturnValue([
       load({ id: 'l1', aljexId: 'BOOKED', rateConfirmKey: 'rc',
         stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })] } as Partial<Load>),
-      pair({ id: 'l2', aljexId: 'OPEN' }),
+      pair({ id: 'l2', aljexId: 'OPEN', customer: 'Batory Foods' }),
     ])
     await mount()
     expect(screen.getByText('BOOKED')).toBeTruthy()
@@ -565,22 +565,6 @@ describe('NEED RUBEN handoff visibility', () => {
     const row = screen.getByText('RUBENSENT').closest('tr')!
     expect(row.children[2].textContent).toContain('NEED DENNIS')
     expect(row.children[2].textContent).toContain('14:00')
-  })
-})
-
-describe('non-Batory ratecon-only prompt', () => {
-  it('the chip asks for ONE document — the ratecon — never the Batory screenshots', async () => {
-    loads.mockReturnValue([load({
-      aljexId: 'RCONLY', customer: 'Acme Freight',
-      stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })],
-    })])
-    await mount()
-    const row = screen.getByText('RCONLY').closest('tr')!
-    fireEvent.click(within(row.children[1] as HTMLElement).getByText('RATECON NEEDED'))
-    fireEvent.click(screen.getByText('CONFIRMED'))
-    expect(screen.getByLabelText(/Upload the ratecon/)).toBeTruthy()
-    expect(screen.queryByText(/Request email/)).toBeNull()
-    expect(screen.queryByText(/E2Open/)).toBeNull()
   })
 })
 
