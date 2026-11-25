@@ -249,7 +249,9 @@ import {
   isTruckloadMode,
   loadStatusFromStopTimes,
   shipmentStatusFromLoads,
+  loadStatusFromStopClock,
 } from '../../../src/lib/shipmentStatus'
+import { noticeId } from '../../../src/lib/shipmentNotices'
 import {
   INCIDENT_TYPES,
   MANUALLY_LOGGABLE_TYPES,
@@ -627,6 +629,7 @@ type Action =
   | 'SUBMIT_ORDER'
   | 'SET_SHIPMENT_STATUS'
   | 'SET_LOAD_STATUS'
+  | 'UNDO_DELIVERED'
   // Step R cutover. The two writes the one-record vocabulary needs: the customer a
   // shipment was never matched to, and the PRO a leg carries — `aljexId` is read-only
   // to every client token now, so this is the only way one ever changes.
@@ -851,6 +854,8 @@ const ADMIN_ONLY_ACTIONS: Record<string, true> = {
   RETAG_SHIPMENTS: true,
   SWEEP_POD_DELIVERIES: true,
   RESAMPLE_DELIVERED_LOADS: true,
+  // Ryne 2026-11-24: un-deliver a load somebody marked delivered by mistake; the app never moves a load backward otherwise.
+  UNDO_DELIVERED: true,
 }
 
 const QUOTES_PAGE_GROUP = 'page-quotes'
@@ -3473,6 +3478,96 @@ async function pullBackFromReviewIfNotDelivered(shipmentId: string, caller: Call
     console.error('[shipment-actions] pull back from Load Review failed', shipmentId, err instanceof Error ? err.message : String(err))
     return false
   }
+}
+
+/**
+ * Undo a delivery marked by mistake (Ryne 2026-11-24, PRO 20136). The app never moves a load backward on its own, so this is the one,
+ * deliberate way: owner/ADMIN only, a typed reason, and only while nothing depends on the delivery. Refused when the shipment is not
+ * DELIVERED, an order is invoiced or released to billing, a carrier bill exists, or a Delivered notice already went to the customer.
+ * The delivery stop's own arrival/departure times must be cleared first (they are what proves the status); each load then takes the
+ * status its stop clock shows (In transit when the truck left the pickup, else Dispatched or Booked), the shipment re-derives from the
+ * loads, and its delivered stamp, previous-status and Load Review push/hold fields are cleared so a real delivery pushes normally later.
+ */
+async function undoDelivered(input: Row, caller: Caller): Promise<Row> {
+  if (!caller.isAdmin) throw new Error('Forbidden: only an admin can undo a delivery')
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const reason = optionalString(input.reason, 500)
+  if (!reason) throw new Error('Undoing a delivery needs a reason')
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  assertNotVoided(shipment)
+  if (shipment.status !== 'DELIVERED') throw new Error(`This shipment is ${String(shipment.status)}, not Delivered`)
+
+  const orders = await queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  if (orders.some((o) => o.invoiceId || (o.arStatus && o.arStatus !== 'DOCS_NEEDED'))) {
+    throw new Error('This load is invoiced or already released to billing. Void the invoice and put it back to docs needed first.')
+  }
+  const assignments = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  if (assignments.some((a) => a.invoiceId)) throw new Error('A carrier bill exists on this shipment. Void the bill first.')
+  if (SHIPMENT_NOTICE_TABLE_NAME) {
+    const notice = await getById(SHIPMENT_NOTICE_TABLE_NAME, noticeId('MILESTONE', shipmentId, 'DELIVERED'))
+    if (notice && notice.status === 'SENT') throw new Error('A Delivered notice already went to the customer for this shipment.')
+  }
+
+  const loads = (await queryIndex(LOAD_TABLE_NAME, IDX_LOADS_BY_SHIPMENT, 'shipmentId', shipmentId)).filter((l) => l.status === 'DELIVERED')
+  if (loads.length === 0) throw new Error('No load on this shipment is Delivered')
+  const plans = loads.map((load) => {
+    const stops = readStops(load)
+    const hasAssignee = assignments.some((a) => a.loadId === load.id && a.status === 'ACTIVE')
+    const target = loadStatusFromStopClock(stopTimesOf(stops), hasAssignee)
+    if (target === 'DELIVERED') throw new Error('The delivery stop still has a departed time. Clear its arrival and departure times first.')
+    return { load, stops, target }
+  })
+
+  const now = nowIso()
+  const client = await getDataClient()
+  for (const { load, target } of plans) {
+    assertLoadWriteOk(
+      await client.models.Load.update({
+        id: String(load.id),
+        status: target,
+        statusChangedAt: now,
+        statusChangedBy: caller.email,
+        statusSource: 'USER',
+        deliveredAt: null,
+        updatedBy: caller.email,
+      }),
+      'Load update',
+    )
+    await excludeLaneSample(quoteDeps, String(load.id))
+  }
+  // The tracking rows the mistaken stamps wrote on the delivery stop go with them.
+  const eventDeletes: TransactWriteItem[] = []
+  for (const { load, stops } of plans) {
+    for (const stop of stops) {
+      if (stop.type !== 'delivery') continue
+      for (const event of ['ARRIVED', 'DEPARTED'] as const) {
+        const row = await getById(LOAD_CHECK_CALL_TABLE_NAME, stopEventId(String(load.id), String(stop.id), event))
+        if (row && row.source === 'MANUAL') eventDeletes.push(deleteItemTx(LOAD_CHECK_CALL_TABLE_NAME, String(row.id)))
+      }
+    }
+  }
+  if (eventDeletes.length > 0) await transact(eventDeletes, 'undo delivered tracking rows')
+
+  await storeRederiveShipmentStatus(store, shipmentId, caller)
+  const fresh = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!fresh) throw new Error(`Shipment not found: ${shipmentId}`)
+  await transact(
+    [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+      updatedBy: caller.email,
+      updatedAt: now,
+      version: (numberOrNull(fresh.version) ?? 1) + 1,
+    }, null, { remove: ['deliveredAt', 'previousStatus', 'loadReviewPushedAt', 'loadReviewPushedBy', 'loadReviewHeldAt', 'loadReviewHeldBy', 'loadReviewHeldNote'] })],
+    'undo delivered',
+  )
+  await writeAudit('SHIPMENT', shipmentId, 'UNDO_DELIVERED', caller, {
+    reason,
+    from: 'DELIVERED',
+    to: String(fresh.status),
+    loads: plans.map((p) => ({ loadId: String(p.load.id), to: p.target })),
+    clearedDeliveredAt: shipment.deliveredAt ?? null,
+  })
+  return readBundle(shipmentId) as unknown as Row
 }
 
 /**
@@ -10065,6 +10160,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return submitOrder(input, caller)
     case 'SET_SHIPMENT_STATUS':
       return setShipmentStatus(input, caller)
+    case 'UNDO_DELIVERED':
+      return undoDelivered(input, caller)
     case 'SET_LOAD_STATUS':
       return setLoadStatus(input, caller)
     case 'VOID_SHIPMENT':
