@@ -345,4 +345,24 @@ export function loadStatusFromStopTimes(
   return MOVEMENT_RANK[derived] > MOVEMENT_RANK[from] ? derived : from
 }
 
+/**
+ * What the stop clock proves, with no "never backwards" floor. Used only when an admin undoes a mistaken delivery (Ryne 2026-11-24, PRO 20136):
+ * departed the last delivery is Delivered, arrived there is Unloading, left the first pickup is In Transit, arrived at it is Loading, and with
+ * no stop time at all the load is Dispatched when somebody is on it, else Booked.
+ */
+export function loadStatusFromStopClock(
+  stops: StopTimesLike[],
+  hasAssignee: boolean,
+): LoadWorkflowStatus {
+  const ordered = [...stops].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+  const firstPickup = ordered.find((s) => s.type === 'pickup')
+  const deliveries = ordered.filter((s) => s.type === 'delivery')
+  const lastDelivery = deliveries[deliveries.length - 1]
+  if (stamped(lastDelivery?.departedAt)) return 'DELIVERED'
+  if (stamped(lastDelivery?.arrivedAt)) return 'UNLOADING'
+  if (stamped(firstPickup?.departedAt)) return 'IN_TRANSIT'
+  if (stamped(firstPickup?.arrivedAt)) return 'LOADING'
+  return hasAssignee ? 'DISPATCHED' : 'BOOKED'
+}
+
 const stamped = (v: string | null | undefined): boolean => !!(v ?? '').trim()

@@ -6168,6 +6168,72 @@ describe('READY_TO_INVOICE', () => {
         expect(invoiced.results[0].message).toMatch(/already invoiced/)
       })
 
+      describe('UNDO_DELIVERED (a delivery marked by mistake, Ryne 2026-11-24)', () => {
+        const stampDelivery = async (ids: DocIds, patch: Row) => {
+          const stops = JSON.parse(String(table(TABLES.load).get(ids.loadId)!.stops)) as Row[]
+          const delivery = stops.find((s) => s.type === 'delivery')!
+          await call('UPDATE_STOP', { loadId: ids.loadId, expectedUpdatedAt: table(TABLES.load).get(ids.loadId)!.updatedAt, op: 'SET_TIMES', stopId: delivery.id, patch }, ADMIN)
+        }
+
+        it('puts a delivered, unbilled load back on the road, clears the delivered and Load Review stamps, and audits the reason', async () => {
+          const ids = await reviewable()
+          await call('BATCH_SHIPMENT_TASK', { task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: [ids.shipmentId] }, REVIEWER)
+          await call('BATCH_SHIPMENT_TASK', { task: 'RETURN_TO_ACTIVE', shipmentIds: [ids.shipmentId] }, REVIEWER)
+          expect(table(TABLES.shipment).get(ids.shipmentId)!.status).toBe('DELIVERED')
+          await call('UNDO_DELIVERED', { shipmentId: ids.shipmentId, reason: 'Ryne confirmed not delivered' }, ADMIN)
+          const shipment = table(TABLES.shipment).get(ids.shipmentId)!
+          expect(shipment.status).toBe('DISPATCHED')
+          expect(table(TABLES.load).get(ids.loadId)!.status).toBe('DISPATCHED')
+          for (const field of ['deliveredAt', 'previousStatus', 'loadReviewPushedAt', 'loadReviewPushedBy', 'loadReviewHeldAt', 'loadReviewHeldBy', 'loadReviewHeldNote']) {
+            expect(shipment[field], field).toBeUndefined()
+          }
+          const audit = [...table(TABLES.audit).values()].find((row) => row.action === 'UNDO_DELIVERED')!
+          expect(String(audit.changes)).toContain('Ryne confirmed not delivered')
+          // The automatic sweep does not push an undelivered load, and a real delivery pushes again later.
+          expect(((await call('PUSH_READY_TO_LOAD_REVIEW', {}, ADMIN)) as { pushed: number }).pushed).toBe(0)
+        })
+
+        it('is In transit when the truck already left the pickup', async () => {
+          const ids = await reviewable()
+          const stops = JSON.parse(String(table(TABLES.load).get(ids.loadId)!.stops)) as Row[]
+          await call('UPDATE_STOP', { loadId: ids.loadId, expectedUpdatedAt: table(TABLES.load).get(ids.loadId)!.updatedAt, op: 'SET_TIMES', stopId: stops.find((s) => s.type === 'pickup')!.id, patch: { arrivedAt: '2026-03-02T13:00:00.000Z', departedAt: '2026-03-02T14:00:00.000Z' } }, ADMIN)
+          await call('UNDO_DELIVERED', { shipmentId: ids.shipmentId, reason: 'not delivered' }, ADMIN)
+          expect(table(TABLES.shipment).get(ids.shipmentId)!.status).toBe('IN_TRANSIT')
+        })
+
+        it('is admin only and needs a reason', async () => {
+          const ids = await reviewable()
+          await expect(call('UNDO_DELIVERED', { shipmentId: ids.shipmentId, reason: 'x' }, REVIEWER)).rejects.toThrow(/Forbidden/)
+          await expect(call('UNDO_DELIVERED', { shipmentId: ids.shipmentId }, ADMIN)).rejects.toThrow(/needs a reason/)
+          expect(table(TABLES.shipment).get(ids.shipmentId)!.status).toBe('DELIVERED')
+        })
+
+        it('refuses while the delivery stop still has its departed time', async () => {
+          const ids = await reviewable()
+          await stampDelivery(ids, { arrivedAt: '2026-03-02T15:00:00.000Z', departedAt: '2026-03-02T16:00:00.000Z' })
+          await expect(call('UNDO_DELIVERED', { shipmentId: ids.shipmentId, reason: 'x' }, ADMIN)).rejects.toThrow(/Clear its arrival and departure/)
+        })
+
+        it('refuses once the load is invoiced or released to billing, or has a carrier bill, or the customer was told', async () => {
+          const ids = await reviewable()
+          const order = table(TABLES.order).get(ids.orderId)!
+          table(TABLES.order).set(ids.orderId, { ...order, arStatus: 'UNBILLED' })
+          await expect(call('UNDO_DELIVERED', { shipmentId: ids.shipmentId, reason: 'x' }, ADMIN)).rejects.toThrow(/invoiced or already released/)
+          table(TABLES.order).set(ids.orderId, { ...order, invoiceId: 'inv-1', arStatus: 'UNPAID' })
+          await expect(call('UNDO_DELIVERED', { shipmentId: ids.shipmentId, reason: 'x' }, ADMIN)).rejects.toThrow(/invoiced or already released/)
+          table(TABLES.order).set(ids.orderId, order)
+          table(TABLES.notice).set(`ms:${ids.shipmentId}:DELIVERED`, { id: `ms:${ids.shipmentId}:DELIVERED`, status: 'SENT' })
+          await expect(call('UNDO_DELIVERED', { shipmentId: ids.shipmentId, reason: 'x' }, ADMIN)).rejects.toThrow(/Delivered notice already went/)
+          expect(table(TABLES.shipment).get(ids.shipmentId)!.status).toBe('DELIVERED')
+        })
+
+        it('refuses a shipment that is not Delivered', async () => {
+          const ids = await reviewable()
+          await call('UNDO_DELIVERED', { shipmentId: ids.shipmentId, reason: 'x' }, ADMIN)
+          await expect(call('UNDO_DELIVERED', { shipmentId: ids.shipmentId, reason: 'x' }, ADMIN)).rejects.toThrow(/not Delivered/)
+        })
+      })
+
       it('refuses the tenth shipment of a batch before any row is touched', async () => {
         const ids = await reviewable()
         const shipmentIds = Array.from({ length: 10 }, () => ids.shipmentId)
