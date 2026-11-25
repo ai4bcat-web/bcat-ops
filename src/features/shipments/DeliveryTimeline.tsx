@@ -14,13 +14,13 @@ import './deliveryTimeline.css'
 const X0 = 28
 const STEP = 66
 const Y = 20
-const dotX = (n: number) => X0 + n * STEP
+const dotX = (n: number, count = 5) => X0 + (n * 4 * STEP) / Math.max(1, count - 1)
 const PARKED_X = 10
 
 /** Where the truck is drawn: parked left of the first dot until the load is at the pickup. */
 function truckX(r: PhaseResult): number {
   if (r.phase === 'DRAFT' || r.phase === 'NOT_COVERED' || r.phase === 'COVERED' || r.phase === 'RC_SENT' || r.phase === 'DISPATCHED' || r.phase === 'NOT_DISPATCHED' || r.phase === 'EN_ROUTE_PICKUP' || r.phase === 'VOIDED') return PARKED_X
-  return dotX(r.truckAt)
+  return dotX(r.truckAt, r.checkpoints.length)
 }
 
 function truckTitle(r: PhaseResult): string {
@@ -34,7 +34,9 @@ function DeliveryTimelineImpl({ result: r }: { result: PhaseResult }) {
   const x = truckX(r)
   const moving = r.phase === 'IN_TRANSIT' || r.phase === 'DEPARTED'
   const caption = r.caption ? `${r.caption}` : r.label
-  const showPhase = r.caption && !/^(Draft|Not covered|Covered|RC sent|Dispatched|Not dispatched|Voided)$/.test(r.caption)
+  const billing = r.checkpoints.length === 4
+  const showPhase = !billing && r.caption && !/^(Draft|Not covered|Covered|RC sent|Dispatched|Not dispatched|Voided)$/.test(r.caption)
+  const xs = r.checkpoints.map((_, n) => dotX(n, r.checkpoints.length))
   return (
     <div className="tms-dt" data-testid="delivery-timeline" data-phase={r.phase} data-tone={r.tone} data-voided={r.phase === 'VOIDED'}>
       <span className="tms-fg-label" data-testid="delivery-caption">
@@ -43,14 +45,14 @@ function DeliveryTimelineImpl({ result: r }: { result: PhaseResult }) {
       <svg
         className="tms-dt-svg" viewBox="0 0 304 32" width="304" height="32" role="img" aria-label={r.summary} data-testid="delivery-timeline-svg"
       >
-        {CHECKPOINT_X.slice(0, -1).map((from, n) => (
-          <line key={n} className="tms-dt-seg" data-on={r.checkpoints[n + 1]?.reached ? 'true' : 'false'} x1={from} y1={Y} x2={CHECKPOINT_X[n + 1]} y2={Y} data-testid={`dt-seg-${n}`} />
+        {xs.slice(0, -1).map((from, n) => (
+          <line key={n} className="tms-dt-seg" data-on={r.checkpoints[n + 1]?.reached ? 'true' : 'false'} x1={from} y1={Y} x2={xs[n + 1]} y2={Y} data-testid={`dt-seg-${n}`} />
         ))}
         {moving ? <line className="tms-dt-motion" x1={Math.max(X0, x - 34)} y1={Y} x2={x - 12} y2={Y} /> : null}
         {r.checkpoints.map((c, n) => (
           <g key={c.key} data-testid={`dt-cp-${c.key}`} data-reached={c.reached}>
             <title>{c.reached && c.at ? `${c.label}: ${formatBoardDateTime(c.at)}` : c.reached ? `${c.label}: reached` : `${c.label}: not yet`}</title>
-            <circle className="tms-dt-dot" data-on={c.reached ? 'true' : 'false'} cx={dotX(n)} cy={Y} r={4} />
+            <circle className="tms-dt-dot" data-on={c.reached ? 'true' : 'false'} cx={xs[n]} cy={Y} r={4} />
           </g>
         ))}
         <g className="tms-dt-truck" data-tone={r.tone} data-testid="dt-truck" transform={`translate(${x - 10} ${Y - 15})`}>
@@ -65,7 +67,5 @@ function DeliveryTimelineImpl({ result: r }: { result: PhaseResult }) {
     </div>
   )
 }
-
-const CHECKPOINT_X = [0, 1, 2, 3, 4].map(dotX)
 
 export const DeliveryTimeline = memo(DeliveryTimelineImpl)

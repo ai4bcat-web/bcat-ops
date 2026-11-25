@@ -65,4 +65,42 @@ describe('DeliveryTimeline', () => {
     show()
     expect(screen.getByRole('img', { name: /Not covered|Covered|RC sent|Dispatched|Not dispatched|Heading|Departed|transit|site|Delivered|Draft/ })).toBeTruthy()
   })
+
+  describe('after delivery, the line reads billing', () => {
+    const delivered = { deliveredAt: iso(-60), stops: [pu({ arrivedAt: iso(-300), departedAt: iso(-280) }), de({ arrivedAt: iso(-90), departedAt: iso(-60) })] }
+    const billed = () => ['DELIVERED', 'LOAD_REVIEW', 'INVOICED', 'PAID'].filter((k) => screen.getByTestId(`dt-cp-${k}`).getAttribute('data-reached') === 'true')
+    it('delivered with no billing yet stays on the delivery line', () => {
+      show(delivered)
+      expect(label()).toBe('Delivered')
+      expect(screen.queryByTestId('dt-cp-INVOICED')).toBeNull()
+      expect(reached()).toEqual(['AT_PICKUP', 'DEPARTED', 'IN_TRANSIT', 'AT_DELIVERY', 'DELIVERED'])
+    })
+    it('invoiced load says Invoiced, not Delivered', () => {
+      show({ ...delivered, billing: { stage: 'INVOICED' } })
+      expect(label()).toBe('Invoiced')
+      expect(screen.getByTestId('delivery-caption').textContent).toBe('Invoiced')
+      expect(billed()).toEqual(['DELIVERED', 'LOAD_REVIEW', 'INVOICED'])
+      expect(screen.getByTestId('delivery-timeline').dataset.phase).toBe('INVOICED')
+    })
+    it('a factored invoice says so', () => {
+      show({ ...delivered, billing: { stage: 'INVOICED', factored: true } })
+      expect(screen.getByTestId('delivery-caption').textContent).toBe('Invoiced · Factored')
+    })
+    it('load review and paid', () => {
+      const { unmount } = show({ ...delivered, billing: { stage: 'LOAD_REVIEW' } })
+      expect(billed()).toEqual(['DELIVERED', 'LOAD_REVIEW'])
+      expect(screen.getByTestId('delivery-caption').textContent).toBe('In Load Review')
+      unmount()
+      show({ ...delivered, billing: { stage: 'PAID' } })
+      expect(billed()).toEqual(['DELIVERED', 'LOAD_REVIEW', 'INVOICED', 'PAID'])
+      expect(label()).toBe('Paid')
+    })
+    it('billing is ignored until the load is delivered, and a voided load stays voided', () => {
+      show({ stops: [pu({ arrivedAt: iso(-100), departedAt: iso(-60) }), de()], billing: { stage: 'INVOICED' } })
+      expect(label()).toBe('In transit')
+      const { unmount } = show({ ...delivered, voided: true, billing: { stage: 'PAID' } })
+      expect(screen.getAllByTestId('delivery-timeline')[1]!.dataset.phase).toBe('VOIDED')
+      unmount()
+    })
+  })
 })
