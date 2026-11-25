@@ -18,9 +18,18 @@ import { carrierPhase, type CarrierPhase } from './carrierLegs'
 
 export type DeliveryPhase =
   | 'DRAFT' | 'NOT_COVERED' | 'COVERED' | 'RC_SENT' | 'DISPATCHED' | 'NOT_DISPATCHED' | 'EN_ROUTE_PICKUP'
-  | 'AT_PICKUP' | 'DEPARTED' | 'IN_TRANSIT' | 'AT_DELIVERY' | 'DELIVERED' | 'VOIDED'
+  | 'AT_PICKUP' | 'DEPARTED' | 'IN_TRANSIT' | 'AT_DELIVERY' | 'DELIVERED' | 'LOAD_REVIEW' | 'INVOICED' | 'PAID' | 'VOIDED'
 
-export type CheckpointKey = 'AT_PICKUP' | 'DEPARTED' | 'IN_TRANSIT' | 'AT_DELIVERY' | 'DELIVERED'
+export type CheckpointKey = 'AT_PICKUP' | 'DEPARTED' | 'IN_TRANSIT' | 'AT_DELIVERY' | 'DELIVERED' | 'LOAD_REVIEW' | 'INVOICED' | 'PAID'
+
+/** Once the truck has delivered, the line reads the money side: Delivered, Load Review, Invoiced, Paid. */
+export const BILLING_CHECKPOINTS: readonly { key: CheckpointKey; label: string }[] = [
+  { key: 'DELIVERED', label: 'Delivered' },
+  { key: 'LOAD_REVIEW', label: 'Load Review' },
+  { key: 'INVOICED', label: 'Invoiced' },
+  { key: 'PAID', label: 'Paid' },
+]
+const BILLING_PHASES: readonly DeliveryPhase[] = ['DELIVERED', 'LOAD_REVIEW', 'INVOICED', 'PAID']
 
 export const CHECKPOINTS: readonly { key: CheckpointKey; label: string }[] = [
   { key: 'AT_PICKUP', label: 'On site (pickup)' },
@@ -45,6 +54,9 @@ export const PHASE_LABEL: Record<DeliveryPhase, string> = {
   IN_TRANSIT: 'In transit',
   AT_DELIVERY: 'On site (delivery)',
   DELIVERED: 'Delivered',
+  LOAD_REVIEW: 'Load Review',
+  INVOICED: 'Invoiced',
+  PAID: 'Paid',
   VOIDED: 'Voided',
 }
 
@@ -78,6 +90,11 @@ export interface PhaseInput {
   /** Latest position the load reported, if any. */
   lastFix?: { at: string; place?: string | null } | null
   openIncidents?: number | null
+  /**
+   * How far billing has got for a delivered load (the order's lifecycle stage), so the line can say Invoiced or Paid
+   * instead of stopping at Delivered. Ignored until the load is delivered. Absent (the Shipments board) = delivery only.
+   */
+  billing?: { stage: 'LOAD_REVIEW' | 'INVOICED' | 'PAID'; factored?: boolean } | null
   /** Minutes the current ETA is past the appointment, when tracking computed it. */
   etaLateMinutes?: number | null
   nowMs: number
@@ -180,15 +197,15 @@ const STATUS_PHASE: Partial<Record<ShipmentStatus, DeliveryPhase>> = {
 /** The truck stands on the checkpoint, or between two while moving; 0 = parked at the left end. */
 const TRUCK_AT: Record<DeliveryPhase, number> = {
   DRAFT: 0, NOT_COVERED: 0, COVERED: 0, RC_SENT: 0, DISPATCHED: 0, NOT_DISPATCHED: 0, EN_ROUTE_PICKUP: 0, AT_PICKUP: 0, DEPARTED: 1, IN_TRANSIT: 2,
-  AT_DELIVERY: 3, DELIVERED: 4, VOIDED: 0,
+  AT_DELIVERY: 3, DELIVERED: 4, LOAD_REVIEW: 4, INVOICED: 4, PAID: 4, VOIDED: 0,
 }
 const REACHED: Record<DeliveryPhase, number> = {
   DRAFT: 0, NOT_COVERED: 0, COVERED: 0, RC_SENT: 0, DISPATCHED: 0, NOT_DISPATCHED: 0, EN_ROUTE_PICKUP: 0, AT_PICKUP: 1, DEPARTED: 2, IN_TRANSIT: 3,
-  AT_DELIVERY: 4, DELIVERED: 5, VOIDED: 0,
+  AT_DELIVERY: 4, DELIVERED: 5, LOAD_REVIEW: 5, INVOICED: 5, PAID: 5, VOIDED: 0,
 }
 
 function lateReason(phase: DeliveryPhase, stop: PhaseStop | undefined, now: number, etaLateMinutes: number | null | undefined): string | null {
-  if (phase === 'DELIVERED' || !stop) return null
+  if (BILLING_PHASES.includes(phase) || !stop) return null
   const end = windowEnd(stop)
   const where = stop.type === 'delivery' ? 'delivery' : 'pickup'
   if (end !== null) {
@@ -239,12 +256,21 @@ function phaseOfStops(i: PhaseInput, stops: readonly PhaseStop[]): PhaseResult {
         : c.key === 'DELIVERED' ? (i.deliveredAt ?? [...stops].reverse().find((s) => s.type === 'delivery')?.departedAt ?? null)
         : (phase === 'IN_TRANSIT' ? (i.lastFix?.at ?? null) : null),
     }))
+  // The billing line: the checkpoints reached are Delivered plus however far billing has got.
+  const billingCheckpoints = (phase: DeliveryPhase): CheckpointState[] => {
+    const reached = BILLING_PHASES.indexOf(phase) + 1
+    return BILLING_CHECKPOINTS.map((c, n) => ({
+      key: c.key, label: c.label, reached: n < reached,
+      at: n < reached && c.key === 'DELIVERED' ? (i.deliveredAt ?? [...stops].reverse().find((s) => s.type === 'delivery')?.departedAt ?? null) : null,
+    }))
+  }
   const done = (phase: DeliveryPhase, stopIndex: number, caption: string, tone: PhaseTone, late: string | null): PhaseResult => {
     const label = PHASE_LABEL[phase]
     const cap = caption
+    const billingLine = phase !== 'DELIVERED' && BILLING_PHASES.includes(phase)
     return {
-      phase, label, reachedCount: REACHED[phase], stopIndex, stopCount, caption: cap, tone, late: late !== null, reason: late,
-      checkpoints: checkpoints(REACHED[phase], stops[stopIndex], phase), truckAt: TRUCK_AT[phase],
+      phase, label, reachedCount: billingLine ? BILLING_PHASES.indexOf(phase) + 1 : REACHED[phase], stopIndex, stopCount, caption: cap, tone, late: late !== null, reason: late,
+      checkpoints: billingLine ? billingCheckpoints(phase) : checkpoints(REACHED[phase], stops[stopIndex], phase), truckAt: billingLine ? BILLING_PHASES.indexOf(phase) : TRUCK_AT[phase],
       lastFix: i.lastFix ? { at: i.lastFix.at, place: i.lastFix.place ?? null } : null,
       summary: summaryOf(label, cap, stopIndex, stopCount),
     }
@@ -267,6 +293,11 @@ function phaseOfStops(i: PhaseInput, stops: readonly PhaseStop[]): PhaseResult {
     return done('COVERED', 0, 'Covered', 'grey', null)
   }
   // Status alone cannot say WHICH stop: no stop caption without stop events.
+  if (ev.phase === 'DELIVERED' && i.billing) {
+    const phase: DeliveryPhase = i.billing.stage
+    const caption = phase === 'INVOICED' && i.billing.factored ? 'Invoiced · Factored' : phase === 'LOAD_REVIEW' ? 'In Load Review' : ''
+    return done(phase, ev.stop, caption, 'green', null)
+  }
   const stopCaption = stopCount > 2 && ev.phase !== 'DELIVERED' && !ev.fromStatus ? `Stop ${ev.stop + 1} of ${stopCount}` : ''
   const reason = (i.openIncidents ?? 0) > 0
     ? `Open exception (${i.openIncidents})`
@@ -278,5 +309,5 @@ function phaseOfStops(i: PhaseInput, stops: readonly PhaseStop[]): PhaseResult {
 /** Compact board text: "In transit · Stop 1/2". Parked states are just their caption. */
 export function deliveryPhaseText(r: PhaseResult): string {
   if (r.phase === 'DRAFT' || r.phase === 'VOIDED' || r.phase === 'NOT_COVERED' || r.phase === 'COVERED' || r.phase === 'RC_SENT' || r.phase === 'DISPATCHED' || r.phase === 'NOT_DISPATCHED') return r.label
-  return r.stopCount > 2 && r.phase !== 'DELIVERED' ? `${r.label} · Stop ${r.stopIndex + 1}/${r.stopCount}` : r.label
+  return r.stopCount > 2 && !BILLING_PHASES.includes(r.phase) ? `${r.label} · Stop ${r.stopIndex + 1}/${r.stopCount}` : r.label
 }

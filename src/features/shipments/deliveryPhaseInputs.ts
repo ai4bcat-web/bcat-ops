@@ -4,6 +4,7 @@
  */
 import type { PhaseInput, PhaseStop } from '@/lib/deliveryPhase'
 import type { Stop } from '@/types'
+import { stageOfBundle } from '@/lib/shipmentStage'
 import type { LoadCarrierRecord, ShipmentBundle, ShipmentStatus } from '@/types/tms'
 import type { ShipmentRow } from './shipmentViews'
 
@@ -23,6 +24,15 @@ function liveCarriersOf(carriers: readonly LoadCarrierRecord[]): PhaseInput['car
   return live.length >= 2 ? live.map((c) => ({ name: c.carrierName, legStopIds: c.legStopIds })) : undefined
 }
 
+/** How far billing has got, from the same stage the summary rail and the Next chip read; none before Load Review. */
+function billingOfBundle(bundle: ShipmentBundle): PhaseInput['billing'] {
+  const stage = stageOfBundle(bundle).stage
+  if (stage === 'LOAD_REVIEW') return { stage }
+  if (stage === 'BILLED') return { stage: 'INVOICED', factored: Boolean(bundle.orders[0]?.factoringItemId) }
+  if (stage === 'PAID') return { stage }
+  return null
+}
+
 export function phaseInputOfBundle(bundle: ShipmentBundle | null, nowMs: number): PhaseInput {
   if (!bundle) return { create: true, covered: false, stops: [], nowMs }
   const { shipment } = bundle
@@ -38,6 +48,7 @@ export function phaseInputOfBundle(bundle: ShipmentBundle | null, nowMs: number)
     carriers: liveCarriersOf(bundle.loadCarriers.filter((c) => c.loadId === load?.id)),
     lastFix: load?.lastKnownAt ? { at: load.lastKnownAt, place: place || null } : null,
     openIncidents: load?.openIncidentCount,
+    billing: billingOfBundle(bundle),
     nowMs,
   }
 }
