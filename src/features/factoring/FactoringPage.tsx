@@ -54,7 +54,8 @@ import { InvoiceManuallyDialog } from './InvoiceManuallyDialog'
 import { CustomerPaidCell, CustomerPaidDialog } from './CustomerPaidCell'
 import { formatPaidOn } from './formatPaidOn'
 import { ResendToOtrDialog } from './ResendToOtrDialog'
-import { offersResend } from '@/lib/factoringResubmit'
+import { ReleaseFromOtrDialog } from './ReleaseFromOtrDialog'
+import { offersRelease, offersResend } from '@/lib/factoringResubmit'
 import { chicagoDateStr } from '@/lib/date'
 import { FactoringCards } from './FactoringCards'
 import { useOpenInvoices } from '@/hooks/useOpenInvoices'
@@ -479,6 +480,8 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   /** The row whose Customer paid dialog / Send to OTR again confirmation is open. */
   const [paidEditId, setPaidEditId] = useState<string | null>(null)
   const [resendId, setResendId] = useState<string | null>(null)
+  /** The row whose Release from OTR (invoice deleted at OTR) dialog is open. */
+  const [releaseId, setReleaseId] = useState<string | null>(null)
   /** The OTR-rejected row whose Move to manual invoice confirmation is open. */
   const [moveManualId, setMoveManualId] = useState<string | null>(null)
   /** The queue row whose "Change method" dialog is open (an unsent draft can go by hand instead). */
@@ -577,6 +580,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const manualMoveItem = manualMoveId ? items.find((i) => i.id === manualMoveId) ?? null : null
   const paidEditItem = paidEditId ? items.find((i) => i.id === paidEditId) ?? null : null
   const resendItem = resendId ? items.find((i) => i.id === resendId) ?? null : null
+  const releaseItem = releaseId ? items.find((i) => i.id === releaseId) ?? null : null
   const moveManualItem = moveManualId ? items.find((i) => i.id === moveManualId) ?? null : null
   const openItem = openId ? items.find((i) => i.id === openId) ?? null : null
   const manualPanel = openItem?.status === 'MANUAL_INVOICE' || openItem?.status === 'INVOICED_MANUALLY'
@@ -835,6 +839,18 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
               Resend to OTR
             </TmsButton>
           )}
+          {isAdmin && offersRelease(item) && (
+            <TmsButton
+              size="sm"
+              variant="secondary"
+              aria-label={`Release PRO ${item.proNumber} from OTR`}
+              title="Invoice deleted at OTR: put this PRO back in Need to factor. Sends nothing to OTR."
+              disabled={pendingIds.has(item.id)}
+              onClick={() => setReleaseId(item.id)}
+            >
+              Release from OTR
+            </TmsButton>
+          )}
           {canDelete && (
             <TmsIconButton
               aria-label={`Delete queue row for PRO ${item.proNumber}`}
@@ -1054,6 +1070,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
       {paidEditItem && <CustomerPaidDialog item={paidEditItem} onClose={() => setPaidEditId(null)} onDone={refresh} />}
       {resendItem && <ResendToOtrDialog item={resendItem} onClose={() => setResendId(null)} onDone={refresh} />}
+      {releaseItem && <ReleaseFromOtrDialog item={releaseItem} onClose={() => setReleaseId(null)} onDone={refresh} />}
       {changeMethodId && fullInvoiceByItemId.get(changeMethodId) && (
         <ChangeInvoiceMethodDialog
           invoice={fullInvoiceByItemId.get(changeMethodId)!}

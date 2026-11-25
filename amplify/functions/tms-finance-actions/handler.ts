@@ -31,7 +31,7 @@ import {
   voidOtrDeletedInvoice,
 } from './invoices'
 import { acceptDifferences, createCredit, recordPayment, reversePayment, writeOffInvoice } from './payments'
-import { previewFactor, previewFactorReady, sendToFactor } from './factor'
+import { previewFactor, previewFactorReady, releaseDeadOtrSubmission, sendToFactor } from './factor'
 import { moveToManualInvoice } from './otrRejected'
 import { setInvoiceMethod, syncCustomerMethod } from './invoiceMethod'
 import { releaseToBilling, sendInvoice, syncFactoringChange } from './release'
@@ -111,6 +111,7 @@ type Action =
   | 'MARK_SENT'
   | 'VOID_INVOICE'
   | 'VOID_OTR_DELETED_INVOICE'
+  | 'RELEASE_DEAD_OTR_SUBMISSION'
   | 'RECORD_PAYMENT'
   | 'CREATE_CREDIT'
   | 'WRITE_OFF'
@@ -333,6 +334,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return voidInvoice(input, caller)
     case 'VOID_OTR_DELETED_INVOICE':
       return voidOtrDeletedInvoice(input, caller)
+    case 'RELEASE_DEAD_OTR_SUBMISSION':
+      return releaseDeadOtrSubmission(input, caller)
     case 'RECORD_PAYMENT':
       return recordPayment(input, caller) as unknown as Promise<Row>
     case 'CREATE_CREDIT':

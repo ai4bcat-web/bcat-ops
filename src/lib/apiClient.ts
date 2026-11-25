@@ -7934,6 +7934,11 @@ export async function voidOtrDeletedInvoice(input: { invoiceId: string; reason: 
   return financeAction<{ invoice: InvoiceRecord }>('VOID_OTR_DELETED_INVOICE', input)
 }
 
+/** A queue row whose OTR invoice was deleted at OTR (status Dead, never funded): back to Need to factor so Send to Factor can link the new bill. Admin only, reason required, calls nothing at OTR. */
+export async function releaseDeadOtrSubmission(input: { proNumber: string; reason: string }): Promise<{ factoringItem: FactoringItem }> {
+  return financeAction<{ factoringItem: FactoringItem }>('RELEASE_DEAD_OTR_SUBMISSION', input)
+}
+
 /**
  * What a posted row leaves behind: the ArPayment itself and every invoice it moved.
  *

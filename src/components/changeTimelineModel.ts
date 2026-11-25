@@ -37,6 +37,7 @@ const EVENT_LABEL: Record<string, { title: string; tone: TimelineTone }> = {
   WRITE_OFF: { title: 'Written off', tone: 'red' },
   VOID_INVOICE: { title: 'Invoice voided', tone: 'red' },
   VOID_OTR_DELETED_INVOICE: { title: 'Invoice voided (deleted at OTR)', tone: 'red' },
+  RELEASE_DEAD_OTR_SUBMISSION: { title: 'Released from OTR (deleted there)', tone: 'amber' },
   CARRIER_BILL_DELETED: { title: 'Carrier bill deleted', tone: 'red' },
   CARRIER_BILL_VOIDED: { title: 'Carrier bill voided', tone: 'red' },
   CARRIER_BILL_AMOUNT_CHANGED: { title: 'Carrier bill amount changed', tone: 'amber' },

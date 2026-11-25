@@ -73,3 +73,11 @@ export function withPriorInvoice(
 export function sameInvoiceBack(oldId: string | null | undefined, createdId: string | number): boolean {
   return String(oldId ?? '').trim() === String(createdId).trim()
 }
+
+/** Admin "Release from OTR": waiting at OTR, OTR's last word is Dead (invoice deleted there), and it was never funded. */
+export function offersRelease(item: Pick<FactoringItem, 'status' | 'otrInvoiceId' | 'otrStatus' | 'otrScheduleId'> & { factoredAt?: string | null }): boolean {
+  if (!String(item.otrInvoiceId ?? '').trim()) return false
+  if (item.status !== 'PENDING_WITH_OTR' && item.status !== 'NEED_TO_FACTOR') return false
+  if (item.factoredAt || String(item.otrScheduleId ?? '').trim()) return false
+  return otrStatusMeta(item.otrStatus)?.code === 4
+}

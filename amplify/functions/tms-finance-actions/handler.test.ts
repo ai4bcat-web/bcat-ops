@@ -1345,6 +1345,65 @@ describe('VOID_INVOICE', () => {
       await expect(call('VOID_OTR_DELETED_INVOICE', { invoiceId, reason: 'x' })).rejects.toThrow(/reverse the payment first/i)
     })
   })
+
+  describe('RELEASE_DEAD_OTR_SUBMISSION (OTR invoice deleted, new bill to issue)', () => {
+    /** The PRO 20136 state: invoice voided as deleted-at-OTR, then OTR's sync put the row back to waiting with status Dead. */
+    async function deadRow(over: Record<string, unknown> = {}) {
+      const { invoiceId } = await generate()
+      await call('SEND_TO_FACTOR', { invoiceId })
+      const row = table(TABLES.factoring).get('S000001-1')!
+      table(TABLES.factoring).set('S000001-1', { ...row, status: 'PENDING_WITH_OTR', otrInvoiceId: '99123', otrStatus: '1', otrSubmittedAt: '2026-10-01T00:00:00.000Z', otrSubmittedBy: 'ryne', otrAmount: 60000, otrDocsUploaded: { POD: true } })
+      await call('VOID_OTR_DELETED_INVOICE', { invoiceId, reason: 'Deleted at OTR' })
+      table(TABLES.factoring).set('S000001-1', { ...table(TABLES.factoring).get('S000001-1')!, status: 'PENDING_WITH_OTR', otrStatus: '4', ...over })
+      return 'S000001-1'
+    }
+
+    it('puts the row back to Need to factor, clears the OTR fields and keeps the old invoice in its history', async () => {
+      const id = await deadRow()
+      await call('RELEASE_DEAD_OTR_SUBMISSION', { proNumber: id, reason: 'Re-factor, deleted at OTR' })
+      const row = table(TABLES.factoring).get(id)!
+      expect(row.status).toBe('NEED_TO_FACTOR')
+      for (const k of ['otrInvoiceId', 'otrStatus', 'otrSubmittedAt', 'otrSubmittedBy', 'otrAmount', 'otrDocsUploaded', 'invoiceId']) expect(row[k]).toBeUndefined()
+      expect(row.otrPriorInvoices).toMatchObject([{ otrInvoiceId: '99123', otrStatus: '4', replacedBy: 'admin@bcatcorp.com' }])
+    })
+
+    it('lets Send to Factor link a new invoice onto the released row, and refuses it before the release', async () => {
+      const id = await deadRow()
+      const second = await generate()
+      await expect(call('SEND_TO_FACTOR', { invoiceId: second.invoiceId })).rejects.toThrow(/already submitted to OTR as invoice 99123/)
+      await call('RELEASE_DEAD_OTR_SUBMISSION', { proNumber: id, reason: 'Re-factor' })
+      await call('SEND_TO_FACTOR', { invoiceId: second.invoiceId })
+      expect(table(TABLES.factoring).get(id)).toMatchObject({ status: 'NEED_TO_FACTOR', invoiceId: second.invoiceId })
+      expect(table(TABLES.factoring).get(id)!.otrInvoiceId).toBeUndefined()
+    })
+
+    it('is admin only and needs a reason', async () => {
+      const id = await deadRow()
+      await expect(call('RELEASE_DEAD_OTR_SUBMISSION', { proNumber: id, reason: 'x' }, JENNY)).rejects.toThrow(/only an admin/)
+      await expect(call('RELEASE_DEAD_OTR_SUBMISSION', { proNumber: id })).rejects.toThrow(/needs a reason/)
+      expect(table(TABLES.factoring).get(id)!.otrInvoiceId).toBe('99123')
+    })
+
+    it('refuses while OTR still holds it as live, or once it was funded', async () => {
+      const live = await deadRow({ otrStatus: '1' })
+      await expect(call('RELEASE_DEAD_OTR_SUBMISSION', { proNumber: live, reason: 'x' })).rejects.toThrow(/still holds invoice 99123 as Pending/)
+      table(TABLES.factoring).set(live, { ...table(TABLES.factoring).get(live)!, otrStatus: '4', factoredAt: '2026-10-02T00:00:00.000Z' })
+      await expect(call('RELEASE_DEAD_OTR_SUBMISSION', { proNumber: live, reason: 'x' })).rejects.toThrow(/already funded/)
+      expect(table(TABLES.factoring).get(live)!.otrInvoiceId).toBe('99123')
+    })
+
+    it('refuses a row still tied to a live invoice, and a row never submitted', async () => {
+      const id = await deadRow()
+      const row = table(TABLES.factoring).get(id)!
+      const live = [...table(TABLES.invoice).values()][0] as { id: string }
+      table(TABLES.invoice).set(live.id, { ...(table(TABLES.invoice).get(live.id)!), status: 'ISSUED' })
+      table(TABLES.factoring).set(id, { ...row, invoiceId: live.id })
+      await expect(call('RELEASE_DEAD_OTR_SUBMISSION', { proNumber: id, reason: 'x' })).rejects.toThrow(/void that invoice first/)
+      const { otrInvoiceId: _drop, ...never } = row
+      table(TABLES.factoring).set(id, never)
+      await expect(call('RELEASE_DEAD_OTR_SUBMISSION', { proNumber: id, reason: 'x' })).rejects.toThrow(/never submitted to OTR/)
+    })
+  })
 })
 
 // ── payments ────────────────────────────────────────────────────────────────
