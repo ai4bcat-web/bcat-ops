@@ -13,8 +13,8 @@ const batory = { customer: 'BATORY FOODS' } as Load
 const acme = { customer: 'Acme Freight' } as Load
 
 describe('apptWorkflowStatus', () => {
-  it('non-Batory: RATECON NEEDED until the ratecon is on the load, then confirmed', () => {
-    expect(apptWorkflowStatus(stop(), acme)).toBe('ratecon_needed')
+  it('non-Batory: always confirmed — the load was built from its rate con, whether or not the load itself holds the key', () => {
+    expect(apptWorkflowStatus(stop(), acme)).toBe('confirmed')
     expect(apptWorkflowStatus(stop(), { ...acme, rateConfirmKey: 'rate-confirms/x' } as Load)).toBe('confirmed')
   })
 

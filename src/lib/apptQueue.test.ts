@@ -66,10 +66,10 @@ describe('apptQueue', () => {
     expect(rowOutstanding(rows[0])).toBe(false)
   })
 
-  it('a booked non-Batory shipment WITHOUT a ratecon is still outstanding', () => {
+  it('a booked non-Batory shipment is settled even when the load holds no ratecon key (the rate con is filed as a shipment document)', () => {
     const rows = apptQueue([load({ stops: [stop(), stop({ id: 's2', type: 'delivery' })] })])
-    expect(rows[0].pickupStatus).toBe('ratecon_needed')
-    expect(rowOutstanding(rows[0])).toBe(true)
+    expect(rows[0].pickupStatus).toBe('confirmed')
+    expect(rowOutstanding(rows[0])).toBe(false)
   })
 
   it('is empty only when there are no loads at all', () => {
@@ -151,7 +151,7 @@ describe('apptQueue', () => {
         stop({ id: 's1', apptType: 'exact', appt: fromDateTimeInput('2099-08-20T09:00') }),
         stop({ id: 's2', type: 'delivery', apptType: 'exact', appt: fromDateTimeInput('2099-08-21T14:00') }),
       ] }),
-      load({ id: 'l2', stops: [stop({ apptType: 'tbd', appt: fromDateInput('2099-08-20') })] }),
+      load({ id: 'l2', customer: 'Batory Foods', stops: [stop({ apptType: 'tbd', appt: fromDateInput('2099-08-20') })] }),
     ]
     const rows = apptQueue(loadsIn)
     expect(rows.map((r) => r.loadId)).toEqual(['l2', 'l1'])
@@ -189,13 +189,13 @@ describe('apptQueueCount', () => {
   it('counts loads (not stops) awaiting an appointment', () => {
     expect(apptQueueCount([
       settled('a'),
-      load({ id: 'b', stops: [stop({ id: 'bp', apptType: 'tbd', appt: FUT })] }),
-      load({ id: 'c', stops: [stop({ id: 'cp', apptType: 'tbd', appt: FUT }), stop({ id: 'cd', type: 'delivery', apptType: 'tbd', appt: FUT })] }),
+      load({ id: 'b', customer: 'Batory Foods', stops: [stop({ id: 'bp', apptType: 'tbd', appt: FUT })] }),
+      load({ id: 'c', customer: 'Batory Foods', stops: [stop({ id: 'cp', apptType: 'tbd', appt: FUT }), stop({ id: 'cd', type: 'delivery', apptType: 'tbd', appt: FUT })] }),
     ])).toBe(2)
   })
 
   it('counts a load once even when both stops need attention', () => {
-    expect(apptQueueCount([load({ stops: [stop({ apptType: 'tbd', appt: FUT }), stop({ id: 's2', type: 'delivery', apptType: 'tbd', appt: FUT })] })])).toBe(1)
+    expect(apptQueueCount([load({ customer: 'Batory Foods', stops: [stop({ apptType: 'tbd', appt: FUT }), stop({ id: 's2', type: 'delivery', apptType: 'tbd', appt: FUT })] })])).toBe(1)
   })
 
   it('a stale outstanding load (all dates 5+ days past) no longer counts as open', () => {
@@ -478,9 +478,9 @@ describe('stopConfirmed — screenshots gate ONLY Batory Foods', () => {
     const batory = apptQueue([load({ customer: 'Batory Foods', stops })])
     expect(batory[0].pickupStatus).toBe('requested')
     expect(batory[0].pickupConfirmed).toBe(false)
-    // Acme: ratecon missing → both ends RATECON NEEDED; with it → confirmed.
+    // Acme (non-Batory): confirmed with or without a ratecon key on the load.
     const acme = apptQueue([load({ customer: 'Acme Freight', stops })])
-    expect(acme[0].pickupStatus).toBe('ratecon_needed')
+    expect(acme[0].pickupStatus).toBe('confirmed')
     const acmeRc = apptQueue([load({ customer: 'Acme Freight', rateConfirmKey: 'rc', stops } as Parameters<typeof load>[0])])
     expect(acmeRc[0].pickupStatus).toBe('confirmed')
   })

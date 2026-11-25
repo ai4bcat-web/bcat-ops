@@ -18,9 +18,10 @@ import type { TmsTone } from '@/features/tms/kit/statusTone'
  *   → CONFIRMED needs the CONFIRMED-EMAIL and E2OPEN screenshots.
  * Entering CHANGE NEEDED clears all three, so the new cycle needs fresh proof.
  *
- * Non-Batory: no screenshots and no ladder — the builder uploads the RATECON on the
- * load; its appointments are CONFIRMED automatically (the appt times come from the
- * ratecon), and show RATECON NEEDED until it is uploaded.
+ * Non-Batory: no screenshots and no ladder. Every such shipment is built from its rate
+ * confirmation, which carries the appointment times, so its appointments are CONFIRMED.
+ * (A rate con filed as a shipment document or attached on the load both count; the old
+ * RATECON NEEDED chip only looked at the load's own key and flagged loads that had one.)
  */
 
 export type { ApptWorkflowStatus }
@@ -37,7 +38,7 @@ export const RUBEN  = 'ruben@bcatcorp.com'
 /** The standing rule: every new Batory pickup is requested for noon. */
 export const BATORY_PICKUP_REQUEST_TIME = '12:00 PM'
 
-export type EffectiveApptStatus = ApptWorkflowStatus | 'ratecon_needed'
+export type EffectiveApptStatus = ApptWorkflowStatus
 
 /**
  * The date/time a request for this stop asks for: the CHANGE NEEDED target when one is
@@ -58,10 +59,8 @@ export function defaultRequestedFor(stop: Pick<Stop, 'type' | 'appt' | 'apptChan
  * booked + confirmation screenshots → confirmed; booked without → requested (the
  * request clearly happened — the time is in); unbooked → the phase's entry status.
  */
-export function apptWorkflowStatus(stop: Stop, load: Pick<Load, 'customer' | 'customerApptWorkflow' | 'rateConfirmKey' | 'rateConfirmUrl'>): EffectiveApptStatus {
-  if (!requiresApptProofs(load)) {
-    return (load.rateConfirmKey || load.rateConfirmUrl) ? 'confirmed' : 'ratecon_needed'
-  }
+export function apptWorkflowStatus(stop: Stop, load: Pick<Load, 'customer' | 'customerApptWorkflow'>): EffectiveApptStatus {
+  if (!requiresApptProofs(load)) return 'confirmed'
   if (stop.apptStatus) return stop.apptStatus
   // Grandfathering (stops written before apptStatus existed):
   if (stop.apptMoveRequested) return 'change_needed'
@@ -156,5 +155,4 @@ export const STATUS_META: Record<EffectiveApptStatus, { label: string; tone: Ext
   requested:      { label: 'REQUESTED',       tone: 'orange' },
   change_needed:  { label: 'CHANGE NEEDED',   tone: 'orange' },
   confirmed:      { label: 'CONFIRMED',       tone: 'green' },
-  ratecon_needed: { label: 'RATECON NEEDED',  tone: 'blue' },
 }

@@ -82,7 +82,7 @@ const hasTime = (iso?: string): boolean => {
 
 /** Mirrors src/lib/apptStatus.ts apptWorkflowStatus, trimmed to what the report needs. */
 export function statusOf(stop: Stop, load: LoadRow, customersById: Record<string, CustomerRow> = {}): string {
-  if (!requiresApptProofs(load, customersById)) return load.rateConfirmKey ? 'confirmed' : 'RATECON NEEDED'
+  if (!requiresApptProofs(load, customersById)) return 'confirmed'
   if (stop.apptStatus) return stop.apptStatus === 'confirmed' ? 'confirmed'
     : { need_request: 'NEED DENNIS', need_book: 'NEED RUBEN', requested: 'REQUESTED', change_needed: 'CHANGE NEEDED' }[stop.apptStatus] ?? stop.apptStatus
   if (stop.apptMoveRequested) return 'CHANGE NEEDED'
