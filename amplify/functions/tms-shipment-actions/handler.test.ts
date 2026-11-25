@@ -4787,6 +4787,14 @@ describe('SET_AR_STATUS', () => {
       .rejects.toThrow(/Not delivered yet/)
   })
 
+  it('clears the release stamp when an order goes back to DOCS_NEEDED', async () => {
+    const ids = await deliverable()
+    table(TABLES.order).set(ids.orderId, { ...table(TABLES.order).get(ids.orderId)!, arStatus: 'UNBILLED', readyToInvoiceAt: '2026-03-03T10:00:00.000Z' })
+    const bundle = (await call('SET_AR_STATUS', { orderId: ids.orderId, status: 'DOCS_NEEDED' })) as { orders: Row[] }
+    expect(bundle.orders[0].arStatus).toBe('DOCS_NEEDED')
+    expect(table(TABLES.order).get(ids.orderId)!.readyToInvoiceAt).toBeUndefined()
+  })
+
   it('refuses INVOICE_NOT_NEEDED while the order has revenue', async () => {
     const { orderId } = await deliverable()
     await expect(call('SET_AR_STATUS', { orderId, status: 'INVOICE_NOT_NEEDED' })).rejects.toThrow(/still needs an invoice/)
@@ -6191,6 +6199,14 @@ describe('READY_TO_INVOICE', () => {
           expect(String(audit.changes)).toContain('Ryne confirmed not delivered')
           // The automatic sweep does not push an undelivered load, and a real delivery pushes again later.
           expect(((await call('PUSH_READY_TO_LOAD_REVIEW', {}, ADMIN)) as { pushed: number }).pushed).toBe(0)
+        })
+
+        it('clears a leftover release stamp on the Docs needed order', async () => {
+          const ids = await reviewable()
+          const order = table(TABLES.order).get(ids.orderId)!
+          table(TABLES.order).set(ids.orderId, { ...order, arStatus: 'DOCS_NEEDED', readyToInvoiceAt: '2026-03-03T10:00:00.000Z' })
+          await call('UNDO_DELIVERED', { shipmentId: ids.shipmentId, reason: 'x' }, ADMIN)
+          expect(table(TABLES.order).get(ids.orderId)!.readyToInvoiceAt).toBeUndefined()
         })
 
         it('is In transit when the truck already left the pickup', async () => {

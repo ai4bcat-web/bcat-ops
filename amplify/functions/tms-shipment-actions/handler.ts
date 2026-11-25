@@ -3536,6 +3536,18 @@ async function undoDelivered(input: Row, caller: Caller): Promise<Row> {
     )
     await excludeLaneSample(quoteDeps, String(load.id))
   }
+  // A release stamp left on a Docs needed order (an earlier release that was pulled back) would keep the load in billing lists.
+  const staleReleases = orders.filter((o) => o.readyToInvoiceAt != null)
+  if (staleReleases.length > 0) {
+    await transact(
+      staleReleases.map((o) => updateItemTx(ORDER_TABLE_NAME, String(o.id), {
+        updatedBy: caller.email,
+        updatedAt: now,
+        version: (numberOrNull(o.version) ?? 1) + 1,
+      }, null, { remove: ['readyToInvoiceAt'] })),
+      'undo delivered release stamp',
+    )
+  }
   // The tracking rows the mistaken stamps wrote on the delivery stop go with them.
   const eventDeletes: TransactWriteItem[] = []
   for (const { load, stops } of plans) {
@@ -9126,11 +9138,12 @@ async function setArStatus(input: Row, caller: Caller): Promise<Row> {
     [updateItemTx(ORDER_TABLE_NAME, orderId, {
       arStatus: requested,
       arStatusChangedAt: now,
-      readyToInvoiceAt: requested === 'UNBILLED' ? now : order.readyToInvoiceAt ?? null,
+      ...(requested === 'DOCS_NEEDED' ? {} : { readyToInvoiceAt: requested === 'UNBILLED' ? now : order.readyToInvoiceAt ?? null }),
       updatedBy: caller.email,
       updatedAt: now,
       version: (numberOrNull(order.version) ?? 1) + 1,
-    }, null)],
+      // Back to docs needed means no longer released: a leftover release stamp keeps the load in billing lists and shows Ready to invoice.
+    }, null, requested === 'DOCS_NEEDED' && order.readyToInvoiceAt != null ? { remove: ['readyToInvoiceAt'] } : undefined)],
     'order',
   )
   await writeAudit('ORDER', orderId, 'SET_AR_STATUS', caller, { from: order.arStatus, to: requested })
