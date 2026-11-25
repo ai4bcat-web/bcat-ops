@@ -152,6 +152,7 @@ import {
 } from './store'
 
 import { commissionVoidWrites, runCommissionsAfter } from './commissions'
+import { isWaitingOnOtr } from '../../../src/lib/factoredOpen'
 
 const MAX_NOTE = 2000
 /** The four prefixes an invoice may carry bytes from. Anything else is refused. */
@@ -1243,11 +1244,21 @@ export async function markInvoiceSent(input: Row, caller: Caller): Promise<Row> 
  * against a bill we would be un-issuing. The row is kept VOID with its PDF: somebody
  * out there has a copy of that document and the file is the record of what they got.
  */
+/**
+ * Void an invoice the office deleted at OTR (Ryne 2026-11-24). Admin only, a typed reason is required, and it only applies while OTR
+ * is still waiting on the bill (PENDING_WITH_OTR, never approved, funded or finished): the factor has advanced nothing. The invoice is
+ * voided, its order goes back to UNBILLED, the OTR queue row is archived and the load's financials are unfrozen, all through the same
+ * transaction as a normal void. The customer's billing method is not touched, and nothing is sent to OTR or the customer.
+ */
+export async function voidOtrDeletedInvoice(input: Row, caller: Caller): Promise<Row> {
+  return voidInvoice(input, caller, { otrDeleted: true })
+}
+
 export async function voidInvoice(
   input: Row,
   caller: Caller,
   /** Internal only (never read from input): MOVE_TO_MANUAL_INVOICE on a bill OTR already turned down. */
-  opts: { otrRejected?: boolean } = {},
+  opts: { otrRejected?: boolean; otrDeleted?: boolean } = {},
 ): Promise<Row> {
   // Ryne 2026-11-12: voiding an invoice is an admin act (owner or ADMIN). Invoicing page access does not include it.
   if (!caller.isAdmin) throw new Error('Forbidden: only an admin can void an invoice')
@@ -1267,7 +1278,14 @@ export async function voidInvoice(
     ? await getById(FACTORING_ITEM_TABLE_NAME, invoice.factoringItemId)
     : null
   if (factoringRow?.otrInvoiceId && !opts.otrRejected) {
-    throw new Error(`This invoice was submitted to OTR as invoice ${String(factoringRow.otrInvoiceId)}; it cannot be voided here`)
+    // Ryne 2026-11-24: an invoice he deleted at OTR while OTR was still waiting on it (never approved or funded) may be voided by an admin.
+    const stillWaiting = opts.otrDeleted && isWaitingOnOtr(factoringRow as never)
+    if (!stillWaiting) {
+      throw new Error(`This invoice was submitted to OTR as invoice ${String(factoringRow.otrInvoiceId)}; it cannot be voided here`)
+    }
+  }
+  if (opts.otrDeleted && !factoringRow?.otrInvoiceId) {
+    throw new Error('This invoice was never submitted to OTR; use Void invoice instead')
   }
 
   const order = await getById(ORDER_TABLE_NAME, invoice.orderId)
@@ -1326,7 +1344,7 @@ export async function voidInvoice(
       ),
     )
   }
-  if (factoringRow && !factoringRow.otrInvoiceId && factoringRow.source === 'TMS') {
+  if (factoringRow && (!factoringRow.otrInvoiceId || opts.otrDeleted) && factoringRow.source === 'TMS') {
     // The row is parked AND released: a voided invoice no longer exists, so leaving
     // its number on the queue row would block the re-issued bill from ever being
     // handed to the factor under the same PRO. The void itself is in the audit log.
@@ -1345,6 +1363,11 @@ export async function voidInvoice(
 
   await transact(writes, 'void invoice')
   await writeAudit('Invoice', invoiceId, 'VOID_INVOICE', caller, { reason, orderId: invoice.orderId })
+  if (opts.otrDeleted && factoringRow) {
+    await writeAudit('FactoringItem', String(factoringRow.id), 'VOID_OTR_DELETED_INVOICE', caller, {
+      reason, invoiceId, otrInvoiceId: factoringRow.otrInvoiceId, statusBefore: factoringRow.status, otrStatusBefore: factoringRow.otrStatus ?? null,
+    })
+  }
   // The invoice's document on the shipment goes void with it.
   await fileInvoiceDocument({ shipmentId: invoice.shipmentId, invoiceId, orderId: invoice.orderId, void: true })
   return { invoice: (await getById(INVOICE_TABLE_NAME, invoiceId)) ?? {} }
