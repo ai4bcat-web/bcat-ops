@@ -4,7 +4,7 @@ import { TmsButton } from '@/features/tms/kit/TmsButton'
 import { CapacityCardDialog } from './CapacityCardDialog'
 import { useCapacityBoard } from './useCapacityBoard'
 import {
-  capacityColumns, capacityHeadline, clampCapacityRange, formatRatePerMile, rangeDays, todayChicagoYmd,
+  capacityColumns, capacityHeadline, clampCapacityRange, formatCapacityTimes, formatMaxWeight, formatRatePerMile, rangeDays, todayChicagoYmd,
   type CapacityCard,
 } from '@/lib/capacityBoard'
 import type { Driver } from '@/types'
@@ -187,7 +187,8 @@ function CapacityCardView({ card, day, driverName, onEdit, onCover, onReopen, on
   const covered = card.status === 'COVERED'
   const span = spanLabel(card)
   const rate = formatRatePerMile(card.minRatePerMileCents)
-  const meta = [card.equipment, `${card.lengthFt} ft`, card.loadType === 'PARTIAL' ? 'Partial' : 'Full', card.weightLbs ? `${card.weightLbs.toLocaleString('en-US')} lbs` : '']
+  const times = formatCapacityTimes(card)
+  const meta = [card.equipment, `${card.lengthFt} ft`, card.loadType === 'PARTIAL' ? 'Partial' : 'Full', formatMaxWeight(card.weightLbs)]
     .filter(Boolean).join(' · ')
   const iconBtn: React.CSSProperties = {
     display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, borderRadius: 6,
@@ -222,12 +223,10 @@ function CapacityCardView({ card, day, driverName, onEdit, onCover, onReopen, on
         }}>{covered ? 'Covered' : 'Open'}</span>
       </div>
       <div style={{ fontSize: 12, color: 'var(--tms-text-2)' }}>{meta}</div>
-      {(rate || card.referenceId) && (
-        <div style={{ fontSize: 12, color: 'var(--tms-text-2)' }}>{[rate, card.referenceId ? `Ref ${card.referenceId}` : ''].filter(Boolean).join(' · ')}</div>
-      )}
+      {rate && <div style={{ fontSize: 12, color: 'var(--tms-text-2)' }}>{rate}</div>}
+      {times && <div style={{ fontSize: 12, color: 'var(--tms-text-2)' }}>{times}</div>}
       {span && <div style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>{span}</div>}
       {driverName && <div style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>Driver {driverName}</div>}
-      {card.contactPhone && <div style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>{card.contactPhone}</div>}
       {card.comments && <div style={{ fontSize: 11.5, color: 'var(--tms-muted)', overflowWrap: 'anywhere' }}>{card.comments}</div>}
       <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
         {covered ? (

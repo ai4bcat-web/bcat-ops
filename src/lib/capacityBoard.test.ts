@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   addDaysYmd, applyCapacityOp, capacityColumns, clampCapacityRange, daysBetweenYmd, defaultCapacityRange, parseCapacityBoard,
-  parseCapacityFields, pruneBoard, rangeDays, shiftCardRange, CAPACITY_MAX_CARDS, EMPTY_CAPACITY_BOARD,
+  parseCapacityFields, formatCapacityTimes, formatMaxWeight, CAPACITY_EQUIPMENT, capacityHeadline, pruneBoard, rangeDays, shiftCardRange, CAPACITY_MAX_CARDS, EMPTY_CAPACITY_BOARD,
   type CapacityBoard, type CapacityOp,
 } from './capacityBoard'
 
@@ -55,6 +55,38 @@ describe('card fields', () => {
     expect(() => parseCapacityFields({ ...fields, minRatePerMile: 'abc' })).toThrow('must be a number')
   })
 
+  it('keeps optional pickup and destination radius, and ignores a destination radius with no destination', () => {
+    const plain = parseCapacityFields(fields)
+    expect(plain.originRadiusMi).toBeUndefined() // an old card has no radius
+    const ok = parseCapacityFields({ ...fields, destination: 'Atlanta, GA', originRadiusMi: '50', destinationRadiusMi: '100' })
+    expect(ok.originRadiusMi).toBe(50)
+    expect(ok.destinationRadiusMi).toBe(100)
+    expect(parseCapacityFields({ ...fields, originRadiusMi: '50', destinationRadiusMi: '100' }).destinationRadiusMi).toBeUndefined()
+    expect(() => parseCapacityFields({ ...fields, originRadiusMi: '501' })).toThrow('between 0 and 500')
+    expect(() => parseCapacityFields({ ...fields, originRadiusMi: 'far' })).toThrow('must be a number')
+    expect(capacityHeadline({ origin: 'Chicago, IL', destination: 'Atlanta, GA', originRadiusMi: 50 })).toBe('Chicago, IL · 50 mi → Atlanta, GA')
+  })
+
+  it('keeps optional pickup and delivery times, single or window, and refuses a window that ends before it starts', () => {
+    const ok = parseCapacityFields({ ...fields, pickupTimeFrom: '08:00', pickupTimeTo: '12:00', deliveryTimeFrom: '14:00' })
+    expect(formatCapacityTimes(ok)).toBe('PU 8:00a–12:00p · DEL 2:00p')
+    expect(formatCapacityTimes(parseCapacityFields({ ...fields, deliveryTimeTo: '17:30' }))).toBe('DEL by 5:30p')
+    expect(formatCapacityTimes(parseCapacityFields(fields))).toBe('')
+    expect(() => parseCapacityFields({ ...fields, pickupTimeFrom: '12:00', pickupTimeTo: '08:00' })).toThrow('Pickup window ends before it starts')
+    expect(() => parseCapacityFields({ ...fields, deliveryTimeFrom: '25:00' })).toThrow('must be a time')
+  })
+
+  it('reads an old card that still holds a reference, phone and plain weight, without showing or requiring them', () => {
+    const old = parseCapacityBoard({ cards: [{ id: 'o1', status: 'OPEN', availableFrom: '2026-11-27', availableTo: '2026-11-27', origin: 'Chicago, IL', destination: '', equipment: 'Dry Van', loadType: 'FULL', lengthFt: 53, weightLbs: 40000, referenceId: 'R9', contactPhone: '555', createdAt: NOW, createdBy: 'x', updatedAt: NOW, updatedBy: 'x' }] })
+    expect(old.cards).toHaveLength(1)
+    expect(formatMaxWeight(old.cards[0].weightLbs)).toBe('max 40,000 lb')
+    const saved = parseCapacityFields({ ...fields, referenceId: 'R9', contactPhone: '555' }) as unknown as Record<string, unknown>
+    expect(saved.referenceId).toBeUndefined()
+    expect(saved.contactPhone).toBeUndefined()
+    expect(() => parseCapacityFields({ ...fields, weightLbs: '999999' })).toThrow('Maximum weight must be between')
+    expect(CAPACITY_EQUIPMENT.slice(0, 2)).toEqual([{ value: 'Van', defaultLengthFt: 53 }, { value: 'Box truck', defaultLengthFt: 18 }])
+  })
+
   it('refuses a backwards or too-long range and a bad load type', () => {
     expect(() => parseCapacityFields({ ...fields, availableTo: '2026-11-26' })).toThrow('before the first')
     expect(() => parseCapacityFields({ ...fields, availableTo: '2026-12-31' })).toThrow('14 days at most')
@@ -64,12 +96,12 @@ describe('card fields', () => {
 
 describe('operations', () => {
   it('saves a new card open, then edits it and clears a field the person emptied', () => {
-    const created = run(EMPTY_CAPACITY_BOARD, { op: 'save', fields: { ...fields, referenceId: 'R1' } })
-    expect(created.card).toMatchObject({ status: 'OPEN', origin: 'Chicago, IL', referenceId: 'R1', createdBy: 'dennis@bcatcorp.com' })
-    const edited = run(created.board, { op: 'save', id: created.card.id, fields: { ...fields, origin: 'Dallas, TX', referenceId: '' } })
+    const created = run(EMPTY_CAPACITY_BOARD, { op: 'save', fields: { ...fields, comments: 'R1' } })
+    expect(created.card).toMatchObject({ status: 'OPEN', origin: 'Chicago, IL', comments: 'R1', createdBy: 'dennis@bcatcorp.com' })
+    const edited = run(created.board, { op: 'save', id: created.card.id, fields: { ...fields, origin: 'Dallas, TX', comments: '' } })
     expect(edited.board.cards).toHaveLength(1)
     expect(edited.card.origin).toBe('Dallas, TX')
-    expect(edited.card.referenceId).toBeUndefined()
+    expect(edited.card.comments).toBeUndefined()
     expect(edited.card.createdAt).toBe(created.card.createdAt)
   })
 
