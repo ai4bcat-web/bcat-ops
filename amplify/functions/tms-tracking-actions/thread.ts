@@ -422,6 +422,30 @@ async function positionOfText(deps: ThreadDeps, body: string): Promise<TextPosit
  * shipmentId. Deduplicates on messageId and clears the reply clock on every load in
  * the shipment that is waiting for one.
  */
+/**
+ * What an inbound message row keeps of its attachments: name, type and size, never the bytes.
+ * The raw array carries each file's base64, and a PDF over ~300 KB pushed the row past DynamoDB's 400 KB item limit
+ * ("Item size has exceeded the maximum allowed size"), so the e-mail was never filed and the bridge re-read it every run.
+ * The bytes are filed separately as shipment documents by INGEST_ATTACHMENT.
+ */
+export function inboundAttachmentMeta(raw: unknown): { name: string; contentType: string; sizeBytes: number | null }[] | null {
+  if (!Array.isArray(raw)) return null
+  const out: { name: string; contentType: string; sizeBytes: number | null }[] = []
+  for (const a of raw) {
+    if (a == null || typeof a !== 'object') continue
+    const att = a as Record<string, unknown>
+    const name = optionalString(att.name, 200)
+    if (!name) continue
+    const base64 = typeof att.base64 === 'string' ? att.base64 : ''
+    out.push({
+      name,
+      contentType: optionalString(att.contentType, 100) ?? 'application/octet-stream',
+      sizeBytes: base64 ? Math.floor((base64.length * 3) / 4) - (base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0) : null,
+    })
+  }
+  return out.length > 0 ? out : null
+}
+
 export async function ingestShipmentMessage(deps: ThreadDeps, input: Row, caller: Caller): Promise<Row> {
   const messageId = assertString(input.messageId, 'messageId')
   const to = optionalString(input.to, 500)
@@ -475,7 +499,7 @@ export async function ingestShipmentMessage(deps: ThreadDeps, input: Row, caller
     messageId,
     inReplyTo: optionalString(input.inReplyTo, 500) ?? null,
     providerRef: null,
-    attachments: input.attachments ?? null,
+    attachments: inboundAttachmentMeta(input.attachments),
     documentIds: null,
     trackingLinkId: null,
     at: now,
