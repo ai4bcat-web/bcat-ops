@@ -1350,7 +1350,7 @@ const CUSTOMER_FIELDS_BASE = `
   id name contactName contactEmail contactPhone notes
   mcNumber dotNumber factored billingEmail billingContactName billingPhone billingAddress
   paymentTermsDays creditLimitCents creditHoldFlag requiredDocsForInvoice
-  defaultDivisionKey defaultSalesRepId aliases normalizedName active apptWorkflow mergedIntoId
+  defaultDivisionKey defaultSalesRepId aliases normalizedName active apptWorkflow invoiceChannel mergedIntoId
   createdAt updatedAt
 `
 const CUSTOMER_V2_FIELDS = [
@@ -2830,6 +2830,8 @@ export interface CreateShipmentInput {
   /** The WorkflowRun this came from. Read-only afterwards: only CREATE_SHIPMENT writes it. */
   workflowRunId?: string
   load?: CreateShipmentLoadBag
+  /** Auto shipper (invoiced through Square): who gets the invoice and the vehicle. Only for a customer on the Square channel. */
+  carShipping?: Pick<import('@/lib/squareInvoicing').CarShippingData, 'payer' | 'vehicle'>
 }
 export async function createShipment(input: CreateShipmentInput): Promise<ShipmentBundle> {
   return shipmentAction<ShipmentBundle>('CREATE_SHIPMENT', input)

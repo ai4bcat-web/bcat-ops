@@ -843,6 +843,40 @@ describe('CREATE_SHIPMENT', () => {
     expect(bundle.shipment.mode).toBe('DRAYAGE')
   })
 
+  describe('auto shipper (invoiced through Square)', () => {
+    const details = {
+      payer: { name: 'Pat Example', email: 'pat@example.com', phone: '(847) 555-0100' },
+      vehicle: { year: '2018', make: 'Honda', model: 'Civic' },
+    }
+
+    it('records the payer and vehicle on a customer switched to the Square channel', async () => {
+      seedCustomer({ invoiceChannel: 'SQUARE' })
+      const bundle = (await call('CREATE_SHIPMENT', { customerId: 'cus-1', carShipping: details, load: { rateCents: 120_900 } })) as { shipment: Row }
+      expect(bundle.shipment.carShipping).toMatchObject({ payer: { name: 'Pat Example', email: 'pat@example.com' }, vehicle: { make: 'Honda' } })
+      // The audit says the details were recorded, never what they were.
+      const audit = [...table(TABLES.audit).values()].find((row) => row.action === 'CREATE_SHIPMENT')
+      expect(String(audit?.changes)).not.toContain('pat@example.com')
+    })
+
+    it('refuses the details for a customer that is not on the Square channel', async () => {
+      await expect(call('CREATE_SHIPMENT', { customerId: 'cus-1', carShipping: details, load: { rateCents: 120_900 } }))
+        .rejects.toThrow(/invoiced through Square/)
+    })
+
+    it('refuses incomplete details and a missing price', async () => {
+      seedCustomer({ invoiceChannel: 'SQUARE' })
+      await expect(call('CREATE_SHIPMENT', { customerId: 'cus-1', carShipping: { ...details, payer: { ...details.payer, email: 'nope' } }, load: { rateCents: 100 } }))
+        .rejects.toThrow(/e-mail/)
+      await expect(call('CREATE_SHIPMENT', { customerId: 'cus-1', carShipping: details }))
+        .rejects.toThrow(/needs a price/)
+    })
+
+    it('leaves every other shipment without the field', async () => {
+      const bundle = (await call('CREATE_SHIPMENT', { customerId: 'cus-1' })) as { shipment: Row }
+      expect('carShipping' in bundle.shipment).toBe(false)
+    })
+  })
+
   it('audits the void when the leg cannot be created, so the consumed PRO has a history', async () => {
     loadCreate.mockResolvedValueOnce({ data: null, errors: [{ message: 'Load create refused' }] })
 

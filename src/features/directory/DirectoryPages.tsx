@@ -795,7 +795,7 @@ function CustomerModal({ open, initial, divisions, existingCustomers = [], isAdm
       }
     >
       {isNew && <DuplicateCustomerNotice guard={guard} onOpenExisting={(id) => onOpenExisting?.(id)} />}
-      <CustomerForm value={value} set={set} errors={errors} divisions={divisions} isNew={isNew} />
+      <CustomerForm value={value} set={set} errors={errors} divisions={divisions} isNew={isNew} canSetInvoiceChannel={isAdmin} />
     </TmsDialog>
   )
 }

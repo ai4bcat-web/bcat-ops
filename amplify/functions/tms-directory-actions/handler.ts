@@ -1423,6 +1423,11 @@ async function upsertCustomer(
     active,
     // Unset stays null: the /batory/i name fallback remains in force until an admin decides.
     apptWorkflow: optionalEnum(input.apptWorkflow, ['NONE', 'BATORY'] as const, 'apptWorkflow'),
+    // Auto shipper: invoiced through Square. An admin decision (it changes how every shipment for the customer is billed);
+    // anyone else keeps what is already there.
+    invoiceChannel: isAdmin
+      ? optionalEnum(input.invoiceChannel, ['SQUARE'] as const, 'invoiceChannel')
+      : ((existing?.invoiceChannel as string | undefined) ?? null),
     mergedIntoId: undefined,
 
     // Customer v2

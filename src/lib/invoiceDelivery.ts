@@ -17,7 +17,7 @@ export const SQUARE_INVOICED_DIVISION = 'CAR_SHIPPING'
 /** Prefix of the refusal so callers and the UI can tell "not here" from a real failure. */
 export const SQUARE_INVOICED_CODE = 'SQUARE_INVOICED'
 
-export const SQUARE_INVOICED_MESSAGE = 'Invoiced in Square (coming)'
+export const SQUARE_INVOICED_MESSAGE = 'Invoiced in Square'
 
 export function isSquareInvoiced(shipment: { revDivision?: string | null } | null | undefined): boolean {
   return shipment?.revDivision === SQUARE_INVOICED_DIVISION
@@ -27,7 +27,7 @@ export function isSquareInvoiced(shipment: { revDivision?: string | null } | nul
 export class SquareInvoicedError extends Error {
   readonly code = SQUARE_INVOICED_CODE
   constructor(what: string) {
-    super(`${SQUARE_INVOICED_CODE}: ${SQUARE_INVOICED_MESSAGE} — ${what} is not done from the standard invoice template.`)
+    super(`${SQUARE_INVOICED_CODE}: ${SQUARE_INVOICED_MESSAGE} — ${what} is not done from the standard invoice template. Auto shipper shipments are invoiced from the Square card on the shipment.`)
     this.name = 'SquareInvoicedError'
   }
 }

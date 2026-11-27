@@ -927,20 +927,61 @@ export const PROVIDERS: ProviderDescriptor[] = [
     label: 'Square',
     category: 'CRM',
     credentialSource: 'PAGE',
+    // Sandbox and production are separate Square worlds: different token, different location, different webhook.
+    // Both sets live here so switching Environment is one setting, and the page never mixes them up.
     credentialFields: [
-      { key: 'accessToken', label: 'Access token', secret: true, kind: 'password' },
-      { key: 'locationId', label: 'Location ID', secret: false },
+      { key: 'sandboxAccessToken', label: 'SANDBOX access token', secret: true, kind: 'password', hint: 'Square Developer Dashboard → your app → Credentials → Sandbox. Test data only: no real customer, e-mail or money.' },
+      { key: 'sandboxLocationId', label: 'SANDBOX location ID', secret: false, hint: 'Square Developer Dashboard → Locations, with the Sandbox toggle on.' },
+      { key: 'productionAccessToken', label: 'PRODUCTION access token', secret: true, kind: 'password', optional: true, hint: 'Leave empty until the sandbox test is approved. Real customers and real money.' },
+      { key: 'productionLocationId', label: 'PRODUCTION location ID', secret: false, optional: true, hint: 'The BCAT Logistics location, with the Production toggle on. Different from the sandbox one.' },
+      {
+        key: 'webhookSigningSecret',
+        label: 'Webhook signature key',
+        secret: true,
+        kind: 'password',
+        optional: true,
+        hint: 'The Signature key of the Square webhook subscription for the ACTIVE environment. Replace it when you switch to production: Square gives each environment its own.',
+      },
     ],
     stackSecretNames: [],
-    settingsFields: [],
+    settingsFields: [
+      {
+        key: 'environment',
+        label: 'Active environment',
+        type: 'select',
+        defaultValue: 'SANDBOX',
+        options: [
+          { value: 'SANDBOX', label: 'SANDBOX (test data, nothing real is sent)' },
+          { value: 'PRODUCTION', label: 'PRODUCTION (real invoices, real e-mails, real money)' },
+        ],
+        hint: 'Decides which token and location above are used. Stays on Sandbox until the test run is approved.',
+      },
+      {
+        key: 'autoShipperInvoicing',
+        label: 'Create Square invoices for auto shipper shipments',
+        type: 'boolean',
+        defaultValue: false,
+        hint: 'Off: shipments are still created, nothing is sent to Square. Turn on after the sandbox test.',
+      },
+      { key: 'acceptBankTransfer', label: 'Accept bank transfer on the invoice', type: 'boolean', defaultValue: false, hint: 'Only if bank transfer is enabled in your Square account.' },
+      { key: 'acceptCashApp', label: 'Accept Cash App Pay on the invoice', type: 'boolean', defaultValue: false, hint: 'Only if Cash App Pay is enabled in your Square account.' },
+      {
+        key: 'webhookUrl',
+        label: 'Webhook URL (as entered in Square)',
+        type: 'text',
+        hint: 'The exact tracking-api address ending /api/webhooks/square that you added in Square. The signature is checked against it, so it must match character for character.',
+      },
+    ],
     capabilities: ['connect', 'validate', 'sync'],
+    liveCapabilities: ['validate'],
     validateHow: {
-      describe: 'GET https://connect.squareup.com/v2/locations with the access token as a bearer token.',
+      describe: 'GET /v2/locations on the sandbox (and production, if set) Square API with each access token, and check the saved location ID is one of them.',
+      liveCheck: 'SQUARE_LOCATIONS',
     },
     applicability: 'LIVE_CAPABLE',
     loadsRead: 'NONE',
-    feeds: "Best Care Auto Transport's customer source. The customer-import adapter is served by the generic stub until credentials exist.",
-    note: 'The sync capability imports Auto Shipper customers for the Car Shipping board.',
+    feeds: 'Auto shipper invoices: BCAT Ops creates the Square customer, order and invoice for each shipment and reads payments back.',
+    note: 'Auto shipper shipments are invoiced from BCAT Ops through Square. The customer-import adapter is still served by the generic stub.',
   },
 ]
 

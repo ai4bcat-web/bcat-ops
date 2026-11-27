@@ -993,9 +993,9 @@ describe('CAR_SHIPPING invoices through Square, not the standard template', () =
 
   it('refuses to preview, generate, release or render, and writes nothing', async () => {
     asCarShipping()
-    await expect(call('PREVIEW_INVOICE', { orderId: ORDER_ID })).rejects.toThrow(/SQUARE_INVOICED: Invoiced in Square \(coming\)/)
-    await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID })).rejects.toThrow(/Invoiced in Square \(coming\)/)
-    await expect(call('RELEASE_TO_BILLING', { orderId: ORDER_ID })).rejects.toThrow(/Invoiced in Square \(coming\)/)
+    await expect(call('PREVIEW_INVOICE', { orderId: ORDER_ID })).rejects.toThrow(/SQUARE_INVOICED: Invoiced in Square/)
+    await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID })).rejects.toThrow(/Invoiced in Square/)
+    await expect(call('RELEASE_TO_BILLING', { orderId: ORDER_ID })).rejects.toThrow(/Invoiced in Square/)
     expect(table(TABLES.invoice).size).toBe(0)
     expect(table(TABLES.order).get(ORDER_ID)!.arStatus).toBe('UNBILLED')
   })
@@ -1007,8 +1007,8 @@ describe('CAR_SHIPPING invoices through Square, not the standard template', () =
     const out = (await call('BATCH_GENERATE', { orderIds: [ORDER_ID, 'ord-2'] })) as { results: Row[]; skipped: Row[] }
     expect(out.results).toEqual([])
     expect(out.skipped).toEqual([
-      { orderId: ORDER_ID, code: 'SQUARE_INVOICED', reason: 'Invoiced in Square (coming)' },
-      { orderId: 'ord-2', code: 'SQUARE_INVOICED', reason: 'Invoiced in Square (coming)' },
+      { orderId: ORDER_ID, code: 'SQUARE_INVOICED', reason: 'Invoiced in Square' },
+      { orderId: 'ord-2', code: 'SQUARE_INVOICED', reason: 'Invoiced in Square' },
     ])
     expect(table(TABLES.invoice).size).toBe(0)
   })
@@ -1018,11 +1018,11 @@ describe('CAR_SHIPPING invoices through Square, not the standard template', () =
     const { invoiceId } = await generate()
     asCarShipping()
     sesSend.mockClear()
-    await expect(call('EMAIL_INVOICE', { invoiceId })).rejects.toThrow(/Invoiced in Square \(coming\)/)
-    await expect(call('SEND_INVOICE', { invoiceId })).rejects.toThrow(/Invoiced in Square \(coming\)/)
+    await expect(call('EMAIL_INVOICE', { invoiceId })).rejects.toThrow(/Invoiced in Square/)
+    await expect(call('SEND_INVOICE', { invoiceId })).rejects.toThrow(/Invoiced in Square/)
     const out = (await call('BATCH_EMAIL', { invoiceIds: [invoiceId] })) as { results: Row[]; skipped: Row[] }
     expect(out.results).toEqual([])
-    expect(out.skipped).toEqual([{ invoiceId, code: 'SQUARE_INVOICED', reason: 'Invoiced in Square (coming)' }])
+    expect(out.skipped).toEqual([{ invoiceId, code: 'SQUARE_INVOICED', reason: 'Invoiced in Square' }])
     expect(sesSend).not.toHaveBeenCalled()
   })
 

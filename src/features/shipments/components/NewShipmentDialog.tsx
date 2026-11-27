@@ -55,6 +55,9 @@ import { MODE_OPTIONS } from '../orderDraft'
 import { useNavigate } from 'react-router-dom'
 import { shipmentEditorPath } from '@/lib/shipmentLinks'
 import { applyNewShipmentEffects, linkStopsToDirectory as linkStops } from '../newShipmentEffects'
+import { AutoShipperFields } from './AutoShipperFields'
+import { EMPTY_AUTO_SHIPPER, autoShipperPayload, type AutoShipperForm } from '../autoShipperForm'
+import { isSquareChannel, normalizeCarShipping } from '@/lib/squareInvoicing'
 
 /**
  * "This form has not been seeded yet", distinct from every prefill including `undefined`
@@ -131,9 +134,13 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
   const [createCustomerFor, setCreateCustomerFor] = useState<{ name?: string; city?: string } | undefined>(undefined)
   const [createLocationFor, setCreateLocationFor] = useState<{ initial?: { name?: string; city?: string }; stopIndex: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [autoShipper, setAutoShipper] = useState<AutoShipperForm>(EMPTY_AUTO_SHIPPER)
+  const [autoShipperError, setAutoShipperError] = useState<string | null>(null)
 
   const tender = prefill?.tender
   const linkedCustomer = directory.customers.find((c) => c.id === customerId) ?? null
+  /** A customer an admin switched to the Square channel: the payer and vehicle are asked here, and a Square draft follows the save. */
+  const isAutoShipper = isSquareChannel(linkedCustomer)
 
   /*
    * Is this a Batory shipment? Same rule the appointments queue uses, so the two cannot
@@ -194,6 +201,8 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
     setMode(defaultMode)
     setPro('')
     setError(null)
+    setAutoShipper(EMPTY_AUTO_SHIPPER)
+    setAutoShipperError(null)
     setCustomerId(prefill?.customerId ?? '')
     setTypedCustomer(prefill?.customerName ?? prefill?.tender?.customer ?? '')
     setUseTypedCustomer(false)
@@ -306,6 +315,20 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
       return
     }
     const pickedDriverId = stopDrivers[0] ?? null
+    // Auto shipper: the payer, the vehicle, the price and both ends of the route are what the Square invoice is made of.
+    let carShipping: ReturnType<typeof autoShipperPayload> | undefined
+    if (isAutoShipper) {
+      const checked = normalizeCarShipping(autoShipperPayload(autoShipper))
+      if (!checked.ok) { setAutoShipperError(checked.error); return }
+      if (!(values.rate != null && !isNaN(values.rate) && values.rate > 0)) { setAutoShipperError('Enter the price: it is the amount on the Square invoice.'); return }
+      const ends = values.stops.map((s, i) => stopFormToStop(s, i))
+      const pickup = ends.find((s) => s.type === 'pickup')
+      const delivery = [...ends].reverse().find((s) => s.type === 'delivery')
+      if (!pickup?.city?.trim() || !delivery?.city?.trim()) { setAutoShipperError('Enter the pickup and delivery city: the route is on the invoice.'); return }
+      if (!pickup.appt) { setAutoShipperError('Enter the pickup date: it is the service date on the invoice.'); return }
+      setAutoShipperError(null)
+      carShipping = { payer: checked.value.payer, vehicle: checked.value.vehicle }
+    }
     saveInFlight.current = true
     setSaving(true)
     setError(null)
@@ -332,6 +355,7 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
         // TENDER_RESPOND stays the review. A prefill that says nothing is MANUAL.
         source: prefill?.source ?? 'MANUAL',
         ...(prefill?.workflowRunId ? { workflowRunId: prefill.workflowRunId } : {}),
+        ...(carShipping ? { carShipping } : {}),
         load: {
           // The driver is booked through ASSIGN_ASSET below, which writes the stops, the
           // mirrors and the Ivan Cartage leg together. Sending it here would create a
@@ -534,11 +558,15 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
               </div>
             </div>
 
+            {isAutoShipper && <AutoShipperFields value={autoShipper} onChange={(next) => { setAutoShipper(next); setAutoShipperError(null) }} error={autoShipperError} />}
+
             {/* ── Freight ─────────────────────────────────────────────── */}
-            <div style={{ marginBottom: 24 }}>
-              <SectionHeading>Freight</SectionHeading>
-              <FreightFields control={control} register={register} errors={errors} />
-            </div>
+            {!isAutoShipper && (
+              <div style={{ marginBottom: 24 }}>
+                <SectionHeading>Freight</SectionHeading>
+                <FreightFields control={control} register={register} errors={errors} />
+              </div>
+            )}
 
             {/* ── Stops ───────────────────────────────────────────────── */}
             <LegStopsSection
