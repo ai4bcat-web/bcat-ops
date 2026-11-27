@@ -34,8 +34,11 @@ import { DifferencesView } from './DifferencesView'
 import { openCount, differenceRows } from './differences'
 import { isShortPayNote } from '@/lib/paymentDifference'
 import { CustomerSearch } from './CustomerSearch'
+import {
+  SEARCH_RESULT_CAP, invoiceSearch, invoiceSearchState, ledgerSearch, looksLikeInvoiceNumber, poMapOf, proOfInvoiceId,
+} from './search'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
-import { graphqlErrorText, listArPayments, listInvoicesByMonth, listShipmentsByNumber, reversePayment } from '@/lib/apiClient'
+import { getInvoice, graphqlErrorText, listArPayments, listInvoicesByCustomer, listInvoicesByMonth, listShipmentsByNumber, reversePayment } from '@/lib/apiClient'
 import { listAljexMemoRows } from '@/lib/paymentsClient'
 import { chicagoDateStr } from '@/lib/date'
 import { saveBlob } from '@/lib/download'
@@ -103,6 +106,9 @@ export function PaymentsReceivedPage() {
       return next
     }, { replace: true })
   }
+  // Any text in the search box looks across ALL invoices and payments, on the All tab, whatever the date range (Ryne 2026-11-27).
+  const searchTerm = outQuery.trim()
+  const searching = searchTerm.length > 0
   const [showReversed, setShowReversed] = useState(false)
   const [baseFilter, setFilter] = useState<ReceivedFilter>(() => ({
     ...(initialPeriod?.range ?? monthBounds(asOf)),
@@ -116,12 +122,20 @@ export function PaymentsReceivedPage() {
   // The picked customer lives in the URL (`?customer=`), so a link, a reload and the search box all agree.
   const urlCustomer = searchParams.get('customer')
   const filter = useMemo<ReceivedFilter>(() => ({ ...baseFilter, customers: urlCustomer ? [urlCustomer] : [] }), [baseFilter, urlCustomer])
+  // While a term is typed the date range and the type / method / division toggles stay out of the way; only the picked customer narrows.
+  const effectiveFilter = useMemo<ReceivedFilter>(
+    () => (searching ? { ...filter, from: '', to: '', types: [], methods: [], divisions: [], unappliedOnly: false, diffsOnly: false } : filter),
+    [filter, searching],
+  )
 
   const { customers } = useDirectory({ locations: false })
   const { divisions } = useOwnershipDivisions()
   const [payments, setPayments] = useState<ArPaymentRecord[]>([])
   const [memos, setMemos] = useState<Awaited<ReturnType<typeof listAljexMemoRows>>>([])
   const [recentPaid, setRecentPaid] = useState<InvoiceRecord[]>([])
+  /** Invoices found outside the six-month window: an exact invoice / PRO look-up and the picked customer's book. */
+  const [lookedUp, setLookedUp] = useState<InvoiceRecord[]>([])
+  const [customerBook, setCustomerBook] = useState<InvoiceRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [memoError, setMemoError] = useState<string | null>(null)
   const [dialog, setDialog] = useState<Dialog | null>(null)
@@ -138,6 +152,27 @@ export function PaymentsReceivedPage() {
     .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Payments could not load'))
     .finally(() => setLoading(false)), [months])
   useEffect(() => { void load() }, [load])
+
+  // Beyond the six months the page loads: an exact invoice number / PRO is read directly, and a picked customer's whole book is read once.
+  useEffect(() => {
+    if (!looksLikeInvoiceNumber(searchTerm)) return
+    let cancelled = false
+    const ids = [...new Set([searchTerm, proOfInvoiceId(searchTerm)])]
+    const timer = setTimeout(() => {
+      void Promise.all(ids.map((id) => getInvoice(id))).then((found) => {
+        const got = found.filter((i): i is InvoiceRecord => !!i)
+        if (cancelled || got.length === 0) return
+        setLookedUp((prev) => [...prev.filter((p) => !got.some((g) => g.id === p.id)), ...got])
+      })
+    }, 300)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [searchTerm])
+  useEffect(() => {
+    if (!searching || !urlCustomer) return
+    let cancelled = false
+    void listInvoicesByCustomer(urlCustomer).then((list) => { if (!cancelled) setCustomerBook(list) })
+    return () => { cancelled = true }
+  }, [searching, urlCustomer])
 
   const customerById = useMemo(() => new Map(customers.map((c) => [c.id, c])), [customers])
   // Who has money outstanding, so the customer search lists them first.
@@ -183,8 +218,8 @@ export function PaymentsReceivedPage() {
   const [shipmentsByPro, setShipmentsByPro] = useState<ReadonlyMap<string, ShipmentRef | null>>(() => new Map())
   const asked = useRef(new Set<string>())
   const inRange = useMemo(
-    () => filterReceived(rows, { ...filter, types: [], methods: [], divisions: [], unappliedOnly: false, diffsOnly: false }, () => []),
-    [rows, filter],
+    () => filterReceived(rows, { ...effectiveFilter, types: [], methods: [], divisions: [], unappliedOnly: false, diffsOnly: false }, () => []),
+    [rows, effectiveFilter],
   )
   useEffect(() => {
     const pros = [...new Set(inRange.flatMap((r) => r.invoices.map((i) => proOf(i.invoiceId))))].filter((p) => p && !asked.current.has(p))
@@ -210,10 +245,21 @@ export function PaymentsReceivedPage() {
     .map((i) => shipmentsByPro.get(proOf(i.invoiceId))?.division)
     .filter((d): d is string => !!d), [shipmentsByPro])
 
-  const filtered = useMemo(() => filterReceived(rows, filter, divisionsOf), [rows, filter, divisionsOf])
+  // What the tabs show: a typed search always lands on All (the previous tab comes back when the box is cleared).
+  const shownView: PageView = searching ? 'all' : view
+  const knownInvoices = useMemo(() => [...open.invoices, ...recentPaid, ...lookedUp, ...customerBook], [open.invoices, recentPaid, lookedUp, customerBook])
+  const poByInvoice = useMemo(() => poMapOf(knownInvoices), [knownInvoices])
+  const filtered = useMemo(() => {
+    const inFilter = filterReceived(rows, effectiveFilter, divisionsOf)
+    return searching ? ledgerSearch(inFilter, searchTerm, poByInvoice) : inFilter
+  }, [rows, effectiveFilter, divisionsOf, searching, searchTerm, poByInvoice])
   const reversedCount = useMemo(() => filtered.filter((r) => r.reversed).length, [filtered])
-  const ledgerView: ReceivedView = view === 'outstanding' || view === 'differences' ? 'payments' : view
-  const isLedger = view !== 'outstanding' && view !== 'differences'
+  const ledgerView: ReceivedView = shownView === 'outstanding' || shownView === 'differences' ? 'payments' : shownView
+  const isLedger = shownView !== 'outstanding' && shownView !== 'differences'
+  const invoiceHits = useMemo(
+    () => (searching ? invoiceSearch([knownInvoices], searchTerm, (id) => customerById.get(id)?.name ?? '', { customerId: urlCustomer }) : { rows: [] as InvoiceRecord[], total: 0 }),
+    [searching, knownInvoices, searchTerm, customerById, urlCustomer],
+  )
   const diffOpen = useMemo(
     () => openCount(differenceRows(open.invoices, rows, (id, fallback) => customerById.get(id)?.name ?? fallback)),
     [open.invoices, rows, customerById],
@@ -276,7 +322,7 @@ export function PaymentsReceivedPage() {
     setDialog(c ? { kind: 'credit', customerId: c.id, customerName: c.name } : { kind: 'pickCustomer', next: 'credit' })
   }
 
-  const rangeLabel = preset === 'custom'
+  const rangeLabel = searching ? 'all dates' : preset === 'custom'
     ? `${filter.from ? formatDay(filter.from) : 'start'} – ${filter.to ? formatDay(filter.to) : 'today'}`
     : PRESET_LABEL[preset].toLowerCase()
   const n = (count: number, one: string) => `${count} ${count === 1 ? one : `${one}s`}`
@@ -393,15 +439,13 @@ export function PaymentsReceivedPage() {
         <TmsSummaryChips aria-label="Payments Received at a glance" testId="payments-received-totals" items={summaryItems} />
 
         <div className="pr-toolbar" data-testid="payments-received-filters">
-          <TmsSegmentedTabs aria-label="Show" size="sm" active={view} onSelect={(k) => setView(k as PageView)}
+          <TmsSegmentedTabs aria-label="Show" size="sm" active={shownView} onSelect={(k) => { if (searching) changeOutQuery(''); setView(k as PageView) }}
             tabs={VIEW_TABS.map((t) => (t.key === 'differences' && diffOpen > 0 ? { ...t, label: `Differences (${diffOpen})` } : t))} />
           <CustomerSearch customers={customers} openByCustomer={openByCustomer} selectedId={oneCustomer}
             selectedName={oneCustomer ? customerById.get(oneCustomer)?.name : undefined} onSelect={setCustomer} />
-          {view === 'outstanding' && (
-            <TmsInput type="search" aria-label="Search invoice, PRO or PO" placeholder="Invoice #, PRO or PO" value={outQuery}
-              onChange={(e) => changeOutQuery(e.target.value)} />
-          )}
-          {isLedger && (<>
+          <TmsInput type="search" aria-label="Search invoice, PRO or PO" placeholder="Invoice #, PRO or PO" value={outQuery}
+            title="Searches every invoice and payment, all dates, on the All tab." onChange={(e) => changeOutQuery(e.target.value)} />
+          {isLedger && !searching && (<>
           <TmsSelect aria-label="Dates" value={preset} onChange={(e) => choosePreset(e.target.value as PresetKey)}>
             {(Object.keys(PRESET_LABEL) as PresetKey[]).map((k) => <option key={k} value={k}>{PRESET_LABEL[k]}</option>)}
           </TmsSelect>
@@ -436,15 +480,29 @@ export function PaymentsReceivedPage() {
           </>)}
         </div>
         {memoError && <p className="text-sm" style={{ color: 'var(--tms-badge-red)' }}>{memoError}</p>}
+        {searching && (
+          <p className="text-sm tms-muted" data-testid="payments-received-searching">
+            Searching every invoice and payment, all dates, for “{searchTerm}”. Clear the search to go back to the {VIEW_TABS.find((t) => t.key === view)?.label ?? 'previous'} tab.
+          </p>
+        )}
 
-        {view === 'differences' ? (
+        {shownView === 'differences' ? (
           <DifferencesView invoices={open.invoices} ledger={rows} customers={customerById} loading={open.loading} customerId={oneCustomer}
             onAccepted={() => { void load(); void open.refresh() }} />
-        ) : view === 'outstanding' ? (
+        ) : shownView === 'outstanding' ? (
           <OutstandingView invoices={open.invoices} customers={customerById} loading={open.loading} asOf={asOf}
             customerId={oneCustomer} query={outQuery} divisionName={divisionName}
             onReceived={() => { void load(); void open.refresh() }} />
         ) : (
+        <>
+        {searching && (
+          <InvoiceSearchResults
+            term={searchTerm}
+            rows={invoiceHits.rows}
+            total={invoiceHits.total}
+            customerName={(id) => customerById.get(id)?.name ?? ''}
+          />
+        )}
         <ArDenseTable<ReceivedRow>
           key={`${ledgerView}-${showType}`}
           grid={{
@@ -456,13 +514,14 @@ export function PaymentsReceivedPage() {
             renderCell,
             onRowClick: (r) => setDialog({ kind: 'detail', row: r }),
             cardLayout: { title: 'customer', party: 'date', amount: 'amount', pills: showType ? ['type'] : [] },
-            empty: loading ? 'Loading…' : 'Nothing was received in this range.',
+            empty: loading ? 'Loading…' : searching ? `No payment matches “${searchTerm}”.` : 'Nothing was received in this range.',
           }}
           pageFilters={{
             count: filterCount,
             onClear: () => { setCustomer(null); setFilter((f) => ({ ...f, customers: [], methods: [], divisions: [], unappliedOnly: false, diffsOnly: false })) },
           }}
         />
+        </>
         )}
       </div>
 
@@ -516,6 +575,53 @@ export function PaymentsReceivedPage() {
 }
 
 /** Who paid: a search over every customer, for Record payment and memos opened without one. */
+/** Invoices matching the typed search, whatever their state: open, partly paid, paid (with the paid date) or void. */
+function InvoiceSearchResults({ term, rows, total, customerName }: {
+  term: string
+  rows: readonly InvoiceRecord[]
+  total: number
+  customerName: (customerId: string) => string
+}) {
+  return (
+    <section className="pr-out-group" data-testid="payments-received-invoice-results" aria-label="Invoices matching the search">
+      <div className="pr-out-head">
+        <strong className="pr-out-name">Invoices matching “{term}”</strong>
+        <span className="tms-muted text-sm">
+          {total === 0 ? 'none' : total > rows.length ? `showing ${rows.length} of ${total}; refine the search` : `${total} ${total === 1 ? 'invoice' : 'invoices'}`}
+        </span>
+      </div>
+      {rows.length > 0 && (
+        <div className="pr-out-table-wrap">
+          <table className="pr-out-table">
+            <thead>
+              <tr><th>Invoice</th><th>Customer</th><th>Status</th><th>Invoiced</th><th>Paid on</th><th>Amount</th><th>Paid</th><th>Balance</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((inv) => {
+                const state = invoiceSearchState(inv)
+                const tone = state === 'Paid' ? 'green' : state === 'Void' ? 'red' : state === 'Partly paid' ? 'orange' : 'gray'
+                return (
+                  <tr key={inv.id} data-testid={`payments-received-invoice-${inv.id}`}>
+                    <td><Link className="pr-chip" to={`/tms/invoicing/invoices/${encodeURIComponent(inv.id)}`}>{inv.number || inv.id}</Link></td>
+                    <td>{customerName(inv.customerId)}</td>
+                    <td><TmsBadge tone={tone}>{state}</TmsBadge></td>
+                    <td>{formatDay(inv.invoiceDate)}</td>
+                    <td>{state === 'Paid' || state === 'Partly paid' ? formatDay(inv.paidAt) : '—'}</td>
+                    <td>{formatCents(inv.totalCents ?? 0)}</td>
+                    <td>{formatCents(inv.paidCents ?? 0)}</td>
+                    <td>{state === 'Void' ? '—' : formatCents(inv.balanceCents ?? 0)}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {total >= SEARCH_RESULT_CAP && <p className="text-sm tms-muted" style={{ padding: '6px 12px' }}>Showing the newest {SEARCH_RESULT_CAP}. Type more of the number or the customer to narrow it.</p>}
+    </section>
+  )
+}
+
 function PickCustomerDialog({ customers, title, onClose, onPick }: {
   customers: CustomerRecord[]
   title: string
