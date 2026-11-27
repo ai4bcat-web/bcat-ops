@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import type { TransactWriteItem } from '@aws-sdk/client-dynamodb'
 import {
   ingestShipmentMessage,
+  inboundAttachmentMeta,
   listThread,
   openShipmentThread,
   sendShipmentMessage,
@@ -427,6 +428,40 @@ describe('sendShipmentMessage', () => {
 })
 
 describe('ingestShipmentMessage', () => {
+  it('keeps an attachment\'s name, type and size on the message row, never its bytes', async () => {
+    const store = new MemoryStore()
+    seedShipment(store, { threadKey: threadKeyFor('shp-1') })
+    seedLoad(store)
+    const deps = makeDeps(store)
+    const base64 = Buffer.alloc(900_000, 7).toString('base64')
+
+    const result = await ingestShipmentMessage(
+      deps,
+      {
+        messageId: '<ratecon-1@example.com>',
+        to: threadReplyAddress('shp-1'),
+        from: 'broker@example.com',
+        subject: 'Rate con',
+        body: 'attached',
+        attachments: [{ name: 'ratecon.pdf', contentType: 'application/pdf', base64 }],
+      },
+      CALLER,
+    )
+
+    expect(result.routed).toBe(true)
+    const msg = store.queryIndex('ShipmentMessage-test', 'shipmentMessagesByShipmentIdAndAt', 'shipmentId', 'shp-1')[0]
+    expect(msg.attachments).toEqual([{ name: 'ratecon.pdf', contentType: 'application/pdf', sizeBytes: 900_000 }])
+    expect(JSON.stringify(msg).length).toBeLessThan(5_000)
+  })
+
+  it('inboundAttachmentMeta drops junk entries and returns null when nothing is left', () => {
+    expect(inboundAttachmentMeta(undefined)).toBeNull()
+    expect(inboundAttachmentMeta([null, 3, { contentType: 'x' }])).toBeNull()
+    expect(inboundAttachmentMeta([{ name: 'a.png', base64: 'QUJD' }])).toEqual([
+      { name: 'a.png', contentType: 'application/octet-stream', sizeBytes: 3 },
+    ])
+  })
+
   it('routes an inbound reply by plus address', async () => {
     const store = new MemoryStore()
     seedShipment(store, { threadKey: threadKeyFor('shp-1') })
