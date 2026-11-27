@@ -4065,6 +4065,26 @@ export async function listLoadFinancialsByLoadIds(loadIds: readonly string[]): P
   }
 }
 
+/**
+ * The car-shipping details (payer, vehicle, Square ids) of these shipments, by shipment id. One narrow read of two fields,
+ * so the Auto shipper loads page does not widen the shared shipment read. A backend without the field, or a failed read,
+ * answers an empty map: the page then shows the customer's own name and no vehicle.
+ */
+export async function listCarShippingByShipmentIds(ids: readonly string[]): Promise<Map<string, import('@/lib/squareInvoicing').CarShippingData | null>> {
+  const out = new Map<string, import('@/lib/squareInvoicing').CarShippingData | null>()
+  if (ids.length === 0) return out
+  try {
+    const rows = await batchGet<{ id: string; carShipping?: unknown }>({ query: 'getShipment', fields: 'id carShipping' }, ids, ID_BATCH)
+    for (const [id, row] of rows) {
+      const raw = row?.carShipping == null ? null : unwrapJson(row.carShipping)
+      out.set(id, raw && typeof raw === 'object' ? (raw as import('@/lib/squareInvoicing').CarShippingData) : null)
+    }
+  } catch (err) {
+    console.warn('[apiClient] car-shipping details could not be read:', err)
+  }
+  return out
+}
+
 type RawLoad = Load & { rateConfirmKey?: string }
 
 /** The full-`Load` read: self-healing field groups, then the same customer-policy and rate-con post-processing as `listLoads`. Voided loads are included. */

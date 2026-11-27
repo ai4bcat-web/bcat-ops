@@ -1,0 +1,32 @@
+/* Auto shipper loads: one filter row above the shared dense grid, payment chips in the cells. */
+.tms-shell .asl-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-block: 4px 8px;
+}
+
+.tms-shell .asl-toolbar .tms-select {
+  width: auto;
+  flex: 0 0 auto;
+  max-width: 220px;
+}
+
+.tms-shell .asl-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.tms-shell .asl-sub {
+  color: var(--tms-muted);
+  font-size: 12px;
+}
+
+.tms-shell .asl-note {
+  color: var(--tms-muted);
+  font-size: 13px;
+  margin-block: 0 8px;
+}
