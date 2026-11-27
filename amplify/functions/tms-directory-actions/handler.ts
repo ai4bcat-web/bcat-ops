@@ -13,6 +13,7 @@
  */
 import { splitEmailText } from '../../../src/lib/apEmails'
 import { FLEET_PROFILES_NO_CREATE_MESSAGE, FLEET_PROFILES_ONLY_MESSAGE, isFleetProfilesOnly } from '../../../src/lib/profileAccess'
+import { applyCapacityOp, parseCapacityBoard, todayChicagoYmd, type CapacityOp } from '../../../src/lib/capacityBoard'
 import { getAmplifyDataClientConfig, type DataClientEnv } from '@aws-amplify/backend-function/runtime'
 import { Amplify } from 'aws-amplify'
 import { generateClient } from 'aws-amplify/data'
@@ -198,6 +199,7 @@ type Action =
   | 'REMOVE_DRIVER_NOTE'
   | 'SAVE_DIVISION'
   | 'SAVE_SETTINGS'
+  | 'CAPACITY_BOARD'
   | 'PREVIEW_MERGE_LOCATIONS'
   | 'MERGE_LOCATIONS'
   | 'RESUME_MERGE'
@@ -373,6 +375,12 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
     // Read-only measuring for whoever builds loads; the key never leaves this Lambda.
     const ok = isOwner || isAdmin || groups.includes('page-loads') || groups.includes(TMS_PAGE_GROUP)
     if (!ok) throw new Error(`Forbidden: ${action} requires owner, ADMIN, page-loads, or ${TMS_PAGE_GROUP}`)
+  } else if (action === 'CAPACITY_BOARD') {
+    // The Calendar's Capacity board: dispatch work for whoever can open the Calendar. Someone limited to the fleet profiles
+    // (Jason) is not one of them: the board carries the rates the office is asking for.
+    if (isFleetProfilesOnly(email, groups)) throw new Error(FLEET_PROFILES_ONLY_MESSAGE)
+    const ok = isOwner || isAdmin || groups.includes('page-calendar') || groups.includes('page-dispatch') || groups.includes('page-loads') || groups.includes(TMS_PAGE_GROUP)
+    if (!ok) throw new Error(`Forbidden: ${action} requires owner, ADMIN, page-calendar, page-dispatch, page-loads, or ${TMS_PAGE_GROUP}`)
   } else if (assistantActions[action]) {
     const ok = isOwner || isAdmin || groups.includes(TMS_PAGE_GROUP)
     if (!ok) throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${TMS_PAGE_GROUP}`)
@@ -2436,6 +2444,59 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
   }
 }
 
+// ── The Calendar's Capacity board ────────────────────────────────────────────
+
+/**
+ * One operation on the board (save, move, cover, reopen, delete, restore), applied to `TmsSettings.capacityBoard` with a
+ * compare-and-swap, so two people editing at once never lose a card: a write that finds the board changed re-reads and applies its
+ * operation again, three times, then says so. Returns the whole board, which the page shows. No new table: the board is one field.
+ */
+async function capacityBoardAction(input: Record<string, unknown>, caller: Caller): Promise<{ cards: unknown[]; card: unknown }> {
+  if (!SETTINGS_TABLE_NAME) throw new Error('Settings table name is not configured')
+  const opName = assertString(input.op, 'op')
+  if (!['save', 'move', 'cover', 'reopen', 'delete', 'restore'].includes(opName)) throw new Error(`Unknown capacity operation: ${opName}`)
+  const op = { ...input, op: opName } as unknown as CapacityOp
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const result = await dynamo.send(new GetItemCommand({ TableName: SETTINGS_TABLE_NAME, Key: marshall({ id: 'default' }), ConsistentRead: true }))
+    const settings = result.Item ? unmarshall(result.Item) : null
+    if (!settings) throw new Error('TMS settings have not been created yet')
+    const before = settings.capacityBoard
+    const now = nowIso()
+    const { board, card } = applyCapacityOp(parseCapacityBoard(before), op, { today: todayChicagoYmd(), nowIso: now, user: caller.email, newId: () => randomUUID() })
+    const names: Record<string, string> = { '#board': 'capacityBoard' }
+    const values: Record<string, AttributeValue> = { ':board': marshall({ board }, { removeUndefinedValues: true }).board }
+    let condition = 'attribute_not_exists(#board)'
+    if (before != null) {
+      condition = '#board = :before'
+      values[':before'] = marshall({ before }, { removeUndefinedValues: true }).before
+    }
+    try {
+      await dynamo.send(new UpdateItemCommand({
+        TableName: SETTINGS_TABLE_NAME,
+        Key: marshall({ id: 'default' }),
+        ConditionExpression: condition,
+        UpdateExpression: 'SET #board = :board',
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+      }))
+    } catch (err) {
+      if (attempt < 2 && /ConditionalCheckFailed/i.test(String(err))) continue
+      if (/ConditionalCheckFailed/i.test(String(err))) throw new Error('The capacity board changed while you were saving. Try again.', { cause: err })
+      throw err
+    }
+    await writeAudit('CapacityCard', card.id, `CAPACITY_${opName.toUpperCase()}`, caller, {
+      op: opName,
+      origin: card.origin,
+      destination: card.destination,
+      availableFrom: card.availableFrom,
+      availableTo: card.availableTo,
+      status: card.status,
+    })
+    return { cards: board.cards, card }
+  }
+  throw new Error('The capacity board changed while you were saving. Try again.')
+}
+
 // ── Step M: Academy Ask assistant ───────────────────────────────────────────
 
 const ASK_MODEL = 'claude-sonnet-5'
@@ -3985,6 +4046,8 @@ export const handler = async (event: AppSyncEvent, context?: { getRemainingTimeI
       return saveDivision(input, caller)
     case 'SAVE_SETTINGS':
       return saveSettings(input, caller)
+    case 'CAPACITY_BOARD':
+      return capacityBoardAction(input, caller)
     case 'ROTATE_WEBHOOK_SECRET':
       return rotateWebhookSecret(input, caller)
     case 'ASK_ACADEMY':

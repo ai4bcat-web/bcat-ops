@@ -42,3 +42,39 @@ describe('CalendarToolbar on a phone', () => {
     expect(screen.getByRole('button', { name: 'New Shipment' }).textContent).toContain('New Shipment')
   })
 })
+
+describe('CalendarToolbar views', () => {
+  it('offers Day and Capacity only: Week and Month are gone', () => {
+    render(<MemoryRouter><CalendarToolbar {...props} /></MemoryRouter>)
+    expect(screen.getByRole('button', { name: 'Day' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Capacity' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Week' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Month' })).toBeNull()
+  })
+
+  it('puts Capacity right after Day', () => {
+    render(<MemoryRouter><CalendarToolbar {...props} /></MemoryRouter>)
+    const tabs = screen.getAllByRole('button').map((b) => b.textContent).filter((t) => t === 'Day' || t === 'Capacity')
+    expect(tabs).toEqual(['Day', 'Capacity'])
+  })
+
+  it('hides the Capacity tab from someone who may not have it', () => {
+    render(<MemoryRouter><CalendarToolbar {...props} capacityEnabled={false} /></MemoryRouter>)
+    expect(screen.queryByRole('button', { name: 'Capacity' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Day' })).toBeTruthy()
+  })
+
+  it('calls onViewChange with capacity when the tab is picked', () => {
+    const onViewChange = vi.fn()
+    render(<MemoryRouter><CalendarToolbar {...props} onViewChange={onViewChange} /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: 'Capacity' }))
+    expect(onViewChange).toHaveBeenCalledWith('capacity')
+  })
+
+  it('steps the load filters and load search aside on Capacity, and keeps New Shipment', () => {
+    render(<MemoryRouter><CalendarToolbar {...props} currentView="capacity" /></MemoryRouter>)
+    expect(document.getElementById('calendar-filters')).toBeNull()
+    expect(screen.queryByLabelText('Search loads')).toBeNull()
+    expect(screen.getByRole('button', { name: 'New Shipment' })).toBeTruthy()
+  })
+})

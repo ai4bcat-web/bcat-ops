@@ -14,8 +14,8 @@ describe('calendar view', () => {
 
   it('reopens a phone on the view last picked there', () => {
     const s = memory()
-    rememberPhoneView('week', s)
-    expect(initialCalendarView(true, s)).toBe('week')
+    rememberPhoneView('capacity', s)
+    expect(initialCalendarView(true, s)).toBe('capacity')
     expect(initialCalendarView(false, s)).toBe('day')
   })
 
@@ -25,9 +25,11 @@ describe('calendar view', () => {
     expect(initialCalendarView(true, { getItem: () => { throw new Error('blocked') } })).toBe('day')
   })
 
-  it('opens on Day when a removed List view was remembered', () => {
-    const s = memory(); s.setItem('calendar.phoneView.v2', 'list')
-    expect(initialCalendarView(true, s)).toBe('day')
+  it('opens on Day when a removed List, Week or Month view was remembered', () => {
+    for (const gone of ['list', 'week', 'month']) {
+      const s = memory(); s.setItem('calendar.phoneView.v2', gone)
+      expect(initialCalendarView(true, s)).toBe('day')
+    }
   })
 
 })
