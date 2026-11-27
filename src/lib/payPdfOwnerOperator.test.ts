@@ -19,6 +19,17 @@ describe('owner-operator statement PDF rows', () => {
     expect(rows[1][8]).toMatch(/^Held — /)
     expect(rows[1][9]).toBe('$0.00')
   })
+  it('prints the freight less what was paid direct, with the note under it', () => {
+    const paid = {
+      driver: { name: 'Chad' },
+      setting: { payPercent: 0.5, expensesBeforePercent: false },
+      trips: [{ id: 'c', loadId: '20132', customer: 'Axle Logistics', origin: 'North Aurora, IL', destination: 'Fort Worth, TX', miles: 900, freightAmount: 3150, paidDirect: 500, loadTotal: 3650, deliveredAt: '', readiness: { payload: { InvoiceNo: '20132' }, missingDocuments: [] } }],
+      heldTrips: [],
+    } as unknown as OwnerOperatorPayRow
+    const [r] = ownerOperatorPdfRows(paid)
+    expect(r[6]).toBe('$3,150.00\nless $500.00 lumper paid direct to driver')
+    expect(r[9]).toBe('$1,575.00')
+  })
   it('names the file by driver and period', () => {
     expect(ownerOperatorPdfFilename(row, '2026-10-04')).toBe('settlement-Roy-Workman-2026-10-04.pdf')
   })

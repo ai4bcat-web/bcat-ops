@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { ownerOpTripsFor, OWNER_OP_FIRST_PERIOD, ratePerMile, totalRatePerMile, settlementStopDates, settlementDateLabel } from './ownerOperatorTrips'
+import { ownerOpTripsFor, OWNER_OP_FIRST_PERIOD, ratePerMile, totalRatePerMile, settlementStopDates, settlementDateLabel, paidDirectCents } from './ownerOperatorTrips'
+import { tripPayAmount, calcDriverPay } from './driverPay'
 
 const driverId = 'driver-1'
 
@@ -152,5 +153,60 @@ describe('settlementStopDates', () => {
   it('labels in Central time, blank when unknown', () => {
     expect(settlementDateLabel({ at: '2026-11-10T03:00:00Z', actual: true })).toBe('11/09')
     expect(settlementDateLabel({ at: null, actual: false })).toBe('')
+  })
+})
+
+describe('a lumper paid direct to the driver (load 20132)', () => {
+  const fifty = { payPercent: 0.5, expensesBeforePercent: false }
+  const afterExpenses = { payPercent: 0.5, expensesBeforePercent: true }
+
+  it('works the driver share off the total less the amount paid direct: $3,650 - $500 -> $3,150 -> 50% = $1,575', () => {
+    const [trip] = ownerOpTripsFor([baseLoad({ rate: 365000, driverPaidDirectCents: 50000 })], driverId, '2026-09-27')
+    expect(trip.freightAmount).toBe(3150)
+    expect(trip.paidDirect).toBe(500)
+    expect(trip.loadTotal).toBe(3650)
+    expect(tripPayAmount(trip.freightAmount, fifty)).toBe(1575)
+    // The check drops by exactly $250 against the same load without the adjustment.
+    const [before] = ownerOpTripsFor([baseLoad({ rate: 365000 })], driverId, '2026-09-27')
+    expect(tripPayAmount(before.freightAmount, fifty) - tripPayAmount(trip.freightAmount, fifty)).toBe(250)
+  })
+
+  it('leaves a load with nothing paid direct exactly as it was (missing, null, zero, negative, NaN)', () => {
+    for (const v of [undefined, null, 0, -500, Number.NaN]) {
+      const [trip] = ownerOpTripsFor([baseLoad({ rate: 45000, driverPaidDirectCents: v })], driverId, '2026-09-27')
+      expect(trip.freightAmount).toBe(450)
+      expect(trip.paidDirect).toBe(0)
+      expect(trip.loadTotal).toBe(450)
+    }
+  })
+
+  it('never takes more than the load total, so freight cannot go negative', () => {
+    const [trip] = ownerOpTripsFor([baseLoad({ rate: 45000, driverPaidDirectCents: 90000 })], driverId, '2026-09-27')
+    expect(trip.paidDirect).toBe(450)
+    expect(trip.freightAmount).toBe(0)
+    expect(paidDirectCents({ rate: 45000, driverPaidDirectCents: 90000 })).toBe(45000)
+    expect(paidDirectCents({ rate: null, driverPaidDirectCents: 500 })).toBe(0)
+  })
+
+  it('adjusts only the load it is set on, and the week statement adds up', () => {
+    const loads = [
+      baseLoad({ id: 'a', rate: 365000, driverPaidDirectCents: 50000, deliveryAppt: '2026-09-28T17:00:00Z' }),
+      baseLoad({ id: 'b', rate: 540000, deliveryAppt: '2026-09-29T17:00:00Z' }),
+    ]
+    const trips = ownerOpTripsFor(loads, driverId, '2026-09-27')
+    expect(trips.map((t) => t.freightAmount)).toEqual([3150, 5400])
+    const st = calcDriverPay(trips.map((t) => ({ freightAmount: t.freightAmount })), afterExpenses, [], [], [])
+    expect(st.gross).toBe(8550)
+    // 50% of gross less the 2% factoring fee on that gross.
+    expect(st.checkAmount).toBe(4189.5)
+  })
+
+  it('on an after-expenses statement the check drops by his share of the amount net of the factoring fee that follows the gross ($245)', () => {
+    const withLumper = ownerOpTripsFor([baseLoad({ rate: 365000 })], driverId, '2026-09-27')
+    const adjusted = ownerOpTripsFor([baseLoad({ rate: 365000, driverPaidDirectCents: 50000 })], driverId, '2026-09-27')
+    const check = (trips: typeof adjusted) => calcDriverPay(trips.map((t) => ({ freightAmount: t.freightAmount })), afterExpenses, [], [], []).checkAmount
+    expect(check(withLumper)).toBe(1788.5)
+    expect(check(adjusted)).toBe(1543.5)
+    expect(check(withLumper) - check(adjusted)).toBe(245)
   })
 })

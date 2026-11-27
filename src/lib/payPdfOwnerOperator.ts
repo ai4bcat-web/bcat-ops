@@ -10,6 +10,7 @@ import type { OwnerOperatorPayRow } from '@/hooks/useOwnerOperatorPay'
 import { tripPayAmount, FACTORING_FEE_LABEL } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 import { ratePerMile, settlementDateLabel, totalRatePerMile, type SettlementDate } from '@/lib/ownerOperatorTrips'
+import { paidDirectNote } from '@/lib/paidDirect'
 import { PAY_HOLD_LABEL } from '@/lib/payHold'
 import { weekLabelLong } from '@/features/driver-pay/week'
 import { loadImage, COMPANY_NAME } from '@/lib/payPdf'
@@ -44,7 +45,7 @@ export function ownerOperatorPdfRows(row: OwnerOperatorPayRow): string[][] {
       pdfDate(t.dates?.pickup),
       pdfDate(t.dates?.delivery),
       t.miles != null ? t.miles.toLocaleString() : '—',
-      money(t.freightAmount),
+      t.paidDirect > 0 ? `${money(t.freightAmount)}\n${paidDirectNote(t.paidDirect)}` : money(t.freightAmount),
       rpm != null ? `$${rpm.toFixed(2)}` : '—',
       reason ? `Held — ${PAY_HOLD_LABEL[reason]}` : 'On this check',
       money(reason ? 0 : tripPayAmount(t.freightAmount, row.setting)),

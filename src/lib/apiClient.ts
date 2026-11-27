@@ -167,6 +167,8 @@ let loadsHaveFreight = true
 // Step C's declared cargo value — read by the carrier booking gates.
 let loadsHaveCargoValue = true
 let loadsHavePodNotes = true
+// Cents of the load's total already paid to the driver directly (a lumper); read by the owner operator settlements.
+let loadsHavePaidDirect = true
 // Step B's shipment layer: the link to Shipment/Order plus the carrier-side status
 // and assignment. One flag for the whole group — they deploy together, and step D's
 // tracking columns ride the same flag because they land in the same Load deploy.
@@ -201,6 +203,7 @@ const loadFields = () => {
   if (loadsHaveFreight) f += ' commodity weight pieces piecesUnit'
   if (loadsHavePodNotes) f += ' podNotes'
   if (loadsHaveCargoValue) f += ' cargoValueCents'
+  if (loadsHavePaidDirect) f += ' driverPaidDirectCents'
   if (loadsHaveShipment) f += LOAD_SHIPMENT_FIELDS
   if (loadsHaveRevTag) f += LOAD_REV_FIELDS
   if (loadsHaveVoided) f += ' voidedAt'
@@ -272,7 +275,7 @@ const AUDIT_FIELDS = `
 
 // Which newer fields the backend is rejecting (not deployed yet). Used to clear the
 // corresponding flag and retry.
-function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean; paperworkLocation: boolean; trailer: boolean; freight: boolean; cargoValue: boolean; podNotes: boolean; shipment: boolean; revTag: boolean; voided: boolean } {
+function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean; paperworkLocation: boolean; trailer: boolean; freight: boolean; cargoValue: boolean; paidDirect: boolean; podNotes: boolean; shipment: boolean; revTag: boolean; voided: boolean } {
   const errs = (err as { errors?: { message?: string }[] })?.errors
   const msg = Array.isArray(errs) ? errs.map((e) => e?.message ?? '').join(' ') : ''
   return {
@@ -285,6 +288,7 @@ function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sort
     trailer: /'trailerNumber'/i.test(msg),
     freight: /'(commodity|weight|pieces|piecesUnit)'/i.test(msg),
     cargoValue: /'cargoValueCents'/i.test(msg),
+    paidDirect: /'driverPaidDirectCents'/i.test(msg),
     podNotes: /'podNotes'/i.test(msg),
     shipment: /'(shipmentId|orderId|loadNumber|leg|status|statusChangedAt|statusChangedBy|statusSource|carrierRepId|assignmentType|activeLoadCarrierId|carrierName|equipmentType|divisionKey|trackingProvider|nextCheckCallAt|nextCheckCallNote|checkCallOpen|pickupMonth|lastCheckCallAt|lastCheckCallType|lastKnownAt|lastKnownCity|lastKnownState|lastKnownLat|lastKnownLng|lastKnownPreviousAt|lastKnownPreviousCity|lastKnownPreviousState|lastKnownPreviousLat|lastKnownPreviousLng|lastKnownSource|openIncidentCount|deliveredAt|checkCallDueNotifiedAt|checkCallOverdueNotifiedAt|carrierAssignmentStatus)'/i.test(msg),
     revTag: /'(revDivision|revSubdivision|revTagSource|revRuleId|salesRepId)'/i.test(msg),
@@ -334,6 +338,10 @@ function healLoadFields(err: unknown): boolean {
   if (loadsHaveCargoValue && u.cargoValue) {
     console.warn("[apiClient] backend has no cargoValueCents yet — querying loads without it until deploy")
     loadsHaveCargoValue = false; changed = true
+  }
+  if (loadsHavePaidDirect && u.paidDirect) {
+    console.warn("[apiClient] backend has no driverPaidDirectCents yet — querying loads without it until deploy")
+    loadsHavePaidDirect = false; changed = true
   }
   if (loadsHavePodNotes && u.podNotes) {
     console.warn("[apiClient] backend has no podNotes yet — querying loads without it until deploy")
@@ -5292,6 +5300,19 @@ export async function setLoadRequiredDocs(input: {
   requiredDocTypes: string[]
 }): Promise<{ bundle: ShipmentBundle; unchanged?: boolean }> {
   return shipmentAction<{ bundle: ShipmentBundle; unchanged?: boolean }>('SET_LOAD_REQUIRED_DOCS', input)
+}
+
+/**
+ * Dollars of a load's total the driver was paid directly (a lumper the broker handed them), so
+ * their settlement works their share off the rest. The customer invoice and the factored amount
+ * are untouched. 0 clears it. Audited; refuses more than the load's total.
+ */
+export async function setLoadPaidDirect(input: {
+  loadId: string
+  paidDirectDollars: number
+  reason?: string
+}): Promise<{ loadId: string; paidDirectCents: number; previousCents: number; unchanged?: boolean }> {
+  return shipmentAction('SET_LOAD_PAID_DIRECT', input)
 }
 
 export interface ReadyToInvoiceInput {

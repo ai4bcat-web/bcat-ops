@@ -5392,6 +5392,53 @@ describe('documents', () => {
     expect(table(TABLES.order).get(ids.orderId)!.docsMissing).toEqual(['POD', 'RATE_CON'])
   })
 
+  /**
+   * A lumper the broker paid the driver directly (Ryne, 2026-11-27): the amount comes off the driver's
+   * settlement base and nothing else. Written only here, audited, never more than the load total.
+   */
+  describe('SET_LOAD_PAID_DIRECT', () => {
+    const PAY_USER = { sub: 'sub-pay', username: 'pay', claims: { email: 'pay@bcatcorp.com', 'cognito:groups': ['page-ownerOperatorPay'] } }
+
+    async function withRate(rate: number | null): Promise<DocIds> {
+      const ids = await delivered()
+      table(TABLES.load).set(ids.loadId, { ...table(TABLES.load).get(ids.loadId)!, rate })
+      return ids
+    }
+
+    it('sets, changes and clears the amount, and audits what it was and what it became', async () => {
+      const ids = await withRate(365_000)
+      const set = await call('SET_LOAD_PAID_DIRECT', { loadId: ids.loadId, paidDirectDollars: 500, reason: 'Lumper paid to Chad by the broker' }, ADMIN)
+      expect(set).toMatchObject({ paidDirectCents: 50_000, previousCents: 0 })
+      const load = table(TABLES.load).get(ids.loadId)!
+      expect(load.driverPaidDirectCents).toBe(50_000)
+      // The money on the load is untouched.
+      expect(load.rate).toBe(365_000)
+      const audit = [...table(TABLES.audit).values()].find((r) => r.action === 'SET_LOAD_PAID_DIRECT')
+      expect(audit).toMatchObject({ entityType: 'LOAD', entityId: ids.loadId })
+      expect(JSON.parse(String(audit!.changes))).toMatchObject({ previousCents: 0, paidDirectCents: 50_000, loadTotalCents: 365_000, reason: 'Lumper paid to Chad by the broker' })
+
+      expect(await call('SET_LOAD_PAID_DIRECT', { loadId: ids.loadId, paidDirectDollars: 500 }, ADMIN)).toMatchObject({ unchanged: true })
+
+      await call('SET_LOAD_PAID_DIRECT', { loadId: ids.loadId, paidDirectDollars: 0 }, ADMIN)
+      expect(table(TABLES.load).get(ids.loadId)!.driverPaidDirectCents ?? null).toBeNull()
+    })
+
+    it('refuses more than the load total, a negative amount, and a load with no rate', async () => {
+      const ids = await withRate(365_000)
+      await expect(call('SET_LOAD_PAID_DIRECT', { loadId: ids.loadId, paidDirectDollars: 3650.01 }, ADMIN)).rejects.toThrow(/cannot be more than the load total/)
+      await expect(call('SET_LOAD_PAID_DIRECT', { loadId: ids.loadId, paidDirectDollars: -1 }, ADMIN)).rejects.toThrow(/zero or more/)
+      const noRate = await withRate(null)
+      await expect(call('SET_LOAD_PAID_DIRECT', { loadId: noRate.loadId, paidDirectDollars: 10 }, ADMIN)).rejects.toThrow(/no rate/)
+    })
+
+    it('is for the settlements pages and admins, not for anyone who may merely edit a load', async () => {
+      const ids = await withRate(365_000)
+      await expect(call('SET_LOAD_PAID_DIRECT', { loadId: ids.loadId, paidDirectDollars: 500 }, DISPATCHER)).rejects.toThrow()
+      await expect(call('SET_LOAD_PAID_DIRECT', { loadId: ids.loadId, paidDirectDollars: 500 }, TMS_USER)).rejects.toThrow()
+      await expect(call('SET_LOAD_PAID_DIRECT', { loadId: ids.loadId, paidDirectDollars: 500 }, PAY_USER)).resolves.toMatchObject({ paidDirectCents: 50_000 })
+    })
+  })
+
 
   it('refuses to review a document that is no longer active', async () => {
     const ids = await delivered()
