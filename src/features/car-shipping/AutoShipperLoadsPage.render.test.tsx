@@ -119,6 +119,21 @@ describe('AutoShipperLoadsPage', () => {
     expect(record.searchParams.get('recordLeg')).toBe('L2')
   })
 
+  it('shows the Carrier pay column and a total tile to someone with the AP grant, and neither without it', async () => {
+    renderPage()
+    await screen.findAllByText('14730')
+    expect(screen.getAllByText('Carrier pay').length).toBeGreaterThan(0)
+    // 14730 is paid at $900.00 (its bill), 14731 owes $1,000.00 (the leg rate): $1,900.00 across 2 loads.
+    expect(screen.getByText('$1,900.00 · 2 loads')).toBeTruthy()
+    expect(screen.getAllByText('$900.00').length).toBeGreaterThan(0)
+    cleanup()
+    auth.access = new Set(['autoShipperLoads', 'invoicing'])
+    renderPage()
+    await screen.findAllByText('14730')
+    expect(screen.queryByText('Carrier pay')).toBeNull()
+    expect(screen.queryByText('$900.00')).toBeNull()
+  })
+
   it('the Carrier unpaid tab keeps only loads with a carrier still to pay', async () => {
     renderPage()
     await screen.findAllByText('14730')

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  autoShipperCsv, bothPaid, buildAutoShipperRows, carrierAction, carrierRollupOf, customerAction, carrierUnpaid, customerUnpaid, inRange, inTab, isAutoShipperCustomer,
+  autoShipperCsv, bothPaid, carrierPayCents, carrierPayTotal, buildAutoShipperRows, carrierAction, carrierRollupOf, customerAction, carrierUnpaid, customerUnpaid, inRange, inTab, isAutoShipperCustomer,
   isAutoShipperShipment, payerText, rangeStart, summarize, tabCounts, vehicleText, type AutoShipperInput, type AutoShipperRow,
 } from './autoShipperLoads'
 import type { CarrierBillRecord, InvoiceRecord, LoadCarrierRecord, OrderRecord, ShipmentRecord } from '@/types/tms'
@@ -335,5 +335,40 @@ describe('row actions: where Mark paid and Pay carrier go', () => {
     const own = rowFor({ legs: [leg('L1', 's1', { kind: 'OWN_ASSET', driverName: 'Sam' })] })
     expect(carrierAction(own.carriers![0]!, 's1')).toBeNull()
     expect(rowFor({ showAp: false, legs: [leg('L1', 's1')] }).carriers).toBeNull()
+  })
+})
+
+describe('carrier pay amount (Ryne 2026-11-27)', () => {
+  const carriersOf = (legs: LoadCarrierRecord[], bills: CarrierBillRecord[] = [], showAp = true) =>
+    build({ shipments: [ship('s1', '14730')], orders: [order('s1')], legs, bills, showAp })[0]
+
+  it('is the recorded bill amount when a bill exists, else the leg carrier rate', () => {
+    expect(carrierPayCents(carriersOf([leg('L1', 's1')]))).toBe(90000)
+    expect(carrierPayCents(carriersOf([leg('L1', 's1')], [bill('b1', 'L1', 's1', { netCents: 85000 })]))).toBe(85000)
+  })
+
+  it('adds up every carrier on a multi-carrier load', () => {
+    const row = carriersOf([leg('L1', 's1'), leg('L2', 's1', { carrierName: 'Other Carrier', carrierRateCents: 25000 })])
+    expect(carrierPayCents(row)).toBe(115000)
+  })
+
+  it('is blank for an own truck, no carrier, and a viewer without the AP grant', () => {
+    expect(carrierPayCents(carriersOf([leg('L1', 's1', { kind: 'OWN_ASSET', carrierId: null, carrierName: null, driverName: 'Sam' })]))).toBeNull()
+    expect(carrierPayCents(carriersOf([]))).toBeNull()
+    expect(carrierPayCents(carriersOf([leg('L1', 's1')], [], false))).toBeNull()
+  })
+
+  it('totals the rows shown and counts the loads that carry an amount', () => {
+    const a = carriersOf([leg('L1', 's1')])
+    const b = carriersOf([])
+    expect(carrierPayTotal([a, b, a])).toEqual({ cents: 180000, count: 2 })
+  })
+
+  it('heads the CSV column Carrier pay and writes the amount per carrier', () => {
+    const row = carriersOf([leg('L1', 's1'), leg('L2', 's1', { carrierName: 'Other Carrier', carrierRateCents: 25000 })])
+    const [head, line] = autoShipperCsv([row], { showAr: false, showAp: true }).split('\r\n')
+    expect(head).toContain('Carrier pay')
+    expect(line).toContain('900.00; 250.00')
+    expect(autoShipperCsv([row], { showAr: false, showAp: false })).not.toContain('Carrier pay')
   })
 })
