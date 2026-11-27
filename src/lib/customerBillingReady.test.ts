@@ -30,9 +30,12 @@ describe('AP e-mail waiver (Ryne 2026-11-16: AUTO SHIPPER)', () => {
     expect(customerBillingSummary(autoShipper, { apEmailRequired: required })).toBe('Manual invoice · AP e-mail: not required')
   })
   it('a factored customer can never waive it', () => {
-    const factored = { ...autoShipper, billingMethod: 'FACTOR' }
+    const factored = { ...autoShipper, name: 'Acme Freight', billingMethod: 'FACTOR' }
     expect(customerApEmailRequired(factored, null)).toBe(true)
     expect(customerBillingGaps(factored, { apEmailRequired: customerApEmailRequired(factored, null) })).toEqual(['CUSTOMER_AP_EMAIL'])
+  })
+  it('the AUTO SHIPPER is never factored (Ryne 2026-11-27), so even a stray FACTOR on it may still waive it', () => {
+    expect(customerApEmailRequired({ ...autoShipper, billingMethod: 'FACTOR' }, null)).toBe(false)
   })
   it('defaults to required (no list, or a list that keeps it)', () => {
     expect(customerApEmailRequired({ billingMethod: 'MANUAL' }, null)).toBe(true)

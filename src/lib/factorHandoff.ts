@@ -21,7 +21,7 @@
 // Relative, not `@/` — the tmsFinanceActions Lambda bundles this file by path for its
 // SEND_TO_FACTOR action, and the alias does not exist in the function build.
 import { customerRefOf } from './customerRef'
-import { isBrokerageRevDivision } from './reviewRequirements'
+import { isAutoShipperCustomer, isBrokerageRevDivision } from './reviewRequirements'
 import { rateCentsToDollars } from './otrInvoice'
 import type { OtrRequiredField } from './otrInvoice'
 import type { FactoringItem, Stop } from '../types'
@@ -229,6 +229,10 @@ export function needsFactorReaddress(
 export function whyNotFactorable(input: FactorRefusalInput): string | null {
   const { invoice, order, shipment, customer, load, existingRow } = input
 
+  // The AUTO SHIPPER customer is never factored (Ryne 2026-11-27): its payer pays BCAT directly (Square or by hand).
+  if (isAutoShipperCustomer(customer)) {
+    return `${customer.name} is an auto shipper; auto shipper invoices are never factored. Invoice it through Square or manually.`
+  }
   // Brokered loads are never factored (Ryne 2026-11-16): they invoice manually with BCAT's own remit-to.
   if (isBrokerageRevDivision((shipment as { revDivision?: string | null }).revDivision)) {
     return `Shipment ${shipment.number} is a brokered load; brokered loads are not factored. Invoice it manually.`

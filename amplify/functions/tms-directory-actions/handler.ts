@@ -36,7 +36,7 @@ import { CUSTOMER_TRACKING_MODES, DRIVER_SMS_TARGETS, TRACKING_METHODS } from '.
 import { CUSTOMER_TYPES } from '../../../src/lib/factorBilling'
 import { customerMcRequiredError } from '../../../src/lib/factorReadyAtCreate'
 import { teamMembership, validateTeams } from '../../../src/lib/teams'
-import { REVIEW_REQUIREMENTS, customerApEmailRequired, normalizeReviewRequirements } from '../../../src/lib/reviewRequirements'
+import { REVIEW_REQUIREMENTS, customerApEmailRequired, isAutoShipperCustomer, normalizeReviewRequirements } from '../../../src/lib/reviewRequirements'
 import { SEED_DIVISIONS, SEED_RULES, validateDivisions, validateRules } from '../../../src/lib/ownership'
 import { checkIntakeEmail, normalizeIntakeEmail } from '../../../src/lib/intakeMail'
 import { isOwnPersonalTemplateId, isPersonalTemplateId } from '../../../src/lib/personalColumnLayout'
@@ -1117,6 +1117,16 @@ function resolveBillingFields(
     billingNeedsReview: (existing?.billingNeedsReview as string | undefined) ?? null,
   }
   const method = 'billingMethod' in input ? optionalEnumStrict(input.billingMethod, BILLING_METHODS, 'billingMethod') : before.billingMethod
+  // The AUTO SHIPPER customer is never factored (Ryne 2026-11-27): FACTOR cannot be chosen for it, however the save arrives.
+  if (
+    method === 'FACTOR' &&
+    isAutoShipperCustomer({
+      name: typeof input.name === 'string' ? input.name : (existing?.name as string | undefined),
+      invoiceChannel: 'invoiceChannel' in input ? (input.invoiceChannel as string | null | undefined) : (existing?.invoiceChannel as string | null | undefined),
+    })
+  ) {
+    throw new Error('Auto shipper invoices are never factored, so its billing method cannot be Factor.')
+  }
   const apRaw = 'apEmail' in input ? optionalString(input.apEmail, 254) : before.apEmail
   const noaRaw = 'noaEmail' in input ? optionalString(input.noaEmail, 254) : before.noaEmail
   const extraRaw = 'apEmailsExtra' in input ? optionalStringArray(input.apEmailsExtra, 254) : before.apEmailsExtra

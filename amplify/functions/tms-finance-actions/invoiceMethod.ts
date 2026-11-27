@@ -16,7 +16,7 @@
  * FACTOR the existing Send to Factor does the work (gate, queue row, re-address). Neither e-mails anyone or calls OTR;
  * the PDF is redrawn because it prints the remit-to.
  */
-import { assertString, optionalString, type Caller } from '../_shared/actionInputs'
+import { assertArrayOf, assertString, optionalString, type Caller } from '../_shared/actionInputs'
 import { auditCustomerChange } from '../_shared/customerAudit'
 import { remitToFor } from '../../../src/lib/invoiceBuild'
 import {
@@ -276,4 +276,81 @@ export async function syncCustomerMethod(input: Row, caller: Caller): Promise<Ro
     }
   }
   return { customerId, changed, skipped }
+}
+
+const MAX_UNFACTOR_BATCH = 20
+
+/**
+ * Take the "factored" flag off invoices nothing is actually factored on (Ryne 2026-11-27: an AUTO SHIPPER must never read
+ * Factored (OTR)). An import (Aljex carry-over, the AR/AP sheet) stamped `factored` on invoices that never had a queue row, an OTR
+ * invoice or a payment from OTR, and those invoices are already marked sent, so the ordinary "Change method" link refuses them.
+ *
+ * Admin only, with a typed reason. Per invoice, refused (and listed under `skipped`) when the factor could be involved: a queue row
+ * that is anything but archived, an OTR invoice id or schedule on it, money already taken or written off, or an invoice that is
+ * void or paid. Otherwise the invoice loses `factored` and its pointer to a queue row, takes the division's own manual remit-to,
+ * and its order loses the pointer too. Balances, numbers, dates and the "sent" stamps stay as they were. Nothing is e-mailed and
+ * OTR is never called.
+ */
+export async function clearFactoredFlag(input: Row, caller: Caller): Promise<Row> {
+  if (!caller.isAdmin) throw new Error('Forbidden: only an admin can take an invoice off the factor')
+  const invoiceIds = assertArrayOf<string>(input.invoiceIds, 'invoiceIds', (item, index) => assertString(item, `invoiceIds[${index}]`), MAX_UNFACTOR_BATCH)
+  const reason = optionalString(input.reason, 2000)
+  if (!reason) throw new Error('Taking an invoice off the factor needs a reason')
+
+  const done: Row[] = []
+  const skipped: Row[] = []
+  const seen = new Set<string>()
+  for (const invoiceId of invoiceIds) {
+    if (seen.has(invoiceId)) continue
+    seen.add(invoiceId)
+    const invoice = await getById(INVOICE_TABLE_NAME, invoiceId)
+    if (!invoice) { skipped.push({ invoiceId, reason: 'Invoice not found' }); continue }
+    if (invoice.status !== 'ISSUED') { skipped.push({ invoiceId, reason: `That invoice is ${String(invoice.status ?? 'not open').toLowerCase()}` }); continue }
+    if (invoice.factored !== true && !optionalString(invoice.factoringItemId, 100)) { skipped.push({ invoiceId, reason: 'Not marked factored' }); continue }
+    if ((numberOrNull(invoice.paidCents) ?? 0) > 0 || (numberOrNull(invoice.writtenOffCents) ?? 0) > 0) {
+      skipped.push({ invoiceId, reason: 'Money has already been taken on this invoice' })
+      continue
+    }
+    const shipment = invoice.shipmentId ? await getById(SHIPMENT_TABLE_NAME, String(invoice.shipmentId)) : null
+    const item = await queueRowOf(invoice, shipment)
+    if (item && (item.status !== 'ARCHIVED' || optionalString(item.otrInvoiceId, 100) || optionalString(item.otrScheduleId, 100))) {
+      skipped.push({ invoiceId, reason: 'It has a live OTR queue row or an OTR invoice, so it is really with the factor' })
+      continue
+    }
+    const order = invoice.orderId ? await getById(ORDER_TABLE_NAME, String(invoice.orderId)) : null
+    const division = invoice.divisionKey ? await getDivision(String(invoice.divisionKey)) : null
+    const settings = await getSettings()
+    const remitTo = remitToFor(division as never, { billingMethod: 'MANUAL', factored: false }, settings as never)
+    const now = nowIso()
+    const writes = [
+      updateTx(
+        INVOICE_TABLE_NAME,
+        invoiceId,
+        { factored: false, remitTo, updatedAt: now, updatedBy: caller.email, version: (numberOrNull(invoice.version) ?? 1) + 1 },
+        {
+          remove: ['factoringItemId'],
+          // Still open and unpaid, and nobody changed it between the read and this write.
+          condition: 'attribute_exists(id) AND #st = :issued AND (attribute_not_exists(paidCents) OR paidCents = :zero)',
+          extraValues: { ':issued': { S: 'ISSUED' }, ':zero': { N: '0' } },
+        },
+      ),
+    ]
+    if (order && order.factoringItemId) {
+      writes.push(updateTx(ORDER_TABLE_NAME, String(order.id), { updatedAt: now, updatedBy: caller.email, version: (numberOrNull(order.version) ?? 1) + 1 }, { remove: ['factoringItemId'] }))
+    }
+    const names = writes[0].Update?.ExpressionAttributeNames
+    if (names) names['#st'] = 'status'
+    await transact(writes, 'invoice off the factor')
+    await writeAudit('Invoice', invoiceId, 'CLEAR_FACTORED_FLAG', caller, {
+      reason,
+      factoredWas: invoice.factored ?? null,
+      factoringItemIdWas: optionalString(invoice.factoringItemId, 100),
+      remitToWas: (invoice.remitTo as Row | undefined)?.name ?? null,
+      remitToNow: remitTo.name || null,
+    })
+    // Only an invoice that has a stored PDF prints the remit-to; an imported one has none.
+    if (optionalString(invoice.pdfKey, 1024)) await rerenderInvoicePdf(invoiceId, caller).catch(() => undefined)
+    done.push({ invoiceId, number: String(invoice.number ?? invoiceId) })
+  }
+  return { done, skipped }
 }

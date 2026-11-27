@@ -21,6 +21,7 @@ import {
 } from '../../../src/lib/releaseGate'
 import { assertNotSquareInvoiced } from '../../../src/lib/invoiceDelivery'
 import { isFactoredLoad } from '../../../src/lib/factorBilling'
+import { isAutoShipperCustomer } from '../../../src/lib/reviewRequirements'
 import { factorGapsAtCreate, factoringPoNumber, routeEnds } from '../../../src/lib/factorReadyAtCreate'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { isCustomerUnresolved, unresolvedCustomerMessage } from '../../../src/lib/customerResolution'
@@ -142,6 +143,10 @@ export async function sendToFactor(input: Row, caller: Caller): Promise<Row> {
   if (!orderRow) throw new Error(`Order not found: ${invoice.orderId}`)
   if (!shipmentRow) throw new Error(`Shipment not found: ${invoice.shipmentId}`)
   if (!customerRow) throw new Error(`Customer not found: ${invoice.customerId}`)
+  // The AUTO SHIPPER customer is never factored (Ryne 2026-11-27); refused before anything is written to the queue.
+  if (isAutoShipperCustomer(customerRow as { name?: string | null; invoiceChannel?: string | null })) {
+    throw new Error('Auto shipper invoices are never factored. Invoice it through Square or manually.')
+  }
   assertNotSquareInvoiced(shipmentRow as unknown as { revDivision?: string | null }, 'sending it to the factor')
 
   const order = orderRow as unknown as OrderRecord

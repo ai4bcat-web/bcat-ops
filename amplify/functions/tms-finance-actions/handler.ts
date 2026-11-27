@@ -35,7 +35,7 @@ import {
 import { acceptDifferences, createCredit, recordPayment, reversePayment, writeOffInvoice } from './payments'
 import { previewFactor, previewFactorReady, releaseDeadOtrSubmission, sendToFactor } from './factor'
 import { moveToManualInvoice } from './otrRejected'
-import { setInvoiceMethod, syncCustomerMethod } from './invoiceMethod'
+import { clearFactoredFlag, setInvoiceMethod, syncCustomerMethod } from './invoiceMethod'
 import { releaseToBilling, sendInvoice, syncFactoringChange } from './release'
 import {
   approveBill,
@@ -126,6 +126,7 @@ type Action =
   | 'PREVIEW_FACTOR_READY'
   | 'MOVE_TO_MANUAL_INVOICE'
   | 'SET_INVOICE_METHOD'
+  | 'CLEAR_FACTORED_FLAG'
   | 'SYNC_CUSTOMER_METHOD'
   | 'SEND_TO_FACTOR'
   | 'SAVE_AR_SETTINGS'
@@ -234,6 +235,8 @@ const ADMIN_ONLY_ACTIONS: Record<string, true> = {
   SAVE_AP_SETTINGS: true,
   SAVE_COMMISSION_SETTINGS: true,
   REPOINT_INVOICED_CUSTOMER: true,
+  // Taking the factored flag off an invoice nothing is with OTR on is an admin act (Ryne 2026-11-27: AUTO SHIPPER is never factored).
+  CLEAR_FACTORED_FLAG: true,
   // Hiding years of payment history is an admin act, never a page one.
   ARCHIVE_AP_PAYMENTS_THROUGH: true,
   UNARCHIVE_AP_PAYMENTS: true,
@@ -285,7 +288,7 @@ function accountingPagesFor(action: Action): readonly string[] {
   // Making the Square DRAFT is bookkeeping for a shipment just built (nothing reaches the payer); sending, canceling and syncing are Invoicing's.
   if (action === 'SQUARE_CREATE_INVOICE' || action === 'SQUARE_SAVE_DETAILS') return ['invoicing', 'loadReview']
   if (action === 'CLEAR_FINANCE_REVIEW' || action === 'SET_DELIVERED_DATE') return ['invoicing', 'carrierPay']
-  if (action === 'SEND_TO_FACTOR' || action === 'SYNC_FACTORING_CHANGE' || action === 'SETTLE_FACTORED_INVOICES' || action === 'MOVE_TO_MANUAL_INVOICE' || action === 'SET_INVOICE_METHOD' || action === 'SYNC_CUSTOMER_METHOD') return ['invoicing', 'factoring']
+  if (action === 'SEND_TO_FACTOR' || action === 'SYNC_FACTORING_CHANGE' || action === 'SETTLE_FACTORED_INVOICES' || action === 'MOVE_TO_MANUAL_INVOICE' || action === 'SET_INVOICE_METHOD' || action === 'CLEAR_FACTORED_FLAG' || action === 'SYNC_CUSTOMER_METHOD') return ['invoicing', 'factoring']
   if (COMMISSION_ACTIONS[action]) return ['commissions']
   if (AP_ACTIONS[action]) return ['carrierPay']
   return ['invoicing']
@@ -409,6 +412,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return moveToManualInvoice(input, caller)
     case 'SET_INVOICE_METHOD':
       return setInvoiceMethod(input, caller)
+    case 'CLEAR_FACTORED_FLAG':
+      return clearFactoredFlag(input, caller)
     case 'SYNC_CUSTOMER_METHOD':
       return syncCustomerMethod(input, caller)
     case 'SEND_TO_FACTOR':

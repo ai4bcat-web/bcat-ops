@@ -10,9 +10,9 @@
  * Relative imports only: the finance and shipment Lambdas bundle this file by path.
  */
 import type { CustomerRecord } from '../types/tms'
-import { isBrokerageRevDivision } from './reviewRequirements'
+import { isAutoShipperCustomer, isBrokerageRevDivision } from './reviewRequirements'
 
-export type FactorBillingCustomer = Pick<CustomerRecord, 'factored' | 'billingMethod'>
+export type FactorBillingCustomer = Pick<CustomerRecord, 'factored' | 'billingMethod'> & { name?: string | null; invoiceChannel?: string | null }
 
 /** Broker or shipper (Ryne 2026-11-14). Unset means nobody has said yet. */
 export const CUSTOMER_TYPES = ['BROKER', 'SHIPPER'] as const
@@ -28,6 +28,7 @@ export function mcRequiredForFactoring(customer: (FactorBillingCustomer & { cust
 
 export function isFactorBilled(customer: FactorBillingCustomer | null | undefined): boolean {
   if (!customer) return false
+  if (isAutoShipperCustomer(customer)) return false // never factored (Ryne 2026-11-27), whatever the billing method says
   if (customer.billingMethod === 'MANUAL') return false
   return customer.billingMethod === 'FACTOR' || customer.factored === true
 }

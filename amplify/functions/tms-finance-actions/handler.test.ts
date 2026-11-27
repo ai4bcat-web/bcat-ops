@@ -2050,6 +2050,79 @@ describe('review regressions', () => {
     })
   })
 
+  describe('an AUTO SHIPPER is never factored (Ryne 2026-11-27)', () => {
+    const makeAutoShipper = () => table(TABLES.customer).set(CUSTOMER_ID, { ...table(TABLES.customer).get(CUSTOMER_ID)!, name: 'AUTO SHIPPER', billingMethod: 'FACTOR', factored: true })
+
+    it('refuses Send to Factor, even for a customer set to FACTOR', async () => {
+      const { invoiceId } = await generate()
+      await call('SAVE_AR_SETTINGS', { factorRemitTo: { name: 'OTR Solutions' } })
+      makeAutoShipper()
+      await expect(call('SEND_TO_FACTOR', { invoiceId })).rejects.toThrow(/auto shipper invoices are never factored/i)
+      expect(table(TABLES.factoring).size).toBe(0)
+      expect(table(TABLES.invoice).get(invoiceId)!.factored).not.toBe(true)
+    })
+
+    it('refuses by the Square channel too, whatever the customer is called', async () => {
+      const { invoiceId } = await generate()
+      table(TABLES.customer).set(CUSTOMER_ID, { ...table(TABLES.customer).get(CUSTOMER_ID)!, name: 'Some Other Name', invoiceChannel: 'SQUARE', billingMethod: 'FACTOR' })
+      await expect(call('SEND_TO_FACTOR', { invoiceId })).rejects.toThrow(/auto shipper invoices are never factored/i)
+    })
+
+    describe('CLEAR_FACTORED_FLAG', () => {
+      const flagged = async () => {
+        const { invoiceId } = await generate()
+        // What the Aljex / AR sheet imports left: factored, marked sent by hand, no queue row, no payment.
+        table(TABLES.invoice).set(invoiceId, { ...table(TABLES.invoice).get(invoiceId)!, factored: true, markedSentAt: '2026-11-12T12:00:00.000Z', markedSentNote: 'Invoiced outside BCAT Ops (Square)' })
+        return invoiceId
+      }
+
+      it('takes an imported factored invoice with no OTR activity back to manual, keeping its balance and sent stamp', async () => {
+        const invoiceId = await flagged()
+        const before = { ...table(TABLES.invoice).get(invoiceId)! }
+        const out = (await call('CLEAR_FACTORED_FLAG', { invoiceIds: [invoiceId], reason: 'Ryne: auto shippers are never factored' })) as { done: Row[]; skipped: Row[] }
+        expect(out.done).toHaveLength(1)
+        expect(out.skipped).toHaveLength(0)
+        const invoice = table(TABLES.invoice).get(invoiceId)!
+        expect(invoice.factored).toBe(false)
+        expect(invoice.factoringItemId).toBeUndefined()
+        for (const k of ['paidCents', 'balanceCents', 'totalCents', 'status', 'number', 'markedSentAt']) expect(invoice[k]).toEqual(before[k])
+        expect((invoice.remitTo as Row)?.name ?? '').not.toBe('OTR Solutions')
+        expect(auditRows('CLEAR_FACTORED_FLAG', 'Invoice')).toHaveLength(1)
+        expect(sesSend).not.toHaveBeenCalled()
+      })
+
+      it('is an admin act and needs a reason', async () => {
+        const invoiceId = await flagged()
+        await expect(call('CLEAR_FACTORED_FLAG', { invoiceIds: [invoiceId], reason: 'x' }, JENNY)).rejects.toThrow(/Forbidden/)
+        await expect(call('CLEAR_FACTORED_FLAG', { invoiceIds: [invoiceId] })).rejects.toThrow(/needs a reason/)
+        expect(table(TABLES.invoice).get(invoiceId)!.factored).toBe(true)
+      })
+
+      it('leaves an invoice that is really with OTR, or has money on it, and says why', async () => {
+        const invoiceId = await flagged()
+        table(TABLES.factoring).set('S000001-1', { id: 'S000001-1', __typename: 'FactoringItem', invoiceId, status: 'PENDING_WITH_OTR', otrInvoiceId: '99123' })
+        table(TABLES.invoice).set(invoiceId, { ...table(TABLES.invoice).get(invoiceId)!, factoringItemId: 'S000001-1' })
+        const live = (await call('CLEAR_FACTORED_FLAG', { invoiceIds: [invoiceId], reason: 'r' })) as { done: Row[]; skipped: Row[] }
+        expect(live.done).toHaveLength(0)
+        expect(live.skipped[0].reason).toMatch(/really with the factor/)
+        expect(table(TABLES.invoice).get(invoiceId)!.factored).toBe(true)
+
+        table(TABLES.factoring).delete('S000001-1')
+        table(TABLES.invoice).set(invoiceId, { ...table(TABLES.invoice).get(invoiceId)!, factoringItemId: undefined, paidCents: 1000 })
+        const paid = (await call('CLEAR_FACTORED_FLAG', { invoiceIds: [invoiceId], reason: 'r' })) as { done: Row[]; skipped: Row[] }
+        expect(paid.skipped[0].reason).toMatch(/Money has already been taken/)
+      })
+
+      it('skips an invoice that is not marked factored, and a missing one, without holding up the rest', async () => {
+        const invoiceId = await flagged()
+        const { invoiceId: plain } = await generate().catch(() => ({ invoiceId: 'none' }))
+        const out = (await call('CLEAR_FACTORED_FLAG', { invoiceIds: [invoiceId, 'nope', plain], reason: 'r' })) as { done: Row[]; skipped: Row[] }
+        expect(out.done.map((d) => d.invoiceId)).toContain(invoiceId)
+        expect(out.skipped.some((x) => x.invoiceId === 'nope')).toBe(true)
+      })
+    })
+  })
+
   it('refuses to re-render a void invoice over the document that was sent', async () => {
     const { invoiceId } = await generate()
     const before = table(TABLES.invoice).get(invoiceId)!.pdfKey

@@ -9,6 +9,7 @@
  */
 import { invoiceAgeBucket, daysSinceInvoice, AR_AGING_BUCKETS, AR_AGING_BUCKET_LABEL, type AgingBucket } from './arAging'
 import { invoiceCompanyName, invoicePoNumber } from './invoiceIdentity'
+import { isAutoShipperName } from './reviewRequirements'
 import type { InvoiceRecord } from '../types/tms'
 
 export type StatementBucket = (typeof AR_AGING_BUCKETS)[number]
@@ -48,7 +49,8 @@ export interface StatementShipmentLike {
 const OPEN: Record<string, true> = { ISSUED: true, PARTIAL: true }
 
 /** Billed through OTR: the customer pays the factor, so BCAT never asks them about it. */
-export function isFactoredInvoice(inv: Pick<InvoiceRecord, 'factored' | 'factoringItemId'>): boolean {
+export function isFactoredInvoice(inv: Pick<InvoiceRecord, 'factored' | 'factoringItemId'> & { customerName?: string | null }): boolean {
+  if (isAutoShipperName(inv.customerName)) return false // never factored (Ryne 2026-11-27)
   return Boolean(inv.factored || inv.factoringItemId)
 }
 

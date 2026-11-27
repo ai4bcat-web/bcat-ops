@@ -1,5 +1,6 @@
 /** Who an invoice goes to on Send, as SEND_INVOICE / SEND_TO_FACTOR decide it. */
 import { allApEmails } from '@/lib/billingMethod'
+import { isAutoShipperCustomer, isAutoShipperName } from '@/lib/reviewRequirements'
 import type { CustomerRecord, InvoiceRecord, TmsSettings } from '@/types/tms'
 import type { InvoiceAttachmentPlanRow } from '@/lib/invoiceDelivery'
 
@@ -16,6 +17,7 @@ export function isInternalAddress(address: string): boolean {
  * factored), so the customer's billing method only decides for an older invoice that never set the flag.
  */
 export function isFactoredInvoice(inv: InvoiceRecord, customer: CustomerRecord | undefined): boolean {
+  if (isAutoShipperCustomer(customer) || isAutoShipperName(inv.customerName)) return false // never factored (Ryne 2026-11-27)
   if (inv.factored === true || inv.factoringItemId) return true
   if (inv.factored === false) return false
   return customer?.billingMethod === 'FACTOR'

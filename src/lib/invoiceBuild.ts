@@ -19,6 +19,7 @@
 import { canEmailTo, DOCUMENT_TYPE_LABELS, normalizeRequiredDocTypes, requiredDocTypesFor } from './shipmentDocuments'
 import { isShipmentVoided } from './shipmentVoid'
 import { isFactorBilled, isFactoredLoad } from './factorBilling'
+import { isAutoShipperCustomer } from './reviewRequirements'
 import type {
   Address,
   BillToParty,
@@ -631,6 +632,7 @@ export function invoiceIsFactored(
   customer: Parameters<typeof isFactoredLoad>[0],
   revDivision: string | null | undefined,
 ): boolean {
+  if (isAutoShipperCustomer(customer)) return false // never factored (Ryne 2026-11-27), whatever the flag says
   return invoice.factored === true || (invoice.factored !== false && isFactoredLoad(customer, revDivision))
 }
 
