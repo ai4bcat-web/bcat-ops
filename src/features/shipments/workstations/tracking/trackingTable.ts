@@ -24,14 +24,16 @@ export type PodState = 'NOT_DUE' | 'NEEDED' | 'REQUESTED' | 'IN_REVIEW' | 'RECEI
  * Where the proof of delivery stands. `docsMissing` null = documents never checked.
  * `pendingDocReviewCount` counts any carrier upload awaiting review, not only PODs —
  * accepted as the proxy for "a POD is in review".
- * RECEIVED means the POD is really on file: the order's document gate ran with POD on its list
- * and POD is not missing, or the documents were signed off by hand. Car shipping chases no POD,
+ * RECEIVED means the POD is really on file: it is among the documents the order's gate found (`docsPresent`),
+ * the gate ran with POD on its list and POD is not missing, or the documents were signed off by hand. Car shipping chases no POD,
  * so it counts as received. A cached gate whose list leaves POD off says nothing about a POD
  * being on file (Ryne 2026-11-12: POD is always required), so that reads UNKNOWN.
  */
 export function podStateOf(row: ShipmentRow): PodState {
   if (boardStatusOf(row) !== 'DELIVERED') return 'NOT_DUE'
   if (row.revDivision === 'CAR_SHIPPING' || row.docsOverrideAt) return 'RECEIVED'
+  // A POD among the documents on file is received, whatever the customer's required list says (it can be empty).
+  if (Array.isArray(row.docsPresent) && row.docsPresent.includes('POD')) return 'RECEIVED'
   if (row.docsMissing == null) return 'UNKNOWN'
   if (!row.docsMissing.includes('POD')) {
     return Array.isArray(row.docsRequired) && !row.docsRequired.includes('POD') ? 'UNKNOWN' : 'RECEIVED'
