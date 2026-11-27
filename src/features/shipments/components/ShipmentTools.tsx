@@ -34,6 +34,7 @@ import { TrackingSection } from './TrackingSection'
 import { DocumentsSection } from './DocumentsSection'
 import { DeliveryCard } from './DeliveryCard'
 import { ArCard } from './ArCard'
+import { SquareCard } from './SquareCard'
 import { ApCard } from './ApCard'
 import { DivisionCard } from './DivisionCard'
 import { TrackerCard } from './TrackerCard'
@@ -277,6 +278,7 @@ export function ShipmentTools(props: ShipmentToolsProps) {
 
       {activeTab === 'invoicing' && (
         <div className="space-y-3">
+          <SquareCard bundle={bundle} onReload={actions.reload} />
           <ArCard bundle={bundle} onReload={actions.reload} />
           <ReleaseGateCard shipment={shipment} order={order ?? null} />
         </div>

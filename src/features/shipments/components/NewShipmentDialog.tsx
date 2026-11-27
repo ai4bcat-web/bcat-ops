@@ -37,7 +37,7 @@ import { useDirectory } from '@/hooks/useDirectory'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useTrucks } from '@/hooks/useTrucks'
 import { useLoads } from '@/hooks/useLoads'
-import { assignAsset, createLocation, createShipment } from '@/lib/apiClient'
+import { assignAsset, createLocation, createShipment, createSquareInvoice } from '@/lib/apiClient'
 import { distinctStopDrivers } from '@/lib/ownAssetDriver'
 import { activeUnits } from '@/lib/fleetActive'
 import { apptNotices } from '@/lib/apptNotify'
@@ -376,6 +376,17 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
         },
       })
       toast.success(`Shipment ${bundle.shipment.number} created`)
+      if (carShipping) {
+        // The shipment is already saved, so a Square problem never costs the PRO or blocks the shipment: it shows on the
+        // shipment's Square card with a Retry. Nothing is sent to the payer; this only makes the draft.
+        try {
+          const made = await createSquareInvoice({ shipmentId: bundle.shipment.id })
+          if (made.skipped) toast.message(`Square draft not made: ${made.skipped}`)
+          else toast.success('Square draft invoice created. Send it from the shipment when ready.')
+        } catch (err) {
+          toast.warning(`Shipment ${bundle.shipment.number} created, but the Square draft was not: ${errorMessage(err)}`)
+        }
+      }
       if (pickedDriverId) {
         const driver = drivers.find((d) => d.id === pickedDriverId)
         const truck = driver?.assignedTruckId ? equipment.find((e) => e.id === driver.assignedTruckId) : undefined

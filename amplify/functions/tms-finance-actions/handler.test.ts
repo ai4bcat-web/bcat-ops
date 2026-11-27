@@ -54,6 +54,7 @@ const TABLES = {
   commission: 'Commission-test',
   payPeriod: 'CommissionPayPeriod-test',
   userProfile: 'UserProfile-test',
+  integration: 'Integration-test',
 }
 
 const store = vi.hoisted(() => {
@@ -80,6 +81,7 @@ const store = vi.hoisted(() => {
   process.env.COMMISSION_TABLE_NAME = 'Commission-test'
   process.env.COMMISSION_PAY_PERIOD_TABLE_NAME = 'CommissionPayPeriod-test'
   process.env.USER_PROFILE_TABLE_NAME = 'UserProfile-test'
+  process.env.INTEGRATION_TABLE_NAME = 'Integration-test'
   process.env.BUCKET_NAME = 'bcat-test-bucket'
   process.env.FROM_ADDRESS = 'ai4bcat@gmail.com'
   return new Map<string, Map<string, Record<string, unknown>>>()
@@ -343,7 +345,12 @@ vi.mock('@aws-sdk/client-sesv2', () => {
   return { SESv2Client, SendEmailCommand }
 })
 
+// Square credentials come from the integration store; the tests hand them over directly.
+const squareCreds = vi.hoisted(() => ({ value: null as Record<string, string> | null }))
+vi.mock('../_shared/integrationSecrets', () => ({ readPageCredentials: vi.fn(async () => squareCreds.value) }))
+
 import { handler } from './handler'
+import { setSquareFetch } from './square'
 import { factoringRowFor } from '../../../src/lib/factorHandoff'
 
 interface MockCommand {
@@ -4744,5 +4751,254 @@ describe('Chase ACH file access (Ryne 2026-11-19: the Accounts payable page runs
     for (const action of ['PREVIEW_CHASE_ACH', 'EXPORT_CHASE_ACH', 'CLEAR_CHASE_ACH_MARK']) {
       expect(await forbidden(call(action, { billIds: [] }, BILLER))).toBe(true)
     }
+  })
+})
+
+
+// ── Auto shipper → Square ───────────────────────────────────────────────────
+
+describe('Square invoicing for an auto shipper shipment', () => {
+  const TOKEN = 'sandbox-token-SECRET-1'
+  const PAYER = { name: 'Pat Example', email: 'pat@example.com', phone: '(847) 555-0100' }
+  const VEHICLE = { year: '2018', make: 'Honda', model: 'Civic' }
+
+  interface Recorded { method: string; path: string; body: Row | null; auth: string | null }
+  let calls: Recorded[]
+  let sq: { invoiceStatus: string; tenders: Row[]; failNext: string | null; failStatus: number; version: number }
+
+  /** A small Square: customers, orders, invoices (create / publish / cancel / delete / get) and an order with tenders. */
+  function fakeSquare() {
+    calls = []
+    sq = { invoiceStatus: 'DRAFT', tenders: [], failNext: null, failStatus: 500, version: 0 }
+    setSquareFetch(async (url, init) => {
+      const path = new URL(url).pathname + (new URL(url).search || '')
+      const method = String(init.method)
+      const body = init.body ? (JSON.parse(String(init.body)) as Row) : null
+      calls.push({ method, path, body, auth: (init.headers as Record<string, string>).Authorization ?? null })
+      const json = (status: number, value: unknown) => new Response(JSON.stringify(value), { status })
+      if (sq.failNext && path.startsWith(sq.failNext)) {
+        sq.failNext = null
+        return json(sq.failStatus, { errors: [{ code: 'INTERNAL_SERVER_ERROR', detail: `down for ${TOKEN}` }] })
+      }
+      if (method === 'POST' && path === '/v2/customers') return json(200, { customer: { id: 'CUST1' } })
+      if (method === 'POST' && path === '/v2/orders') return json(200, { order: { id: 'ORD1' } })
+      if (method === 'POST' && path === '/v2/invoices') { sq.invoiceStatus = 'DRAFT'; sq.version = 0; return json(200, { invoice: { id: 'INV1', version: 0, status: 'DRAFT', order_id: 'ORD1' } }) }
+      if (method === 'POST' && path.endsWith('/publish')) { sq.invoiceStatus = 'UNPAID'; sq.version += 1; return json(200, { invoice: { id: 'INV1', version: sq.version, status: 'UNPAID', public_url: 'https://squareupsandbox.com/pay/abc' } }) }
+      if (method === 'POST' && path.endsWith('/cancel')) { sq.invoiceStatus = 'CANCELED'; sq.version += 1; return json(200, { invoice: { id: 'INV1', version: sq.version, status: 'CANCELED' } }) }
+      if (method === 'DELETE') return json(200, {})
+      if (method === 'GET' && path.startsWith('/v2/invoices/')) return json(200, { invoice: { id: 'INV1', version: sq.version, status: sq.invoiceStatus, public_url: 'https://squareupsandbox.com/pay/abc' } })
+      if (method === 'GET' && path.startsWith('/v2/orders/')) return json(200, { order: { id: 'ORD1', tenders: sq.tenders } })
+      return json(404, { errors: [{ code: 'NOT_FOUND', detail: `no route ${method} ${path}` }] })
+    })
+  }
+
+  function seedSquare(over: { settings?: Row; carShipping?: Row | null } = {}): void {
+    seed({ customer: { invoiceChannel: 'SQUARE' }, order: { customerRateCents: 120_900, revenueCents: 120_900 } })
+    table(TABLES.charge).delete('chg-2')
+    table(TABLES.charge).set('chg-1', { ...table(TABLES.charge).get('chg-1'), rateCents: 120_900, amountCents: 120_900 })
+    table(TABLES.shipment).set(SHIPMENT_ID, {
+      ...table(TABLES.shipment).get(SHIPMENT_ID),
+      pickupAppt: '2026-10-23T08:00:00.000Z',
+      ...(over.carShipping === null ? {} : { carShipping: over.carShipping ?? { payer: PAYER, vehicle: VEHICLE } }),
+    })
+    table(TABLES.integration).set('SQUARE', { id: 'SQUARE', provider: 'SQUARE', settings: { environment: 'SANDBOX', autoShipperInvoicing: true, ...over.settings } })
+    squareCreds.value = { sandboxAccessToken: TOKEN, sandboxLocationId: 'LOC-SANDBOX', productionAccessToken: 'prod-token', productionLocationId: 'LOC-PROD' }
+  }
+  const squareOf = () => (table(TABLES.shipment).get(SHIPMENT_ID)!.carShipping as { square?: Row }).square ?? {}
+
+  beforeEach(() => { fakeSquare() })
+  afterEach(() => { setSquareFetch(null); squareCreds.value = null })
+
+  it('does nothing and calls no one while the switch is off', async () => {
+    seedSquare({ settings: { autoShipperInvoicing: false } })
+    const out = await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    expect(String(out.skipped)).toMatch(/off/i)
+    expect(calls).toHaveLength(0)
+  })
+
+  it('makes the Square customer, order and a DRAFT invoice from the payer, price, pickup date and route', async () => {
+    seedSquare()
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(['POST /v2/customers', 'POST /v2/orders', 'POST /v2/invoices'])
+    // Sandbox host, sandbox token as a bearer, never anywhere else.
+    expect(calls.every((c) => c.auth === `Bearer ${TOKEN}`)).toBe(true)
+    const order = calls[1].body as { order: { location_id: string; line_items: Array<Row> } }
+    expect(order.order.location_id).toBe('LOC-SANDBOX')
+    expect(order.order.line_items[0]).toMatchObject({ name: 'auto transport', quantity: '1', base_price_money: { amount: 120_900, currency: 'USD' } })
+    expect(String(order.order.line_items[0].note)).toBe('2018 Honda Civic · Chicago, IL → Dallas, TX')
+    const invoice = (calls[2].body as { invoice: Row }).invoice
+    expect(invoice).toMatchObject({ invoice_number: 'S000001', delivery_method: 'EMAIL', sale_or_service_date: '2026-10-23' })
+    expect(squareOf()).toMatchObject({ environment: 'SANDBOX', customerId: 'CUST1', orderId: 'ORD1', invoiceId: 'INV1', status: 'DRAFT', amountCents: 120_900, invoiceNumber: 'S000001' })
+    // No BCAT invoice and nothing sent to the payer yet.
+    expect(table(TABLES.invoice).size).toBe(0)
+    expect(calls.some((c) => c.path.endsWith('/publish'))).toBe(false)
+  })
+
+  it('never puts carrier pay, cost or margin in anything it sends', async () => {
+    seedSquare()
+    table(TABLES.charge).set('chg-2', { id: 'chg-2', shipmentId: SHIPMENT_ID, loadId: LOAD_ID, side: 'CARRIER', code: 'LINEHAUL', rateCents: 90_000, count: 1, amountCents: 90_000, isRate: true, sortOrder: 1 })
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    const sent = JSON.stringify(calls.map((c) => c.body))
+    expect(sent).not.toMatch(/90000|carrier|margin|costCents/i)
+  })
+
+  it('a second create changes nothing at Square (it already exists)', async () => {
+    seedSquare()
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    calls.length = 0
+    const again = await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    expect(again.existing).toBe(true)
+    expect(calls).toHaveLength(0)
+  })
+
+  it('resumes after Square fails part way, with the same ids and no second customer or order', async () => {
+    seedSquare()
+    sq.failNext = '/v2/invoices'
+    await expect(call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })).rejects.toThrow(/Square refused/)
+    // The shipment is untouched by the failure; the ids made so far were kept and the reason recorded, token redacted.
+    expect(squareOf()).toMatchObject({ customerId: 'CUST1', orderId: 'ORD1' })
+    expect(String(squareOf().lastError)).not.toContain(TOKEN)
+    calls.length = 0
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(['POST /v2/invoices'])
+    expect(squareOf()).toMatchObject({ invoiceId: 'INV1', status: 'DRAFT', lastError: null })
+  })
+
+  it('rebuilds a still-draft invoice at a new price, deleting the old draft first and using fresh idempotency keys', async () => {
+    seedSquare()
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    const firstKey = (calls[1].body as Row).idempotency_key
+    table(TABLES.order).set(ORDER_ID, { ...table(TABLES.order).get(ORDER_ID), customerRateCents: 130_000, revenueCents: 130_000 })
+    calls.length = 0
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    expect(calls[0]).toMatchObject({ method: 'DELETE' })
+    const order = calls.find((c) => c.path === '/v2/orders')!
+    expect((order.body as { order: { line_items: Array<{ base_price_money: { amount: number } }> } }).order.line_items[0].base_price_money.amount).toBe(130_000)
+    expect(order.body!.idempotency_key).not.toBe(firstKey)
+    expect(squareOf()).toMatchObject({ amountCents: 130_000, gen: 1 })
+  })
+
+  it('refuses to work on an invoice made in another environment', async () => {
+    seedSquare()
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    table(TABLES.integration).set('SQUARE', { id: 'SQUARE', provider: 'SQUARE', settings: { environment: 'PRODUCTION', autoShipperInvoicing: true } })
+    await expect(call('SQUARE_SEND_INVOICE', { shipmentId: SHIPMENT_ID })).rejects.toThrow(/SANDBOX/)
+  })
+
+  it('sends: Square publishes, and the BCAT invoice is written under the PRO with the Square link', async () => {
+    seedSquare()
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    await call('SQUARE_SEND_INVOICE', { shipmentId: SHIPMENT_ID })
+    expect(squareOf()).toMatchObject({ status: 'UNPAID', publicUrl: 'https://squareupsandbox.com/pay/abc', bcatInvoiceId: 'S000001' })
+    const invoice = table(TABLES.invoice).get('S000001')!
+    expect(invoice).toMatchObject({ number: 'S000001', status: 'ISSUED', totalCents: 120_900, balanceCents: 120_900, factored: false })
+    expect(invoice.external).toMatchObject({ provider: 'SQUARE', invoiceId: 'INV1' })
+    // Billed to the payer (name and e-mail), never to anything carrier-side.
+    expect(invoice.billTo).toMatchObject({ name: 'Pat Example', email: 'pat@example.com' })
+    expect(table(TABLES.order).get(ORDER_ID)).toMatchObject({ arStatus: 'UNPAID', invoiceId: 'S000001' })
+    // Sending twice neither publishes twice nor writes a second invoice.
+    calls.length = 0
+    await call('SQUARE_SEND_INVOICE', { shipmentId: SHIPMENT_ID })
+    expect(calls).toHaveLength(0)
+    expect(table(TABLES.invoice).size).toBe(1)
+  })
+
+  it('records a Square payment once, however many times Square says so, and marks the invoice paid', async () => {
+    seedSquare()
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    await call('SQUARE_SEND_INVOICE', { shipmentId: SHIPMENT_ID })
+    sq.invoiceStatus = 'PAID'
+    sq.tenders = [{ id: 'T1', payment_id: 'PAY1', created_at: '2026-10-29T15:00:00Z', amount_money: { amount: 120_900 }, type: 'CARD', card_details: { card: { card_brand: 'VISA', last_4: '4217' } } }]
+    await call('SQUARE_SYNC', { shipmentId: SHIPMENT_ID })
+    await call('SQUARE_SYNC', { shipmentId: SHIPMENT_ID })
+    await call('SQUARE_SYNC', { shipmentId: SHIPMENT_ID, eventId: 'evt-1' })
+    const payments = [...table(TABLES.arPayment).values()].filter((p) => p.kind === 'PAYMENT')
+    expect(payments).toHaveLength(1)
+    expect(payments[0]).toMatchObject({ method: 'CARD', amountCents: 120_900 })
+    expect(String(payments[0].reference)).toContain('VISA 4217')
+    expect(table(TABLES.invoice).get('S000001')).toMatchObject({ status: 'PAID', paidCents: 120_900, balanceCents: 0 })
+    expect(squareOf()).toMatchObject({ status: 'PAID', lastEventId: 'evt-1' })
+  })
+
+  it('cancels a sent invoice in Square and voids the unpaid BCAT invoice with it', async () => {
+    seedSquare()
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    await call('SQUARE_SEND_INVOICE', { shipmentId: SHIPMENT_ID })
+    await call('SQUARE_CANCEL', { shipmentId: SHIPMENT_ID, reason: 'Customer changed their mind' })
+    expect(squareOf().status).toBe('CANCELED')
+    expect(table(TABLES.invoice).get('S000001')).toMatchObject({ status: 'VOID' })
+  })
+
+  it('a refund in Square only raises a review flag: it never reverses a payment by itself', async () => {
+    seedSquare()
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    await call('SQUARE_SEND_INVOICE', { shipmentId: SHIPMENT_ID })
+    sq.invoiceStatus = 'PAID'
+    sq.tenders = [{ id: 'T1', payment_id: 'PAY1', created_at: '2026-10-29T15:00:00Z', amount_money: { amount: 120_900 }, type: 'CARD' }]
+    await call('SQUARE_SYNC', { shipmentId: SHIPMENT_ID })
+    sq.invoiceStatus = 'REFUNDED'
+    await call('SQUARE_SYNC', { shipmentId: SHIPMENT_ID })
+    expect(String(squareOf().reviewFlag)).toMatch(/refund/i)
+    expect([...table(TABLES.arPayment).values()].filter((p) => p.kind === 'REVERSAL')).toHaveLength(0)
+    expect(table(TABLES.invoice).get('S000001')).toMatchObject({ status: 'PAID' })
+  })
+
+  it('reissues a sent invoice as <PRO>-2 after cancelling the first', async () => {
+    seedSquare()
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    await call('SQUARE_SEND_INVOICE', { shipmentId: SHIPMENT_ID })
+    table(TABLES.order).set(ORDER_ID, { ...table(TABLES.order).get(ORDER_ID), customerRateCents: 130_000, revenueCents: 130_000 })
+    table(TABLES.charge).set('chg-1', { ...table(TABLES.charge).get('chg-1'), rateCents: 130_000, amountCents: 130_000 })
+    await call('SQUARE_REISSUE', { shipmentId: SHIPMENT_ID })
+    expect(squareOf()).toMatchObject({ status: 'DRAFT', invoiceNumber: 'S000001-2', amountCents: 130_000, reissue: 1 })
+    expect(table(TABLES.invoice).get('S000001')).toMatchObject({ status: 'VOID' })
+  })
+
+  it('will not reissue once money has been paid', async () => {
+    seedSquare()
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    await call('SQUARE_SEND_INVOICE', { shipmentId: SHIPMENT_ID })
+    sq.invoiceStatus = 'PAID'
+    await call('SQUARE_SYNC', { shipmentId: SHIPMENT_ID })
+    await expect(call('SQUARE_REISSUE', { shipmentId: SHIPMENT_ID })).rejects.toThrow(/refund it in Square first/)
+  })
+
+  it('refuses a shipment whose customer is not on the Square channel, or that has no payer details', async () => {
+    seedSquare({ carShipping: null })
+    await expect(call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })).rejects.toThrow(/no auto shipper details/)
+    seedSquare()
+    table(TABLES.customer).set(CUSTOMER_ID, { ...table(TABLES.customer).get(CUSTOMER_ID), invoiceChannel: null })
+    await expect(call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })).rejects.toThrow(/not invoiced through Square/)
+  })
+
+  it('says what to do when Square is not connected, without leaking a credential', async () => {
+    seedSquare()
+    squareCreds.value = null
+    await expect(call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })).rejects.toThrow(/not connected for SANDBOX/)
+  })
+
+  it('lets Invoicing send and a Load Review user make the draft, but nobody without those grants', async () => {
+    seedSquare()
+    await expect(call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID }, DISPATCHER)).rejects.toThrow(/Forbidden/)
+    await expect(call('SQUARE_SEND_INVOICE', { shipmentId: SHIPMENT_ID }, DISPATCHER)).rejects.toThrow(/Forbidden/)
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID }, BILLER)
+    await call('SQUARE_SEND_INVOICE', { shipmentId: SHIPMENT_ID }, BILLER)
+    expect(squareOf().status).toBe('UNPAID')
+  })
+
+  it('edits the payer and vehicle only while the invoice is a draft', async () => {
+    seedSquare()
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    await call('SQUARE_SAVE_DETAILS', { shipmentId: SHIPMENT_ID, carShipping: { payer: { ...PAYER, email: 'new@example.com' }, vehicle: VEHICLE } })
+    expect((table(TABLES.shipment).get(SHIPMENT_ID)!.carShipping as { payer: Row }).payer.email).toBe('new@example.com')
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    await call('SQUARE_SEND_INVOICE', { shipmentId: SHIPMENT_ID })
+    await expect(call('SQUARE_SAVE_DETAILS', { shipmentId: SHIPMENT_ID, carShipping: { payer: PAYER, vehicle: VEHICLE } })).rejects.toThrow(/already sent/)
+  })
+
+  it('the standard invoice template still refuses a Square shipment', async () => {
+    seedSquare()
+    table(TABLES.shipment).set(SHIPMENT_ID, { ...table(TABLES.shipment).get(SHIPMENT_ID), revDivision: 'CAR_SHIPPING' })
+    await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID })).rejects.toThrow(/Invoiced in Square/)
   })
 })
