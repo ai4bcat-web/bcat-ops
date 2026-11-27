@@ -187,6 +187,17 @@ export function idempotencyKey(shipmentId: string, step: 'cust' | 'order' | 'inv
   return `${shipmentId}:${step}:${gen}`.slice(0, 192)
 }
 
+/** A short, stable fingerprint (FNV-1a, 32 bit, hex) of what the payer typed. Not a secret and not for security. */
+export function payerFingerprint(payer: CarShippingPayer): string {
+  const text = [payer.name, payer.company ?? '', payer.email, phoneToE164(payer.phone) ?? payer.phone].join('|').toLowerCase()
+  let h = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h.toString(16).padStart(8, '0')
+}
+
 const MONEY_CURRENCY = 'USD'
 
 export function squareCustomerBody(payer: CarShippingPayer, shipmentId: string, pro: string) {
@@ -194,7 +205,9 @@ export function squareCustomerBody(payer: CarShippingPayer, shipmentId: string, 
   const given = parts.length > 1 ? parts.slice(0, -1).join(' ') : parts[0]
   const family = parts.length > 1 ? parts[parts.length - 1] : undefined
   return {
-    idempotency_key: idempotencyKey(shipmentId, 'cust'),
+    // Square keeps a key with the request it first saw (even one it refused), so corrected payer details must get a
+    // fresh key; the same details keep the same key, so a retried click still cannot make a second customer.
+    idempotency_key: `${idempotencyKey(shipmentId, 'cust')}:${payerFingerprint(payer)}`.slice(0, 192),
     given_name: given,
     ...(family ? { family_name: family } : {}),
     ...(payer.company ? { company_name: payer.company } : {}),
