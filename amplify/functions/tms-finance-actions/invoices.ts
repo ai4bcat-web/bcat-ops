@@ -1237,6 +1237,53 @@ export async function markInvoiceSent(input: Row, caller: Caller): Promise<Row> 
 }
 
 /**
+ * Flag (or un-flag) invoices OTR Solutions offset against our payments because they say the customer paid us directly (Ryne 2026-11-27).
+ *
+ * An internal marker only: it changes no balance, payment, status or invoice document, is never printed or e-mailed, and survives a
+ * payment reversal or a re-payment because those only touch the money fields. Setting it needs a typed note (who said what);
+ * clearing it does not. One call can flag a handful of invoices; each is written and audited on its own, so one that cannot be
+ * flagged (void, missing) is reported and skipped without holding up the rest.
+ */
+export async function setOtrOffset(input: Row, caller: Caller): Promise<Row> {
+  const invoiceIds = assertArrayOf<string>(input.invoiceIds, 'invoiceIds', (item, index) =>
+    assertString(item, `invoiceIds[${index}]`), MAX_BATCH)
+  const clear = input.clear === true
+  const note = optionalString(input.note, MAX_NOTE)
+  if (!clear && !note) throw new Error('Flagging an OTR offset needs a note saying what OTR told you')
+
+  const done: Row[] = []
+  const skipped: Row[] = []
+  const seen = new Set<string>()
+  for (const invoiceId of invoiceIds) {
+    if (seen.has(invoiceId)) continue
+    seen.add(invoiceId)
+    const row = await getById(INVOICE_TABLE_NAME, invoiceId)
+    if (!row) { skipped.push({ invoiceId, reason: 'Invoice not found' }); continue }
+    if (row.status === 'VOID') { skipped.push({ invoiceId, reason: 'That invoice is void' }); continue }
+    const before = (row.otrOffset ?? null) as Row | null
+    if (clear && !before) { skipped.push({ invoiceId, reason: 'Not flagged' }); continue }
+
+    const now = nowIso()
+    const patch: Row = {
+      updatedAt: now,
+      updatedBy: caller.email,
+      version: (numberOrNull(row.version) ?? 1) + 1,
+    }
+    if (!clear) patch.otrOffset = { flaggedAt: now, flaggedBy: caller.email, note } as unknown as Row
+    await transact(
+      [updateTx(INVOICE_TABLE_NAME, invoiceId, patch, {
+        ...(clear ? { remove: ['otrOffset'] } : {}),
+        condition: 'attribute_exists(id)',
+      })],
+      'invoice OTR offset flag',
+    )
+    await writeAudit('Invoice', invoiceId, clear ? 'CLEAR_OTR_OFFSET' : 'SET_OTR_OFFSET', caller, { note: note ?? null, before: before ?? null })
+    done.push({ invoiceId, otrOffset: clear ? null : (patch.otrOffset as Row) })
+  }
+  return { done, skipped }
+}
+
+/**
  * The only way back out of UNPAID.
  *
  * Refused once a penny has been taken against it — reverse the payment first — and

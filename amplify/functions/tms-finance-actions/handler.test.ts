@@ -1919,6 +1919,48 @@ describe('review regressions', () => {
     expect(invoice.sentCount).toBe(0)
   })
 
+  describe('OTR offset flag (SET_OTR_OFFSET)', () => {
+    it('flags an invoice with the note, audits it, and changes no money', async () => {
+      const { invoiceId } = await generate()
+      const before = { ...table(TABLES.invoice).get(invoiceId)! }
+      const out = (await call('SET_OTR_OFFSET', { invoiceIds: [invoiceId], note: 'OTR says the customer paid us directly' })) as { done: Row[]; skipped: Row[] }
+      expect(out.done).toHaveLength(1)
+      expect(out.skipped).toHaveLength(0)
+      const invoice = table(TABLES.invoice).get(invoiceId)!
+      expect(invoice.otrOffset).toMatchObject({ note: 'OTR says the customer paid us directly' })
+      expect((invoice.otrOffset as Row).flaggedBy).toBeTruthy()
+      for (const k of ['paidCents', 'balanceCents', 'totalCents', 'status', 'writtenOffCents', 'factored', 'pdfKey']) expect(invoice[k]).toEqual(before[k])
+    })
+
+    it('needs a note to flag, but not to clear', async () => {
+      const { invoiceId } = await generate()
+      await expect(call('SET_OTR_OFFSET', { invoiceIds: [invoiceId] })).rejects.toThrow(/needs a note/)
+      await call('SET_OTR_OFFSET', { invoiceIds: [invoiceId], note: 'OTR offset' })
+      const out = (await call('SET_OTR_OFFSET', { invoiceIds: [invoiceId], clear: true })) as { done: Row[] }
+      expect(out.done).toHaveLength(1)
+      expect(table(TABLES.invoice).get(invoiceId)!.otrOffset).toBeUndefined()
+    })
+
+    it('keeps the flag through a payment and its reversal', async () => {
+      const { invoiceId } = await generate()
+      await call('SET_OTR_OFFSET', { invoiceIds: [invoiceId], note: 'OTR offset' })
+      const total = Number(table(TABLES.invoice).get(invoiceId)!.totalCents)
+      const paid = (await call('RECORD_PAYMENT', { customerId: CUSTOMER_ID, receivedAt: '2026-10-25', method: 'CHECK', amountCents: total, applications: [{ invoiceId, amountCents: total }], creditApplications: [] })) as { payment: Row }
+      expect(table(TABLES.invoice).get(invoiceId)!.otrOffset).toBeTruthy()
+      await call('REVERSE_PAYMENT', { paymentId: String(paid.payment.id), reason: 'OTR offset; confirming customer payment' })
+      const invoice = table(TABLES.invoice).get(invoiceId)!
+      expect(invoice.otrOffset).toBeTruthy()
+      expect(invoice.paidCents).toBe(0)
+    })
+
+    it('skips a void or missing invoice without holding up the rest', async () => {
+      const { invoiceId } = await generate()
+      const out = (await call('SET_OTR_OFFSET', { invoiceIds: [invoiceId, 'nope'], note: 'OTR offset' })) as { done: Row[]; skipped: Row[] }
+      expect(out.done).toHaveLength(1)
+      expect(out.skipped).toEqual([{ invoiceId: 'nope', reason: 'Invoice not found' }])
+    })
+  })
+
   it('refuses to re-render a void invoice over the document that was sent', async () => {
     const { invoiceId } = await generate()
     const before = table(TABLES.invoice).get(invoiceId)!.pdfKey

@@ -3247,11 +3247,20 @@ export interface InvoiceRecord {
   voidedBy?: string | null
   voidReason?: string | null
   note?: string | null
+  /** OTR Solutions offset our payment and said the customer paid us directly. Internal only: never on an invoice, e-mail or customer page. */
+  otrOffset?: OtrOffsetFlag | null
   createdBy: string
   updatedBy: string
   version: number
   createdAt?: string
   updatedAt?: string
+}
+
+/** The internal "OTR offset" marker on an invoice (Ryne 2026-11-27). Changes no money. */
+export interface OtrOffsetFlag {
+  flaggedAt: string
+  flaggedBy: string
+  note: string
 }
 
 export type ArPaymentKind = 'PAYMENT' | 'CREDIT_MEMO' | 'WRITE_OFF' | 'REVERSAL'

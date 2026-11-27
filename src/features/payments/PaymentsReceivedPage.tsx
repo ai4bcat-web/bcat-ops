@@ -40,7 +40,8 @@ import { chicagoDateStr } from '@/lib/date'
 import { saveBlob } from '@/lib/download'
 import { formatCents } from '@/lib/invoiceBuild'
 import { shipmentEditorPath } from '@/lib/shipmentLinks'
-import type { ArPaymentRecord, CustomerRecord, InvoiceRecord } from '@/types/tms'
+import type { ArPaymentRecord, CustomerRecord, InvoiceRecord, OtrOffsetFlag } from '@/types/tms'
+import { OtrOffsetChip } from '@/features/ar/components/OtrOffsetChip'
 import {
   NO_METHOD, RECEIVED_TYPE_LABEL, filterReceived, fromAljexMemo, fromArPayment, hideReversed, inView, monthBounds, nameKey,
   receivedCsv, receivedTotals, type ReceivedFilter, type ReceivedRow, type ReceivedView,
@@ -291,6 +292,9 @@ export function PaymentsReceivedPage() {
       title: 'Money received but not yet put against an invoice.' },
   ]
 
+  /** Invoices OTR Solutions offset (internal marker), among the recent ones this page already reads. */
+  const offsetById = useMemo(() => new Map(recentPaid.filter((inv) => inv.otrOffset).map((inv) => [inv.id, inv.otrOffset as OtrOffsetFlag])), [recentPaid])
+
   const invoiceChips = (r: ReceivedRow): ReactNode => {
     if (r.invoices.length === 0) return <span className="tms-muted">—</span>
     return (
@@ -299,9 +303,11 @@ export function PaymentsReceivedPage() {
           const ref = shipmentsByPro.get(proOf(i.invoiceId))
           const to = r.source === 'BCAT' ? `/tms/invoicing/invoices/${encodeURIComponent(i.invoiceId)}` : ref ? shipmentEditorPath(ref.id) : null
           const label = i.amountCents != null && r.invoices.length > 1 ? `${i.invoiceId} · ${formatCents(i.amountCents)}` : i.invoiceId
-          return to
+          const chip = to
             ? <Link key={i.invoiceId} className="pr-chip" to={to} onClick={(e) => e.stopPropagation()}>{label}</Link>
             : <span key={i.invoiceId} className="pr-chip">{label}</span>
+          const offset = offsetById.get(i.invoiceId)
+          return offset ? <span key={i.invoiceId} className="inline-flex items-center gap-1">{chip}<OtrOffsetChip flag={offset} /></span> : chip
         })}
       </span>
     )
@@ -319,6 +325,10 @@ export function PaymentsReceivedPage() {
       filter: 'number', numberOf: (r) => r.amountCents / 100, numberUnit: '$',
     },
     { key: 'invoices', header: 'Applied to', group: 'Payment', text: (r) => r.invoices.map((i) => i.invoiceId).join(' ') || '—' },
+    {
+      key: 'otrOffset', header: 'OTR offset', group: 'Payment', text: (r) => (r.invoices.some((i) => offsetById.has(i.invoiceId)) ? 'OTR offset' : '—'),
+      filter: 'multi', optionsOf: (r) => [{ value: r.invoices.some((i) => offsetById.has(i.invoiceId)) ? 'OTR offset' : 'Not flagged', label: r.invoices.some((i) => offsetById.has(i.invoiceId)) ? 'OTR offset' : 'Not flagged' }],
+    },
     {
       key: 'unapplied', header: 'Unapplied', group: 'Amounts', align: 'right', text: (r) => (r.unappliedCents > 0 ? formatCents(r.unappliedCents) : ''),
       sortValue: (r) => r.unappliedCents, filter: 'number', numberOf: (r) => r.unappliedCents / 100, numberUnit: '$',
@@ -482,6 +492,7 @@ export function PaymentsReceivedPage() {
       {dialog?.kind === 'detail' && (
         <PaymentDetailDialog
           row={dialog.row}
+          offsetById={offsetById}
           busy={busy}
           onClose={() => setDialog(null)}
           onReverse={(p) => setDialog({ kind: 'reverse', payment: p })}
@@ -535,8 +546,9 @@ function PickCustomerDialog({ customers, title, onClose, onPick }: {
 }
 
 /** One row opened: what it was applied to, its note, and Reverse. */
-function PaymentDetailDialog({ row, busy, onClose, onReverse }: {
+function PaymentDetailDialog({ row, offsetById, busy, onClose, onReverse }: {
   row: ReceivedRow
+  offsetById: ReadonlyMap<string, OtrOffsetFlag>
   busy: boolean
   onClose: () => void
   onReverse: (payment: ArPaymentRecord) => void
@@ -573,9 +585,12 @@ function PaymentDetailDialog({ row, busy, onClose, onReverse }: {
             <ul className="flex flex-col gap-1">
               {row.invoices.map((i) => (
                 <li key={i.invoiceId} className="flex justify-between gap-3">
-                  {row.source === 'BCAT'
-                    ? <Link to={`/tms/invoicing/invoices/${encodeURIComponent(i.invoiceId)}`}>Invoice {i.invoiceId}</Link>
-                    : <span>PRO {i.invoiceId}</span>}
+                  <span className="inline-flex items-center gap-2">
+                    {row.source === 'BCAT'
+                      ? <Link to={`/tms/invoicing/invoices/${encodeURIComponent(i.invoiceId)}`}>Invoice {i.invoiceId}</Link>
+                      : <span>PRO {i.invoiceId}</span>}
+                    <OtrOffsetChip flag={offsetById.get(i.invoiceId)} />
+                  </span>
                   <span>{i.amountCents != null ? formatCents(i.amountCents) : ''}</span>
                 </li>
               ))}

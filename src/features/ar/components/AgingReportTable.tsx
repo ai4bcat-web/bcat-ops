@@ -13,6 +13,7 @@ import { chicagoDateStr } from '@/lib/date'
 import { downloadCsv } from '@/lib/directoryCsv'
 import { formatDay } from '../arViews'
 import { AgingColumnFilter } from './AgingColumnFilter'
+import { OtrOffsetChip } from './OtrOffsetChip'
 import type { AgingFilterColumn } from '../agingColumnFilters'
 import {
   DEFAULT_AGING_SORT,
@@ -309,6 +310,7 @@ export function AgingReportTable({
                       <div className="tms-aging-card-inv-top">
                         <button type="button" className="tms-link" onClick={() => onOpenInvoice(inv.id)}>{inv.pro || inv.number}</button>
                         {inv.factored && <span className="tms-aging-otr">OTR</span>}
+                        <OtrOffsetChip flag={inv.otrOffset} />
                         <span className="tms-aging-card-amt">{formatCents(inv.balanceCents)}</span>
                       </div>
                       <div className="tms-muted text-xs">
@@ -412,7 +414,7 @@ function InvoiceTable({ invoices, sort, onSort, onOpenInvoice }: {
             <td className="tms-dg-right">{money(inv.paidCents)}</td>
             <td className="tms-dg-right"><strong>{formatCents(inv.balanceCents)}</strong></td>
             <td>{AR_AGING_BUCKET_LABEL[inv.bucket]}</td>
-            <td>{inv.factored ? <span className="tms-aging-otr" title="Factored: OTR collects it; left off the customer's statement">OTR</span> : 'Manual'}</td>
+            <td>{inv.factored ? <span className="tms-aging-otr" title="Factored: OTR collects it; left off the customer's statement">OTR</span> : 'Manual'} <OtrOffsetChip flag={inv.otrOffset} /></td>
           </tr>
         ))}
       </tbody>
