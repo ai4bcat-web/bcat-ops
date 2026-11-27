@@ -69,6 +69,7 @@ import { repointInvoicedCustomer } from './repoint'
 import { changeInvoiceCustomer } from './changeCustomer'
 import { brokerageRepRollup } from './brokerageRep'
 import { agingStatement } from './statements'
+import { cancelSquareInvoice, createSquareInvoice, reissueSquareInvoice, saveSquareDetails, sendSquareInvoice, syncSquare } from './square'
 import { pastDueReminder } from './pastDueReminder'
 /** Auto-settling factored invoices from OTR's status is off; see the schedule branch in handler(). */
 export const SETTLE_TURNED_OFF = {
@@ -182,6 +183,12 @@ type Action =
   | 'BROKERAGE_REP_ROLLUP'
   | 'INVOICE_ATTACHMENTS'
   | 'PREVIEW_INVOICE_PACKET'
+  | 'SQUARE_CREATE_INVOICE'
+  | 'SQUARE_SEND_INVOICE'
+  | 'SQUARE_SYNC'
+  | 'SQUARE_CANCEL'
+  | 'SQUARE_REISSUE'
+  | 'SQUARE_SAVE_DETAILS'
 
 /**
  * AP is a separate page from AR.
@@ -275,6 +282,8 @@ interface AppSyncEvent {
  */
 function accountingPagesFor(action: Action): readonly string[] {
   if (action === 'RELEASE_TO_BILLING') return ['loadReview', 'invoicing']
+  // Making the Square DRAFT is bookkeeping for a shipment just built (nothing reaches the payer); sending, canceling and syncing are Invoicing's.
+  if (action === 'SQUARE_CREATE_INVOICE' || action === 'SQUARE_SAVE_DETAILS') return ['invoicing', 'loadReview']
   if (action === 'CLEAR_FINANCE_REVIEW' || action === 'SET_DELIVERED_DATE') return ['invoicing', 'carrierPay']
   if (action === 'SEND_TO_FACTOR' || action === 'SYNC_FACTORING_CHANGE' || action === 'SETTLE_FACTORED_INVOICES' || action === 'MOVE_TO_MANUAL_INVOICE' || action === 'SET_INVOICE_METHOD' || action === 'SYNC_CUSTOMER_METHOD') return ['invoicing', 'factoring']
   if (COMMISSION_ACTIONS[action]) return ['commissions']
@@ -338,6 +347,18 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return markInvoiced(input, caller)
     case 'SET_OTR_OFFSET':
       return setOtrOffset(input, caller)
+    case 'SQUARE_CREATE_INVOICE':
+      return createSquareInvoice(input, caller)
+    case 'SQUARE_SEND_INVOICE':
+      return sendSquareInvoice(input, caller)
+    case 'SQUARE_SYNC':
+      return syncSquare(input, caller)
+    case 'SQUARE_CANCEL':
+      return cancelSquareInvoice(input, caller)
+    case 'SQUARE_REISSUE':
+      return reissueSquareInvoice(input, caller)
+    case 'SQUARE_SAVE_DETAILS':
+      return saveSquareDetails(input, caller)
     case 'VOID_INVOICE':
       return voidInvoice(input, caller)
     case 'VOID_OTR_DELETED_INVOICE':

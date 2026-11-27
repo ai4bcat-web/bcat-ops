@@ -3257,6 +3257,8 @@ const financeCarrierCntTbl  = stageTables['CarrierContact']
 const commissionTable       = stageTables['Commission']
 const commissionPeriodTable = stageTables['CommissionPayPeriod']
 const financeUserProfileTbl = stageTables['UserProfile']
+// Auto shipper -> Square: the Integrations page's SQUARE row (the active environment and the on/off switch live in its settings).
+const financeIntegrationTbl = stageTables['Integration']
 
 financeActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -3294,7 +3296,17 @@ financeActionsFn.addToRolePolicy(
       commissionTable.tableArn,
       commissionPeriodTable.tableArn,
       financeUserProfileTbl.tableArn,
+      financeIntegrationTbl.tableArn,
     ],
+  })
+)
+// Auto shipper -> Square: the stored Square credentials, read-only and for that one provider (the webhook key is a separate
+// parameter this Lambda never reads). Written only by the Integrations page, through tmsDirectoryActions.
+financeActionsFn.addEnvironment('INTEGRATION_PARAM_PATH', integrationParamPath)
+financeActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['ssm:GetParameter'],
+    resources: [Stack.of(financeActionsFn).formatArn({ service: 'ssm', resource: 'parameter', resourceName: `${integrationParamPath.replace(/^\//, '')}/SQUARE` })],
   })
 )
 // The open book, the Paid tab, a customer's ledger, the AR worklists, one shipment's

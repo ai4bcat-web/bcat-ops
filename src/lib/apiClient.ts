@@ -7633,10 +7633,10 @@ const INVOICE_FIELDS = `
   arOpen paidAt remitTo factored factoringItemId
   pdfKey pdfSizeBytes pdfVersion attachDocumentIds
   sentAt sentTo sentCount markedSentAt markedSentBy factorSubmittedAt lastNoticeId aljexDueDate aljexTerms
-  voidedAt voidedBy voidReason note otrOffset
+  voidedAt voidedBy voidReason note otrOffset external
   createdBy updatedBy version createdAt updatedAt
 `
-const INVOICE_JSON_FIELDS: (keyof InvoiceRecord)[] = ['billTo', 'lines', 'references', 'remitTo', 'otrOffset']
+const INVOICE_JSON_FIELDS: (keyof InvoiceRecord)[] = ['billTo', 'lines', 'references', 'remitTo', 'otrOffset', 'external']
 
 const AR_PAYMENT_FIELDS = `
   id customerId kind receivedAt method reference
@@ -7712,6 +7712,32 @@ export async function financeAction<T>(action: string, input: unknown): Promise<
   if (v == null) throw new Error(`${action} returned no result`)
   return v as T
 }
+
+// ── Auto shipper → Square (tmsFinanceActions) ────────────────────────────────
+
+/** What the Square actions hand back: where the Square side of the shipment stands now. */
+export interface SquareActionResult {
+  square?: import('@/lib/squareInvoicing').CarShippingSquare
+  /** A plain-words reason nothing was done (Square invoicing is switched off). */
+  skipped?: string
+  existing?: boolean
+  deleted?: boolean
+  synced?: boolean
+}
+
+/** Make the Square customer, order and DRAFT invoice. Nothing reaches the payer. Safe to repeat: it resumes. */
+export const createSquareInvoice = (input: { shipmentId: string }) => financeAction<SquareActionResult>('SQUARE_CREATE_INVOICE', input)
+/** Publish the draft: Square e-mails the payer and BCAT Ops writes the invoice. */
+export const sendSquareInvoice = (input: { shipmentId: string }) => financeAction<SquareActionResult>('SQUARE_SEND_INVOICE', input)
+/** Re-read the invoice from Square and apply its status and payments. */
+export const syncSquareInvoice = (input: { shipmentId: string }) => financeAction<SquareActionResult>('SQUARE_SYNC', input)
+/** Delete a draft, or cancel a sent invoice (the BCAT invoice is voided with it when nothing was paid). */
+export const cancelSquareInvoice = (input: { shipmentId: string; reason?: string }) => financeAction<SquareActionResult>('SQUARE_CANCEL', input)
+/** Cancel the sent invoice and make the next one as <PRO>-2 at the shipment's current price (a draft; not sent). */
+export const reissueSquareInvoice = (input: { shipmentId: string }) => financeAction<SquareActionResult>('SQUARE_REISSUE', input)
+/** Change the payer or vehicle while the invoice is still a draft. */
+export const saveSquareDetails = (input: { shipmentId: string; carShipping: Pick<import('@/lib/squareInvoicing').CarShippingData, 'payer' | 'vehicle'> }) =>
+  financeAction<SquareActionResult & { carShipping?: unknown }>('SQUARE_SAVE_DETAILS', input)
 
 // ── AR reads ─────────────────────────────────────────────────────────────────
 

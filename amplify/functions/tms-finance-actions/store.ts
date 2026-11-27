@@ -111,6 +111,7 @@ export const CARRIER_CONTACT_TABLE_NAME = process.env.CARRIER_CONTACT_TABLE_NAME
 export const COMMISSION_TABLE_NAME = process.env.COMMISSION_TABLE_NAME ?? ''
 export const COMMISSION_PAY_PERIOD_TABLE_NAME = process.env.COMMISSION_PAY_PERIOD_TABLE_NAME ?? ''
 export const USER_PROFILE_TABLE_NAME = process.env.USER_PROFILE_TABLE_NAME ?? ''
+export const INTEGRATION_TABLE_NAME = process.env.INTEGRATION_TABLE_NAME ?? ''
 export const BUCKET_NAME = process.env.BUCKET_NAME ?? ''
 export const FROM_ADDRESS = process.env.FROM_ADDRESS ?? ''
 export const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'

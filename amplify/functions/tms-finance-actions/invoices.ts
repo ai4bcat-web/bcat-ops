@@ -364,7 +364,7 @@ interface Snapshot {
   attachDocumentIds: string[]
 }
 
-function buildSnapshot(
+export function buildSnapshot(
   context: OrderContext,
   args: { number: string; invoiceDate: string; dueAt: string | null; billToId: string | null; note: string | null; attachDocumentIds: string[] | null },
   caller: Caller,

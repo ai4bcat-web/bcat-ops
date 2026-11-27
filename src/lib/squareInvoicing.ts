@@ -78,6 +78,8 @@ export interface CarShippingSquare {
   /** `<PRO>` or `<PRO>-2` after a reissue. */
   invoiceNumber?: string | null
   reissue?: number | null
+  /** Bumped whenever the Square objects are rebuilt (a draft at a new price, a reissue) so each build gets fresh idempotency keys. */
+  gen?: number | null
   lastSyncAt?: string | null
   lastEventId?: string | null
   lastError?: string | null
@@ -181,8 +183,8 @@ export function squareInvoiceNumber(pro: string, reissue: number | null | undefi
 }
 
 /** Idempotency keys derive from the shipment and the step, so a retried click can never make a second object. */
-export function idempotencyKey(shipmentId: string, step: 'cust' | 'order' | 'inv' | 'pub' | 'cancel', reissue = 0): string {
-  return `${shipmentId}:${step}:${reissue}`.slice(0, 192)
+export function idempotencyKey(shipmentId: string, step: 'cust' | 'order' | 'inv' | 'pub' | 'cancel', gen = 0): string {
+  return `${shipmentId}:${step}:${gen}`.slice(0, 192)
 }
 
 const MONEY_CURRENCY = 'USD'
@@ -209,10 +211,11 @@ export function squareOrderBody(args: {
   shipmentId: string
   amountCents: number
   description: string
-  reissue?: number
+  /** The build generation (see `CarShippingSquare.gen`). */
+  gen?: number
 }) {
   return {
-    idempotency_key: idempotencyKey(args.shipmentId, 'order', args.reissue ?? 0),
+    idempotency_key: idempotencyKey(args.shipmentId, 'order', args.gen ?? 0),
     order: {
       location_id: args.locationId,
       customer_id: args.customerId,
@@ -246,10 +249,10 @@ export function squareInvoiceBody(args: {
   dueDate: string
   description: string
   methods?: AcceptedMethods
-  reissue?: number
+  gen?: number
 }) {
   return {
-    idempotency_key: idempotencyKey(args.shipmentId, 'inv', args.reissue ?? 0),
+    idempotency_key: idempotencyKey(args.shipmentId, 'inv', args.gen ?? 0),
     invoice: {
       location_id: args.locationId,
       order_id: args.orderId,
