@@ -81,9 +81,10 @@ const ALLOWED: Array<{ method: 'GET' | 'POST' | 'DELETE'; path: RegExp }> = [
   { method: 'POST', path: /^\/v2\/orders$/ },
   { method: 'GET', path: /^\/v2\/orders\/[A-Za-z0-9_-]{1,64}$/ },
   { method: 'POST', path: /^\/v2\/invoices$/ },
-  { method: 'GET', path: /^\/v2\/invoices\/[A-Za-z0-9_-]{1,64}$/ },
-  { method: 'DELETE', path: /^\/v2\/invoices\/[A-Za-z0-9_-]{1,64}\?version=\d{1,9}$/ },
-  { method: 'POST', path: /^\/v2\/invoices\/[A-Za-z0-9_-]{1,64}\/(publish|cancel)$/ },
+  // A Square invoice id carries a colon ("inv:0-ChAr..."), which no other Square id does.
+  { method: 'GET', path: /^\/v2\/invoices\/[A-Za-z0-9_:-]{1,64}$/ },
+  { method: 'DELETE', path: /^\/v2\/invoices\/[A-Za-z0-9_:-]{1,64}\?version=\d{1,9}$/ },
+  { method: 'POST', path: /^\/v2\/invoices\/[A-Za-z0-9_:-]{1,64}\/(publish|cancel)$/ },
 ]
 
 export function squareCallAllowed(method: string, path: string): boolean {

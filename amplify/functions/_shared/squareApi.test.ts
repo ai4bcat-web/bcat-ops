@@ -41,6 +41,17 @@ describe('CALL', () => {
     }
   })
 
+  it('takes a real Square invoice id, which carries a colon, on every invoice route', () => {
+    const id = 'inv:0-ChArxs-mjQnMWyBRq81ToVceEP0L'
+    for (const [m, p] of [['GET', `/v2/invoices/${id}`], ['DELETE', `/v2/invoices/${id}?version=0`], ['POST', `/v2/invoices/${id}/publish`], ['POST', `/v2/invoices/${id}/cancel`]]) {
+      expect(squareCallAllowed(m, p)).toBe(true)
+    }
+    // The colon is for invoices only, and nothing that climbs out of the path is let through.
+    expect(squareCallAllowed('GET', '/v2/orders/inv:0-abc')).toBe(false)
+    expect(squareCallAllowed('GET', '/v2/invoices/inv:0-abc/../payments')).toBe(false)
+    expect(squareCallAllowed('GET', '/v2/invoices/inv:0-abc?x=1')).toBe(false)
+  })
+
   it('sends the bearer token to the sandbox host and hands back only the status and body', async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ customer: { id: 'C1' } }), { status: 200 }))
     const out = await runSquareApi({ op: 'CALL', method: 'POST', path: '/v2/customers', body: { given_name: 'Pat' } }, deps({ fetchImpl }))
