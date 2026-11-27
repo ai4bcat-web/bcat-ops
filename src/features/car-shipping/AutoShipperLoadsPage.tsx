@@ -26,7 +26,7 @@ import { shipmentEditorPath } from '@/lib/shipmentLinks'
 import { useAutoShipperLoads } from './useAutoShipperLoads'
 import {
   AUTO_SHIPPER_TABS, CARRIER_PAY_LABEL, CARRIER_ROLLUP_LABEL, CUSTOMER_PAY_LABEL, DATE_RANGE_OPTIONS,
-  autoShipperCsv, carrierAction, customerAction, inRange, inTab, summarize, tabCounts,
+  autoShipperCsv, carrierAction, carrierPayCents, carrierPayTotal, customerAction, inRange, inTab, summarize, tabCounts,
   type AutoShipperRow, type AutoShipperTab, type CarrierPayState, type CustomerPayState, type DateRangeKey,
 } from './autoShipperLoads'
 
@@ -65,6 +65,8 @@ export function AutoShipperLoadsPage() {
   const activeTab = tabs.some((t) => t.key === tab) ? tab : 'all'
   const listed = useMemo(() => inRangeRows.filter((r) => inTab(r, activeTab)), [inRangeRows, activeTab])
 
+  const carrierTotal = useMemo(() => carrierPayTotal(listed), [listed])
+
   const kpis = useMemo<DenseKpi[]>(() => {
     const out: DenseKpi[] = []
     if (showAr) {
@@ -82,9 +84,13 @@ export function AutoShipperLoadsPage() {
         title: 'Delivered loads with a carrier still unpaid',
       })
       out.push({ label: 'Carriers paid', value: `${summary.carriersPaid} loads`, tone: 'good' })
+      out.push({
+        label: 'Carrier pay', value: `${money(carrierTotal.cents)} · ${carrierTotal.count} loads`,
+        title: 'What the carriers on the rows listed below are paid in all, paid or not',
+      })
     }
     return out
-  }, [showAr, showAp, summary, activeTab])
+  }, [showAr, showAp, summary, activeTab, carrierTotal])
 
   const columns = useMemo<Array<ArColumn<AutoShipperRow>>>(() => {
     const cols: Array<ArColumn<AutoShipperRow>> = [
@@ -114,6 +120,10 @@ export function AutoShipperLoadsPage() {
       cols.push(
         { key: 'carrier', header: 'Carrier', text: (r) => (r.carriers ?? []).map((c) => c.carrierName).join(', ') || CARRIER_ROLLUP_LABEL.NO_CARRIER, group: 'Carrier' },
         {
+          key: 'carrierAmount', header: 'Carrier pay', text: (r) => (r.carriers ?? []).map((c) => money(c.amountCents)).filter(Boolean).join(', '),
+          numberOf: (r) => { const c = carrierPayCents(r); return c == null ? null : c / 100 }, filter: 'number', align: 'right', group: 'Carrier',
+        },
+        {
           key: 'carrierPay', header: 'Carrier payment', text: (r) => (r.carrierRollup ? CARRIER_ROLLUP_LABEL[r.carrierRollup] : ''), filter: 'multi',
           optionsOf: (r) => (r.carriers && r.carriers.length ? r.carriers.map((c) => ({ value: CARRIER_PAY_LABEL[c.state], label: CARRIER_PAY_LABEL[c.state] })) : [{ value: CARRIER_ROLLUP_LABEL.NO_CARRIER, label: CARRIER_ROLLUP_LABEL.NO_CARRIER }]),
           extraPx: 150, group: 'Carrier',
@@ -123,7 +133,6 @@ export function AutoShipperLoadsPage() {
           extraPx: 120, group: 'Carrier',
         },
         { key: 'payTo', header: 'Pay to', text: (r) => (r.carriers ?? []).map((c) => c.payTo ?? '').filter(Boolean).join(', '), group: 'Carrier' },
-        { key: 'carrierAmount', header: 'Carrier amount', text: (r) => (r.carriers ?? []).map((c) => money(c.amountCents)).filter(Boolean).join(', '), numberOf: (r) => (r.carriers ?? []).reduce((sum, c) => sum + (c.amountCents ?? 0), 0) / 100, filter: 'number', align: 'right', group: 'Carrier' },
       )
     }
     return cols
@@ -176,7 +185,9 @@ export function AutoShipperLoadsPage() {
             c.state === 'OWN_TRUCK'
               ? <span key={c.legId}>{c.carrierName}</span>
               : <Link key={c.legId} to={carrierLink(row, c.billId)} onClick={(e) => e.stopPropagation()}
-                title={c.billId ? 'Open this carrier bill in Accounts Payable' : 'Open the shipment to record the carrier bill'}>{c.carrierName}</Link>
+                title={`${c.billId ? 'Open this carrier bill in Accounts Payable' : 'Open the shipment to record the carrier bill'}${c.amountCents != null ? ` · ${money(c.amountCents)}` : ''}`}>
+                {row.carriers!.length > 1 && c.amountCents != null ? `${c.carrierName} ${money(c.amountCents)}` : c.carrierName}
+              </Link>
           ))}
         </span>
       )
@@ -186,7 +197,7 @@ export function AutoShipperLoadsPage() {
       return (
         <span className="asl-chips">
           {row.carriers.map((c) => (
-            <span key={c.legId} className="asl-chips">
+            <span key={c.legId} className="asl-chips" title={c.amountCents != null && c.state !== 'OWN_TRUCK' ? `${c.carrierName}: ${money(c.amountCents)} carrier pay` : undefined}>
               <TmsBadge tone={CARRIER_TONE[c.state]}>{CARRIER_PAY_LABEL[c.state]}</TmsBadge>
               {c.state === 'PAID' && c.paidAt ? <span className="asl-sub">{formatDay(c.paidAt.slice(0, 10))}</span> : null}
               {c.state !== 'PAID' && c.state !== 'OWN_TRUCK' && c.owedCents > 0 ? <span className="asl-sub">{money(c.owedCents)}</span> : null}
@@ -238,7 +249,8 @@ export function AutoShipperLoadsPage() {
           rowKey: (r) => r.id,
           renderCell,
           onFiltered: setShown,
-          defaultColumns: ['pro', 'payer', 'pickup', 'route', 'vehicle', ...(showAr ? ['price', 'customerPay', 'owed', 'customerAction'] : []), ...(showAp ? ['carrier', 'carrierPay', 'carrierAction', 'payTo'] : [])],
+          defaultColumns: ['pro', 'payer', 'pickup', 'route', 'vehicle', ...(showAr ? ['price', 'customerPay', 'owed', 'customerAction'] : []), ...(showAp ? ['carrier', 'carrierAmount', 'carrierPay', 'carrierAction', 'payTo'] : [])],
+          introduceColumns: showAp ? [{ key: 'carrierAmount', after: 'carrier' }] : undefined,
           cardLayout: { title: 'pro', party: 'payer', amount: showAr ? 'owed' : 'route', pills: [...(showAr ? ['customerPay'] : []), ...(showAp ? ['carrierPay'] : [])] },
           empty: loading ? 'Loading…' : error ? 'The loads could not load. Refresh to try again.' : `No auto shipper loads for ${rangeLabel.toLowerCase()}.`,
         }}

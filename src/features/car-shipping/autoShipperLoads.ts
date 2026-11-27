@@ -424,6 +424,23 @@ export interface AutoShipperSummary {
   carriersPaid: number
 }
 
+/** What the load's carriers are paid in all: the recorded bill amounts, else the carrier rate. Null with no AP access, no carrier, or an own truck only. */
+export function carrierPayCents(row: Pick<AutoShipperRow, 'carriers'>): number | null {
+  const payable = (row.carriers ?? []).filter((c) => c.state !== 'OWN_TRUCK' && c.amountCents != null)
+  return payable.length === 0 ? null : payable.reduce((sum, c) => sum + (c.amountCents ?? 0), 0)
+}
+
+/** The carrier pay of the rows shown, for the strip above the grid. */
+export function carrierPayTotal(rows: readonly AutoShipperRow[]): { cents: number; count: number } {
+  let cents = 0
+  let count = 0
+  for (const r of rows) {
+    const c = carrierPayCents(r)
+    if (c != null) { cents += c; count += 1 }
+  }
+  return { cents, count }
+}
+
 export function summarize(rows: readonly AutoShipperRow[]): AutoShipperSummary {
   const out: AutoShipperSummary = { customersOwe: { count: 0, cents: 0 }, notInvoiced: 0, carriersToPay: { count: 0, cents: 0 }, carriersPaid: 0 }
   for (const row of rows) {
@@ -454,7 +471,7 @@ const dollars = (cents: number | null | undefined): string => (cents == null ? '
 export function autoShipperCsv(rows: readonly AutoShipperRow[], opts: { showAr: boolean; showAp: boolean }): string {
   const header = ['PRO', 'Payer', 'Pickup', 'Delivery', 'Route', 'Vehicle', 'Shipment status']
   if (opts.showAr) header.push('Customer price', 'Customer payment', 'Invoice', 'Customer owes', 'Days outstanding', 'Square status')
-  if (opts.showAp) header.push('Carrier', 'Carrier payment', 'Pay to', 'Carrier amount', 'Carrier owed', 'Carrier paid on')
+  if (opts.showAp) header.push('Carrier', 'Carrier payment', 'Pay to', 'Carrier pay', 'Carrier owed', 'Carrier paid on')
   const lines = [header.map(cell).join(',')]
   for (const r of rows) {
     const base: Array<string | number | null> = [r.pro, r.payer, r.pickup, r.delivery, r.route, r.vehicle, r.status]
