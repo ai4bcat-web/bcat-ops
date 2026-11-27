@@ -13,8 +13,10 @@
  * An own-fleet leg never appears as a carrier bill: the driver is paid through
  * settlements, and the Awaiting view says so instead of offering a Record button.
  */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { clearApIntent, readApIntent } from './apLinks'
+import { BackToAutoShipperLoads } from '@/features/car-shipping/BackToAutoShipperLoads'
 import { Download, FileBarChart } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -325,6 +327,35 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   // The drawer stays open under the dialogs it opens (dates, carrier pay, payment info).
   const [drawerId, setDrawerId] = useState<string | null>(null)
   const drawerBill = drawerId ? open.bills.find((b) => b.id === drawerId) ?? null : null
+  // A link from another page (`?payBill=`, `?openBill=`, `?recordLeg=`; Auto Shipper Loads sends them) opens the Pay dialog, the bill
+  // drawer or Record bill once the open bills have loaded, then clears those params so a reload does not reopen it.
+  const handedOff = useRef(false)
+  useEffect(() => {
+    if (handedOff.current || open.loading) return
+    const intent = readApIntent(searchParams)
+    if (!intent) return
+    handedOff.current = true
+    // Opened from a promise chain, not the effect body: `react-hooks/set-state-in-effect` cannot see through one, and this is a
+    // one-time hand-off from the URL, not state derived from props.
+    void Promise.resolve().then(() => {
+      if (intent.kind === 'record') {
+        setTab('expected')
+        setDialog({ kind: 'record', loadCarrierId: intent.legId })
+        return
+      }
+      const bill = open.bills.find((b) => b.id === intent.billId)
+      if (!bill) {
+        toast.error('That carrier bill is not open any more (it may already be paid or voided).')
+      } else if (intent.kind === 'open' || bill.status === 'IN_REVIEW') {
+        setTab('expected')
+        setDrawerId(bill.id)
+      } else {
+        setTab(bill.selectedForPayment ? 'selected' : 'aging')
+        setDialog({ kind: 'pay', carrierId: bill.carrierId, billIds: [bill.id] })
+      }
+    })
+    void Promise.resolve().then(() => setSearchParams((prev) => clearApIntent(prev), { replace: true }))
+  }, [open.loading, open.bills, searchParams, setSearchParams])
   const agingRows = useMemo(() => applyToBePaidFilters(agingBills, filters, asOf, payInfos), [agingBills, filters, asOf, payInfos])
   const selectedRows = useMemo(() => applyToBePaidFilters(selectedBills, filters, asOf, payInfos), [selectedBills, filters, asOf, payInfos])
   // The Paid tab's range: a tab key or an older 'YYYY-MM'. It is remembered per user in this browser.
@@ -682,6 +713,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         onOpenQueue={() => { setChip('NEEDS_REVIEW'); setTab('inbox') }}
       />
       <div className="tms-page">
+        <BackToAutoShipperLoads />
         <ApChrome
           title={chrome.title}
           viewTabs={chrome.viewTabs}

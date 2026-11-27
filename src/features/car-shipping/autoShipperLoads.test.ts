@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  autoShipperCsv, bothPaid, buildAutoShipperRows, carrierRollupOf, carrierUnpaid, customerUnpaid, inRange, inTab, isAutoShipperCustomer,
+  autoShipperCsv, bothPaid, buildAutoShipperRows, carrierAction, carrierRollupOf, customerAction, carrierUnpaid, customerUnpaid, inRange, inTab, isAutoShipperCustomer,
   isAutoShipperShipment, payerText, rangeStart, summarize, tabCounts, vehicleText, type AutoShipperInput, type AutoShipperRow,
 } from './autoShipperLoads'
 import type { CarrierBillRecord, InvoiceRecord, LoadCarrierRecord, OrderRecord, ShipmentRecord } from '@/types/tms'
@@ -264,5 +264,76 @@ describe('the CSV', () => {
     expect(line).toContain('"Smith, Jones & Co"')
     expect(line).toContain('1209.00')
     expect(line).toContain('Bill recorded')
+  })
+})
+
+
+describe('row actions: where Mark paid and Pay carrier go', () => {
+  const rowFor = (over: Partial<AutoShipperInput>) => build({ shipments: [ship('s1', '14730')], orders: [order('s1')], ...over })[0]!
+
+  it('Mark paid opens Payments Received on the invoice, with the way back', () => {
+    const row = rowFor({ invoices: [invoice('s1')] })
+    const a = customerAction(row)!
+    expect(a.label).toBe('Mark paid')
+    const q = new URLSearchParams(a.to!.split('?')[1])
+    expect(a.to!.startsWith('/tms/payments-received?')).toBe(true)
+    expect(q.get('record')).toBe('1')
+    expect(q.get('customer')).toBe('c-auto')
+    expect(q.getAll('invoice')).toEqual(['inv-s1'])
+    expect(q.get('from')).toBe('auto-shipper-loads')
+  })
+
+  it('a partly paid invoice still says Mark paid; a paid one has no button', () => {
+    expect(customerAction(rowFor({ invoices: [invoice('s1', { paidCents: 50000, balanceCents: 70900 })] }))?.label).toBe('Mark paid')
+    expect(customerAction(rowFor({ invoices: [invoice('s1', { status: 'PAID', paidCents: 120900, balanceCents: 0 })] }))).toBeNull()
+  })
+
+  it('a load not invoiced yet has no Mark paid, and points at Mark invoiced', () => {
+    const a = customerAction(rowFor({}))!
+    expect(a.to).toBeNull()
+    expect(a.label).toBe('Not invoiced yet')
+    expect(a.helpTo).toBe('/tms/invoicing?tab=ready')
+    expect(a.helpLabel).toBe('Mark invoiced')
+  })
+
+  it('has no customer action without the AR grant', () => {
+    expect(customerAction(rowFor({ showAr: false, invoices: [invoice('s1')] }))).toBeNull()
+  })
+
+  it('a load with no customer on it explains why instead of linking', () => {
+    const a = customerAction({ customer: { state: 'UNPAID', invoiceId: 'i', invoiceNumber: '1' } as never, customerId: null })!
+    expect(a.to).toBeNull()
+    expect(a.note).toMatch(/no customer/i)
+  })
+
+  it('a carrier with no bill goes to Record bill on its leg, in Accounts Payable', () => {
+    const row = rowFor({ legs: [leg('L1', 's1')] })
+    const a = carrierAction(row.carriers![0]!, 's1')!
+    expect(a.label).toBe('Record bill')
+    const q = new URLSearchParams(a.to!.split('?')[1])
+    expect(a.to!.startsWith('/tms/invoicing/payable?')).toBe(true)
+    expect(q.get('recordLeg')).toBe('L1')
+    expect(q.get('tab')).toBe('expected')
+    expect(q.get('from')).toBe('auto-shipper-loads')
+  })
+
+  it('a bill still in review goes to the bill, to approve it first; an approved or scheduled one goes to Pay', () => {
+    const inReview = rowFor({ legs: [leg('L1', 's1')], bills: [bill('b1', 'L1', 's1')] })
+    expect(carrierAction(inReview.carriers![0]!, 's1')).toMatchObject({ label: 'Review bill' })
+    expect(new URLSearchParams(carrierAction(inReview.carriers![0]!, 's1')!.to!.split('?')[1]).get('openBill')).toBe('b1')
+    for (const extra of [{ status: 'TO_BE_PAID' as const }, { status: 'TO_BE_PAID' as const, selectedForPayment: true }, { status: 'PARTIAL' as const, balanceCents: 40000 }]) {
+      const row = rowFor({ legs: [leg('L1', 's1')], bills: [bill('b1', 'L1', 's1', extra)] })
+      const a = carrierAction(row.carriers![0]!, 's1')!
+      expect(a.label).toBe('Pay carrier')
+      expect(new URLSearchParams(a.to!.split('?')[1]).get('payBill')).toBe('b1')
+    }
+  })
+
+  it('a paid carrier and an own truck have no button, and there are none without the AP grant', () => {
+    const paid = rowFor({ legs: [leg('L1', 's1')], bills: [bill('b1', 'L1', 's1', { status: 'PAID', balanceCents: 0, paidAt: '2026-11-26T12:00:00Z' })] })
+    expect(carrierAction(paid.carriers![0]!, 's1')).toBeNull()
+    const own = rowFor({ legs: [leg('L1', 's1', { kind: 'OWN_ASSET', driverName: 'Sam' })] })
+    expect(carrierAction(own.carriers![0]!, 's1')).toBeNull()
+    expect(rowFor({ showAp: false, legs: [leg('L1', 's1')] }).carriers).toBeNull()
   })
 })

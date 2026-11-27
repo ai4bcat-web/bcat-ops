@@ -161,6 +161,18 @@ describe('Payments Received page', () => {
     expect(await screen.findByText('Record payment for c1: 14096,14097')).toBeTruthy()
   })
 
+  it('opens Record payment from Auto Shipper Loads, with a way back that survives the one-time hand-off', async () => {
+    render(<MemoryRouter initialEntries={['/tms/payments-received?record=1&customer=c1&invoice=14096&from=auto-shipper-loads']}><PaymentsReceivedPage /></MemoryRouter>)
+    expect(await screen.findByText('Record payment for c1: 14096')).toBeTruthy()
+    expect(screen.getByRole('link', { name: /Back to Auto Shipper Loads/ }).getAttribute('href')).toBe('/auto-shipper-loads')
+  })
+
+  it('shows no back link on a plain visit', async () => {
+    render(<MemoryRouter initialEntries={['/tms/payments-received?customer=c2']}><PaymentsReceivedPage /></MemoryRouter>)
+    await screen.findByTestId('payments-outstanding')
+    expect(screen.queryByTestId('back-to-auto-shipper-loads')).toBeNull()
+  })
+
   it('works on one customer: ?customer= shows only theirs, with a chip and the customer bar', async () => {
     render(<MemoryRouter initialEntries={['/tms/payments-received?customer=c2']}><PaymentsReceivedPage /></MemoryRouter>)
     const out = await screen.findByTestId('payments-outstanding')
