@@ -234,6 +234,7 @@ import { descriptorOf } from '../../../src/lib/integrations/registry'
 import { modeOf } from '../../../src/lib/integrations/health'
 import type { ProviderKey } from '../../../src/lib/integrations/types'
 import { readPageCredentials } from '../_shared/integrationSecrets'
+import { runSquareApi } from '../_shared/squareApi'
 
 import {
   computeFinancials,
@@ -716,6 +717,7 @@ type Action =
   | 'RESAMPLE_DELIVERED_LOADS'
   // The invoice the accounting post generated, filed on its shipment as a document (system caller: tms-finance-actions).
   | 'ATTACH_INVOICE_DOC'
+  | 'SQUARE_API'
   | 'REVIEW_DOCUMENT'
   | 'UPDATE_DOCUMENT'
   | 'VOID_DOCUMENT'
@@ -966,8 +968,10 @@ export const SYSTEM_CALLERS: Record<string, readonly Action[]> = {
   'driver-app-api': ['ATTACH_DRIVER_DOC', 'FLAG_ACCESSORIAL_FROM_DRIVER_DOC'],
   // A POD that reached the shipment through the carrier portal or an inbound e-mail delivers an own-fleet load too.
   'tracking-api': ['LOG_CHECK_CALL', 'DELIVER_ON_POD'],
-  // A generated invoice's PDF is filed on its shipment as an INVOICE document.
-  'finance-actions': ['ATTACH_INVOICE_DOC'],
+  // A generated invoice's PDF is filed on its shipment as an INVOICE document. SQUARE_API is the auto shipper's Square door: this router
+  // already holds the Integration read and the credential read, so the finance Lambda asks it to make each Square call (the token never
+  // leaves here) instead of being granted a second copy of both in the size-capped data stack.
+  'finance-actions': ['ATTACH_INVOICE_DOC', 'SQUARE_API'],
   // A driver's "on site / departed / delivered" tap on the tracking link is filed as a stop event (tracking-api, above).
 }
 
@@ -982,6 +986,7 @@ export async function authorize(action: Action, identity?: AppSyncIdentity | nul
   }
   if (action === 'FILE_INBOUND_OFFER') throw new Error('Forbidden: FILE_INBOUND_OFFER is for the carrier inbox only')
   if (action === 'ATTACH_INVOICE_DOC') throw new Error('Forbidden: ATTACH_INVOICE_DOC is for the finance Lambda only')
+  if (action === 'SQUARE_API') throw new Error('Forbidden: SQUARE_API is for the finance Lambda only')
   if (action === 'FLAG_ACCESSORIAL_FROM_DRIVER_DOC') throw new Error('Forbidden: FLAG_ACCESSORIAL_FROM_DRIVER_DOC is for the driver app Lambda only')
   if (!identity) throw new Error('Unauthorized: missing identity')
   const email = await getCallerEmail(identity)
@@ -10347,6 +10352,11 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return sweepPodDeliveries(input, caller)
     case 'ATTACH_INVOICE_DOC':
       return attachInvoiceDoc(documentDeps, input, caller)
+    case 'SQUARE_API':
+      return runSquareApi(input, {
+        getIntegrationRow: () => getById(INTEGRATION_TABLE_NAME, 'SQUARE'),
+        readCredentials: () => readPageCredentials('SQUARE'),
+      })
     case 'REVIEW_DOCUMENT':
       return reviewDocument(documentDeps, input, caller)
     case 'UPDATE_DOCUMENT':

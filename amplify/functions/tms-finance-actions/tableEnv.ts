@@ -26,7 +26,6 @@ export const FINANCE_ACTIONS_TABLES = {
   COMMISSION_TABLE_NAME: 'Commission',
   COMMISSION_PAY_PERIOD_TABLE_NAME: 'CommissionPayPeriod',
   USER_PROFILE_TABLE_NAME: 'UserProfile',
-  INTEGRATION_TABLE_NAME: 'Integration',
 } as const
 
 applyDataTableSuffix(FINANCE_ACTIONS_TABLES)

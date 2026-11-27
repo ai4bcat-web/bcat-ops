@@ -345,12 +345,13 @@ vi.mock('@aws-sdk/client-sesv2', () => {
   return { SESv2Client, SendEmailCommand }
 })
 
-// Square credentials come from the integration store; the tests hand them over directly.
+// Square credentials live behind the shipment router; the tests stand in for that door with the real one (`runSquareApi`) and hand it
+// the stored credentials directly.
 const squareCreds = vi.hoisted(() => ({ value: null as Record<string, string> | null }))
-vi.mock('../_shared/integrationSecrets', () => ({ readPageCredentials: vi.fn(async () => squareCreds.value) }))
 
 import { handler } from './handler'
-import { setSquareFetch } from './square'
+import { setSquareTransport } from './square'
+import { runSquareApi } from '../_shared/squareApi'
 import { factoringRowFor } from '../../../src/lib/factorHandoff'
 
 interface MockCommand {
@@ -4770,7 +4771,7 @@ describe('Square invoicing for an auto shipper shipment', () => {
   function fakeSquare() {
     calls = []
     sq = { invoiceStatus: 'DRAFT', tenders: [], failNext: null, failStatus: 500, version: 0 }
-    setSquareFetch(async (url, init) => {
+    const fakeFetch = async (url: string, init: RequestInit) => {
       const path = new URL(url).pathname + (new URL(url).search || '')
       const method = String(init.method)
       const body = init.body ? (JSON.parse(String(init.body)) as Row) : null
@@ -4789,6 +4790,15 @@ describe('Square invoicing for an auto shipper shipment', () => {
       if (method === 'GET' && path.startsWith('/v2/invoices/')) return json(200, { invoice: { id: 'INV1', version: sq.version, status: sq.invoiceStatus, public_url: 'https://squareupsandbox.com/pay/abc' } })
       if (method === 'GET' && path.startsWith('/v2/orders/')) return json(200, { order: { id: 'ORD1', tenders: sq.tenders } })
       return json(404, { errors: [{ code: 'NOT_FOUND', detail: `no route ${method} ${path}` }] })
+    }
+    const deps = {
+      getIntegrationRow: async () => table(TABLES.integration).get('SQUARE') ?? null,
+      readCredentials: async () => squareCreds.value,
+      fetchImpl: fakeFetch,
+    }
+    setSquareTransport({
+      context: () => runSquareApi({ op: 'CONTEXT' }, deps),
+      call: (method, path, body) => runSquareApi({ op: 'CALL', method, path, ...(body !== undefined ? { body } : {}) }, deps),
     })
   }
 
@@ -4807,7 +4817,7 @@ describe('Square invoicing for an auto shipper shipment', () => {
   const squareOf = () => (table(TABLES.shipment).get(SHIPMENT_ID)!.carShipping as { square?: Row }).square ?? {}
 
   beforeEach(() => { fakeSquare() })
-  afterEach(() => { setSquareFetch(null); squareCreds.value = null })
+  afterEach(() => { setSquareTransport(null); squareCreds.value = null })
 
   it('does nothing and calls no one while the switch is off', async () => {
     seedSquare({ settings: { autoShipperInvoicing: false } })

@@ -8,7 +8,7 @@
  * exactly what the handler emits — GetItem, Query on a GSI, BatchGetItem,
  * UpdateItem with ADD, and TransactWriteItems with the conditions it writes.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest'
 import { createHash } from 'node:crypto'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 // The rule the public offer page shows a carrier, used here to answer a link the
@@ -74,6 +74,7 @@ const store = vi.hoisted(() => {
   process.env.LOAD_CHARGE_TABLE_NAME = 'LoadCharge-test'
   process.env.LOAD_TABLE_NAME = 'Load-test'
   process.env.CUSTOMER_TABLE_NAME = 'Customer-test'
+  process.env.INTEGRATION_TABLE_NAME = 'Integration-test'
   process.env.SETTINGS_TABLE_NAME = 'TmsSettings-test'
   process.env.AUDIT_LOG_TABLE_NAME = 'AuditLog-test'
   process.env.DRIVER_TABLE_NAME = 'Driver-test'
@@ -375,6 +376,10 @@ vi.mock('@aws-amplify/backend-function/runtime', () => ({
     libraryOptions: {},
   })),
 }))
+
+// The auto shipper's Square door reads the stored Square credentials; the tests hand them over directly (null = nothing stored, as before).
+const squareCreds = vi.hoisted(() => ({ value: null as Record<string, string> | null }))
+vi.mock('../_shared/integrationSecrets', () => ({ readPageCredentials: vi.fn(async () => squareCreds.value) }))
 
 import { handler } from './handler'
 
@@ -6785,6 +6790,34 @@ describe('SET_SHIPMENT_TYPE', () => {
     const ids = await railLoad()
     table(TABLES.load).set(ids.loadId, { ...table(TABLES.load).get(ids.loadId)!, activeLoadCarrierId: 'lc-1' })
     await expect(call('SET_SHIPMENT_TYPE', { shipmentId: ids.shipmentId, expectedUpdatedAt: ids.updatedAt, shipmentType: 'FTL' })).rejects.toThrow(/carrier is booked/i)
+  })
+})
+
+// ── SQUARE_API ───────────────────────────────────────────────────────────────
+
+describe('SQUARE_API (the finance Lambda\'s door to Square)', () => {
+  const asSystem = (systemCaller: string, input: Row) =>
+    handler({ arguments: { action: 'SQUARE_API', input: JSON.stringify(input) }, systemCaller } as never) as Promise<Row>
+
+  afterEach(() => { squareCreds.value = null })
+
+  it('is for the finance Lambda only: not a signed-in user (admin included), not another system caller', async () => {
+    await expect(call('SQUARE_API', { op: 'CONTEXT' })).rejects.toThrow(/finance Lambda only/)
+    await expect(asSystem('tracking-api', { op: 'CONTEXT' })).rejects.toThrow(/finance Lambda only/)
+    await expect(asSystem('driver-app-api', { op: 'CONTEXT' })).rejects.toThrow(/finance Lambda only/)
+  })
+
+  it('answers the non-secret context to the finance Lambda, and never the token', async () => {
+    squareCreds.value = { sandboxAccessToken: 'sandbox-token-SECRET', sandboxLocationId: 'LOC-SB' }
+    const out = await asSystem('finance-actions', { op: 'CONTEXT' })
+    expect(out).toMatchObject({ connected: true, environment: 'SANDBOX', locationId: 'LOC-SB', enabled: false })
+    expect(JSON.stringify(out)).not.toContain('SECRET')
+  })
+
+  it('says what is missing when nothing is stored, and refuses a call it should not make', async () => {
+    expect(await asSystem('finance-actions', { op: 'CONTEXT' })).toMatchObject({ connected: false })
+    await expect(asSystem('finance-actions', { op: 'CALL', method: 'GET', path: '/v2/payments' })).rejects.toThrow(/not an allowed Square call/)
+    await expect(asSystem('finance-actions', { op: 'CALL', method: 'GET', path: '/v2/orders/O1' })).rejects.toThrow(/not connected for SANDBOX/)
   })
 })
 
