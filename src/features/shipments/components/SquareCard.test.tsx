@@ -31,6 +31,13 @@ function bundle(square?: Record<string, unknown>, amountCents = 120_900): Shipme
 beforeEach(() => { grant.value = true; Object.values(api).forEach((f) => f.mockClear()) })
 
 describe('SquareCard', () => {
+  it('never breaks the page on odd car-shipping data: a string, an empty object, or details with no payer or vehicle', () => {
+    for (const odd of ['{"payer":{}}', {}, { square: { status: 'DRAFT' } }, 'null']) {
+      const b = { shipment: { id: 'shp-1', carShipping: odd }, orders: [{ id: 'ord-1', customerRateCents: 120900 }] } as unknown as ShipmentBundle
+      expect(() => render(<SquareCard bundle={b} onReload={() => {}} />)).not.toThrow()
+    }
+  })
+
   it('draws nothing for a shipment that is not an auto shipper, or for someone without the Invoicing grant', () => {
     const plain = { shipment: { id: 'shp-1' }, orders: [] } as unknown as ShipmentBundle
     const { container } = render(<SquareCard bundle={plain} onReload={() => {}} />)
