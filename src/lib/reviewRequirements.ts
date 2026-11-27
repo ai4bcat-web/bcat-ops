@@ -266,16 +266,34 @@ export function isBrokerageRevDivision(revDivision: string | null | undefined): 
 }
 
 /**
+ * The AUTO SHIPPER customer is never factored (Ryne 2026-11-27): it is billed through Square (or by hand), and the shipment's
+ * real payer pays us directly. It is recognised by the Square invoice channel on the customer record or, for a slice that
+ * carries only the name, by the name itself. One helper, so every screen and every server action says the same thing.
+ * Import-free: the finance and directory Lambdas bundle this file by path.
+ */
+export function isAutoShipperName(name: string | null | undefined): boolean {
+  return typeof name === 'string' && name.trim().replace(/\s+/g, ' ').toUpperCase() === 'AUTO SHIPPER'
+}
+
+export function isAutoShipperCustomer(
+  customer: { name?: string | null; invoiceChannel?: string | null } | null | undefined,
+): boolean {
+  if (!customer) return false
+  return customer.invoiceChannel === 'SQUARE' || isAutoShipperName(customer.name)
+}
+
+/**
  * Is THIS LOAD billed through the factor (OTR)? The one rule (Ryne 2026-11-16): the customer factors (isFactorBilled's
  * rule, restated here so this module stays import-free for the Lambda bundle) AND the load is not in the BROKERAGE
  * revenue division — brokered loads are never factored, whatever the customer's billing method; they invoice manually
  * with BCAT's own remit-to. Called without a division it answers for the customer alone (customer-level screens).
  */
 export function customerFactorsForOtr(
-  customer: { billingMethod?: string | null; factored?: boolean | null } | null | undefined,
+  customer: { billingMethod?: string | null; factored?: boolean | null; name?: string | null; invoiceChannel?: string | null } | null | undefined,
   revDivision?: string | null,
 ): boolean {
   if (!customer) return false
+  if (isAutoShipperCustomer(customer)) return false
   if (isBrokerageRevDivision(revDivision)) return false
   if (customer.billingMethod === 'MANUAL') return false
   return customer.billingMethod === 'FACTOR' || customer.factored === true
@@ -283,7 +301,7 @@ export function customerFactorsForOtr(
 
 /** The same rule under its load-level name. */
 export const isFactoredLoad = (
-  customer: { billingMethod?: string | null; factored?: boolean | null } | null | undefined,
+  customer: { billingMethod?: string | null; factored?: boolean | null; name?: string | null; invoiceChannel?: string | null } | null | undefined,
   revDivision: string | null | undefined,
 ): boolean => customerFactorsForOtr(customer, revDivision)
 

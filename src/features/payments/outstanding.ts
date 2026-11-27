@@ -14,6 +14,7 @@
  * Pure: the page loads the invoices and posts the payment; this groups, totals and validates.
  */
 import { customerRefOf } from '@/lib/customerRef'
+import { isAutoShipperName } from '@/lib/reviewRequirements'
 import { OVERPAY_REASON, SHORT_PAY_REASON, differenceReason, isShortPayNote } from '@/lib/paymentDifference'
 import type { ArPaymentMethod, InvoiceRecord, PaymentApplication } from '@/types/tms'
 
@@ -84,8 +85,9 @@ export function daysBetween(fromYmd: string | null, toYmd: string): number {
   return Math.max(0, Math.round((Date.parse(`${toYmd}T00:00:00Z`) - Date.parse(`${fromYmd}T00:00:00Z`)) / DAY_MS))
 }
 
-export const isFactoredInvoice = (inv: Pick<InvoiceRecord, 'factored' | 'factoringItemId'>): boolean =>
-  Boolean(inv.factored || inv.factoringItemId)
+/** An AUTO SHIPPER invoice is never factored (Ryne 2026-11-27), whatever an old import left on its flag. */
+export const isFactoredInvoice = (inv: Pick<InvoiceRecord, 'factored' | 'factoringItemId'> & { customerName?: string | null }): boolean =>
+  !isAutoShipperName(inv.customerName) && Boolean(inv.factored || inv.factoringItemId)
 
 export function outstandingRow(inv: InvoiceRecord, asOf: string): OutstandingRow {
   return {

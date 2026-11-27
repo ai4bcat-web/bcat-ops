@@ -954,6 +954,22 @@ describe('UPSERT_CUSTOMER', () => {
     })
   })
 
+  it('refuses Factor for the AUTO SHIPPER customer, however the save arrives (Ryne 2026-11-27)', async () => {
+    const existing = makeDynamoItem({
+      id: 'c-auto', name: 'AUTO SHIPPER', normalizedName: 'auto shipper', active: true, billingMethod: 'MANUAL',
+      paymentTermsDays: 30, createdAt: '2025-01-01', createdBy: 'someone@bcatcorp.com', updatedAt: '2025-01-02',
+    })
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [existing], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Update' || cmd.__type === 'Put') return Promise.resolve({ Attributes: existing })
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('UPSERT_CUSTOMER', { id: 'c-auto', expectedUpdatedAt: '2025-01-02', patch: true, billingMethod: 'FACTOR', changeReason: 'Load Review', changeSource: 'LOAD_REVIEW' })),
+    ).rejects.toThrow(/never factored/i)
+  })
+
   it('a patch (Load Review rail) needs no name and keeps every field it does not carry', async () => {
     // 14925 ICAT LOGISTICS (Ryne 2026-11-16): switching Manual → Factor from the rail said "name must be a string".
     const existing = makeDynamoItem({
