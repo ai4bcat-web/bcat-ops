@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { billsThroughOtr, isQueueOnlyRow, ordersNeedingInvoice, unsentLabel } from './autoInvoice'
+import { billsThroughOtr, invoiceErrorText, isQueueOnlyRow, ordersNeedingInvoice, unsentLabel } from './autoInvoice'
 import type { FactoringItem, InvoiceRecord } from '@/types/tms'
 
 describe('factored rows are never e-mailed (Ryne 2026-11-14)', () => {
@@ -43,5 +43,14 @@ describe('ordersNeedingInvoice', () => {
 
   it('never lists an order twice', () => {
     expect(ordersNeedingInvoice([{ orderId: 'o1', invoice: null }, { orderId: 'o1', invoice: null }], new Set())).toEqual(['o1'])
+  })
+})
+
+describe('a load billed in Square points at Mark invoiced', () => {
+  it('rewrites the server\'s Square refusal into the next step and leaves every other message alone', () => {
+    const refusal = 'SQUARE_INVOICED: Invoiced in Square (coming) — invoicing it is not done from the standard invoice template.'
+    expect(invoiceErrorText(refusal)).toMatch(/Use Mark invoiced to move it to Invoiced without e-mailing anyone/)
+    expect(invoiceErrorText(refusal)).not.toMatch(/coming/)
+    expect(invoiceErrorText('No customer is set on this order')).toBe('No customer is set on this order')
   })
 })

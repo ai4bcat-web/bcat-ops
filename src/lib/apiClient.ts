@@ -7948,6 +7948,14 @@ export async function markInvoiceSent(input: { invoiceId: string; note: string }
   return financeAction<{ invoice: InvoiceRecord }>('MARK_SENT', input)
 }
 
+/**
+ * MARK_INVOICED: move Ready to invoice orders to Invoiced without e-mailing anyone (loads billed outside the standard
+ * template, e.g. in Square). One row per order: the invoice it made, or why it did not. Nothing is sent to the customer or OTR.
+ */
+export async function markInvoiced(input: { orderIds: string[]; reference?: string; note?: string; invoiceDate?: string }): Promise<{ results: { orderId: string; invoiceId?: string; number?: string; totalCents?: number; error?: string; releaseGate?: ReleaseGateResult }[] }> {
+  return financeAction('MARK_INVOICED', input)
+}
+
 /** Flag (or, with `clear`, un-flag) invoices OTR Solutions offset against our payments. Internal marker only: no money moves. */
 export async function setOtrOffset(input: { invoiceIds: string[]; note?: string; clear?: boolean }): Promise<{ done: { invoiceId: string }[]; skipped: { invoiceId: string; reason: string }[] }> {
   return financeAction('SET_OTR_OFFSET', input)

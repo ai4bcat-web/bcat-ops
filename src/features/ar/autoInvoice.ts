@@ -49,3 +49,13 @@ export function ordersNeedingInvoice(
   }
   return [...new Set(out)]
 }
+
+/**
+ * Why a Ready to invoice order's invoice was not made, in words a person can act on. A load billed outside the standard
+ * template (Square: CAR_SHIPPING / AUTO SHIPPER) is refused by the server on purpose; its way out is Mark invoiced.
+ */
+export function invoiceErrorText(message: string): string {
+  return /SQUARE_INVOICED/.test(message)
+    ? 'Billed in Square, not from the standard invoice. Use Mark invoiced to move it to Invoiced without e-mailing anyone.'
+    : message
+}
