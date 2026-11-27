@@ -3657,10 +3657,12 @@ export async function getShipmentBundle(shipmentId: string): Promise<ShipmentBun
     listShipmentDocuments(shipmentId),
   ])
   if (!shipment) throw new Error('Shipment not found')
+  // The car-shipping details (payer, vehicle, Square ids) ride a narrow read of their own, so the shared shipment read stays as it was.
+  const carShipping = (await listCarShippingByShipmentIds([shipmentId])).get(shipmentId) ?? null
   const financials = (await Promise.all(loads.map((l) => getLoadFinancials(l.id))))
     .filter((f): f is LoadFinancialsRecord => f != null)
   return {
-    shipment,
+    shipment: carShipping ? { ...shipment, carShipping } : shipment,
     orders: orders.map((o) => unwrapJsonFields(o, ORDER_JSON_FIELDS)),
     loads: loads.map((l) => unwrapJsonFields(l, ['stops'])),
     loadCarriers,

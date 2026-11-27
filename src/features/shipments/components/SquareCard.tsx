@@ -35,7 +35,9 @@ export function SquareCard({ bundle, onReload }: { bundle: ShipmentBundle; onRel
   const [confirmSend, setConfirmSend] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
 
-  const data = bundle.shipment.carShipping as CarShippingData | null | undefined
+  // A value that is not an object (an un-parsed JSON string, a stray scalar) is treated as no details: this card must never break the page.
+  const rawData = bundle.shipment.carShipping as unknown
+  const data = (rawData && typeof rawData === 'object' ? rawData : null) as CarShippingData | null
   const shipmentIdForSync = bundle.shipment.id
   const openState = squareCardState(data?.square)
   const lastSyncAt = data?.square?.lastSyncAt ?? null
@@ -51,6 +53,8 @@ export function SquareCard({ bundle, onReload }: { bundle: ShipmentBundle; onRel
   // Only for an auto shipper shipment, and only for people who may see AR money: the payer's invoice is AR.
   if (!data || !allowed) return null
   const square = data.square
+  const payer = data.payer ?? ({} as Partial<CarShippingData['payer']>)
+  const vehicle = data.vehicle ?? ({} as Partial<CarShippingData['vehicle']>)
   const state = squareCardState(square)
   const order = bundle.orders?.[0]
   const amountCents = Number(order?.customerRateCents ?? order?.revenueCents ?? 0)
@@ -91,8 +95,8 @@ export function SquareCard({ bundle, onReload }: { bundle: ShipmentBundle; onRel
         <TmsMetaList
           columns={2}
           items={[
-            { label: 'Bill to', value: [data.payer.company || data.payer.name, data.payer.email, data.payer.phone].filter(Boolean).join(' · ') },
-            { label: 'Vehicle', value: [data.vehicle.year, data.vehicle.make, data.vehicle.model].filter(Boolean).join(' ') },
+            { label: 'Bill to', value: [payer.company || payer.name, payer.email, payer.phone].filter(Boolean).join(' · ') },
+            { label: 'Vehicle', value: [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ') },
             { label: 'Amount', value: formatCents(amountCents) },
             { label: 'Invoice #', value: square?.invoiceNumber ?? '—' },
           ]}
@@ -160,7 +164,7 @@ export function SquareCard({ bundle, onReload }: { bundle: ShipmentBundle; onRel
           open
           onOpenChange={(open) => { if (!open) setConfirmSend(false) }}
           title="Send this invoice?"
-          description={`Square will e-mail invoice ${square?.invoiceNumber ?? ''} for ${formatCents(amountCents)} to ${data.payer.email}${square?.environment === 'SANDBOX' ? ' (sandbox: no real e-mail is sent)' : ''}. This reaches the payer.`}
+          description={`Square will e-mail invoice ${square?.invoiceNumber ?? ''} for ${formatCents(amountCents)} to ${payer.email ?? ''}${square?.environment === 'SANDBOX' ? ' (sandbox: no real e-mail is sent)' : ''}. This reaches the payer.`}
           footer={(
             <>
               <TmsButton variant="ghost" onClick={() => setConfirmSend(false)} disabled={busy != null}>Cancel</TmsButton>
@@ -174,7 +178,7 @@ export function SquareCard({ bundle, onReload }: { bundle: ShipmentBundle; onRel
             </>
           )}
         >
-          <p className="text-sm">{data.payer.company || data.payer.name} · {data.payer.email}</p>
+          <p className="text-sm">{payer.company || payer.name} · {payer.email}</p>
         </TmsDialog>
       )}
       {cancelOpen && (

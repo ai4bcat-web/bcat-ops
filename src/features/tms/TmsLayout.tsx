@@ -22,6 +22,7 @@ import { useShellBadgeCounts } from '@/features/tms/useShellBadgeCounts'
 import { ShipmentTabsProvider } from '@/features/shipments/tabs/ShipmentTabsProvider'
 import { ShipmentTabStrip } from '@/features/shipments/tabs/ShipmentTabStrip'
 import { ShipmentTabHost } from '@/features/shipments/tabs/ShipmentTabHost'
+import { PageErrorBoundary } from '@/components/PageErrorBoundary'
 
 /** The list pages that run edge to edge on an icon rail (Shipments Active / All / Intake, Load Tracking, Customers, Carriers). */
 const DENSE_PATHS = new Set(['/tms/shipments', '/tms/shipments/intake', '/tms/tracking', '/tms/shipments/new', '/tms/customers', '/tms/carriers'])
@@ -126,15 +127,15 @@ export function TmsLayout() {
         <>
           <LegacyRuntime />
           <div className="tms-legacy-host">
-            <Outlet />
+            <PageErrorBoundary resetKey={location.pathname}><Outlet /></PageErrorBoundary>
           </div>
         </>
       ) : (
         <>
           <TmsReferenceData />
           <ShipmentTabStrip />
-          <ShipmentTabHost />
-          <Outlet />
+          <PageErrorBoundary resetKey={location.pathname}><ShipmentTabHost /></PageErrorBoundary>
+          <PageErrorBoundary resetKey={location.pathname}><Outlet /></PageErrorBoundary>
         </>
       )}
       <NotificationsDrawer open={notificationsOpen} onOpenChange={setNotificationsOpen} groups={notificationGroups} />
