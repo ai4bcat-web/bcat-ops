@@ -35,6 +35,7 @@ import {
 import { EmailInvoiceDialog } from './components/EmailInvoiceDialog'
 import { useBillingGrant, BILLING_GRANT_MESSAGE } from './useBillingGrant'
 import { ReasonDialog } from './components/ReasonDialog'
+import { OtrOffsetChip } from './components/OtrOffsetChip'
 import { ChangeTimeline } from '@/components/ChangeTimeline'
 import { entitiesWithSpellings } from '@/components/changeTimelineModel'
 import { SendToFactorDialog } from './components/SendToFactorDialog'
@@ -169,6 +170,7 @@ export function InvoiceDetail() {
           {invoice.number}
           <TmsBadge tone={statusTone(invoice.status)}>{invoice.status}</TmsBadge>
           <TmsBadge tone={chip.late ? 'red' : 'gray'}>{chip.label}</TmsBadge>
+          <OtrOffsetChip flag={invoice.otrOffset} />
         </span>
       }
       actions={

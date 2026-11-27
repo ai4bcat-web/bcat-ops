@@ -29,6 +29,7 @@ import { ReleaseGateList } from './ReleaseGateCard'
 import { PushToLoadReview } from './PushToLoadReview'
 import { releaseGateMessages } from './releaseGateView'
 import { getInvoice, readyToInvoice, saveOrderForm, voidInvoice, getInvoicePdfUrl } from '@/lib/apiClient'
+import { OtrOffsetChip } from '@/features/ar/components/OtrOffsetChip'
 import { formatCents } from '@/lib/invoiceBuild'
 import { AGING_BUCKET_LABEL, agingBucket, daysLate, type AgingBucket } from '@/lib/arAging'
 import { formatDateTime } from '@/lib/date'
@@ -225,6 +226,7 @@ export function ArCard({ bundle, onReload }: ArCardProps) {
                   <>
                     <Link to={`/tms/invoicing/invoices/${invoiceId}`} className="underline underline-offset-2">{number}</Link>
                     {voided && <TmsBadge tone="red">void</TmsBadge>}
+                    <OtrOffsetChip flag={invoice?.otrOffset} />
                   </>
                 ),
               },

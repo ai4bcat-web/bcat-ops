@@ -57,7 +57,7 @@ import { EditCustomerBillingDialog } from '@/features/shipments/form/EditCustome
 import { ChangeInvoiceMethodDialog } from './components/ChangeInvoiceMethodDialog'
 import { canChangeMethod, INVOICE_METHOD_SYNCED_EVENT, isMethodPinned, methodForLoad } from '@/lib/invoiceMethod'
 import {
-  batchGenerateInvoices, getTmsSettings, graphqlErrorText, voidInvoice,
+  batchGenerateInvoices, getTmsSettings, graphqlErrorText, setOtrOffset, voidInvoice,
 } from '@/lib/apiClient'
 import { NeedsReviewList } from '@/features/finance/NeedsReview'
 import { openReviewCount, useNeedsReview } from '@/features/finance/useNeedsReview'
@@ -111,6 +111,7 @@ type ArDialog =
   | { kind: 'statementPreview'; customerId: string; customerName: string }
   | { kind: 'bulkStatement'; customers: BulkStatementCustomer[] }
   | { kind: 'pastDue'; groups: PastDueGroup[] }
+  | { kind: 'otrOffset'; invoiceIds: string[]; clear: boolean }
   | { kind: 'credit'; customerId: string; customerName: string }
   | { kind: 'factor'; invoiceId: string }
   | { kind: 'batchFactor'; rows: ArQueueRow[] }
@@ -582,6 +583,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onEdit: (inv) => setDialog({ kind: 'edit', invoice: inv }),
       onStatement: (customerId, customerName) => setDialog({ kind: 'statement', customerId, customerName }),
       onPastDue: (groups) => { if (groups.length > 0) setDialog({ kind: 'pastDue', groups }) },
+      onOtrOffset: (invoiceIds, clear) => { if (invoiceIds.length > 0) setDialog({ kind: 'otrOffset', invoiceIds, clear }) },
       paymentFacts,
     })
     : agingView({
@@ -811,6 +813,33 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           onSent={() => { setDialog(null); setSelected([]); void refreshAll() }}
         />
       )}
+      {dialog?.kind === 'otrOffset' && (
+        <ReasonDialog
+          title={dialog.clear
+            ? `Clear the OTR offset flag on ${dialog.invoiceIds.length} invoice${dialog.invoiceIds.length === 1 ? '' : 's'}`
+            : `Flag ${dialog.invoiceIds.length} invoice${dialog.invoiceIds.length === 1 ? '' : 's'} as offset by OTR`}
+          description={dialog.clear
+            ? 'Removes the internal marker only. Nothing is sent and no balance changes.'
+            : 'OTR Solutions offset our payment and said the customer paid us directly. This is an internal marker: nothing is sent, nothing is printed on the invoice and no balance changes.'}
+          label={dialog.clear ? 'Why it is being cleared' : 'What OTR told you'}
+          confirmLabel={dialog.clear ? 'Clear flag' : 'Flag as OTR offset'}
+          tone="default"
+          busy={busy}
+          onClose={() => setDialog(null)}
+          onConfirm={(note) => {
+            setBusy(true)
+            setOtrOffset({ invoiceIds: dialog.invoiceIds, note, clear: dialog.clear })
+              .then((r) => {
+                if (r.skipped.length > 0) toast.error(`${r.skipped.length} skipped: ${r.skipped[0].reason}`)
+                else toast.success(dialog.clear ? 'OTR offset cleared' : 'Flagged as OTR offset')
+                setSelected([])
+                closeAndRefresh()
+              })
+              .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not update the flag'))
+              .finally(() => setBusy(false))
+          }}
+        />
+      )}
       {dialog?.kind === 'credit' && (
         <CreditMemoDialog
           customerId={dialog.customerId}
@@ -944,7 +973,7 @@ function dateCol<T>(key: string, header: string, of: (row: T) => string | null, 
 function queueView({
   status, noBuy, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, factorByItemId, customerById,
   attachmentPlans, boardById, shipmentsById, months, month, paidLoading, onMonth, onSelect, invoiceErrors, invoicesRunning, onRetryInvoice, onBatchGenerate, onReview, onEdit,
-  onStatement, onPastDue, paymentFacts,
+  onStatement, onPastDue, onOtrOffset, paymentFacts,
   factorReadiness, onBatchFactor, onWhy, onDocs, onEditCustomer, onChangeMethod, onEditAmount, editedIds,
 }: {
   status: ArQueueStatus
@@ -995,6 +1024,8 @@ function queueView({
   onStatement?: (customerId: string, customerName: string) => void
   /** Invoiced: e-mail a customer a past-due reminder for these invoices (previewed first). */
   onPastDue?: (groups: PastDueGroup[]) => void
+  /** Invoiced: flag (or clear) the ticked invoices as offset by OTR Solutions, with a typed note. Internal marker only. */
+  onOtrOffset?: (invoiceIds: string[], clear: boolean) => void
   paymentFacts: CustomerPaymentFacts
 }): ListView {
   const ready = status === 'READY'
@@ -1096,6 +1127,10 @@ function queueView({
       filter: 'multi', optionsOf: (row) => opt(row.factored ? 'OTR' : 'Manual'),
     },
     {
+      key: 'otrOffset', header: 'OTR offset', group: 'Invoice', text: (row) => (row.invoice?.otrOffset ? 'OTR offset' : '—'),
+      filter: 'multi', optionsOf: (row) => opt(row.invoice?.otrOffset ? 'OTR offset' : 'Not flagged'),
+    },
+    {
       key: 'email', header: 'Invoice email', group: 'Invoice',
       text: (row) => invoiceEmailsOf(row).to.join(', ') || (row.factored ? '' : 'No AP email'),
     },
@@ -1166,6 +1201,7 @@ function queueView({
     return [...byCustomer.values()].filter((g) => g.customerId)
   }
   const remindSelected = invoiced ? rows.filter((row) => selected.includes(row.orderId) && canRemind(row)) : []
+  const offsetSelected = invoiced ? rows.filter((row) => selected.includes(row.orderId) && row.invoiceId != null && row.invoice?.status !== 'VOID') : []
 
   const renderCell = (row: ArQueueRow, key: string): ReactNode => {
     switch (key) {
@@ -1446,6 +1482,30 @@ function queueView({
           >
             <Mail size={14} /> Past due reminder{remindSelected.length ? ` (${remindSelected.length})` : ''}
           </TmsButton>
+          {onOtrOffset && (
+            <>
+              <TmsButton
+                aria-label="Flag selected invoices as offset by OTR"
+                data-testid="batch-otr-offset"
+                disabled={busy || offsetSelected.length === 0}
+                title={offsetSelected.length === 0 ? 'Tick invoices OTR Solutions offset; you type what they told you. No money moves.' : 'Internal marker only: nothing is sent and no balance changes'}
+                onClick={() => onOtrOffset(offsetSelected.map((row) => row.invoiceId as string), false)}
+              >
+                Flag OTR offset{offsetSelected.length ? ` (${offsetSelected.length})` : ''}
+              </TmsButton>
+              {offsetSelected.some((row) => row.invoice?.otrOffset) && (
+                <TmsButton
+                  variant="ghost"
+                  aria-label="Clear the OTR offset flag on selected invoices"
+                  data-testid="batch-otr-offset-clear"
+                  disabled={busy}
+                  onClick={() => onOtrOffset(offsetSelected.filter((row) => row.invoice?.otrOffset).map((row) => row.invoiceId as string), true)}
+                >
+                  Clear OTR offset
+                </TmsButton>
+              )}
+            </>
+          )}
         </div>
       )}
       {invoiced && (

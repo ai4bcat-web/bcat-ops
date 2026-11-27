@@ -2508,6 +2508,9 @@ const schema = a.schema(stageTypes({
       voidedBy:        a.string(),
       voidReason:      a.string(),
       note:            a.string(),
+      // OTR Solutions offset our payment and told us the customer paid us directly: { flaggedAt, flaggedBy, note }. Internal only,
+      // never printed on an invoice or e-mailed; it changes no balance or payment (Ryne 2026-11-27).
+      otrOffset:       a.json(),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
       version:         a.integer().required(),

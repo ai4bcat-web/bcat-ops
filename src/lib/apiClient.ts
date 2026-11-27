@@ -7631,10 +7631,10 @@ const INVOICE_FIELDS = `
   arOpen paidAt remitTo factored factoringItemId
   pdfKey pdfSizeBytes pdfVersion attachDocumentIds
   sentAt sentTo sentCount markedSentAt markedSentBy factorSubmittedAt lastNoticeId aljexDueDate aljexTerms
-  voidedAt voidedBy voidReason note
+  voidedAt voidedBy voidReason note otrOffset
   createdBy updatedBy version createdAt updatedAt
 `
-const INVOICE_JSON_FIELDS: (keyof InvoiceRecord)[] = ['billTo', 'lines', 'references', 'remitTo']
+const INVOICE_JSON_FIELDS: (keyof InvoiceRecord)[] = ['billTo', 'lines', 'references', 'remitTo', 'otrOffset']
 
 const AR_PAYMENT_FIELDS = `
   id customerId kind receivedAt method reference
@@ -7944,6 +7944,11 @@ export async function batchEmailInvoices(input: {
 /** "I sent this myself" — the note is required, because it is the only record of how. */
 export async function markInvoiceSent(input: { invoiceId: string; note: string }): Promise<{ invoice: InvoiceRecord }> {
   return financeAction<{ invoice: InvoiceRecord }>('MARK_SENT', input)
+}
+
+/** Flag (or, with `clear`, un-flag) invoices OTR Solutions offset against our payments. Internal marker only: no money moves. */
+export async function setOtrOffset(input: { invoiceIds: string[]; note?: string; clear?: boolean }): Promise<{ done: { invoiceId: string }[]; skipped: { invoiceId: string; reason: string }[] }> {
+  return financeAction('SET_OTR_OFFSET', input)
 }
 
 export async function voidInvoice(input: { invoiceId: string; reason: string }): Promise<{ invoice: InvoiceRecord }> {

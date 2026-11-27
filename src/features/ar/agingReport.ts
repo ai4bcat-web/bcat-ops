@@ -11,7 +11,7 @@
  * statement leaves them off.
  */
 import { AR_AGING_BUCKETS, AR_AGING_BUCKET_LABEL, daysLate, daysSinceInvoice, invoiceAgeBucket } from '@/lib/arAging'
-import type { InvoiceRecord } from '@/types/tms'
+import type { InvoiceRecord, OtrOffsetFlag } from '@/types/tms'
 import { isFactoredInvoice } from '@/lib/agingStatement'
 import { chicagoDateStr } from '@/lib/date'
 
@@ -36,6 +36,8 @@ export interface AgingReportInvoice {
   balanceCents: number
   bucket: AgingReportBucket
   factored: boolean
+  /** OTR Solutions offset this invoice (internal marker; never on a customer statement). */
+  otrOffset: OtrOffsetFlag | null
 }
 
 export interface AgingReportCustomer {
@@ -103,6 +105,7 @@ export function buildAgingReport(
       balanceCents: inv.balanceCents,
       bucket,
       factored,
+      otrOffset: inv.otrOffset ?? null,
     }
     let c = byCustomer.get(inv.customerId)
     if (!c) {
