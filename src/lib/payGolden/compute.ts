@@ -167,7 +167,9 @@ function ownerOperatorStatements(fx: PayFixture) {
       const driver = drivers.get(base.driverId)
       if (!driver || driver.type === 'broker') continue
       const setting = { ...base, ...effectivePayRate(base as any, periodStart) }
-      const trips = ownerOpTripsFor(fx.loads as any, base.driverId, periodStart).map((t, i) => ({
+      // paidDirect / loadTotal are display-only companions of freightAmount (a lumper paid direct to the driver); no fixture
+      // load carries one, so the snapshot stays the pay math it has always pinned.
+      const trips = ownerOpTripsFor(fx.loads as any, base.driverId, periodStart).map(({ paidDirect: _paidDirect, loadTotal: _loadTotal, ...t }, i) => ({
         ...t,
         // Deterministic stand-in for the POD index: every third trip has no POD yet.
         readiness: { missingDocuments: i % 3 === 2 ? (['POD'] as Array<'POD'>) : ([] as Array<'POD'>) },

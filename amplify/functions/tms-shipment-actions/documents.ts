@@ -930,6 +930,52 @@ export async function setLoadRequiredDocs(deps: DocumentDeps, input: Row, caller
   return { bundle: await readBundle(deps.store, shipmentId) }
 }
 
+// ── SET_LOAD_PAID_DIRECT ─────────────────────────────────────────────────────
+
+/**
+ * Record how much of a load's total the driver was already paid directly (a lumper the broker handed
+ * them). Owner operator settlements work the driver's share off the total less this amount; the customer
+ * invoice, the charges and the factored amount are not touched. 0 clears it. Written only here, so every
+ * change is audited with what it was and what it became.
+ */
+export async function setLoadPaidDirect(deps: DocumentDeps, input: Row, caller: Caller): Promise<Row> {
+  const loadId = assertString(input.loadId, 'loadId')
+  const raw = typeof input.paidDirectDollars === 'number' ? input.paidDirectDollars : Number(input.paidDirectDollars)
+  if (!Number.isFinite(raw) || raw < 0) throw new Error('paidDirectDollars must be zero or more')
+  const cents = Math.round(raw * 100)
+  const reason = optionalString(input.reason, 200)
+
+  const load = await getById(deps.store.db, deps.store.tables.load, loadId)
+  if (!load) throw new Error(`Load not found: ${loadId}`)
+  if (load.voidedAt) throw new Error('That load is voided')
+  const rate = numberOrNull(load.rate)
+  if (rate == null) throw new Error('That load has no rate, so there is nothing to take this amount off')
+  if (cents > Math.round(rate)) {
+    throw new Error(`The amount paid direct cannot be more than the load total of $${(rate / 100).toFixed(2)}`)
+  }
+  const previousCents = numberOrNull(load.driverPaidDirectCents) ?? 0
+  if (previousCents === cents) return { loadId, paidDirectCents: cents, previousCents, unchanged: true }
+
+  const now = nowIso()
+  await transact(
+    deps.store.db,
+    [
+      updateItemTx(
+        deps.store.tables.load,
+        loadId,
+        { ...(cents > 0 ? { driverPaidDirectCents: cents } : {}), updatedAt: now, updatedBy: caller.email },
+        typeof load.updatedAt === 'string' ? load.updatedAt : null,
+        cents > 0 ? {} : { remove: ['driverPaidDirectCents'] },
+      ),
+    ],
+    'load paid direct',
+  )
+  await deps.writeAudit('LOAD', loadId, 'SET_LOAD_PAID_DIRECT', caller, {
+    shipmentId: load.shipmentId ?? null, previousCents, paidDirectCents: cents, loadTotalCents: Math.round(rate), reason,
+  })
+  return { loadId, paidDirectCents: cents, previousCents }
+}
+
 // ── UPDATE_DOCUMENT ──────────────────────────────────────────────────────────
 
 /**

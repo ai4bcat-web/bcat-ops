@@ -14,7 +14,8 @@ import type { OwnerOpTrip } from '@/lib/ownerOperatorTrips'
 import { tripPayAmount, FACTORING_FEE_LABEL } from '@/lib/driverPay'
 import { mileageDeductionLine } from '@/lib/mileageDeduction'
 import { creditLineLabel } from '@/lib/payCredits'
-import { payCreditsDeployed, sendDriverPayEmail, type DriverPayCredit } from '@/lib/apiClient'
+import { payCreditsDeployed, sendDriverPayEmail, setLoadPaidDirect, getShipmentBundle, type DriverPayCredit } from '@/lib/apiClient'
+import { paidDirectNote, lumperSuggestion } from '@/lib/paidDirect'
 import { buildOwnerOperatorStatementPdf, ownerOperatorPdfFilename, pdfToBase64 } from '@/lib/payPdfOwnerOperator'
 import { getColor } from '@/lib/driverColors'
 import { weekLabelLong, sundayOf, shiftWeek } from '@/features/driver-pay/week'
@@ -274,7 +275,7 @@ function statementCsv(row: OwnerOperatorPayRow, periodStart: string): string {
   L.push([
     'PRO #', 'PO #', 'Customer', 'Pickup date', 'Delivery date', 'Broker MC', 'Invoice amount', 'Invoice date',
     'Origin city', 'Origin state', 'Origin ZIP', 'Dest city', 'Dest state', 'Dest ZIP',
-    'POD', 'Rate confirmation', 'Miles', 'Rate/mi', 'Freight', 'Driver Amount', 'On this check',
+    'POD', 'Rate confirmation', 'Miles', 'Rate/mi', 'Freight', 'Paid direct to driver (already off Freight)', 'Driver Amount', 'On this check',
   ].map(q).join(','))
   const heldReasonById = new Map(row.heldTrips.map((h) => [h.trip.id, h.reason]))
   for (const t of row.trips) {
@@ -285,7 +286,7 @@ function statementCsv(row: OwnerOperatorPayRow, periodStart: string): string {
       csvField(t, 'FromCity'), csvField(t, 'FromState'), csvField(t, 'FromZip'),
       csvField(t, 'ToCity'), csvField(t, 'ToState'), csvField(t, 'ToZip'),
       csvDoc(t, 'POD'), csvDoc(t, 'Rate confirmation'),
-      t.miles ?? '', ratePerMile(t.freightAmount, t.miles) ?? '', t.freightAmount,
+      t.miles ?? '', ratePerMile(t.freightAmount, t.miles) ?? '', t.freightAmount, t.paidDirect > 0 ? t.paidDirect : '',
       // A held load's pay is not on this check, so the column shows 0 rather than a
       // figure someone could total up and expect to see in the driver's bank.
       heldReasonById.has(t.id) ? 0 : tripPayAmount(t.freightAmount, row.setting),
@@ -560,6 +561,68 @@ export function OwnerOperatorPayPage({ week, onWeek, viewSwitch, initialDriverId
   )
 }
 
+/**
+ * What the driver was already paid directly on this load (a lumper the broker handed them). The
+ * driver's share is worked off the freight less this, so the note under the freight says how the
+ * figure was reached. Staff only: the page itself is behind the settlements permission.
+ */
+function PaidDirectCell({ trip }: { trip: OwnerOpTrip }) {
+  const shipmentId = useAppStore((st) => st.loads.find((l) => l.id === trip.id)?.shipmentId ?? null)
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const note = paidDirectNote(trip.paidDirect)
+
+  const begin = async () => {
+    setText(trip.paidDirect > 0 ? String(trip.paidDirect) : '')
+    setOpen(true)
+    if (trip.paidDirect > 0 || !shipmentId) return
+    try {
+      const bundle = await getShipmentBundle(shipmentId)
+      const suggested = lumperSuggestion(bundle.charges, trip.id)
+      if (suggested != null) setText((cur) => (cur === '' ? String(suggested) : cur))
+    } catch { /* the amount can still be typed */ }
+  }
+
+  const save = async () => {
+    const dollars = text.trim() === '' ? 0 : Number(text)
+    if (!Number.isFinite(dollars) || dollars < 0) { toast.error('Enter the amount in dollars, or leave it empty to clear it'); return }
+    setBusy(true)
+    try {
+      const res = await setLoadPaidDirect({ loadId: trip.id, paidDirectDollars: dollars })
+      useAppStore.setState((st) => ({ loads: st.loads.map((l) => (l.id === trip.id ? { ...l, driverPaidDirectCents: res.paidDirectCents > 0 ? res.paidDirectCents : null } : l)) }))
+      toast.success(res.paidDirectCents > 0 ? `Settlement now works off ${money((trip.loadTotal - res.paidDirectCents / 100))} for this load` : 'Cleared. The settlement works off the full load total again')
+      setOpen(false)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not save')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div style={{ fontSize: 10.5, fontWeight: 400, whiteSpace: 'normal', textAlign: 'right' }}>
+      {note && <div style={{ color: 'var(--tms-muted)' }} title={`Load total ${money(trip.loadTotal)}`}>{note}</div>}
+      {!open && (
+        <button type="button" onClick={() => void begin()} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--tms-accent, var(--tms-text-2))', fontSize: 10.5 }}>
+          {trip.paidDirect > 0 ? 'Edit paid direct' : 'Paid direct…'}
+        </button>
+      )}
+      {open && (
+        <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end' }}>
+          <input
+            id={`paid-direct-${trip.id}`} aria-label="Paid direct to driver, in dollars" inputMode="decimal" autoFocus value={text}
+            onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void save(); if (e.key === 'Escape') setOpen(false) }}
+            placeholder="$ paid direct" style={{ width: 84, fontSize: 11.5, padding: '2px 5px', textAlign: 'right' }}
+          />
+          <button type="button" disabled={busy} onClick={() => void save()} style={{ fontSize: 11, padding: '2px 7px', cursor: 'pointer' }}>Save</button>
+          <button type="button" disabled={busy} onClick={() => setOpen(false)} style={{ fontSize: 11, padding: '2px 7px', cursor: 'pointer' }}>Cancel</button>
+        </span>
+      )}
+    </div>
+  )
+}
+
 function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, onSettings, onRemoveDeduction, onWaiveDeduction, onAddMileage, onExport, onPdf, onEmail }: {
   row: OwnerOperatorPayRow
   /** Recorded on any document uploaded from this card. */
@@ -698,7 +761,10 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
                 <td style={TD}><OtrDoc trip={t} kind="Rate confirmation" driver={driver} staffEmail={staffEmail} onUploaded={onRefresh} /></td>
                 <td style={TD}>{t.miles != null ? t.miles.toLocaleString('en-US') : <span style={MISSING} title="No miles on the shipment — rate per mile cannot be worked out">No miles</span>}</td>
                 <td style={TD}>{ratePerMile(t.freightAmount, t.miles) != null ? `${money(ratePerMile(t.freightAmount, t.miles)!)}/mi` : '—'}</td>
-                <td style={TD}>{money(t.freightAmount)}</td>
+                <td style={TD}>
+                  {money(t.freightAmount)}
+                  <PaidDirectCell trip={t} />
+                </td>
                 <td style={{ ...TD, fontWeight: 600 }}>
                   {held
                     ? <HeldAmount reason={held} amount={tripPayAmount(t.freightAmount, setting)} />

@@ -74,6 +74,10 @@ const schema = a.schema(stageTypes({
 
       truckId:         a.string(),
       rate:            a.integer(),
+      // Cents of `rate` the driver was already paid directly (a lumper the broker handed them). Owner operator
+      // settlements work the driver's share off rate minus this; the invoice and the factored amount stay at rate.
+      // Read-only to a client: SET_LOAD_PAID_DIRECT is the only writer, and it audits the change.
+      driverPaidDirectCents: a.integer().authorization((allow) => [allow.authenticated().to(['read'])]),
       miles:           a.integer(),
       customer:        a.string(),
       colorKey:        a.string(),   // load color swatch (driver-1…driver-12, broker)
