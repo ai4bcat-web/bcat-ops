@@ -23,6 +23,7 @@ export function CustomerForm({
   errors,
   divisions,
   isNew = false,
+  canSetInvoiceChannel = false,
 }: {
   value: CustomerFormValue
   set: <K extends keyof CustomerFormValue>(key: K, v: CustomerFormValue[K]) => void
@@ -30,6 +31,8 @@ export function CustomerForm({
   divisions: Division[]
   /** A customer being created: the required fields lead the form and are not repeated in the tabs. */
   isNew?: boolean
+  /** Admins only: how this customer's shipments are invoiced (Square for the auto shipper). */
+  canSetInvoiceChannel?: boolean
 }) {
   const [tab, setTab] = useState('Overview')
   const [teams, setTeams] = useState<Team[]>([])
@@ -94,6 +97,19 @@ export function CustomerForm({
                 value={value.apptWorkflow}
                 onChange={(e) => set('apptWorkflow', e.target.value as 'UNSET' | 'NONE' | 'BATORY')}
                 options={APPT_WORKFLOW_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+              />
+            </TmsField>
+          </div>
+          <div className="tms-grid tms-grid-3">
+            <TmsField label="Invoice channel" hint="Auto shipper: each shipment is billed to its own payer through Square. Admins only.">
+              <TmsSelect
+                value={value.invoiceChannel}
+                onChange={(e) => set('invoiceChannel', e.target.value as '' | 'SQUARE')}
+                disabled={!canSetInvoiceChannel}
+                options={[
+                  { value: '', label: 'Standard invoice' },
+                  { value: 'SQUARE', label: 'Auto shipper (invoice via Square)' },
+                ]}
               />
             </TmsField>
           </div>

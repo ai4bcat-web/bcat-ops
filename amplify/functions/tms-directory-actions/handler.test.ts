@@ -436,6 +436,19 @@ describe('UPSERT_CUSTOMER', () => {
     await expect(handler(event('UPSERT_CUSTOMER', { name: 'Acme', apptWorkflow: 'batory' }))).rejects.toThrow('apptWorkflow must be one of NONE, BATORY')
   })
 
+  it('only an admin can switch a customer to the Square channel; anyone else leaves it as it was', async () => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Put') return Promise.resolve({})
+      return Promise.resolve({})
+    }))
+    const byAdmin = await handler(event('UPSERT_CUSTOMER', { name: 'Auto Shipper', invoiceChannel: 'SQUARE' }, identity({ groups: ['ADMIN'] })))
+    expect(byAdmin.invoiceChannel).toBe('SQUARE')
+    const byStaff = await handler(event('UPSERT_CUSTOMER', { name: 'Auto Shipper Two', invoiceChannel: 'SQUARE' }))
+    expect(byStaff.invoiceChannel ?? null).toBeNull()
+    await expect(handler(event('UPSERT_CUSTOMER', { name: 'Auto Shipper Three', invoiceChannel: 'FAX' }, identity({ groups: ['ADMIN'] })))).rejects.toThrow(/invoiceChannel/)
+  })
+
   it('rejects duplicate customer by normalized name', async () => {
     const existing1 = makeDynamoItem({ id: 'c-1', name: 'BATORY FOODS LLC', normalizedName: 'batory foods', active: true, updatedAt: '2025-01-02' })
     const existing2 = makeDynamoItem({ id: 'c-2', name: 'Batory Foods Inc', normalizedName: 'batory foods', active: true, updatedAt: '2025-01-02' })

@@ -96,6 +96,8 @@ export interface CustomerFormValue {
   aliasesText: string
   active: boolean
   apptWorkflow: 'UNSET' | 'NONE' | 'BATORY'
+  /** 'SQUARE': shipments for this customer are invoiced through Square (auto shipper). '' = the standard invoice flow. */
+  invoiceChannel: '' | 'SQUARE'
 
   status: CustomerStatus | ''
   leadSource: string
@@ -195,6 +197,7 @@ function emptyCustomerForm(initial?: CustomerRecord | null): CustomerFormValue {
     aliasesText: arrayToLines(initial?.aliases),
     active: initial?.active ?? true,
     apptWorkflow: initial?.apptWorkflow ?? 'UNSET',
+    invoiceChannel: initial?.invoiceChannel === 'SQUARE' ? 'SQUARE' : '',
 
     status: initial?.status ?? '',
     leadSource: initial?.leadSource ?? '',
@@ -341,6 +344,7 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
     aliases: linesToArray(value.aliasesText),
     active: value.active,
     apptWorkflow: value.apptWorkflow === 'UNSET' ? null : value.apptWorkflow,
+    invoiceChannel: value.invoiceChannel === 'SQUARE' ? 'SQUARE' : null,
 
     status: opts.includeStatus !== false ? (value.status || null) : (initial?.status ?? null),
     leadSource: value.leadSource.trim() || null,

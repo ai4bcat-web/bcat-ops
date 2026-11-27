@@ -172,6 +172,7 @@ export interface ValidateHow {
     | 'BRIDGE_LAST_INBOUND'
     | 'OPENAPI_SELF'
     | 'GOOGLE_OAUTH_CLIENT'
+    | 'SQUARE_LOCATIONS'
 }
 
 export interface ProviderDescriptor {

@@ -303,6 +303,37 @@ export async function validateProvider(
         )
       }
 
+      case 'SQUARE_LOCATIONS': {
+        // Each environment the page holds a token for is checked against its own Square host, and the saved
+        // location must be one the token can see. A 2xx body is never put in the outcome (customer data).
+        const sets: Array<{ label: string; base: string; token: string | null; location: string | null }> = [
+          { label: 'Sandbox', base: 'https://connect.squareupsandbox.com', token: creds.sandboxAccessToken?.trim() || null, location: creds.sandboxLocationId?.trim() || null },
+          { label: 'Production', base: 'https://connect.squareup.com', token: creds.productionAccessToken?.trim() || null, location: creds.productionLocationId?.trim() || null },
+        ]
+        if (sets.some((x) => neutered(x.token))) return NEUTERED
+        const present = sets.filter((x) => x.token)
+        if (present.length === 0) return missing(['sandboxAccessToken'])
+        for (const set of present) {
+          const res = await call(fetchImpl, `${set.base}/v2/locations`, {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${set.token}`, Accept: 'application/json', 'Square-Version': '2024-10-17' },
+          })
+          if (res.status < 200 || res.status >= 300) {
+            const out = httpOutcome(res, [set.token as string])
+            return out.kind === 'HTTP' ? { ...out, message: `${set.label}: ${out.message ?? 'Square refused the token.'}` } : out
+          }
+          let ids: string[] = []
+          try {
+            const parsed = JSON.parse(res.body) as { locations?: Array<{ id?: string }> }
+            ids = (parsed.locations ?? []).map((l) => String(l.id ?? ''))
+          } catch { /* a 2xx with an unreadable body still proves the token */ }
+          if (set.location && ids.length > 0 && !ids.includes(set.location)) {
+            return { kind: 'HTTP', statusCode: 404, message: `${set.label}: Square accepted the token, but the saved location ID is not one of its locations.` }
+          }
+        }
+        return { kind: 'HTTP', statusCode: 200 }
+      }
+
       case 'HUBSPOT_CONTACTS': {
         const got = requireCreds(creds, ['privateAppToken'])
         if (!got.ok) return got.outcome

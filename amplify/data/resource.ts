@@ -965,6 +965,8 @@ const schema = a.schema(stageTypes({
       normalizedName: a.string(),                // dedupe key (lower, strip punctuation)
       active:         a.boolean(),
       apptWorkflow:   a.enum(['NONE', 'BATORY']), // replaces /batory/i regex
+      // Auto shipper: 'SQUARE' = shipments for this customer are invoiced through Square (one payer per shipment). Null = the standard invoice flow.
+      invoiceChannel: a.string(),
       mergedIntoId:   a.string(),                // soft-merge pointer (customer merge future)
 
       // ── Customer v2 (Step A) ───────────────────────────────────────────────
@@ -2046,6 +2048,8 @@ const schema = a.schema(stageTypes({
       // Lower-cased number · customer · cities · reference values, so the board can
       // answer "find me 12345" without scanning five tables.
       searchKey:       a.string(),
+      // Auto shipper (invoice via Square): { payer, vehicle, square:{ ids, status, ... } }. Null on every other shipment.
+      carShipping:     a.json(),
       source:          a.enum(['MANUAL', 'TENDER', 'DUPLICATE', 'BACKFILL', 'FACTORING']),
       // ── Tracking & check calls (Step D) ─────────────────────────────────
       // The one ACTIVE CUSTOMER_VIEW TrackingLink for this shipment. Stable
@@ -2511,6 +2515,8 @@ const schema = a.schema(stageTypes({
       // OTR Solutions offset our payment and told us the customer paid us directly: { flaggedAt, flaggedBy, note }. Internal only,
       // never printed on an invoice or e-mailed; it changes no balance or payment (Ryne 2026-11-27).
       otrOffset:       a.json(),
+      // Invoice issued through an outside system: { provider:'SQUARE', invoiceId, orderId, publicUrl }. Null = issued here.
+      external:        a.json(),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
       version:         a.integer().required(),

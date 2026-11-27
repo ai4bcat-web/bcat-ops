@@ -234,6 +234,8 @@ export interface CustomerRecord {
   normalizedName?: string | null
   active?: boolean | null
   apptWorkflow?: 'NONE' | 'BATORY' | null
+  /** 'SQUARE': this customer's shipments are invoiced through Square (auto shipper). Null = the standard invoice flow. */
+  invoiceChannel?: 'SQUARE' | null
   mergedIntoId?: string | null
 
   // Status ladder
@@ -1926,6 +1928,8 @@ export interface ShipmentRecord {
   destinationCity?: string | null
   /** Lower-cased number · customer · cities · reference values, for board search. */
   searchKey?: string | null
+  /** Auto shipper (Square): the payer, the vehicle and where the Square invoice stands. Null on every other shipment. */
+  carShipping?: import('@/lib/squareInvoicing').CarShippingData | null
   source: ShipmentSource
   // Step D — the customer tracking link, one stable token per shipment
   customerLinkId?: string | null
@@ -3249,6 +3253,8 @@ export interface InvoiceRecord {
   note?: string | null
   /** OTR Solutions offset our payment and said the customer paid us directly. Internal only: never on an invoice, e-mail or customer page. */
   otrOffset?: OtrOffsetFlag | null
+  /** Issued through an outside system (Square): the invoice there. Null = issued here. */
+  external?: { provider: 'SQUARE'; invoiceId: string; orderId?: string | null; publicUrl?: string | null } | null
   createdBy: string
   updatedBy: string
   version: number

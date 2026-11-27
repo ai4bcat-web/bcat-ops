@@ -86,6 +86,7 @@ import {
   threadKeyFor,
   threadReplyAddress,
 } from '../../../src/lib/shipmentThread'
+import { isSquareChannel, normalizeCarShipping, type CarShippingData } from '../../../src/lib/squareInvoicing'
 import {
   assertArrayOf,
   assertEnum,
@@ -2185,6 +2186,19 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
   const workflowRunId = optionalString(input.workflowRunId, 120)
   const bag = validateLoadBag(input.load)
 
+  // Auto shipper (invoiced through Square): the payer and the vehicle ride on the shipment. Only a customer an admin
+  // switched to the Square channel may carry them, and the price is the invoice, so it must be there.
+  let carShipping: CarShippingData | undefined
+  if (input.carShipping != null) {
+    if (!customer || !isSquareChannel(customer as { invoiceChannel?: string | null })) {
+      throw new Error('Auto shipper details only apply to a customer that is invoiced through Square')
+    }
+    const checked = normalizeCarShipping(input.carShipping)
+    if (!checked.ok) throw new Error(checked.error)
+    if (!(typeof bag.rateCents === 'number' && bag.rateCents > 0)) throw new Error('An auto shipper shipment needs a price')
+    carShipping = { payer: checked.value.payer, vehicle: checked.value.vehicle }
+  }
+
   const suppliedPro = optionalString(input.pro, 120)
   if (suppliedPro) {
     assertNotDerivedPro(suppliedPro, settings)
@@ -2268,6 +2282,8 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
     salesRepId,
     trackerId,
     workflowRunId,
+    // Written only when present: a null JSON on every other shipment would be noise on every read.
+    ...(carShipping ? { carShipping } : {}),
     createdBy: caller.email,
     updatedBy: caller.email,
     version: 1,
@@ -2417,6 +2433,8 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
   await applyTagToLoads(shipmentId, caller)
   await writeAudit('SHIPMENT', shipmentId, 'CREATE_SHIPMENT', caller, {
     number, customerId, customerName, mode, source, pro, workflowRunId,
+    // The payer and vehicle are personal data: the audit says THAT they were recorded, not what they are.
+    ...(carShipping ? { carShipping: true } : {}),
   })
   return readBundle(shipmentId) as unknown as Row
 }
