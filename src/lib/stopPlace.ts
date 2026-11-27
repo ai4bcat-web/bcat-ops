@@ -142,5 +142,7 @@ export function stopsList<T = Record<string, unknown>>(v: unknown): T[] {
   for (let i = 0; i < 4 && typeof x === 'string'; i++) {
     try { x = JSON.parse(x) } catch { return [] }
   }
+  // A keyed object ({"0": stop, "1": stop}) is a list that lost its array-ness on the way through AppSync.
+  if (x && typeof x === 'object' && !Array.isArray(x)) x = Object.values(x)
   return Array.isArray(x) ? (x.filter((s) => !!s && typeof s === 'object') as T[]) : []
 }
