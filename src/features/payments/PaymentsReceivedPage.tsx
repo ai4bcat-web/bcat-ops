@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import './paymentsReceived.css'
 import { Link, useSearchParams } from 'react-router-dom'
+import { BackToAutoShipperLoads } from '@/features/car-shipping/BackToAutoShipperLoads'
 import { periodFromParam, presetRange, type PresetKey } from './links'
 import { Download, Plus, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
@@ -369,6 +370,7 @@ export function PaymentsReceivedPage() {
   return (
     <>
       <div className="tms-page" data-testid="payments-received-page">
+        <BackToAutoShipperLoads />
         <div className="tms-page-head">
           <h1>Payments Received</h1>
           <div className="tms-page-actions">

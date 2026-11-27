@@ -108,7 +108,7 @@ export const NAV_ITEMS: NavItem[] = [
 
   // Car shipping — Best Care Auto Transport.
   // Every AUTO SHIPPER load with what the customer owes and what each carrier is owed (Ryne 2026-11-27). Its own grant: the money columns still need the AR / AP grants.
-  { to: '/auto-shipper-loads', label: 'Auto shipper loads', icon: Receipt, pageKey: 'autoShipperLoads', section: 'CAR_SHIPPING' },
+  { to: '/auto-shipper-loads', label: 'Auto Shipper Loads', icon: Receipt, pageKey: 'autoShipperLoads', section: 'CAR_SHIPPING' },
   { to: '/vehicle-quote', label: 'Vehicle Quote', icon: Car, pageKey: 'vehicleQuote', section: 'CAR_SHIPPING' },
   { to: '/vehicle-confirmation', label: 'Booking Confirmation', icon: CalendarCheck, pageKey: 'vehicleConfirmation', section: 'CAR_SHIPPING' },
   // Car-shipping margin configuration: the pricing behind Best Care Auto Transport.

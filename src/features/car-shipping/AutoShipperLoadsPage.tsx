@@ -1,8 +1,9 @@
 /**
- * `/auto-shipper-loads` — CAR SHIPPING → Auto shipper loads (Ryne 2026-11-27). Every shipment of the AUTO SHIPPER customer, with
+ * `/auto-shipper-loads` — CAR SHIPPING → Auto Shipper Loads (Ryne 2026-11-27). Every shipment of the AUTO SHIPPER customer, with
  * what the customer still owes and what each carrier is owed, so the office sees at a glance which loads have money outstanding
  * and which carriers need paying or have been paid. Carrier payment still runs through Accounts Payable: the carrier cell opens
- * the recorded bill (or the shipment's Carrier Pay tab when no bill is recorded yet). Nothing is paid from here.
+ * the recorded bill (or the shipment's Carrier Pay tab when no bill is recorded yet). Nothing is paid from here: the row buttons
+ * (Mark paid, Pay carrier) open Payments Received or Accounts Payable on that invoice or bill, where the money is recorded.
  *
  * Money follows the grants: the customer columns and tiles need the Accounts Receivable grant, the carrier ones the Accounts
  * Payable grant, and a person limited to the fleet profiles (Jason) sees neither.
@@ -25,7 +26,7 @@ import { shipmentEditorPath } from '@/lib/shipmentLinks'
 import { useAutoShipperLoads } from './useAutoShipperLoads'
 import {
   AUTO_SHIPPER_TABS, CARRIER_PAY_LABEL, CARRIER_ROLLUP_LABEL, CUSTOMER_PAY_LABEL, DATE_RANGE_OPTIONS,
-  autoShipperCsv, inRange, inTab, summarize, tabCounts,
+  autoShipperCsv, carrierAction, customerAction, inRange, inTab, summarize, tabCounts,
   type AutoShipperRow, type AutoShipperTab, type CarrierPayState, type CustomerPayState, type DateRangeKey,
 } from './autoShipperLoads'
 
@@ -103,6 +104,9 @@ export function AutoShipperLoadsPage() {
           extraPx: 150, group: 'Customer',
         },
         { key: 'owed', header: 'Customer owes', text: (r) => money(r.customer?.owedCents), numberOf: (r) => (r.customer?.owedCents ?? 0) / 100, filter: 'number', align: 'right', group: 'Customer' },
+        {
+          key: 'customerAction', header: 'Customer action', text: (r) => customerAction(r)?.label ?? '', extraPx: 120, group: 'Customer',
+        },
         { key: 'days', header: 'Days outstanding', text: (r) => (r.customer?.daysOutstanding == null ? '' : String(r.customer.daysOutstanding)), numberOf: (r) => r.customer?.daysOutstanding ?? null, filter: 'number', align: 'right', group: 'Customer' },
       )
     }
@@ -113,6 +117,10 @@ export function AutoShipperLoadsPage() {
           key: 'carrierPay', header: 'Carrier payment', text: (r) => (r.carrierRollup ? CARRIER_ROLLUP_LABEL[r.carrierRollup] : ''), filter: 'multi',
           optionsOf: (r) => (r.carriers && r.carriers.length ? r.carriers.map((c) => ({ value: CARRIER_PAY_LABEL[c.state], label: CARRIER_PAY_LABEL[c.state] })) : [{ value: CARRIER_ROLLUP_LABEL.NO_CARRIER, label: CARRIER_ROLLUP_LABEL.NO_CARRIER }]),
           extraPx: 150, group: 'Carrier',
+        },
+        {
+          key: 'carrierAction', header: 'Carrier action', text: (r) => (r.carriers ?? []).map((c) => carrierAction(c, r.id)?.label ?? '').filter(Boolean).join(', '),
+          extraPx: 120, group: 'Carrier',
         },
         { key: 'payTo', header: 'Pay to', text: (r) => (r.carriers ?? []).map((c) => c.payTo ?? '').filter(Boolean).join(', '), group: 'Carrier' },
         { key: 'carrierAmount', header: 'Carrier amount', text: (r) => (r.carriers ?? []).map((c) => money(c.amountCents)).filter(Boolean).join(', '), numberOf: (r) => (r.carriers ?? []).reduce((sum, c) => sum + (c.amountCents ?? 0), 0) / 100, filter: 'number', align: 'right', group: 'Carrier' },
@@ -130,6 +138,33 @@ export function AutoShipperLoadsPage() {
           <TmsBadge tone={CUSTOMER_TONE[c.state]}>{CUSTOMER_PAY_LABEL[c.state]}</TmsBadge>
           {c.invoiceNumber ? <span className="asl-sub">{c.invoiceNumber}</span> : null}
           {c.squareLabel ? <TmsBadge tone="gray" title="Square invoice status">Square: {c.squareLabel}</TmsBadge> : null}
+        </span>
+      )
+    }
+    if (key === 'customerAction') {
+      const a = customerAction(row)
+      if (!a) return undefined
+      return (
+        <span className="asl-chips" data-testid={`asl-customer-action-${row.pro}`}>
+          {a.to
+            ? <Link className="tms-btn tms-btn-secondary tms-btn-sm" to={a.to} onClick={(e) => e.stopPropagation()}
+              title="Open Payments Received on this invoice and record the payment there">{a.label}</Link>
+            : <span className="asl-sub" title={a.note ?? undefined}>{a.label}</span>}
+          {a.helpTo ? <Link className="asl-sub" to={a.helpTo} onClick={(e) => e.stopPropagation()} title="Open Receivables on Ready to invoice">{a.helpLabel}</Link> : null}
+        </span>
+      )
+    }
+    if (key === 'carrierAction' && row.carriers) {
+      const actions = row.carriers.map((c) => ({ c, a: carrierAction(c, row.id) })).filter((x) => x.a)
+      if (actions.length === 0) return undefined
+      return (
+        <span className="asl-chips" data-testid={`asl-carrier-action-${row.pro}`}>
+          {actions.map(({ c, a }) => (
+            <Link key={c.legId} className="tms-btn tms-btn-secondary tms-btn-sm" to={a!.to!} onClick={(e) => e.stopPropagation()}
+              title={a!.note ?? `Open Accounts Payable on this carrier bill: ${c.carrierName}`}>
+              {actions.length > 1 ? `${a!.label}: ${c.carrierName}` : a!.label}
+            </Link>
+          ))}
         </span>
       )
     }
@@ -172,7 +207,7 @@ export function AutoShipperLoadsPage() {
   return (
     <div className="tms-page" data-testid="auto-shipper-loads-page">
       <div className="tms-page-head">
-        <h1>Auto shipper loads</h1>
+        <h1>Auto Shipper Loads</h1>
         <div className="tms-page-actions">
           <button type="button" className="tms-icon-btn tms-icon-btn-plain" aria-label="Refresh" onClick={() => { void refresh() }}>
             <RefreshCw size={15} />
@@ -197,13 +232,13 @@ export function AutoShipperLoadsPage() {
         key={`${activeTab}-${range}`}
         grid={{
           gridId: 'auto-shipper-loads',
-          label: 'Auto shipper loads',
+          label: 'Auto Shipper Loads',
           columns,
           rows: listed,
           rowKey: (r) => r.id,
           renderCell,
           onFiltered: setShown,
-          defaultColumns: ['pro', 'payer', 'pickup', 'route', 'vehicle', ...(showAr ? ['price', 'customerPay', 'owed'] : []), ...(showAp ? ['carrier', 'carrierPay', 'payTo'] : [])],
+          defaultColumns: ['pro', 'payer', 'pickup', 'route', 'vehicle', ...(showAr ? ['price', 'customerPay', 'owed', 'customerAction'] : []), ...(showAp ? ['carrier', 'carrierPay', 'carrierAction', 'payTo'] : [])],
           cardLayout: { title: 'pro', party: 'payer', amount: showAr ? 'owed' : 'route', pills: [...(showAr ? ['customerPay'] : []), ...(showAp ? ['carrierPay'] : [])] },
           empty: loading ? 'Loading…' : error ? 'The loads could not load. Refresh to try again.' : `No auto shipper loads for ${rangeLabel.toLowerCase()}.`,
         }}

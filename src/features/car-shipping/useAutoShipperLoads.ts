@@ -59,7 +59,7 @@ export function useAutoShipperLoads(opts: { asOf: string; showAr: boolean; showA
         setRaw({ shipments, orders, invoices, legs, bills, carShipping, infos })
         setError(null)
       })
-      .catch((e: unknown) => setError(graphqlErrorText(e) || 'Auto shipper loads could not load'))
+      .catch((e: unknown) => setError(graphqlErrorText(e) || 'Auto Shipper Loads could not load'))
       .finally(() => setLoading(false))
   ), [showAr, showAp])
 

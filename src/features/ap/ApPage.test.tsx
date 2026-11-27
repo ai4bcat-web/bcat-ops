@@ -78,10 +78,10 @@ vi.mock('@/lib/apiClient', () => ({
 }))
 // The dialogs fetch their own context and have their own tests; here they would only drag
 // the finance Lambda into a test about the board.
-vi.mock('./components/RecordBillDialog', () => ({ RecordBillDialog: () => null }))
+vi.mock('./components/RecordBillDialog', () => ({ RecordBillDialog: ({ loadCarrierId }: { loadCarrierId: string }) => <p>record bill dialog for {loadCarrierId}</p> }))
 vi.mock('./components/ApproveBillDialog', () => ({ ApproveBillDialog: ({ bill }: { bill: { id: string } }) => <p>approve dialog for {bill.id}</p> }))
 vi.mock('./components/UpdateCarrierChargesDialog', () => ({ UpdateCarrierChargesDialog: () => null }))
-vi.mock('./components/PayCarrierDialog', () => ({ PayCarrierDialog: () => null }))
+vi.mock('./components/PayCarrierDialog', () => ({ PayCarrierDialog: ({ carrierId }: { carrierId: string }) => <p>pay dialog for {carrierId}</p> }))
 vi.mock('./components/PayToDialog', () => ({ PayToDialog: ({ carrierName }: { carrierName: string }) => <p>pay-to editor for {carrierName}</p> }))
 vi.mock('./components/ApCreditDialog', () => ({ ApCreditDialog: () => null }))
 vi.mock('./components/SendRemittanceDialog', () => ({ SendRemittanceDialog: () => null }))
@@ -934,5 +934,39 @@ describe('Pay-to needed: bills whose carrier has nowhere to send money (Ryne 202
     } finally {
       vi.mocked(listCarrierPaymentInfo).mockResolvedValue([])
     }
+  })
+})
+
+
+describe('links from Auto Shipper Loads (Ryne 2026-11-27)', () => {
+  it('?payBill= opens the Pay dialog on that approved bill, on the Aging tab, with the way back', async () => {
+    await setup({ bills: [bill({ id: 'cb-pay', billNumber: 'PAY-1' })], url: '/tms/invoicing/payable?payBill=cb-pay&from=auto-shipper-loads' })
+    expect(await screen.findByText('pay dialog for car1')).toBeTruthy()
+    expect(screen.getAllByRole('tab', { selected: true }).some((t) => /^Aging/.test(t.textContent ?? ''))).toBe(true)
+    expect(screen.getByRole('link', { name: /Back to Auto Shipper Loads/ }).getAttribute('href')).toBe('/auto-shipper-loads')
+  })
+
+  it('opens a bill already selected for payment on the Selected tab', async () => {
+    await setup({ bills: [bill({ id: 'cb-sel', selectedForPayment: true })], url: '/?payBill=cb-sel' })
+    expect(await screen.findByText('pay dialog for car1')).toBeTruthy()
+    expect(screen.getAllByRole('tab', { selected: true }).some((t) => /^Selected/.test(t.textContent ?? ''))).toBe(true)
+  })
+
+  it('?recordLeg= opens Record bill for a carrier leg that has no bill yet, on Expected', async () => {
+    await setup({ bills: [], url: '/?recordLeg=lc9' })
+    expect(await screen.findByText('record bill dialog for lc9')).toBeTruthy()
+  })
+
+  it('does not open Pay on a bill that is not open any more, and shows no back link for a plain visit', async () => {
+    await setup({ bills: [bill({ id: 'cb-x' })], url: '/?payBill=cb-gone' })
+    await waitFor(() => expect(screen.queryByText(/pay dialog for/)).toBeNull())
+    expect(screen.queryByTestId('back-to-auto-shipper-loads')).toBeNull()
+  })
+
+  it('does not reopen the dialog once it is closed (the link params are cleared)', async () => {
+    await setup({ bills: [bill({ id: 'cb-pay' })], url: '/?payBill=cb-pay' })
+    expect(await screen.findByText('pay dialog for car1')).toBeTruthy()
+    // The link is a one-time hand-off: the URL no longer carries it.
+    expect(window.location.search).not.toContain('payBill')
   })
 })

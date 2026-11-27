@@ -13,6 +13,9 @@
 import { daysLate } from '@/lib/arAging'
 import { squareStatusLabel, isSquareChannel, type CarShippingData, type SquareInvoiceStatus } from '@/lib/squareInvoicing'
 import { payeeLabel } from '@/features/ap/apViews'
+import { AP_FROM_AUTO_SHIPPER, openBillPath, payBillPath, recordLegBillPath } from '@/features/ap/apLinks'
+import { recordPaymentPath } from '@/features/payments/links'
+import { shipmentEditorPath } from '@/lib/shipmentLinks'
 import type {
   CarrierBillRecord, CustomerRecord, InvoiceRecord, LoadCarrierRecord, OrderRecord, ShipmentRecord, ShipmentStatus,
 } from '@/types/tms'
@@ -222,6 +225,8 @@ export interface AutoShipperRow {
   /** The shipment id. */
   id: string
   pro: string
+  /** The customer record the shipment sits under (AUTO SHIPPER); Mark paid hands it to Payments Received. */
+  customerId: string | null
   /** The real payer (company, else name) off `carShipping`; the customer's own name when none was entered. */
   payer: string
   /** YYYY-MM-DD, or null. */
@@ -310,6 +315,7 @@ export function buildAutoShipperRows(input: AutoShipperInput): AutoShipperRow[] 
     rows.push({
       id: s.id,
       pro: s.number,
+      customerId: s.customerId ?? order?.customerId ?? null,
       payer: payerText(car, s.customerName ?? order?.customerName),
       pickup: ymd(s.pickupAppt),
       delivery: ymd(s.deliveryAppt),
@@ -470,4 +476,50 @@ export function autoShipperCsv(rows: readonly AutoShipperRow[], opts: { showAr: 
     lines.push(base.map(cell).join(','))
   }
   return lines.join('\r\n')
+}
+
+
+// ── Row actions (Ryne 2026-11-27) ───────────────────────────────────────────
+// Nothing is paid on this page. Each action is a link to the one place the money is recorded: Payments Received for a customer
+// payment, Accounts Payable for a carrier, each opened on the right invoice or bill.
+
+export interface RowAction {
+  label: string
+  /** Where the button goes; null when there is nothing to open yet. */
+  to: string | null
+  /** Why there is no button (or what it does), shown under or beside it. */
+  note: string | null
+  /** A second link for a blocked action (Not invoiced yet -> Mark invoiced). */
+  helpTo?: string
+  helpLabel?: string
+}
+
+/** Receivables, opened on the Ready to invoice tab where Mark invoiced lives. */
+const READY_TO_INVOICE_PATH = '/tms/invoicing?tab=ready'
+
+/** The customer side: Mark paid for an open invoice, Not invoiced yet (with the way to invoice it), or nothing once paid. */
+export function customerAction(row: Pick<AutoShipperRow, 'customer' | 'customerId'>): RowAction | null {
+  const c = row.customer
+  if (!c || c.state === 'PAID') return null
+  if (c.state === 'NOT_INVOICED') {
+    return { label: 'Not invoiced yet', to: null, note: 'Invoice it first, then record the payment.', helpTo: READY_TO_INVOICE_PATH, helpLabel: 'Mark invoiced' }
+  }
+  if (!row.customerId) return { label: 'Mark paid', to: null, note: 'This load has no customer on it, so Payments Received cannot be opened on it.' }
+  const base = recordPaymentPath({ customerId: row.customerId, invoiceId: c.invoiceId })
+  return { label: 'Mark paid', to: `${base}&from=${AP_FROM_AUTO_SHIPPER}`, note: null }
+}
+
+/** The carrier side, one carrier on the load: record the bill, approve it, or pay it, in Accounts Payable. */
+export function carrierAction(carrier: CarrierPay, shipmentId: string): RowAction | null {
+  if (carrier.state === 'OWN_TRUCK' || carrier.state === 'PAID') return null
+  if (carrier.state === 'NO_BILL') {
+    return carrier.legId
+      ? { label: 'Record bill', to: recordLegBillPath(carrier.legId, AP_FROM_AUTO_SHIPPER), note: 'No carrier bill yet. Record it in Accounts Payable, then pay it.' }
+      : { label: 'Record bill', to: `${shipmentEditorPath(shipmentId)}?tab=carrierPay`, note: null }
+  }
+  if (!carrier.billId) return { label: 'Pay carrier', to: `${shipmentEditorPath(shipmentId)}?tab=carrierPay`, note: null }
+  if (carrier.state === 'BILL_RECORDED') {
+    return { label: 'Review bill', to: openBillPath(carrier.billId, AP_FROM_AUTO_SHIPPER), note: 'The bill is still in review. Approve it in Accounts Payable, then pay it.' }
+  }
+  return { label: 'Pay carrier', to: payBillPath(carrier.billId, AP_FROM_AUTO_SHIPPER), note: null }
 }
