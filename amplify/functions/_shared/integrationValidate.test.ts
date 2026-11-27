@@ -66,6 +66,27 @@ describe('SQUARE_LOCATIONS validation', () => {
     expect(urls).toEqual(['https://connect.squareupsandbox.com/v2/locations', 'https://connect.squareup.com/v2/locations'])
   })
 
+  it('still checks production when the sandbox location is wrong, and names each environment in the message', async () => {
+    const f = vi.fn(async (url: string) =>
+      new Response(String(url).includes('sandbox') ? '{"locations":[{"id":"SBX-OTHER"}]}' : '{"locations":[{"id":"PROD1"}]}', { status: 200 })) as unknown as typeof fetch
+    const out = await validateProvider(square, { ...SANDBOX, productionAccessToken: 'prod-token-1', productionLocationId: 'PROD1' }, f)
+    expect((f as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(2)
+    expect(healthFrom(out, 'now').status).not.toBe('OK')
+    expect(out.message).toContain('Sandbox: Square accepted the token, but the saved location ID is not one of its locations.')
+    expect(out.message).toContain('Production: OK')
+    expect(JSON.stringify(out)).not.toContain('prod-token-1')
+  })
+
+  it('reports a bad production token while the sandbox passes', async () => {
+    const f = vi.fn(async (url: string) =>
+      String(url).includes('sandbox') ? new Response('{"locations":[{"id":"LOC1"}]}', { status: 200 }) : new Response('{"errors":[{"detail":"bad prod-token-1"}]}', { status: 401 })) as unknown as typeof fetch
+    const out = await validateProvider(square, { ...SANDBOX, productionAccessToken: 'prod-token-1', productionLocationId: 'PROD1' }, f)
+    expect(healthFrom(out, 'now').status).toBe('INVALID_CREDENTIALS')
+    expect(out.message).toContain('Sandbox: OK')
+    expect(out.message).toContain('Production:')
+    expect(JSON.stringify(out)).not.toContain('prod-token-1')
+  })
+
   it('makes no call with no token', async () => {
     const f = fetchAnswering(200, '{}')
     const out = await validateProvider(square, {}, f)
