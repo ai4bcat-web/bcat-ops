@@ -313,6 +313,10 @@ export async function validateProvider(
         if (sets.some((x) => neutered(x.token))) return NEUTERED
         const present = sets.filter((x) => x.token)
         if (present.length === 0) return missing(['sandboxAccessToken'])
+        // Every environment that holds a token is checked on its own, so a bad sandbox location never hides what
+        // the production check says (and the other way round). The outcome is OK only when all of them pass; the
+        // message names each one.
+        const results: Array<{ label: string; ok: boolean; outcome: ValidateOutcome | null; note: string }> = []
         for (const set of present) {
           const res = await call(fetchImpl, `${set.base}/v2/locations`, {
             method: 'GET',
@@ -320,7 +324,9 @@ export async function validateProvider(
           })
           if (res.status < 200 || res.status >= 300) {
             const out = httpOutcome(res, [set.token as string])
-            return out.kind === 'HTTP' ? { ...out, message: `${set.label}: ${out.message ?? 'Square refused the token.'}` } : out
+            const note = out.kind === 'HTTP' ? (out.message ?? 'Square refused the token.') : 'Square could not be reached.'
+            results.push({ label: set.label, ok: false, outcome: out, note })
+            continue
           }
           let ids: string[] = []
           try {
@@ -328,10 +334,21 @@ export async function validateProvider(
             ids = (parsed.locations ?? []).map((l) => String(l.id ?? ''))
           } catch { /* a 2xx with an unreadable body still proves the token */ }
           if (set.location && ids.length > 0 && !ids.includes(set.location)) {
-            return { kind: 'HTTP', statusCode: 404, message: `${set.label}: Square accepted the token, but the saved location ID is not one of its locations.` }
+            results.push({
+              label: set.label,
+              ok: false,
+              outcome: { kind: 'HTTP', statusCode: 404 },
+              note: 'Square accepted the token, but the saved location ID is not one of its locations.',
+            })
+            continue
           }
+          results.push({ label: set.label, ok: true, outcome: null, note: 'OK' })
         }
-        return { kind: 'HTTP', statusCode: 200 }
+        const failed = results.filter((r) => !r.ok)
+        if (failed.length === 0) return { kind: 'HTTP', statusCode: 200 }
+        const first = failed[0].outcome as ValidateOutcome
+        const summary = results.map((r) => `${r.label}: ${r.note}`).join(' ')
+        return first.kind === 'HTTP' ? { ...first, message: summary } : first
       }
 
       case 'HUBSPOT_CONTACTS': {
