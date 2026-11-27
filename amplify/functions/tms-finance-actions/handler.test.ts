@@ -1033,6 +1033,87 @@ describe('CAR_SHIPPING invoices through Square, not the standard template', () =
   })
 })
 
+describe('MARK_INVOICED: Ready to invoice to Invoiced without e-mailing', () => {
+  const asCarShipping = () =>
+    table(TABLES.shipment).set(SHIPMENT_ID, { ...table(TABLES.shipment).get(SHIPMENT_ID)!, revDivision: 'CAR_SHIPPING' })
+  type Out = { results: Row[] }
+
+  it('invoices a CAR_SHIPPING order under its PRO, marks it sent by hand with the reference, and e-mails nobody', async () => {
+    seedMethod('MANUAL')
+    asCarShipping()
+    sesSend.mockClear()
+    const out = (await call('MARK_INVOICED', { orderIds: [ORDER_ID], reference: 'Square #14730', note: 'sent from Square' }, JENNY)) as Out
+    expect(out.results).toHaveLength(1)
+    expect(out.results[0]).toMatchObject({ orderId: ORDER_ID })
+    expect(out.results[0].error).toBeUndefined()
+    const invoice = table(TABLES.invoice).get(String(out.results[0].invoiceId))!
+    expect(invoice).toMatchObject({ orderId: ORDER_ID, status: 'ISSUED', paidCents: 0, arOpen: 'OPEN' })
+    expect(invoice.number).toBe(table(TABLES.shipment).get(SHIPMENT_ID)!.number)
+    expect(invoice.markedSentAt).toBeTruthy()
+    expect(String(invoice.markedSentNote)).toContain('Square #14730')
+    expect(invoice.sentAt).toBeUndefined()
+    expect(invoice.sentCount).toBe(0)
+    expect(table(TABLES.order).get(ORDER_ID)).toMatchObject({ arStatus: 'UNPAID', invoiceId: invoice.id })
+    expect(invoice.balanceCents).toBe(invoice.totalCents)
+    expect(sesSend).not.toHaveBeenCalled()
+    expect(table(TABLES.notice).size).toBe(0)
+    expect([...table(TABLES.audit).values()].some((a) => a.action === 'MARK_INVOICED' && a.entityId === invoice.id)).toBe(true)
+  })
+
+  it('renders no standard-template PDF for a Square-invoiced shipment, and the standard send stays refused', async () => {
+    seedMethod('MANUAL')
+    asCarShipping()
+    const out = (await call('MARK_INVOICED', { orderIds: [ORDER_ID] }, JENNY)) as Out
+    const invoiceId = String(out.results[0].invoiceId)
+    expect(table(TABLES.invoice).get(invoiceId)!.pdfKey ?? null).toBeNull()
+    await expect(call('EMAIL_INVOICE', { invoiceId })).rejects.toThrow(/Invoiced in Square/)
+    await expect(call('SEND_INVOICE', { invoiceId })).rejects.toThrow(/Invoiced in Square/)
+    expect(sesSend).not.toHaveBeenCalled()
+  })
+
+  it('works for any customer: an ordinary order is invoiced and marked sent with a standard PDF, still no e-mail', async () => {
+    seedMethod('MANUAL')
+    sesSend.mockClear()
+    const out = (await call('MARK_INVOICED', { orderIds: [ORDER_ID] }, JENNY)) as Out
+    const invoice = table(TABLES.invoice).get(String(out.results[0].invoiceId))!
+    expect(invoice.pdfKey).toBeTruthy()
+    expect(invoice.markedSentAt).toBeTruthy()
+    expect(sesSend).not.toHaveBeenCalled()
+  })
+
+  it('never bills an order twice', async () => {
+    seedMethod('MANUAL')
+    asCarShipping()
+    await call('MARK_INVOICED', { orderIds: [ORDER_ID] }, JENNY)
+    const again = (await call('MARK_INVOICED', { orderIds: [ORDER_ID] }, JENNY)) as Out
+    expect(again.results[0].error).toMatch(/Already invoiced|Not waiting/)
+    expect(table(TABLES.invoice).size).toBe(1)
+  })
+
+  it('refuses a factored customer (its next step is Factor) and writes nothing', async () => {
+    seedMethod('FACTOR')
+    const out = (await call('MARK_INVOICED', { orderIds: [ORDER_ID] }, JENNY)) as Out
+    expect(out.results[0].error).toMatch(/factored/i)
+    expect(table(TABLES.invoice).size).toBe(0)
+    expect(table(TABLES.order).get(ORDER_ID)!.arStatus).toBe('UNBILLED')
+  })
+
+  it('handles a batch: one refusal does not hold up the rest', async () => {
+    seedMethod('MANUAL')
+    seedSecondOrder('ord-2')
+    const out = (await call('MARK_INVOICED', { orderIds: [ORDER_ID, 'ord-2', 'nope', ORDER_ID] }, JENNY)) as Out
+    expect(out.results).toHaveLength(3)
+    expect(out.results.find((r) => r.orderId === 'nope')!.error).toMatch(/not found/i)
+    expect(out.results.filter((r) => r.invoiceId)).toHaveLength(2)
+  })
+
+  it('is closed to someone without the Invoicing page (Jason)', async () => {
+    const jason = { sub: 'sub-jas', username: 'jason', claims: { email: 'jason@bcatcorp.com', 'cognito:groups': [] } }
+    await expect(call('MARK_INVOICED', { orderIds: [ORDER_ID] }, jason)).rejects.toThrow(/Forbidden/)
+    expect(table(TABLES.invoice).size).toBe(0)
+  })
+})
+
 describe('invoice documents packet', () => {
   const doc = (id: string, type: string, over: Row = {}) =>
     table(TABLES.document).set(id, {

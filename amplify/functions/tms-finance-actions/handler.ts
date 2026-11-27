@@ -23,6 +23,7 @@ import {
   invoiceAttachmentPlans,
   previewInvoicePacket,
   markInvoiceSent,
+  markInvoiced,
   setOtrOffset,
   previewInvoice,
   renderInvoicePdf,
@@ -110,6 +111,7 @@ type Action =
   | 'EMAIL_INVOICE'
   | 'BATCH_EMAIL'
   | 'MARK_SENT'
+  | 'MARK_INVOICED'
   | 'SET_OTR_OFFSET'
   | 'VOID_INVOICE'
   | 'VOID_OTR_DELETED_INVOICE'
@@ -332,6 +334,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return batchEmail(input, caller)
     case 'MARK_SENT':
       return markInvoiceSent(input, caller)
+    case 'MARK_INVOICED':
+      return markInvoiced(input, caller)
     case 'SET_OTR_OFFSET':
       return setOtrOffset(input, caller)
     case 'VOID_INVOICE':

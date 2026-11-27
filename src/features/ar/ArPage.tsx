@@ -12,7 +12,7 @@
  */
 import { InvoiceEditDrawer } from './components/InvoiceEditDrawer'
 import { ChangeInvoiceCustomerDialog } from './components/ChangeInvoiceCustomerDialog'
-import { NOT_IN_OTR_QUEUE, billsThroughOtr, ordersNeedingInvoice, unsentLabel } from './autoInvoice'
+import { NOT_IN_OTR_QUEUE, billsThroughOtr, invoiceErrorText, isQueueOnlyRow, ordersNeedingInvoice, unsentLabel } from './autoInvoice'
 import { isFactoredLoad } from '@/lib/factorBilling'
 import { ArSummaryStrip } from './ArSummaryStrip'
 import { readyQueueRows, receivablesSummary, useArSummaryModel } from './useArSummaryModel'
@@ -57,7 +57,7 @@ import { EditCustomerBillingDialog } from '@/features/shipments/form/EditCustome
 import { ChangeInvoiceMethodDialog } from './components/ChangeInvoiceMethodDialog'
 import { canChangeMethod, INVOICE_METHOD_SYNCED_EVENT, isMethodPinned, methodForLoad } from '@/lib/invoiceMethod'
 import {
-  batchGenerateInvoices, getTmsSettings, graphqlErrorText, setOtrOffset, voidInvoice,
+  batchGenerateInvoices, getTmsSettings, graphqlErrorText, markInvoiced, setOtrOffset, voidInvoice,
 } from '@/lib/apiClient'
 import { NeedsReviewList } from '@/features/finance/NeedsReview'
 import { openReviewCount, useNeedsReview } from '@/features/finance/useNeedsReview'
@@ -112,6 +112,7 @@ type ArDialog =
   | { kind: 'bulkStatement'; customers: BulkStatementCustomer[] }
   | { kind: 'pastDue'; groups: PastDueGroup[] }
   | { kind: 'otrOffset'; invoiceIds: string[]; clear: boolean }
+  | { kind: 'markInvoiced'; orderIds: string[] }
   | { kind: 'credit'; customerId: string; customerName: string }
   | { kind: 'factor'; invoiceId: string }
   | { kind: 'batchFactor'; rows: ArQueueRow[] }
@@ -439,13 +440,13 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           const next = new Map(prev)
           for (const r of answer?.results ?? []) {
             if (r.invoiceId) next.delete(r.orderId)
-            else next.set(r.orderId, r.releaseGate && !r.releaseGate.ok ? r.releaseGate.missing.map((m) => m.message).join(' ') : r.error ?? 'Refused')
+            else next.set(r.orderId, r.releaseGate && !r.releaseGate.ok ? r.releaseGate.missing.map((m) => m.message).join(' ') : invoiceErrorText(r.error ?? 'Refused'))
           }
           return next
         })
       })
       .catch((e: unknown) => {
-        const message = graphqlErrorText(e) || 'The invoice could not be made'
+        const message = invoiceErrorText(graphqlErrorText(e) || 'The invoice could not be made')
         setAutoErrors((prev) => new Map([...prev, ...chunk.map((id) => [id, message] as const)]))
       }), Promise.resolve().then(() => setAutoRunning((prev) => new Set([...prev, ...orderIds]))))
       .then(() => refreshRef.current())
@@ -571,6 +572,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       invoicesRunning: autoRunning,
       onRetryInvoice: retryInvoice,
       onBatchGenerate: runBatchGenerate,
+      onMarkInvoiced: (orderIds: string[]) => { if (orderIds.length > 0) setDialog({ kind: 'markInvoiced', orderIds }) },
       factorReadiness,
       onBatchFactor: (rows) => setDialog({ kind: 'batchFactor', rows }),
       onWhy: (row: ArQueueRow, reason: string) => setDialog({ kind: 'why', pro: String(row.shipmentNumber ?? row.orderId), reason, customerId: row.customerId, shipmentId: row.shipmentId, row }),
@@ -840,6 +842,31 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           }}
         />
       )}
+      {dialog?.kind === 'markInvoiced' && (
+        <ReasonDialog
+          title={`Mark ${dialog.orderIds.length} load${dialog.orderIds.length === 1 ? '' : 's'} invoiced (no e-mail)`}
+          description="Moves it to Invoiced with its normal invoice, due date and A/R balance. Nothing is e-mailed to the customer and nothing goes to OTR; record the payment on Payments Received when it arrives."
+          label="Where the invoice was sent (for example, the Square invoice number)"
+          confirmLabel="Mark invoiced"
+          tone="default"
+          busy={busy}
+          onClose={() => setDialog(null)}
+          onConfirm={(reference) => {
+            setBusy(true)
+            markInvoiced({ orderIds: dialog.orderIds, reference: reference.slice(0, 80) })
+              .then(({ results }) => {
+                const made = results.filter((r) => r.invoiceId)
+                const failed = results.filter((r) => r.error)
+                if (made.length > 0) toast.success(`${made.length} invoice${made.length === 1 ? '' : 's'} marked invoiced; nothing was e-mailed`)
+                if (failed.length > 0) toast.error(`${failed.length} not invoiced: ${failed[0].error}`)
+                setSelected([])
+                closeAndRefresh()
+              })
+              .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not mark it invoiced'))
+              .finally(() => setBusy(false))
+          }}
+        />
+      )}
       {dialog?.kind === 'credit' && (
         <CreditMemoDialog
           customerId={dialog.customerId}
@@ -972,7 +999,7 @@ function dateCol<T>(key: string, header: string, of: (row: T) => string | null, 
 
 function queueView({
   status, noBuy, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, factorByItemId, customerById,
-  attachmentPlans, boardById, shipmentsById, months, month, paidLoading, onMonth, onSelect, invoiceErrors, invoicesRunning, onRetryInvoice, onBatchGenerate, onReview, onEdit,
+  attachmentPlans, boardById, shipmentsById, months, month, paidLoading, onMonth, onSelect, invoiceErrors, invoicesRunning, onRetryInvoice, onBatchGenerate, onMarkInvoiced, onReview, onEdit,
   onStatement, onPastDue, onOtrOffset, paymentFacts,
   factorReadiness, onBatchFactor, onWhy, onDocs, onEditCustomer, onChangeMethod, onEditAmount, editedIds,
 }: {
@@ -1003,6 +1030,8 @@ function queueView({
   invoicesRunning?: ReadonlySet<string>
   onRetryInvoice?: (orderId: string) => void
   onBatchGenerate: () => void
+  /** Ready to invoice: move these orders to Invoiced without e-mailing anyone (for loads billed outside the app, e.g. in Square). */
+  onMarkInvoiced?: (orderIds: string[]) => void
   /** Ready to factor per row key (Ready to invoice only). */
   factorReadiness?: Map<string, FactorReadiness>
   onBatchFactor?: (rows: ArQueueRow[]) => void
@@ -1401,6 +1430,12 @@ function queueView({
             return (
               <span className="flex items-center justify-end gap-1">
                 <TmsBadge tone="red" title={error}>Invoice not made</TmsBadge>
+                {onMarkInvoiced && !throughOtr(row) && (
+                  <TmsButton size="sm" aria-label={`Mark ${row.shipmentNumber ?? row.orderId} invoiced without e-mailing`}
+                    disabled={busy || !canRelease} title={canRelease ? 'Move to Invoiced without e-mailing anyone' : BILLING_GRANT_MESSAGE} onClick={() => onMarkInvoiced([row.orderId])}>
+                    Mark invoiced
+                  </TmsButton>
+                )}
                 <TmsButton size="sm" aria-label={`Retry the invoice for ${row.shipmentNumber ?? row.orderId}`}
                   disabled={busy || !canRelease} title={canRelease ? error : BILLING_GRANT_MESSAGE} onClick={() => onRetryInvoice?.(row.orderId)}>
                   Retry
@@ -1430,6 +1465,8 @@ function queueView({
 
   // Drafts (auto-generated, not sent) ticked in Ready to invoice: the review carousel's batch.
   // Factored drafts are never e-mailed: their next step is batch Factor (Ryne 2026-11-14).
+  // Ticked loads still waiting for an invoice (no invoice yet, not a factoring-queue-only row, not billed through OTR): what Mark invoiced can move.
+  const markableRows = rows.filter((row) => !row.invoice && !isQueueOnlyRow(row) && !throughOtr(row) && selected.includes(row.orderId))
   const selectedDrafts = rows.filter((row) => row.invoice && !throughOtr(row) && selected.includes(row.orderId)).map((row) => row.invoice as InvoiceRecord)
   const actions = (
     <>
@@ -1448,6 +1485,19 @@ function queueView({
           >
             Batch generate
           </TmsButton>
+          {onMarkInvoiced && (
+            <TmsButton
+              aria-label="Mark selected loads invoiced without e-mailing"
+              data-testid="batch-mark-invoiced"
+              disabled={busy || !canRelease || markableRows.length === 0 || markableRows.length > BATCH_GENERATE_LIMIT}
+              title={!canRelease ? BILLING_GRANT_MESSAGE : markableRows.length === 0
+                ? 'Tick loads waiting for an invoice to move them to Invoiced without sending anything'
+                : 'Moves them to Invoiced without e-mailing the customer or OTR'}
+              onClick={() => onMarkInvoiced(markableRows.map((row) => row.orderId))}
+            >
+              Mark invoiced (no e-mail){markableRows.length ? ` (${markableRows.length})` : ''}
+            </TmsButton>
+          )}
           <TmsButton
             variant="primary"
             aria-label="Factor selected loads with OTR"

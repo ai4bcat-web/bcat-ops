@@ -67,6 +67,7 @@ import {
   mergesIntoInvoicePdf,
   isCustomerRateCon,
   SQUARE_INVOICED_CODE,
+  isSquareInvoiced,
   SQUARE_INVOICED_MESSAGE,
   SquareInvoicedError,
   type InvoiceAttachmentPlan,
@@ -504,7 +505,12 @@ export async function proInvoiceNumber(context: Pick<OrderContext, 'order' | 'or
   throw new Error(`Every invoice number for PRO ${pro} up to ${base}-99 is taken`)
 }
 
-export async function generateInvoice(input: Row, caller: Caller): Promise<Row> {
+/**
+ * `external` is only ever set by markInvoiced: an invoice whose bill goes out somewhere else (Square, for
+ * CAR_SHIPPING). That path may issue the AR invoice for a Square-invoiced shipment, and for one it
+ * renders no standard-template PDF, because the standard template is never what the customer receives.
+ */
+export async function generateInvoice(input: Row, caller: Caller, opts: { external?: boolean } = {}): Promise<Row> {
   const orderId = assertString(input.orderId, 'orderId')
   const invoiceDate = optionalString(input.invoiceDate, 10) ?? nowIso().slice(0, 10)
   const dueAt = optionalString(input.dueAt, 10)
@@ -516,7 +522,8 @@ export async function generateInvoice(input: Row, caller: Caller): Promise<Row> 
         assertString(item, `attachDocumentIds[${index}]`), 20)
 
   const context = await readOrderContext(orderId)
-  assertNotSquareInvoiced(context.shipment, 'invoicing it')
+  if (!opts.external) assertNotSquareInvoiced(context.shipment, 'invoicing it')
+  const skipPdf = opts.external === true && isSquareInvoiced(context.shipment)
   assertCustomerResolved(context, 'invoicing it')
   const gate = docGateFor(context)
   // Ryne 2026-11-16: moving to billing always makes the invoice. Load Review is the paperwork gate (the same shared checks),
@@ -556,13 +563,15 @@ export async function generateInvoice(input: Row, caller: Caller): Promise<Row> 
   const now = nowIso()
   // Rendered before a number is taken: a renderer that throws must not burn one.
   const dryRun = buildSnapshot(context, { number: 'DRAFT', invoiceDate, dueAt, billToId, note, attachDocumentIds }, caller, now)
-  await buildInvoicePdf(invoiceData({
-    invoice: dryRun.invoice,
-    bundle: { shipment: context.shipment, loads: context.loads, orders: context.orders, loadCarriers: context.loadCarriers, locations: context.locations },
-    customer: context.customer,
-    division: context.division,
-    settings: context.settings,
-  }))
+  if (!skipPdf) {
+    await buildInvoicePdf(invoiceData({
+      invoice: dryRun.invoice,
+      bundle: { shipment: context.shipment, loads: context.loads, orders: context.orders, loadCarriers: context.loadCarriers, locations: context.locations },
+      customer: context.customer,
+      division: context.division,
+      settings: context.settings,
+    }))
+  }
 
   const number = await proInvoiceNumber(context)
   const { invoice } = buildSnapshot(context, { number, invoiceDate, dueAt, billToId, note, attachDocumentIds }, caller, now)
@@ -617,10 +626,84 @@ export async function generateInvoice(input: Row, caller: Caller): Promise<Row> 
   // Best-effort like the PDF below: a run that fails is fixed by the next one.
   await runCommissionsAfter(invoice.id, caller, 'RUN')
 
+  // A Square-invoiced shipment's bill is the Square invoice: no standard-template PDF is rendered or filed for it.
+  if (skipPdf) return { invoice: invoice as unknown as Row, gate, documentFiled: true }
   const stored = await storePdf(invoice, context, caller)
   // `documentFiled: false` tells the screen the invoice is issued but its shipment document did not file; re-rendering the PDF files it.
   const { documentFiled, ...issued } = stored
   return { invoice: issued as unknown as Row, gate, documentFiled: documentFiled !== false }
+}
+
+/**
+ * Move orders from Ready to invoice to Invoiced without e-mailing anyone (Ryne 2026-11-27: AUTO SHIPPER loads are
+ * billed in Square, so the standard invoice is refused for them and they could not leave Ready to invoice).
+ *
+ * It makes the normal AR invoice (PRO number, customer charges, terms, AR under the customer) exactly as
+ * GENERATE_INVOICE does, then stamps it as sent by hand with a note naming where the real bill went out. It never
+ * e-mails, never queues anything for OTR, and a factored order is refused (its next step is Factor). One order at a
+ * time, so a refusal stands alone; an order that already has an invoice is skipped, never billed twice (the
+ * generation's own conditional write backs that up when two presses race).
+ */
+export async function markInvoiced(input: Row, caller: Caller): Promise<Row> {
+  const orderIds = assertArrayOf<string>(input.orderIds, 'orderIds', (item, index) =>
+    assertString(item, `orderIds[${index}]`), MAX_BATCH)
+  const reference = optionalString(input.reference, 80)
+  const note = optionalString(input.note, MAX_NOTE)
+  const invoiceDate = optionalString(input.invoiceDate, 10)
+
+  const results: Row[] = []
+  const seen = new Set<string>()
+  for (const orderId of orderIds) {
+    if (seen.has(orderId)) continue
+    seen.add(orderId)
+    try {
+      const order = await getById(ORDER_TABLE_NAME, orderId)
+      if (!order) { results.push({ orderId, error: 'Order not found' }); continue }
+      if (order.invoiceId || order.arStatus !== 'UNBILLED') {
+        results.push({ orderId, error: order.invoiceNumber ? `Already invoiced (invoice ${String(order.invoiceNumber)})` : 'Not waiting to be invoiced' })
+        continue
+      }
+      const context = await readOrderContext(orderId)
+      const revDivision = (context.shipment as unknown as { revDivision?: string | null }).revDivision ?? null
+      if (invoiceIsFactored({}, context.customer, revDivision)) {
+        results.push({ orderId, error: 'This customer is factored: send it to the factor instead of marking it invoiced' })
+        continue
+      }
+      const done = await generateInvoice({ orderId, ...(invoiceDate ? { invoiceDate } : {}) }, caller, { external: true })
+      const invoice = done.invoice as unknown as InvoiceRecord
+      const how = `Invoiced outside the standard e-mail${reference ? ` (${reference})` : ''}`
+      const markedNote = note ? `${how}: ${note}` : how
+      const now = nowIso()
+      await transact(
+        [updateTx(INVOICE_TABLE_NAME, invoice.id, {
+          markedSentAt: now,
+          markedSentBy: caller.email,
+          markedSentNote: markedNote.slice(0, MAX_NOTE),
+          updatedAt: now,
+          updatedBy: caller.email,
+          version: (invoice.version ?? 1) + 1,
+        })],
+        'invoice mark invoiced',
+      )
+      await writeAudit('Invoice', invoice.id, 'MARK_INVOICED', caller, {
+        orderId,
+        shipmentId: invoice.shipmentId,
+        totalCents: invoice.totalCents,
+        reference: reference ?? null,
+        note: note ?? null,
+        emailed: false,
+      })
+      results.push({ orderId, invoiceId: invoice.id, number: invoice.number, totalCents: invoice.totalCents })
+    } catch (err) {
+      const refused = releaseGateOf(err)
+      results.push({
+        orderId,
+        error: err instanceof Error ? err.message : String(err),
+        ...(refused ? { releaseGate: refused } : {}),
+      })
+    }
+  }
+  return { results }
 }
 
 /**
