@@ -4114,3 +4114,93 @@ describe('validateCostManualEntries', () => {
     expect(() => validateCostManualEntries([{ id: 'a', label: 'A', monthlyCents: 1 }, { id: 'a', label: 'B', monthlyCents: 1 }])).toThrow(/duplicate/)
   })
 })
+
+// ── The Calendar's Capacity board (Ryne 2026-11-27) ──────────────────────────
+
+describe('CAPACITY_BOARD', () => {
+  const CARD = { availableFrom: '2099-01-05', origin: 'Chicago, IL', equipment: 'Dry Van', lengthFt: 53 }
+  const dispatcher = () => identity({ email: 'dennis@bcatcorp.com', groups: ['page-calendar'] })
+
+  /** A settings row with the given board, recording every Update and audit Put. */
+  function settingsWith(board: unknown, opts: { failUpdates?: number } = {}) {
+    const updates: MockUpdateCommand[] = []
+    const audits: MockPutCommand[] = []
+    let failures = opts.failUpdates ?? 0
+    let current: unknown = board
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') {
+        return Promise.resolve({ Item: marshall({ id: 'default', ...(current != null ? { capacityBoard: current } : {}) }, { removeUndefinedValues: true }) })
+      }
+      if (cmd.__type === 'Update') {
+        updates.push(cmd)
+        if (failures > 0) { failures -= 1; return Promise.reject(new Error('ConditionalCheckFailedException: The conditional request failed')) }
+        current = unmarshall({ x: cmd.input.ExpressionAttributeValues![':board'] }).x
+        return Promise.resolve({})
+      }
+      if (cmd.__type === 'Put') { audits.push(cmd); return Promise.resolve({}) }
+      throw new Error(`unexpected ${cmd.__type}`)
+    })
+    return { updates, audits, board: () => current as { cards: Record<string, unknown>[] } }
+  }
+
+  it('saves the first card with a create-only write, and records an audit entry', async () => {
+    const db = settingsWith(undefined)
+    const out = await handler(rawEvent('CAPACITY_BOARD', { op: 'save', fields: CARD }, dispatcher())) as { cards: { id: string }[]; card: { id: string } }
+    expect(out.cards).toHaveLength(1)
+    expect(db.updates).toHaveLength(1)
+    expect(db.updates[0].input.ConditionExpression).toBe('attribute_not_exists(#board)')
+    expect(db.updates[0].input.UpdateExpression).toBe('SET #board = :board')
+    expect(db.updates[0].input.ExpressionAttributeNames).toEqual({ '#board': 'capacityBoard' })
+    expect(db.board().cards[0]).toMatchObject({ origin: 'Chicago, IL', status: 'OPEN', createdBy: 'dennis@bcatcorp.com' })
+    expect(db.audits.map((a) => unmarshall(a.input.Item!).action)).toEqual(['CAPACITY_SAVE'])
+  })
+
+  it('writes only if the board is still what it read, then a cover keeps the card', async () => {
+    const db = settingsWith(undefined)
+    const saved = await handler(rawEvent('CAPACITY_BOARD', { op: 'save', fields: CARD }, dispatcher())) as { card: { id: string } }
+    await handler(rawEvent('CAPACITY_BOARD', { op: 'cover', id: saved.card.id }, dispatcher()))
+    expect(db.updates[1].input.ConditionExpression).toBe('#board = :before')
+    expect(db.board().cards).toHaveLength(1)
+    expect(db.board().cards[0]).toMatchObject({ status: 'COVERED', coveredBy: 'dennis@bcatcorp.com' })
+  })
+
+  it('reads the board again and applies the change again when someone else wrote first', async () => {
+    const db = settingsWith(undefined, { failUpdates: 1 })
+    const out = await handler(rawEvent('CAPACITY_BOARD', { op: 'save', fields: CARD }, dispatcher())) as { cards: unknown[] }
+    expect(out.cards).toHaveLength(1)
+    expect(db.updates).toHaveLength(2)
+  })
+
+  it('says so after three lost races instead of overwriting', async () => {
+    const db = settingsWith(undefined, { failUpdates: 3 })
+    await expect(handler(rawEvent('CAPACITY_BOARD', { op: 'save', fields: CARD }, dispatcher()))).rejects.toThrow('changed while you were saving')
+    expect(db.updates).toHaveLength(3)
+  })
+
+  it('refuses an incomplete card before writing anything', async () => {
+    const db = settingsWith(undefined)
+    await expect(handler(rawEvent('CAPACITY_BOARD', { op: 'save', fields: { ...CARD, equipment: '' } }, dispatcher()))).rejects.toThrow('Equipment is required')
+    expect(db.updates).toHaveLength(0)
+  })
+
+  it('is open to the calendar, dispatch, loads and the owner, and closed to everyone else', async () => {
+    settingsWith(undefined)
+    for (const groups of [['page-calendar'], ['page-dispatch'], ['page-loads'], ['page-tms'], ['ADMIN']]) {
+      await expect(handler(rawEvent('CAPACITY_BOARD', { op: 'save', fields: CARD }, identity({ groups })))).resolves.toBeDefined()
+    }
+    await expect(handler(rawEvent('CAPACITY_BOARD', { op: 'save', fields: CARD }, { ...identity(), claims: { email: 'ryne@bcatcorp.com' } }))).resolves.toBeDefined()
+    await expect(handler(rawEvent('CAPACITY_BOARD', { op: 'save', fields: CARD }, identity({ groups: ['page-customers'] })))).rejects.toThrow('Forbidden')
+  })
+
+  it('is closed to someone limited to the fleet profiles, whatever else they hold', async () => {
+    const db = settingsWith(undefined)
+    await expect(handler(rawEvent('CAPACITY_BOARD', { op: 'save', fields: CARD }, identity({ email: 'jason@bcatcorp.com', groups: ['page-calendar', 'page-loads'] }))))
+      .rejects.toThrow('limited to Assets and Drivers')
+    expect(db.updates).toHaveLength(0)
+  })
+
+  it('rejects an operation it does not know', async () => {
+    settingsWith(undefined)
+    await expect(handler(rawEvent('CAPACITY_BOARD', { op: 'explode' }, dispatcher()))).rejects.toThrow('Unknown capacity operation')
+  })
+})

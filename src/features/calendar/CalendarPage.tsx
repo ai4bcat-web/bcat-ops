@@ -6,7 +6,7 @@ import { useDrivers } from '@/hooks/useDrivers'
 import { useDriverAvailability } from '@/hooks/useDriverAvailability'
 import { CalendarToolbar } from './CalendarToolbar'
 import { PlannerView } from './PlannerView'
-import { GridCalendarView } from './GridCalendarView'
+import { CapacityBoard } from './CapacityBoard'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { useLoadReviewMarks } from './useLoadReviewMarks'
 import { CalendarErrorBoundary } from './CalendarErrorBoundary'
@@ -16,7 +16,10 @@ import { OwnFleetSwitchDialog } from './OwnFleetSwitchDialog'
 import { MobileLoadAgenda } from './MobileLoadAgenda'
 import { initialCalendarView, rememberPhoneView, type CalendarView } from './calendarView'
 import { usePhoneWidth, PHONE_MAX_WIDTH } from '@/features/tms/grid/denseCardLayout'
-import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
+import { formatDateShort, addDays } from '@/lib/date'
+import { useAuth } from '@/hooks/useAuth'
+import { isFleetProfilesOnly } from '@/lib/profileAccess'
+import { addDaysYmd, defaultCapacityRange, daysBetweenYmd, todayChicagoYmd } from '@/lib/capacityBoard'
 import { buildLoadHaystack, loadMatchesQuery } from '@/lib/loadSearch'
 import {
   defaultVisibleDriverIds, loadVisibleForDrivers,
@@ -24,11 +27,10 @@ import {
 } from '@/lib/driverFilter'
 import type { Load } from '@/types'
 
-const VIEW_CONFIG: Record<CalendarView, { navDays: number }> = {
-  'day':   { navDays: 1  }, // single current day
-  'week':  { navDays: 7  }, // Monday-started week, weekends included
-  'month': { navDays: -1 }, // month nav handled separately
-}
+const CAPACITY_LEGEND = [
+  { label: 'Open truck', color: 'var(--tms-badge-orange)' },
+  { label: 'Covered',    color: 'var(--tms-badge-green)' },
+]
 
 const STATUS_LEGEND = [
   { label: 'Ready',       color: 'var(--tms-primary)' },
@@ -66,6 +68,11 @@ export function CalendarPage() {
   const [currentView, setCurrentView] = useState<CalendarView>(() =>
     initialCalendarView(typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(`(max-width: ${PHONE_MAX_WIDTH}px)`).matches))
   const [startDate, setStartDate]     = useState<Date>(() => new Date())
+  // The Capacity board's range: today through Sunday to start, then whatever the office picks (at most two weeks).
+  const [capRange, setCapRange] = useState(() => defaultCapacityRange(todayChicagoYmd()))
+  const auth = useAuth()
+  // Someone limited to the fleet profiles does not get the Capacity tab: it carries the rates the office is asking for.
+  const capacityAllowed = !isFleetProfilesOnly(auth.user?.email, auth.user?.groups)
 
   const setVisibleDrivers = useCallback((ids: string[]) => {
     setChosenDriverIds(ids)
@@ -85,67 +92,48 @@ export function CalendarPage() {
    */
   const rosterReady = drivers.length > 0
 
-  const { navDays } = VIEW_CONFIG[currentView]
+  // A phone that last used Capacity, or a saved view, only counts while the person may have it.
+  const view: CalendarView = currentView === 'capacity' && !capacityAllowed ? 'day' : currentView
+  const capacityDays = daysBetweenYmd(capRange.from, capRange.to) + 1
 
-  // Day/Week board columns (PlannerView): Day = the single current day; Week = Monday
-  // through Sunday, weekends included. Month is rendered by GridCalendarView instead.
-  const cols = useMemo<Date[]>(() => {
-    if (currentView === 'day') return [startDate]
-    // Week = Monday through the following Monday inclusive (8 days, weekends included).
-    if (currentView === 'week') return Array.from({ length: 8 }, (_, i) => addDays(startDate, i))
-    return []
-  }, [currentView, startDate])
-
-  // A phone's card list: Day = the day, Week = the week's days, Month = every day of the month.
-  const phoneDays = useMemo<Date[]>(() => {
-    if (currentView !== 'month') return cols
-    const last = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0).getDate()
-    return Array.from({ length: last }, (_, i) => new Date(startDate.getFullYear(), startDate.getMonth(), i + 1))
-  }, [currentView, cols, startDate])
+  // The Day board's one column (PlannerView). The Capacity board lays out its own days.
+  const cols = useMemo<Date[]>(() => [startDate], [startDate])
+  const phoneDays = cols
 
   // The days the board shows; the store windows these (±1 month) in and the poll refreshes only them.
-  const visibleFrom = ymd(currentView === 'month' ? startDate : cols[0])
-  const visibleTo   = ymd(currentView === 'month' ? new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0) : cols[cols.length - 1])
+  const visibleFrom = ymd(cols[0])
+  const visibleTo   = ymd(cols[cols.length - 1])
   useEnsureLoadRange(visibleFrom, visibleTo)
 
   const dateLabel = useMemo(() => {
-    if (currentView === 'month') {
-      return startDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    if (view === 'capacity') {
+      const short = (day: string) => formatDateShort(new Date(`${day}T12:00:00Z`).toISOString())
+      return capRange.from === capRange.to ? short(capRange.from) : `${short(capRange.from)} – ${short(capRange.to)}`
     }
-    if (cols.length <= 1) return formatDateShort(startDate.toISOString())
-    return `${formatDateShort(cols[0].toISOString())} – ${formatDateShort(cols[cols.length - 1].toISOString())}`
-  }, [startDate, currentView, cols])
+    return formatDateShort(startDate.toISOString())
+  }, [startDate, view, capRange])
 
-  const onPrev  = useCallback(() => {
-    if (currentView === 'month') {
-      setStartDate((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))
+  // Previous / Next: a day on the Day board; on Capacity, the range's own length (today through Sunday steps a week-ish at a time).
+  const step = useCallback((dir: 1 | -1) => {
+    if (view === 'capacity') {
+      setCapRange((r) => ({ from: addDaysYmd(r.from, dir * capacityDays), to: addDaysYmd(r.to, dir * capacityDays) }))
     } else {
-      setStartDate((d) => addDays(d, -navDays))
+      setStartDate((d) => addDays(d, dir))
     }
-  }, [currentView, navDays])
-
-  const onNext  = useCallback(() => {
-    if (currentView === 'month') {
-      setStartDate((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1))
-    } else {
-      setStartDate((d) => addDays(d, navDays))
-    }
-  }, [currentView, navDays])
+  }, [view, capacityDays])
+  const onPrev  = useCallback(() => step(-1), [step])
+  const onNext  = useCallback(() => step(1), [step])
 
   const onToday = useCallback(() => {
-    const today = new Date()
-    if (currentView === 'month') setStartDate(new Date(today.getFullYear(), today.getMonth(), 1))
-    else if (currentView === 'day') setStartDate(today)
-    else setStartDate(getMondayOf(today))
-  }, [currentView])
+    if (view === 'capacity') setCapRange(defaultCapacityRange(todayChicagoYmd()))
+    else setStartDate(new Date())
+  }, [view])
 
-  const onViewChange = useCallback((view: CalendarView) => {
-    setCurrentView(view)
-    if (phone) rememberPhoneView(view)
-    const today = new Date()
-    if (view === 'month') setStartDate(new Date(today.getFullYear(), today.getMonth(), 1))
-    else if (view === 'day') setStartDate(today)
-    else setStartDate(getMondayOf(today))
+  const onViewChange = useCallback((next: CalendarView) => {
+    setCurrentView(next)
+    if (phone) rememberPhoneView(next)
+    if (next === 'capacity') setCapRange(defaultCapacityRange(todayChicagoYmd()))
+    else setStartDate(new Date())
   }, [phone])
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
@@ -155,13 +143,13 @@ export function CalendarPage() {
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (e.key === 'n' || e.key === 'N') { e.preventDefault(); navigate('/tms/shipments/new') }
-      if (e.key === 'ArrowLeft')  { e.preventDefault(); setStartDate((d) => addDays(d, -navDays)) }
-      if (e.key === 'ArrowRight') { e.preventDefault(); setStartDate((d) => addDays(d, navDays))  }
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); step(-1) }
+      if (e.key === 'ArrowRight') { e.preventDefault(); step(1)  }
       if (e.key === 'Escape')     { useAppStore.getState().setFilterDriver(null) }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [navDays, navigate])
+  }, [step, navigate])
 
   // ── Periodic refresh ────────────────────────────────────────────────────────
   // Real-time subscriptions keep clients in sync, but a periodic refetch of the visible window is a
@@ -232,13 +220,13 @@ export function CalendarPage() {
             Calendar
           </h1>
           <p style={{ fontSize: 12.5, color: 'var(--tms-muted)', marginTop: 2 }}>
-            {dateLabel} · BCAT freight movements
+            {dateLabel} · {view === 'capacity' ? 'Trucks to fill' : 'BCAT freight movements'}
           </p>
         </div>
 
         {/* Status legend + availability button */}
         <div style={{ display: 'flex', alignItems: 'center', gap: phone ? 10 : 16, ...(phone ? { flexWrap: 'wrap' as const, rowGap: 6 } : {}) }}>
-          {STATUS_LEGEND.map(({ label, color }) => (
+          {(view === 'capacity' ? CAPACITY_LEGEND : STATUS_LEGEND).map(({ label, color }) => (
             <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--tms-muted)' }}>
               <span style={{ width: 8, height: 8, background: color, borderRadius: 2, display: 'inline-block', flexShrink: 0 }} />
               {label}
@@ -255,7 +243,7 @@ export function CalendarPage() {
 
       {/* ── Toolbar ─────────────────────────────────────────────────────────── */}
       <CalendarToolbar
-        currentView={currentView}
+        currentView={view}
         dateLabel={dateLabel}
         onPrev={onPrev}
         onNext={onNext}
@@ -265,6 +253,7 @@ export function CalendarPage() {
         visibleDriverIds={visibleDriverIdSet}
         onVisibleDriversChange={setVisibleDrivers}
         phone={phone}
+        capacityEnabled={capacityAllowed}
       />
 
       {/* ── Planner ─────────────────────────────────────────────────────────── */}
@@ -277,12 +266,22 @@ export function CalendarPage() {
         background: 'var(--tms-card)',
       }}>
         <CalendarErrorBoundary>
-          {/* A phone shows Day / Week / Month as cards per day (Ryne 2026-11-14, which also removed the separate List view); a
-              desktop shows the boards. */}
+          {/* The Capacity board is its own calendar: one column per day of trucks to fill. A phone's Day is a card list per day;
+              a desktop's is the board. */}
+          {view === 'capacity' ? (
+            <CapacityBoard
+              from={capRange.from}
+              to={capRange.to}
+              onRangeChange={(from, to) => setCapRange({ from, to })}
+              drivers={drivers}
+              phone={phone}
+              userEmail={auth.user?.email ?? 'dispatch'}
+            />
+          ) : (
           <CalendarPaperworkProvider loads={visibleLoads}>
           {phone ? (
-            <MobileLoadAgenda loads={visibleLoads} drivers={drivers} days={phoneDays} skipEmptyDays={currentView === 'month'} />
-          ) : currentView === 'day' ? (
+            <MobileLoadAgenda loads={visibleLoads} drivers={drivers} days={phoneDays} />
+          ) : (
             <PlannerView
               loads={visibleLoads}
               drivers={drivers}
@@ -290,16 +289,9 @@ export function CalendarPage() {
               days={cols}
               availabilities={availabilities}
             />
-          ) : (
-            <GridCalendarView
-              loads={visibleLoads}
-              drivers={drivers}
-              startDate={startDate}
-              viewMode={currentView}
-              availabilities={availabilities}
-            />
           )}
           </CalendarPaperworkProvider>
+          )}
         </CalendarErrorBoundary>
       </div>
 

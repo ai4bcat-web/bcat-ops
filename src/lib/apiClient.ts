@@ -15,6 +15,7 @@ import type { McpReviewCard } from '@/lib/integrations/mcpReview'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 import { fuelDedupKey } from '@/lib/driverFuel'
 import { parseFactorRemitMap, type FactorRemitEntry, type FactorRemitMap } from '@/lib/factorRemit'
+import { parseCapacityBoard, type CapacityBoard, type CapacityCard, type CapacityOp } from '@/lib/capacityBoard'
 import { fileContentType } from '@/lib/disputeFiles'
 import { fixOfRow, loadPingKey, type TrackingFix } from '@/lib/trackingPings'
 import type { FixedExpenseInput } from './driverPay'
@@ -8731,6 +8732,20 @@ export async function getFactorRemitEmails(): Promise<FactorRemitMap> {
     console.warn('[factorRemit] could not read factor e-mails', err)
     return {}
   }
+}
+
+/** The Calendar's Capacity board (trucks to fill): read straight from the one settings field, newest state on every call. */
+export async function getCapacityBoard(): Promise<CapacityBoard> {
+  const r = await client.graphql({
+    query: 'query GetCapacityBoard { getTmsSettings(id: "default") { capacityBoard } }',
+  }) as { data: { getTmsSettings: { capacityBoard?: unknown } | null } }
+  return parseCapacityBoard(r.data.getTmsSettings?.capacityBoard)
+}
+
+/** One change to the Capacity board (save, move, cover, reopen, delete, restore); the answer is the whole board and the changed card. */
+export async function capacityBoardOp(op: CapacityOp): Promise<{ board: CapacityBoard; card: CapacityCard }> {
+  const r = await directoryAction<{ cards: CapacityCard[]; card: CapacityCard }>('CAPACITY_BOARD', op)
+  return { board: parseCapacityBoard({ cards: r.cards }), card: r.card }
 }
 
 /** Set (or clear, with '') a pay-to's remittance e-mail (a factor's or a direct payee's). One address serves every carrier paid to that name. */

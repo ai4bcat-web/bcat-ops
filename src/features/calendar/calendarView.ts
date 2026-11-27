@@ -1,14 +1,15 @@
-import type { ViewMode } from '@/types'
-
-/** The calendar's views: Day, Week and Month, the same boards on a phone and a desktop (List was removed, Ryne 2026-11-14). */
-export type CalendarView = ViewMode
+/**
+ * The calendar's views: Day and Capacity, the same on a phone and a desktop. Week and Month were removed (Ryne 2026-11-27) and
+ * List before them (2026-11-14); a view remembered from before reads as Day.
+ */
+export type CalendarView = 'day' | 'capacity'
 
 const PHONE_VIEW_KEY = 'calendar.phoneView.v2'
-const VIEWS: readonly CalendarView[] = ['day', 'week', 'month']
+const VIEWS: readonly CalendarView[] = ['day', 'capacity']
 
 /**
- * The view a phone opens on: the one last picked on a phone, else Day. A desktop always opens on Day. A remembered 'list' from before
- * the removal is not a view any more, so it opens on Day.
+ * The view a phone opens on: the one last picked on a phone, else Day. A desktop always opens on Day. A remembered 'list', 'week' or 'month'
+ * is not a view any more, so it opens on Day.
  */
 export function initialCalendarView(phone: boolean, storage: Pick<Storage, 'getItem'> | null = safeStorage()): CalendarView {
   if (!phone) return 'day'

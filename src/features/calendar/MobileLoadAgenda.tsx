@@ -7,10 +7,10 @@ import { agendaForDay, agendaUnscheduled, chicagoDateStr, type AgendaEntry } fro
 import type { Load, Driver } from '@/types'
 
 /**
- * The calendar on a phone (Ryne 2026-11-14): Day, Week and Month show their loads as cards instead of the wide boards. Each day is a
+ * The calendar's Day on a phone (Ryne 2026-11-14): the loads show as cards instead of the wide board. Each day is a
  * heading with that day's cards beneath, in the Day board's sections and order; nothing is cut off and every line wraps. A tap opens
- * the load the same way a tap on a Day row does (its shipment when it has one). Day and Week list every day, empty ones included;
- * Month skips empty days so the page stays short.
+ * the load the same way a tap on a Day row does (its shipment when it has one). Every day shown is listed, empty ones included,
+ * unless `skipEmptyDays` is set.
  */
 export function MobileLoadAgenda({ loads, drivers, days, skipEmptyDays = false }: {
   loads: Load[]; drivers: Driver[]; days: readonly Date[]; skipEmptyDays?: boolean

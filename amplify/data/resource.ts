@@ -1252,6 +1252,9 @@ const schema = a.schema(stageTypes({
       // One remittance e-mail per factoring company, keyed by the factor's normalized name:
       // { [key]: { name, email, updatedAt, updatedBy } }. See src/lib/factorRemit.ts.
       factorRemitEmails:        a.json(),
+      // The Calendar's Capacity board (trucks to fill): { cards: CapacityCard[] }. Written only by tms-directory-actions CAPACITY_BOARD
+      // with a compare-and-swap; read by the page. See src/lib/capacityBoard.ts.
+      capacityBoard:            a.json(),
       factorFeeBps:             a.integer(),     // OTR's fee on a factored invoice, basis points; unset = 200 (2%)
       payAcceptAsEntered:       a.boolean(),     // receive payments as entered (close short pays, accept overpays); unset = on
       payDiffAutoAcceptCents:   a.integer(),     // a payment short/over by this many cents or less is accepted as paid in full; unset/0 = never

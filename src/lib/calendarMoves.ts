@@ -1,7 +1,6 @@
 /**
- * Calendar card-move date helpers — shared by the Day/Week planner (PlannerView)
- * and the Month grid (GridCalendarView) so dragging a load onto a day schedules
- * it identically in both.
+ * Calendar card-move date helpers for the Day planner (PlannerView): dragging a load onto
+ * a day schedules it the same way every time.
  */
 import { formatDateTimeInput, fromDateTimeInput } from '@/lib/date'
 import { updateStop } from '@/lib/stops'

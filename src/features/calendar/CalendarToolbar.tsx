@@ -23,12 +23,13 @@ interface CalendarToolbarProps {
    * button, and a List view is offered. Desktop is unchanged.
    */
   phone?: boolean
+  /** Offer the Capacity tab. False for someone limited to the fleet profiles, who does not see the office's capacity rates. */
+  capacityEnabled?: boolean
 }
 
 const VIEW_OPTIONS: { value: CalendarView; label: string }[] = [
-  { value: 'day',   label: 'Day'   },
-  { value: 'week',  label: 'Week'  },
-  { value: 'month', label: 'Month' },
+  { value: 'day',      label: 'Day'      },
+  { value: 'capacity', label: 'Capacity' },
 ]
 
 
@@ -44,7 +45,7 @@ const FILTER_CHIPS = [
 
 export function CalendarToolbar({
   currentView, dateLabel, onPrev, onNext, onToday, onViewChange,
-  drivers, visibleDriverIds, onVisibleDriversChange, phone = false,
+  drivers, visibleDriverIds, onVisibleDriversChange, phone = false, capacityEnabled = true,
 }: CalendarToolbarProps) {
   const [filtersOpen, setFiltersOpen] = useState(false)
   const searchQuery      = useAppStore((s) => s.searchQuery)
@@ -53,6 +54,9 @@ export function CalendarToolbar({
   const toggleFilter     = useAppStore((s) => s.toggleFilter)
   const navigate         = useNavigate()
   const activeFilterCount = FILTER_CHIPS.filter(({ key }) => filters[key]).length
+  // The load filters and the load search narrow the Day board; the Capacity board has its own search, so they step aside there.
+  const onCapacity = currentView === 'capacity'
+  const viewOptions = VIEW_OPTIONS.filter((o) => o.value !== 'capacity' || capacityEnabled)
   // Phone sizes: 40px tap targets; each control's place in the wrapped rows.
   const tap = phone ? { width: 40, height: 40 } : null
   const at = (order: number): React.CSSProperties => (phone ? { order } : {})
@@ -75,7 +79,7 @@ export function CalendarToolbar({
 
       {/* ── View tabs ────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', gap: 2, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', borderRadius: 9, padding: 3, flexShrink: 0, ...(phone ? { flex: '1 1 auto' } : {}), ...at(2) }}>
-        {VIEW_OPTIONS.map(({ value, label }) => {
+        {viewOptions.map(({ value, label }) => {
           const active = currentView === value
           return (
             <button
@@ -126,9 +130,9 @@ export function CalendarToolbar({
         {dateLabel}
       </span>
 
-      {!phone && <div style={{ width: 1, height: 24, background: 'var(--tms-border)', flexShrink: 0 }} />}
+      {!phone && !onCapacity && <div style={{ width: 1, height: 24, background: 'var(--tms-border)', flexShrink: 0 }} />}
 
-      {phone && (
+      {phone && !onCapacity && (
         <button
           type="button"
           onClick={() => setFiltersOpen((v) => !v)}
@@ -142,6 +146,7 @@ export function CalendarToolbar({
 
       {/* ── Filter chips ─────────────────────────────────────────────────── */}
       {/* On a phone they sit behind the Filters button and wrap instead of being cut off. */}
+      {!onCapacity && (
       <div
         id="calendar-filters"
         style={phone
@@ -186,8 +191,11 @@ export function CalendarToolbar({
           )
         })}
       </div>
+      )}
+      {onCapacity && <div style={{ flex: 1 }} />}
 
       {/* ── Search ───────────────────────────────────────────────────────── */}
+      {!onCapacity && (
       <div style={{ position: 'relative', flexShrink: 0, ...(phone ? { flex: '1 1 100%', ...at(8) } : { width: 240 }) }}>
         <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--tms-muted)', pointerEvents: 'none' }} />
         <input
@@ -212,6 +220,7 @@ export function CalendarToolbar({
           </button>
         )}
       </div>
+      )}
 
       {/* ── New shipment ─────────────────────────────────────────────────── */}
       <button
