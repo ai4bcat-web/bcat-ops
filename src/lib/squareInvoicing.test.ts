@@ -82,6 +82,15 @@ describe('invoice text and numbers', () => {
     expect(idempotencyKey('shp-1', 'inv')).not.toBe(idempotencyKey('shp-1', 'pub'))
     expect(idempotencyKey('shp-1', 'inv', 0)).not.toBe(idempotencyKey('shp-1', 'inv', 1))
   })
+  it('keeps the customer key for the same payer details and changes it when they are corrected', () => {
+    const payer = { name: 'Pat Example', email: 'pat@example.com', phone: '8475550100' }
+    const a = squareCustomerBody(payer, 'shp-1', '14730').idempotency_key
+    expect(squareCustomerBody({ ...payer }, 'shp-1', '14730').idempotency_key).toBe(a)
+    expect(squareCustomerBody({ ...payer, email: 'pat@corrected.com' }, 'shp-1', '14730').idempotency_key).not.toBe(a)
+    expect(squareCustomerBody({ ...payer, phone: '3125550100' }, 'shp-1', '14730').idempotency_key).not.toBe(a)
+    expect(squareCustomerBody(payer, 'shp-2', '14730').idempotency_key).not.toBe(a)
+    expect(a.length).toBeLessThanOrEqual(192)
+  })
   it('cuts a date-time to a date', () => {
     expect(dateOnly('2026-11-27T10:00')).toBe('2026-11-27')
     expect(dateOnly('')).toBeNull()
