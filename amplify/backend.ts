@@ -3175,14 +3175,16 @@ backend.storage.resources.bucket.grantRead(trackingActionsFn, 'rate-confirms/*')
 // shipment, so the per-shipment e-mail/SMS thread and the check-call agent live
 // here rather than beside the shipment writer. It owns ShipmentMessage outright;
 // ShipmentDocument stays read-mostly (above) plus the one review stamp a POD
-// verdict writes, which is why the document grant gains UpdateItem.
+// verdict writes, which is why the document grant gains UpdateItem. It also files an e-mailed attachment
+// (INGEST_ATTACHMENT puts the ShipmentDocument row beside the S3 object), so it gains PutItem: without it the intake
+// returned 502 after the file landed and the bridge re-read the message every run, leaving a fresh orphan file each time.
 const trackingMessageTbl = stageTables['ShipmentMessage']
 trackingActionsFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
   resources: [trackingMessageTbl.tableArn, `${trackingMessageTbl.tableArn}/index/*`],
 }))
 trackingActionsFn.addToRolePolicy(new PolicyStatement({
-  actions:   ['dynamodb:UpdateItem'],
+  actions:   ['dynamodb:PutItem', 'dynamodb:UpdateItem'],
   resources: [shipmentDocumentTable.tableArn],
 }))
 // A POD verdict is a transaction across the document, the shipment and the order,
