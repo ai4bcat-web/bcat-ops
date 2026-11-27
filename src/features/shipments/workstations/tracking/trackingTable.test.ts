@@ -55,6 +55,13 @@ describe('podStateOf', () => {
     expect(podStateOf(delivered({ docsMissing: ['POD'], docsOverrideAt: '2026-10-29T10:00:00Z' }))).toBe('RECEIVED')
     expect(podStateOf(delivered({ docsMissing: null, revDivision: 'CAR_SHIPPING' }))).toBe('RECEIVED')
   })
+
+  it('reads a POD among the documents on file as received even when the required list is empty (20117, 20118, 20122)', () => {
+    expect(podStateOf(delivered({ docsMissing: [], docsRequired: [], docsPresent: ['POD'] }))).toBe('RECEIVED')
+    expect(podStateOf(delivered({ docsMissing: null, docsPresent: ['POD'] }))).toBe('RECEIVED')
+    // No POD among them and an empty required list still says nothing (20143: only a rate con on file).
+    expect(podStateOf(delivered({ docsMissing: [], docsRequired: [], docsPresent: ['BCAT_RATE_CON'] }))).toBe('UNKNOWN')
+  })
 })
 
 describe('deliveryOverdueOf', () => {
@@ -68,6 +75,10 @@ describe('deliveryOverdueOf', () => {
     const flag = deliveryOverdueOf(delivered({ docsMissing: ['POD'], deliveryAppt: '2026-11-09T15:00:00Z' }), now)
     expect(flag).toMatchObject({ kind: 'NO_POD', daysLate: 3, label: 'No POD — delivery date passed' })
     expect(flag?.tooltip).toBe('Scheduled delivery Nov 9, 2026 — delivered, no POD on file (3 days)')
+  })
+
+  it('does not flag a delivered load whose POD is among the documents on file, even with an empty required list', () => {
+    expect(deliveryOverdueOf(delivered({ docsMissing: [], docsRequired: [], docsPresent: ['POD'], deliveryAppt: '2026-11-01T15:00:00Z' }), now)).toBeNull()
   })
 
   it('does not flag before the day has passed, with a POD on file, or for voided and draft loads', () => {

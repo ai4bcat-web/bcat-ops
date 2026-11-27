@@ -847,8 +847,10 @@ function specialRequirementsLabel(req: SpecialRequirements | null | undefined): 
  * 'NO_POD' = the gate says the POD is outstanding; 'POD_IN' = the gate ran and the POD is not among what is missing; '' = not known yet
  * (the gate never ran for this shipment).
  */
-export function podStatusOf(row: Pick<ShipmentRow, 'revDivision' | 'docsMissing'> & { docsRequired?: string[] | null }): 'NO_POD' | 'POD_IN' | 'NA' | '' {
+export function podStatusOf(row: Pick<ShipmentRow, 'revDivision' | 'docsMissing'> & { docsRequired?: string[] | null; docsPresent?: string[] | null }): 'NO_POD' | 'POD_IN' | 'NA' | '' {
   if (row.revDivision === 'CAR_SHIPPING') return 'NA'
+  // A POD among the documents on file is in, whatever the required list says (it can be empty).
+  if (Array.isArray(row.docsPresent) && row.docsPresent.includes('POD')) return 'POD_IN'
   if (row.docsMissing == null) return ''
   // `docsMissing` only lists what the customer requires: with POD off that list, "POD not missing" says nothing about a POD being on file.
   if (Array.isArray(row.docsRequired) && !row.docsRequired.includes('POD')) return ''

@@ -498,6 +498,7 @@ describe('POD column', () => {
   })
   it('POD in when the customer requires one and the gate does not list it missing; blank when unknown, including a customer whose document list has no POD (the gate says nothing about one)', () => {
     expect(podStatusOf(r({ docsMissing: ['BOL'] }))).toBe('POD_IN')
+    expect(podStatusOf(r({ docsMissing: [], docsRequired: [], docsPresent: ['POD'] }))).toBe('POD_IN')
     expect(podStatusOf(r({ docsMissing: null }))).toBe('')
     expect(podStatusOf(r({ docsRequired: ['BOL'], docsMissing: [] }))).toBe('')
   })
