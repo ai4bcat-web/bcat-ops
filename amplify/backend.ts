@@ -3160,6 +3160,13 @@ trackingActionsFn.addToRolePolicy(new PolicyStatement({
   resources: [shipmentDocumentTable.tableArn, `${shipmentDocumentTable.tableArn}/index/*`],
 }))
 backend.storage.resources.bucket.grantRead(trackingActionsFn, 'shipment-docs/*')
+// An e-mailed attachment is filed under shipment-docs/<shipmentId>/inbound/ (the original, plus a PDF copy of a photo).
+// Spelled out as PutObject alone: the role never overwrites by delete, and a missing write made the intake return 502 so
+// the Apps Script bridge re-read the same message every run until Gmail's daily quota ran out.
+trackingActionsFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['s3:PutObject'],
+  resources: [`${backend.storage.resources.bucket.bucketArn}/shipment-docs/*`],
+}))
 backend.storage.resources.bucket.grantRead(trackingActionsFn, 'driver-docs/*')
 backend.storage.resources.bucket.grantRead(trackingActionsFn, 'rate-confirms/*')
 
