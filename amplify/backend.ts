@@ -3332,9 +3332,12 @@ financeActionsFn.addToRolePolicy(
   })
 )
 // OTR funded it, so the invoice is paid: every 30 minutes, post one FACTOR payment for each open
-// invoice whose factoring row OTR has approved (idempotent per invoice).
+// invoice whose factoring row OTR has approved (idempotent per invoice). That settling is turned off (the tick does nothing
+// for factoring); the same tick now re-reads every open Square invoice (auto shipper) every 5 minutes, which is how a payment
+// or a cancel at Square reaches the books without the public webhook Lambda ever touching AR. With no open Square invoice,
+// or Square invoicing off, a tick makes no outside call at all.
 new Rule(financeActionsFn.stack, 'SettleFactoredInvoicesRule', {
-  schedule: Schedule.rate(Duration.minutes(30)),
+  schedule: Schedule.rate(Duration.minutes(5)),
   targets: [new EventsLambdaTarget(financeActionsFn)],
 })
 financeActionsFn.addEnvironment('BUCKET_NAME',                   backend.storage.resources.bucket.bucketName)

@@ -73,19 +73,37 @@ function WebhookRow({ descriptor, row }: { descriptor: ProviderDescriptor; row: 
     <div className="tms-field">
       <span className="tms-field-label">Webhook</span>
       <code>{`${base}/api/webhooks/${descriptor.key.toLowerCase()}`}</code>
-      <span className="tms-field-hint">
-        Signed with the webhook signing secret above: header <code>x-bcat-signature</code>, format{' '}
-        <code>t=&lt;unix seconds&gt;,v1=&lt;HMAC-SHA256 of &quot;t.body&quot;&gt;</code>. A delivery more than five
-        minutes old is refused as a replay.
-      </span>
+      {descriptor.key === 'SQUARE' ? (
+        <>
+          <span className="tms-field-hint">
+            In Square: Developer Dashboard → your app → Webhooks → Subscriptions → add this URL for the <b>active environment</b>, tick{' '}
+            <code>invoice.published</code>, <code>invoice.updated</code>, <code>invoice.payment_made</code>, <code>invoice.canceled</code>,{' '}
+            <code>invoice.refunded</code>, <code>invoice.scheduled_charge_failed</code>, then copy the subscription&apos;s <b>Signature key</b> into the
+            field above and paste this same URL, exactly as entered in Square, into the &quot;Webhook URL&quot; setting below. Square signs the URL
+            plus the body (header <code>x-square-hmacsha256-signature</code>); a delivery that does not match is refused.
+          </span>
+          <span className="tms-field-hint">
+            A delivery is verified and receipted here. Payments and status are applied from Square&apos;s own API within about five minutes,
+            or at once with Sync from Square on the shipment.
+          </span>
+        </>
+      ) : (
+        <span className="tms-field-hint">
+          Signed with the webhook signing secret above: header <code>x-bcat-signature</code>, format{' '}
+          <code>t=&lt;unix seconds&gt;,v1=&lt;HMAC-SHA256 of &quot;t.body&quot;&gt;</code>. A delivery more than five
+          minutes old is refused as a replay.
+        </span>
+      )}
       <span className="tms-field-hint">
         {row?.lastWebhookAt
           ? `Last delivery received ${formatDateTime(row.lastWebhookAt)}${row.webhookCount ? ` · ${row.webhookCount} in total` : ''}.`
           : 'No delivery received yet.'}
       </span>
-      <span className="tms-field-hint">
-        Receipt is recorded here; acting on what arrives lands in Step K, so nothing is consumed yet.
-      </span>
+      {descriptor.key !== 'SQUARE' && (
+        <span className="tms-field-hint">
+          Receipt is recorded here; acting on what arrives lands in Step K, so nothing is consumed yet.
+        </span>
+      )}
     </div>
   )
 }

@@ -83,6 +83,20 @@ describe('SquareCard', () => {
     expect(screen.queryByRole('button', { name: 'Reissue at new price' })).toBeNull()
   })
 
+  it('opening a sent invoice asks Square once for its latest status, but not again within a minute', async () => {
+    const sent = { invoiceId: 'INV1', status: 'UNPAID', amountCents: 120_900 }
+    const { unmount } = render(<SquareCard bundle={bundle(sent)} onReload={() => {}} />)
+    await waitFor(() => expect(api.syncSquareInvoice).toHaveBeenCalledTimes(1))
+    unmount()
+    api.syncSquareInvoice.mockClear()
+    render(<SquareCard bundle={bundle({ ...sent, lastSyncAt: new Date().toISOString() })} onReload={() => {}} />)
+    // A draft or a paid invoice has nothing to ask either.
+    render(<SquareCard bundle={bundle({ invoiceId: 'INV2', status: 'DRAFT' })} onReload={() => {}} />)
+    render(<SquareCard bundle={bundle({ invoiceId: 'INV3', status: 'PAID' })} onReload={() => {}} />)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(api.syncSquareInvoice).not.toHaveBeenCalled()
+  })
+
   it('shows a refund or failed payment as a review note, in red, and never offers to reverse anything', () => {
     render(<SquareCard bundle={bundle({ invoiceId: 'INV1', status: 'REFUNDED', reviewFlag: 'Square shows a refund on this invoice.' })} onReload={() => {}} />)
     expect(screen.getByTestId('square-review')).toHaveTextContent('refund')

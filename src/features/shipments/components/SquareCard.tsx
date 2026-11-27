@@ -11,7 +11,7 @@
  *     Retry is the honest state when Square was down, and a retry resumes rather than starting a second invoice.
  *  3. Nothing that is carrier-side (pay, cost, margin) is shown or sent: the card reads the payer, the vehicle, the price.
  */
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Copy } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsBadge, TmsButton, TmsCard, TmsDialog, TmsMetaList, type TmsTone } from '@/features/tms/kit'
@@ -36,6 +36,18 @@ export function SquareCard({ bundle, onReload }: { bundle: ShipmentBundle; onRel
   const [cancelOpen, setCancelOpen] = useState(false)
 
   const data = bundle.shipment.carShipping as CarShippingData | null | undefined
+  const shipmentIdForSync = bundle.shipment.id
+  const openState = squareCardState(data?.square)
+  const lastSyncAt = data?.square?.lastSyncAt ?? null
+  const askedOnce = useRef(false)
+  // Opening a sent, unpaid invoice asks Square once for its latest status, so what staff see is never minutes stale. Quiet: no
+  // toast and no spinner, and not more than once a minute per shipment.
+  useEffect(() => {
+    if (!allowed || askedOnce.current || openState !== 'SENT') return
+    if (lastSyncAt && Date.now() - Date.parse(lastSyncAt) < 60_000) return
+    askedOnce.current = true
+    void syncSquareInvoice({ shipmentId: shipmentIdForSync }).then(() => onReload()).catch(() => { /* the Sync button shows the reason */ })
+  }, [allowed, openState, lastSyncAt, shipmentIdForSync, onReload])
   // Only for an auto shipper shipment, and only for people who may see AR money: the payer's invoice is AR.
   if (!data || !allowed) return null
   const square = data.square

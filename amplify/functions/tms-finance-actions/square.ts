@@ -562,3 +562,35 @@ export async function shipmentIdForSquareInvoice(invoiceNumber: string, squareIn
   if (!row || external?.provider !== 'SQUARE' || external.invoiceId !== squareInvoiceId) return null
   return typeof row.shipmentId === 'string' ? row.shipmentId : null
 }
+
+/**
+ * The scheduled pass: every Square invoice still open in AR is re-read from Square and applied. This is what turns Square's
+ * webhook (which the public tracking Lambda can only verify and receipt, since it holds nothing on AR) into payments on the
+ * books within minutes, and it catches anything a webhook missed (Square only retries for 24 hours). Capped per tick; one
+ * invoice failing never stops the rest.
+ */
+const RECONCILE_MAX = 40
+export async function reconcileSquare(): Promise<Row> {
+  try {
+    const cfg = await loadSquareConfig()
+    if (!cfg.enabled) return { skipped: 'Square invoicing is off' }
+  } catch {
+    return { skipped: 'Square is not connected' }
+  }
+  const open = await queryIndex(INVOICE_TABLE_NAME, 'invoicesByArOpenAndDueAt', 'arOpen', 'OPEN')
+  const mine = open
+    .filter((inv) => inv.status !== 'VOID' && asJson<{ provider?: string }>(inv.external)?.provider === 'SQUARE' && typeof inv.shipmentId === 'string')
+    .slice(0, RECONCILE_MAX)
+  let synced = 0
+  let failed = 0
+  for (const inv of mine) {
+    try {
+      await syncSquare({ shipmentId: String(inv.shipmentId) }, SQUARE_SYSTEM_CALLER)
+      synced += 1
+    } catch (err) {
+      failed += 1
+      console.warn('[tms-finance-actions] square reconcile failed for', String(inv.id), String(err).slice(0, 200))
+    }
+  }
+  return { checked: mine.length, synced, failed }
+}

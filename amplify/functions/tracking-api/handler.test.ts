@@ -5,6 +5,7 @@ import { vi, describe, it, expect, beforeAll, beforeEach, afterEach } from 'vite
 import type * as HandlerModule from './handler'
 import type * as ApiModule from './api'
 import { signWebhookBody } from '../_shared/webhook'
+import { signSquareBody } from '../_shared/squareWebhook'
 import { mintClient, tokenFor, verifyToken } from '../_shared/openApi'
 
 const mockSend = vi.hoisted(() => vi.fn())
@@ -1837,6 +1838,83 @@ describe('Step J — a warm container re-reads one parameter when a comparison f
 })
 
 // ── Step AO: a tracking provider's delivery becomes load breadcrumbs ────────
+
+describe('POST /api/webhooks/square', () => {
+  const SQUARE_PARAM = `${INTEGRATION_PARAM_PATH}/SQUARE/webhook`
+  const SQUARE_KEY = 'square-signature-key-sandbox'
+  const URL = 'https://abc123.lambda-url.us-east-1.on.aws/api/webhooks/square'
+  const BODY = JSON.stringify({
+    merchant_id: 'MERCH', type: 'invoice.payment_made', event_id: 'evt-sq-1',
+    data: { type: 'invoice', id: 'INV1', object: { invoice: { id: 'INV1', invoice_number: '14730', status: 'PAID', primary_recipient: { customer_id: 'C1' } } } },
+  })
+  const squareRow = (over: Record<string, unknown> = {}) => ({
+    id: 'SQUARE', provider: 'SQUARE', kind: 'PROVIDER', status: 'CONNECTED', mode: 'STUB', settings: { webhookUrl: URL, environment: 'SANDBOX' }, ...over,
+  })
+  const sig = (body = BODY, key = SQUARE_KEY, url = URL) => ({ 'x-square-hmacsha256-signature': signSquareBody(key, url, body) })
+  const configured = () => params({ [OPENAPI_PARAM]: openApiParam(), [SQUARE_PARAM]: JSON.stringify({ webhookSigningSecret: SQUARE_KEY }) })
+
+  it('receipts a delivery Square signed over the notification URL and the body, keeping only its type and invoice', async () => {
+    configured()
+    const puts: Cmd[] = []
+    const updates: Cmd[] = []
+    route({ integration: squareRow(), onPut: (c) => puts.push(c), onUpdate: (c) => updates.push(c) })
+    const res = await postRaw('/api/webhooks/square', BODY, sig())
+    expect(res.statusCode).toBe(200)
+    expect(json(res)).toMatchObject({ ok: true, duplicate: false, eventId: 'evt-sq-1', type: 'invoice.payment_made' })
+    expect(puts[0].Item).toMatchObject({ id: 'evt:SQUARE:evt-sq-1', kind: 'WEBHOOK_EVENT', eventType: 'invoice.payment_made', invoiceId: 'INV1' })
+    // No customer or payment detail is kept, and the receipt outlives Square's 24-hour retry window.
+    expect(JSON.stringify(puts[0].Item)).not.toMatch(/customer|C1|PAID/)
+    expect(Number(puts[0].Item?.ttlEpoch)).toBeGreaterThan(Math.floor(Date.now() / 1000) + 24 * 3600)
+    expect(updates[0].UpdateExpression).toContain('ADD webhookCount :one')
+    // The public Lambda touches nothing but the Integration table.
+    expect(sent().every((c) => c.TableName === TABLES.integration)).toBe(true)
+  })
+
+  it('answers a redelivery 200 duplicate and writes nothing further', async () => {
+    configured()
+    const updates: Cmd[] = []
+    route({ integration: squareRow(), onUpdate: (c) => updates.push(c), onPut: () => { throw new ConditionalCheckFailedException() } })
+    const res = await postRaw('/api/webhooks/square', BODY, sig())
+    expect(json(res)).toMatchObject({ ok: true, duplicate: true, eventId: 'evt-sq-1' })
+    expect(updates).toHaveLength(0)
+  })
+
+  it('401s a tampered body, a wrong key, a signature over another URL and a missing header, all alike', async () => {
+    configured()
+    const puts: Cmd[] = []
+    route({ integration: squareRow(), onPut: (c) => puts.push(c) })
+    const tampered = await postRaw('/api/webhooks/square', BODY.replace('14730', '99999'), sig())
+    const wrongKey = await postRaw('/api/webhooks/square', BODY, sig(BODY, 'somebody-elses'))
+    const otherUrl = await postRaw('/api/webhooks/square', BODY, sig(BODY, SQUARE_KEY, 'https://evil.example/api/webhooks/square'))
+    const bare = await postRaw('/api/webhooks/square', BODY)
+    const bcatStyle = await postRaw('/api/webhooks/square', BODY, { 'x-bcat-signature': signWebhookBody(BODY, SQUARE_KEY, Math.floor(Date.now() / 1000)) })
+    for (const res of [tampered, wrongKey, otherUrl, bare, bcatStyle]) {
+      expect(res.statusCode).toBe(401)
+      expect(json(res)).toEqual({ error: 'That delivery could not be verified' })
+    }
+    expect(puts).toHaveLength(0)
+    expect(writes()).toHaveLength(0)
+  })
+
+  it('404s when the page has not recorded the notification URL, or the provider is not connected', async () => {
+    configured()
+    route({ integration: squareRow({ settings: { environment: 'SANDBOX' } }) })
+    expect((await postRaw('/api/webhooks/square', BODY, sig())).statusCode).toBe(404)
+    route({ integration: squareRow({ status: 'DISCONNECTED' }) })
+    expect((await postRaw('/api/webhooks/square', BODY, sig())).statusCode).toBe(404)
+  })
+
+  it('acknowledges a verified delivery it cannot file, so Square does not retry it for a day', async () => {
+    configured()
+    const puts: Cmd[] = []
+    route({ integration: squareRow(), onPut: (c) => puts.push(c) })
+    const odd = JSON.stringify({ hello: 'world' })
+    const res = await postRaw('/api/webhooks/square', odd, sig(odd))
+    expect(res.statusCode).toBe(200)
+    expect(json(res)).toMatchObject({ ok: true, ignored: true })
+    expect(puts).toHaveLength(0)
+  })
+})
 
 describe('POST /api/webhooks/<provider> — tracking provider deliveries', () => {
   const MP_PARAM = `${INTEGRATION_PARAM_PATH}/MACROPOINT/webhook`

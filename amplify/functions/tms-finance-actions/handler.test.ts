@@ -4996,6 +4996,36 @@ describe('Square invoicing for an auto shipper shipment', () => {
     await expect(call('SQUARE_SAVE_DETAILS', { shipmentId: SHIPMENT_ID, carShipping: { payer: PAYER, vehicle: VEHICLE } })).rejects.toThrow(/already sent/)
   })
 
+  it('the five-minute tick re-reads every open Square invoice and books what Square says, and calls no one while the switch is off', async () => {
+    seedSquare()
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    await call('SQUARE_SEND_INVOICE', { shipmentId: SHIPMENT_ID })
+    sq.invoiceStatus = 'PAID'
+    sq.tenders = [{ id: 'T1', payment_id: 'PAY1', created_at: '2026-10-29T15:00:00Z', amount_money: { amount: 120_900 }, type: 'CARD', card_details: { card: { card_brand: 'VISA', last_4: '4217' } } }]
+    const tick = await handler({ source: 'aws.events' } as never)
+    expect(tick).toMatchObject({ skipped: true, square: { checked: 1, synced: 1, failed: 0 } })
+    expect(table(TABLES.invoice).get('S000001')).toMatchObject({ status: 'PAID', paidCents: 120_900 })
+    // A paid invoice is no longer open, so the next tick has nothing to ask Square.
+    calls.length = 0
+    expect(await handler({ source: 'aws.events' } as never)).toMatchObject({ square: { checked: 0 } })
+    expect(calls).toHaveLength(0)
+
+    seedSquare({ settings: { autoShipperInvoicing: false } })
+    calls.length = 0
+    expect(await handler({ source: 'aws.events' } as never)).toMatchObject({ square: { skipped: 'Square invoicing is off' } })
+    expect(calls).toHaveLength(0)
+  })
+
+  it('one invoice that Square cannot answer for does not stop the tick', async () => {
+    seedSquare()
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    await call('SQUARE_SEND_INVOICE', { shipmentId: SHIPMENT_ID })
+    sq.failNext = '/v2/invoices/INV1'
+    const tick = await handler({ source: 'aws.events' } as never)
+    expect(tick).toMatchObject({ square: { checked: 1, synced: 0, failed: 1 } })
+    expect(table(TABLES.invoice).get('S000001')).toMatchObject({ status: 'ISSUED' })
+  })
+
   it('the standard invoice template still refuses a Square shipment', async () => {
     seedSquare()
     table(TABLES.shipment).set(SHIPMENT_ID, { ...table(TABLES.shipment).get(SHIPMENT_ID), revDivision: 'CAR_SHIPPING' })
