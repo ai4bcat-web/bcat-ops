@@ -69,7 +69,7 @@ import { repointInvoicedCustomer } from './repoint'
 import { changeInvoiceCustomer } from './changeCustomer'
 import { brokerageRepRollup } from './brokerageRep'
 import { agingStatement } from './statements'
-import { cancelSquareInvoice, createSquareInvoice, reissueSquareInvoice, saveSquareDetails, sendSquareInvoice, syncSquare } from './square'
+import { cancelSquareInvoice, createSquareInvoice, reconcileSquare, reissueSquareInvoice, saveSquareDetails, sendSquareInvoice, syncSquare } from './square'
 import { pastDueReminder } from './pastDueReminder'
 /** Auto-settling factored invoices from OTR's status is off; see the schedule branch in handler(). */
 export const SETTLE_TURNED_OFF = {
@@ -316,7 +316,10 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
   // his own rule for marking invoices paid. settleFactored.ts is kept for that work but nothing
   // calls it; the schedule still fires and does nothing.
   if (!event.arguments && (event as unknown as { source?: string }).source === 'aws.events') {
-    return { ...SETTLE_TURNED_OFF } as unknown as Row
+    // The same tick re-reads every open Square invoice (auto shipper) and applies what Square says; a failure here never fails the tick.
+    let square: Row = {}
+    try { square = await reconcileSquare() } catch (err) { console.warn('[tms-finance-actions] square reconcile failed:', String(err).slice(0, 200)) }
+    return { ...SETTLE_TURNED_OFF, square } as unknown as Row
   }
   const action = event.arguments.action as Action
   // Its own door, decided by brokerageAccessOf inside the action (owner/ADMIN/page-dashboard or a sales rep), never by the AR page rule.

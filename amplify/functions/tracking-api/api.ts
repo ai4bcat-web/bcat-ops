@@ -41,6 +41,7 @@ import {
   type ApiStopInput,
 } from '../_shared/openApi'
 import { WEBHOOK_TOLERANCE_SECONDS, verifyWebhookSignature, webhookEventId } from '../_shared/webhook'
+import { SQUARE_SIGNATURE_HEADER, squareEventInfo, verifySquareSignature } from '../_shared/squareWebhook'
 import { consumeTrackingDelivery, isTrackingProvider } from './providerTracking'
 import { mergeInsurancePolicies, applyMcpUpdate, type McpInsurance } from '../../../src/lib/integrations/mcpAdapter'
 
@@ -523,6 +524,81 @@ async function processMcpWebhookBody(deps: ApiDeps, rawBody: string): Promise<{ 
   return { updated, eventType }
 }
 
+// ── POST /api/webhooks/square ───────────────────────────────────────────────
+
+const SQUARE_PROVIDER_KEY = 'SQUARE'
+/**
+ * Square retries a delivery it did not get a 2xx for over 24 hours, so its receipts outlive the generic ten minutes: a
+ * redelivery a day later still finds the receipt. (A receipt only dedupes; the event is a hint to re-read Square, never an
+ * instruction, so even a missed dedupe changes nothing twice.)
+ */
+const SQUARE_RECEIPT_TTL_SECONDS = 36 * 60 * 60
+
+function settingsOf(row: Row): Record<string, unknown> {
+  const raw = row.settings
+  if (typeof raw === 'string') return parseJson<Record<string, unknown>>(raw) ?? {}
+  return raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+}
+
+/**
+ * A Square invoice event, verified and receipted.
+ *
+ * This public Lambda holds nothing on Invoice, Order or ArPayment, by design, so it cannot apply a payment and does not try.
+ * What it does is prove the delivery is Square's (HMAC over the exact notification URL the page records + the raw body), file
+ * the receipt so Integrations shows the subscription is alive, and answer 2xx fast. The finance Lambda re-reads every open
+ * Square invoice from Square every few minutes and on demand, and applies what Square says: the truth comes from Square's own
+ * API with our credential, never from a request body that arrived from the Internet.
+ */
+async function squareWebhookRoute(deps: ApiDeps, row: Row, secret: string, event: FnUrlRequest, nowIso: string, paramName: string): Promise<ApiReply> {
+  const rawBody = rawBodyOf(event)
+  const header = headerOf(event, SQUARE_SIGNATURE_HEADER)
+  const notificationUrl = typeof settingsOf(row).webhookUrl === 'string' ? (settingsOf(row).webhookUrl as string) : ''
+  if (!notificationUrl.trim()) return { status: 404, body: { error: NO_WEBHOOK } }
+  let check = verifySquareSignature({ header, rawBody, notificationUrl, signatureKey: secret })
+  // A rotated signature key lands mid-minute; only a digest that failed against a cached key is worth one re-read.
+  if (!check.ok && check.reason === 'BAD_SIGNATURE' && await reReadParameter(deps, paramName)) {
+    const rotated = signingSecretIn(await readParameter(deps, paramName))
+    if (rotated && rotated !== secret) check = verifySquareSignature({ header, rawBody, notificationUrl, signatureKey: rotated })
+  }
+  if (!check.ok) return { status: 401, body: { error: BAD_DELIVERY } }
+
+  const info = squareEventInfo(rawBody)
+  // Verified but not an event we can file: acknowledge it so Square does not retry for a day.
+  if (!info.eventId) return { status: 200, body: { ok: true, ignored: true } }
+  const eventId = info.eventId.slice(0, 128).replace(/[^\w.:-]/g, '_')
+  try {
+    await deps.ddb.send(new PutCommand({
+      TableName: deps.integrationTable,
+      Item: {
+        id: `evt:${SQUARE_PROVIDER_KEY}:${eventId}`,
+        provider: SQUARE_PROVIDER_KEY,
+        kind: 'WEBHOOK_EVENT',
+        receivedAt: nowIso,
+        // What the receipt keeps of a delivery: its type and the invoice it is about. No customer or payment detail.
+        eventType: info.type,
+        invoiceId: info.invoiceId,
+        ttlEpoch: Math.floor(Date.parse(nowIso) / 1000) + SQUARE_RECEIPT_TTL_SECONDS,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      },
+      ConditionExpression: 'attribute_not_exists(id)',
+    }))
+  } catch (err) {
+    if ((err as { name?: string } | null)?.name === 'ConditionalCheckFailedException') {
+      return { status: 200, body: { ok: true, duplicate: true, eventId } }
+    }
+    throw err
+  }
+  await deps.ddb.send(new UpdateCommand({
+    TableName: deps.integrationTable,
+    Key: { id: SQUARE_PROVIDER_KEY },
+    UpdateExpression: 'SET lastWebhookAt = :now, updatedAt = :now ADD webhookCount :one',
+    ConditionExpression: 'attribute_exists(id)',
+    ExpressionAttributeValues: { ':now': nowIso, ':one': 1 },
+  }))
+  return { status: 200, body: { ok: true, duplicate: false, eventId, type: info.type } }
+}
+
 // ── POST /api/webhooks/<provider> ───────────────────────────────────────────
 
 /**
@@ -557,6 +633,9 @@ export async function webhookRoute(deps: ApiDeps, provider: string, event: FnUrl
     if (await reReadParameter(deps, paramName)) secret = signingSecretIn(await readParameter(deps, paramName))
     if (!secret) return { status: 404, body: { error: NO_WEBHOOK } }
   }
+
+  // Square signs with its own scheme (no timestamp, the notification URL is part of the signed text), so it has its own door.
+  if (key === SQUARE_PROVIDER_KEY) return squareWebhookRoute(deps, row, secret, event, nowIso, paramName)
 
   const rawBody = rawBodyOf(event)
   const header = headerOf(event, 'x-bcat-signature')
