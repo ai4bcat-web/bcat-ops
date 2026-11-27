@@ -14,6 +14,11 @@ vi.mock('@/lib/apiClient', () => ({
   writeOffInvoice: vi.fn(),
   getTmsSettings: vi.fn(async () => ({ factorFeeBps: 200 })),
   listShipmentsByNumber: vi.fn(async () => []),
+  // An old paid invoice outside the six months the page loads, found by exact number.
+  getInvoice: vi.fn(async (id: string): Promise<InvoiceRecord | null> => (id === '13365'
+    ? { id: '13365', number: '13365', shipmentNumber: '13365', status: 'PAID', paidAt: '2026-04-30T12:00:00.000Z', invoiceDate: '2026-04-01', totalCents: 148_900, paidCents: 148_900, balanceCents: 0, customerId: 'c1' } as InvoiceRecord
+    : null)),
+  listInvoicesByCustomer: vi.fn(async (): Promise<InvoiceRecord[]> => []),
   listArPayments: vi.fn(async (): Promise<ArPaymentRecord[]> => [
     { id: 'p1', customerId: 'c1', kind: 'PAYMENT', receivedAt: `${ym}-02T12:00:00.000Z`, method: 'ACH', reference: 'ACH-77',
       amountCents: 120_000, appliedCents: 120_000, unappliedCents: 0, applications: [{ invoiceId: '14096', amountCents: 120_000 }], createdBy: 'ryne@bcatcorp.com' },
@@ -194,14 +199,41 @@ describe('Payments Received page', () => {
     await waitFor(() => expect(within(out).getAllByText('TANAGER LOGISTICS').length).toBeGreaterThan(0))
   })
 
-  it('searches invoice #, PRO and PO inside Outstanding', async () => {
+  it('a typed search leaves Outstanding for All and looks at every invoice and payment', async () => {
     render(<MemoryRouter><PaymentsReceivedPage /></MemoryRouter>)
-    const out = await screen.findByTestId('payments-outstanding')
-    fireEvent.change(screen.getByLabelText('Search invoice, PRO or PO'), { target: { value: '15001' } })
-    await waitFor(() => expect(within(out).queryByLabelText('Select 14200')).toBeNull())
-    expect(within(out).getAllByLabelText('Select 15001').length).toBeGreaterThan(0)
-    fireEvent.change(screen.getByLabelText('Search invoice, PRO or PO'), { target: { value: 'nothing-like-it' } })
-    expect(await within(out).findByText(/No open invoices match/)).toBeTruthy()
+    await screen.findByTestId('payments-outstanding')
+    const box = screen.getByLabelText('Search invoice, PRO or PO')
+    fireEvent.change(box, { target: { value: '15001' } })
+    const results = await screen.findByTestId('payments-received-invoice-results')
+    expect(screen.queryByTestId('payments-outstanding')).toBeNull()
+    expect(screen.getByTestId('payments-received-searching')).toBeTruthy()
+    expect(within(results).getByTestId('payments-received-invoice-15001')).toBeTruthy()
+    expect(within(results).queryByTestId('payments-received-invoice-14200')).toBeNull()
+    fireEvent.change(box, { target: { value: 'nothing-like-it' } })
+    expect(await screen.findByText(/No payment matches/)).toBeTruthy()
+    // Clearing the search brings the previous tab back.
+    fireEvent.change(box, { target: { value: '' } })
+    expect(await screen.findByTestId('payments-outstanding')).toBeTruthy()
+    expect(screen.queryByTestId('payments-received-invoice-results')).toBeNull()
+  })
+
+  it('finds a payment from years ago by its reference although the default range is this month', async () => {
+    render(<MemoryRouter><PaymentsReceivedPage /></MemoryRouter>)
+    await screen.findByTestId('payments-outstanding')
+    fireEvent.click(screen.getByRole('tab', { name: 'All' }))
+    // This month only: the 2020 check is out of range.
+    await waitFor(() => expect(screen.queryByText('old')).toBeNull())
+    fireEvent.change(screen.getByLabelText('Search invoice, PRO or PO'), { target: { value: 'old' } })
+    expect(await screen.findByText('old')).toBeTruthy()
+  })
+
+  it('finds a paid invoice outside the six-month window by its number, with the paid date', async () => {
+    render(<MemoryRouter><PaymentsReceivedPage /></MemoryRouter>)
+    await screen.findByTestId('payments-outstanding')
+    fireEvent.change(screen.getByLabelText('Search invoice, PRO or PO'), { target: { value: '13365' } })
+    const row = await screen.findByTestId('payments-received-invoice-13365')
+    expect(within(row).getByText('Paid')).toBeTruthy()
+    expect(within(row).getByText(/Apr 30/)).toBeTruthy()
   })
 
   it('Select all open ticks every open invoice for the customer; a check is applied oldest first', async () => {
