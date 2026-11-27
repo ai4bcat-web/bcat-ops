@@ -76,6 +76,26 @@ export async function fileInvoiceDocument(input: { shipmentId: string; invoiceId
 }
 
 /**
+ * Ask tms-shipment-actions for something only it may do (a system-caller action) and read its answer back.
+ * A function error is rethrown with the router's own sentence, so a refusal there reads the same here.
+ */
+export async function callShipmentActions(action: string, input: Row): Promise<Row> {
+  if (!SHIPMENT_ACTIONS_FUNCTION_NAME) throw new Error('The shipment router is not wired to this Lambda')
+  const out = await lambda.send(new InvokeCommand({
+    FunctionName: SHIPMENT_ACTIONS_FUNCTION_NAME,
+    InvocationType: 'RequestResponse',
+    Payload: Buffer.from(JSON.stringify({ systemCaller: 'finance-actions', arguments: { action, input: JSON.stringify(input) } })),
+  }))
+  const text = out.Payload ? Buffer.from(out.Payload).toString('utf8') : ''
+  if (out.FunctionError) {
+    let message = text.slice(0, 300)
+    try { message = String((JSON.parse(text) as { errorMessage?: unknown }).errorMessage ?? message) } catch { /* keep the raw text */ }
+    throw new Error(message || `${action} failed`)
+  }
+  try { return (text ? JSON.parse(text) : {}) as Row } catch { throw new Error(`${action} returned something unreadable`) }
+}
+
+/**
  * List the invoice that was just sent (by e-mail or by hand) on its shipment's Documents (Ryne 2026-11-18). The document was
  * filed when the PDF was made; this puts back a row that never landed, and does nothing for an invoice with no PDF or a void one.
  * The row is the same one (`inv:<invoiceId>`), and the same file already listed is left alone, so a resend adds nothing.
@@ -111,7 +131,6 @@ export const CARRIER_CONTACT_TABLE_NAME = process.env.CARRIER_CONTACT_TABLE_NAME
 export const COMMISSION_TABLE_NAME = process.env.COMMISSION_TABLE_NAME ?? ''
 export const COMMISSION_PAY_PERIOD_TABLE_NAME = process.env.COMMISSION_PAY_PERIOD_TABLE_NAME ?? ''
 export const USER_PROFILE_TABLE_NAME = process.env.USER_PROFILE_TABLE_NAME ?? ''
-export const INTEGRATION_TABLE_NAME = process.env.INTEGRATION_TABLE_NAME ?? ''
 export const BUCKET_NAME = process.env.BUCKET_NAME ?? ''
 export const FROM_ADDRESS = process.env.FROM_ADDRESS ?? ''
 export const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'

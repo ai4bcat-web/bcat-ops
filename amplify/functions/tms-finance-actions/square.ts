@@ -18,16 +18,12 @@
  *  - The access token and the webhook key are read from the integration store and never logged, returned or stored on
  *    a shipment. An error message from Square is redacted of the token before it leaves.
  */
-import { readPageCredentials } from '../_shared/integrationSecrets'
 import { assertString, type Caller } from '../_shared/actionInputs'
 import {
-  SQUARE_API_VERSION,
   dateOnly,
   invoiceDescription,
   mirrorActionFor,
   normalizeCarShipping,
-  squareBaseUrl,
-  squareBodyLeaks,
   squareCustomerBody,
   squareInvoiceBody,
   squareInvoiceNumber,
@@ -38,10 +34,8 @@ import {
   type CarShippingSquare,
   type SquareEnvironment,
 } from '../../../src/lib/squareInvoicing'
-import { redactSecrets } from '../../../src/lib/integrations/secrets'
 import {
   CUSTOMER_TABLE_NAME,
-  INTEGRATION_TABLE_NAME,
   INVOICE_TABLE_NAME,
   IDX_LOADS_BY_SHIPMENT,
   IDX_ORDERS_BY_SHIPMENT,
@@ -51,6 +45,7 @@ import {
   ORDER_TABLE_NAME,
   SHIPMENT_TABLE_NAME,
   getById,
+  callShipmentActions,
   nowIso,
   putTx,
   queryIndex,
@@ -64,24 +59,33 @@ import { buildSnapshot, readOrderContext, voidInvoice } from './invoices'
 import { recordPayment } from './payments'
 
 // ── configuration and the HTTP call ─────────────────────────────────────────
+//
+// This Lambda decides WHAT to send to Square and records what comes back. It never holds the access token: every Square call goes
+// through tms-shipment-actions' system-caller door (`SQUARE_API`, see _shared/squareApi.ts), which already holds the Integration
+// read and the credential read. That keeps this Lambda's role and environment exactly as they were: both Lambdas sit in the data
+// stack, whose CloudFormation template is within a few hundred bytes of the 1,000,000-byte cap.
 
 export interface SquareConfig {
   environment: SquareEnvironment
-  baseUrl: string
-  token: string
   locationId: string
   enabled: boolean
   methods: AcceptedMethods
 }
 
-type FetchLike = (url: string, init: RequestInit) => Promise<Response>
-let squareFetch: FetchLike = (url, init) => fetch(url, init)
-/** Test hook: every Square call goes through this. */
-export function setSquareFetch(impl: FetchLike | null): void {
-  squareFetch = impl ?? ((url, init) => fetch(url, init))
+/** How a Square request is made. The default asks the shipment router; tests swap in a fake Square. */
+export interface SquareTransport {
+  context(): Promise<Row>
+  call(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<Row>
 }
-
-const TIMEOUT_MS = 15_000
+const routerTransport: SquareTransport = {
+  context: () => callShipmentActions('SQUARE_API', { op: 'CONTEXT' }),
+  call: (method, path, body) => callShipmentActions('SQUARE_API', { op: 'CALL', method, path, ...(body !== undefined ? { body } : {}) }),
+}
+let transport: SquareTransport = routerTransport
+/** Test hook: every Square request goes through this. */
+export function setSquareTransport(impl: SquareTransport | null): void {
+  transport = impl ?? routerTransport
+}
 
 /** The system identity the webhook and the sync act as. Never a person; the audit says so. */
 export const SQUARE_SYSTEM_CALLER: Caller = { email: 'square-sync@system', sub: 'square-sync', groups: ['ADMIN'], isAdmin: true }
@@ -94,26 +98,15 @@ function asJson<T>(value: unknown): T | null {
   return typeof value === 'object' ? (value as T) : null
 }
 
-/** The Integrations page's SQUARE row + stored credentials, for the ACTIVE environment. Throws a sentence a person can act on. */
+/** The Integrations page's SQUARE settings for the ACTIVE environment (no secret in it). Throws a sentence a person can act on. */
 export async function loadSquareConfig(): Promise<SquareConfig> {
-  const row = await getById(INTEGRATION_TABLE_NAME, 'SQUARE')
-  const settings = asJson<Record<string, unknown>>(row?.settings) ?? {}
-  const environment: SquareEnvironment = settings.environment === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX'
-  const creds = (await readPageCredentials('SQUARE')) ?? {}
-  const prefix = environment === 'PRODUCTION' ? 'production' : 'sandbox'
-  const token = (creds[`${prefix}AccessToken`] ?? '').trim()
-  const locationId = (creds[`${prefix}LocationId`] ?? '').trim()
-  if (!token || token === 'disabled-on-dev') {
-    throw new Error(`Square is not connected for ${environment}: enter the ${environment.toLowerCase()} access token on Integrations → Square`)
-  }
-  if (!locationId) throw new Error(`Square has no ${environment.toLowerCase()} location ID: enter it on Integrations → Square`)
+  const ctx = await transport.context()
+  if (ctx.connected !== true) throw new Error(String(ctx.reason ?? 'Square is not connected'))
   return {
-    environment,
-    baseUrl: squareBaseUrl(environment),
-    token,
-    locationId,
-    enabled: settings.autoShipperInvoicing === true,
-    methods: { bankTransfer: settings.acceptBankTransfer === true, cashApp: settings.acceptCashApp === true },
+    environment: ctx.environment === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX',
+    locationId: String(ctx.locationId),
+    enabled: ctx.enabled === true,
+    methods: (ctx.methods ?? {}) as AcceptedMethods,
   }
 }
 
@@ -126,49 +119,16 @@ export class SquareApiError extends Error {
   }
 }
 
-/** Nothing carrier-side, margin or cost may ever be sent to Square. */
-function assertClean(body: unknown): void {
-  const hit = squareBodyLeaks(body)
-  if (hit) throw new Error(`Refusing to send ${hit} to Square: carrier pay, cost and margin never go on a customer invoice`)
-}
-
-async function sq<T = Row>(cfg: SquareConfig, method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<T> {
-  if (body !== undefined) assertClean(body)
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
-  try {
-    const res = await squareFetch(`${cfg.baseUrl}${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${cfg.token}`,
-        'Square-Version': SQUARE_API_VERSION,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-      signal: controller.signal,
-    })
-    const text = await res.text()
-    let json: Row = {}
-    try { json = text ? (JSON.parse(text) as Row) : {} } catch { /* a non-JSON body is reported below */ }
-    if (!res.ok) {
-      const errors = Array.isArray(json.errors) ? (json.errors as Array<{ code?: string; detail?: string }>) : []
-      const detail = errors.map((e) => [e.code, e.detail].filter(Boolean).join(': ')).filter(Boolean).join('; ') || text.slice(0, 200) || `HTTP ${res.status}`
-      throw new SquareApiError(`Square refused the request (${res.status}): ${redactSecrets(detail, [cfg.token])}`, res.status)
-    }
-    return json as T
-  } catch (err) {
-    if (err instanceof SquareApiError) throw err
-    const name = err instanceof Error ? err.name : ''
-    // The ES2020 lib has no ErrorOptions constructor, so the cause is attached by hand (the integrationSecrets precedent).
-    const failure = new Error(
-      name === 'AbortError' ? 'Square did not answer in time; try again' : `Could not reach Square: ${redactSecrets(err instanceof Error ? err.message : String(err), [cfg.token])}`,
-    )
-    ;(failure as Error & { cause?: unknown }).cause = err
-    throw failure
-  } finally {
-    clearTimeout(timer)
+async function sq<T = Row>(_cfg: SquareConfig, method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<T> {
+  const answer = await transport.call(method, path, body)
+  const status = Number(answer.status ?? 0)
+  if (status === 0) throw new Error(String(answer.error ?? 'Could not reach Square; try again'))
+  if (status < 200 || status >= 300) {
+    const errors = Array.isArray((answer.json as Row | undefined)?.errors) ? ((answer.json as Row).errors as Array<{ code?: string; detail?: string }>) : []
+    const detail = errors.map((e) => [e.code, e.detail].filter(Boolean).join(': ')).filter(Boolean).join('; ') || String(answer.text ?? '') || `HTTP ${status}`
+    throw new SquareApiError(`Square refused the request (${status}): ${detail}`, status)
   }
+  return (answer.json ?? {}) as T
 }
 
 // ── the shipment's side ─────────────────────────────────────────────────────
