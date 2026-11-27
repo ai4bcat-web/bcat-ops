@@ -1,4 +1,5 @@
 import { INVOICE_METHOD_SYNCED_EVENT } from './invoiceMethod'
+import { stopsList } from './stopPlace'
 import { generateClient } from 'aws-amplify/data'
 import { messageAttachments } from '@/lib/shipmentThread'
 import { uploadData, getUrl, remove } from 'aws-amplify/storage'
@@ -2763,9 +2764,29 @@ export async function shipmentAction<T>(action: string, input: unknown): Promise
   } catch (err) {
     throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
   }
-  const v = unwrapJson(r.data.tmsShipmentActions)
+  const v = withParsedStops(unwrapJson(r.data.tmsShipmentActions))
   if (v == null) throw new Error(`${action} returned no result`)
   return v as T
+}
+
+/**
+ * The Lambda returns raw rows, and a Load's `stops` (AWSJSON) can come back as a JSON string, a keyed object or a list. Every bundle the
+ * actions return, bare or wrapped as `{ bundle, totals }`, leaves here with `stops` as a list on each load, so no reader of the bundle
+ * after a save has to guess (a string has no `.some`, and the page went blank: Ryne, Save on a load). Anything that is not a bundle is
+ * returned as it came.
+ */
+export function withParsedStops(v: unknown): unknown {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return v
+  const o = v as Record<string, unknown>
+  let out = o
+  if (Array.isArray(o.loads)) {
+    out = { ...out, loads: o.loads.map((l) => {
+      const stops = l && typeof l === 'object' ? (l as { stops?: unknown }).stops : undefined
+      return stops == null || Array.isArray(stops) ? l : { ...(l as object), stops: stopsList(stops) }
+    }) }
+  }
+  if (o.bundle && typeof o.bundle === 'object') out = { ...out, bundle: withParsedStops(o.bundle) }
+  return out
 }
 
 // ── Writes ───────────────────────────────────────────────────────────────────
@@ -3664,7 +3685,7 @@ export async function getShipmentBundle(shipmentId: string): Promise<ShipmentBun
   return {
     shipment: carShipping ? { ...shipment, carShipping } : shipment,
     orders: orders.map((o) => unwrapJsonFields(o, ORDER_JSON_FIELDS)),
-    loads: loads.map((l) => unwrapJsonFields(l, ['stops'])),
+    loads: (withParsedStops({ loads }) as { loads: typeof loads }).loads,
     loadCarriers,
     charges,
     financials,

@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { TmsButton } from '@/features/tms/kit'
 import { updateStop } from '@/lib/apiClient'
 import { formatDateTimeInput, fromDateTimeInput } from '@/lib/date'
+import { stopsList } from '@/lib/stopPlace'
 import { STOP_TIME_SOURCE_LABEL, stopTimesOf } from '@/lib/stopActualTimes'
 import type { FormStop } from '../model'
 import type { FormCtx } from '../sectionProps'
@@ -26,7 +27,7 @@ export function StopActualTimes({ stop, ctx, onChange, isFinalDelivery, disabled
   disabled: boolean
 }) {
   const bundle = ctx.mode === 'edit' ? ctx.bundle : null
-  const load = bundle?.loads.find((l) => (l.stops ?? []).some((s) => s.id === stop.id)) ?? null
+  const load = bundle?.loads.find((l) => stopsList<{ id?: string }>(l.stops).some((s) => s.id === stop.id)) ?? null
   const times = load ? stopTimesOf({ loads: [load] }).find((t) => t.stopId === stop.id) ?? null : null
   const [draft, setDraft] = useState<{ arrivedAt: string | null; departedAt: string | null }>({ arrivedAt: null, departedAt: null })
   const [busy, setBusy] = useState<Kind | null>(null)
