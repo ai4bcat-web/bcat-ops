@@ -1,7 +1,7 @@
 /**
  * The Calendar's Capacity board (Ryne 2026-11-27): a card is a TRUCK WE NEED TO FILL, an open truck or driver the office has to find
  * a load for. The fields follow the DAT "Post Truck" form (available date(s), origin, destination or anywhere, equipment, load type,
- * length, weight, reference, minimum rate per mile, contact phone, comments). The board is one column per day; a card with a date
+ * length, maximum weight, minimum rate per mile, comments). The board is one column per day; a card with a date
  * range shows on every day in it; a covered card stays on the board, greyed, until its last day has passed.
  *
  * The board lives in ONE settings field (`TmsSettings.capacityBoard`, written only by tms-directory-actions with a compare-and-swap),
@@ -20,14 +20,21 @@ export interface CapacityFields {
   origin: string
   /** City, ST or a zone; '' means the truck will go anywhere. */
   destination: string
+  /** Optional search radius around the origin / destination, whole miles. Destination radius only exists when there is a destination. */
+  originRadiusMi?: number
+  destinationRadiusMi?: number
+  /** Optional wanted times, 'HH:MM' 24-hour. One time is the From alone; a window has both (To is not before From). They apply to the whole card. */
+  pickupTimeFrom?: string
+  pickupTimeTo?: string
+  deliveryTimeFrom?: string
+  deliveryTimeTo?: string
   equipment: string
   loadType: CapacityLoadType
   lengthFt: number
+  /** Maximum weight in lbs (stored as `weightLbs`, the name older cards already use). */
   weightLbs?: number
-  referenceId?: string
   /** Minimum rate per mile in cents (250 = $2.50). */
   minRatePerMileCents?: number
-  contactPhone?: string
   comments?: string
   /** Optional link to the driver the truck is (a Driver id). */
   driverId?: string
@@ -137,6 +144,38 @@ function optionalNumber(value: unknown, label: string, min: number, max: number)
   return n
 }
 
+/** The equipment choices on a card. Van and Box truck carry the length a new card starts with; the rest leave length to the person. */
+export const CAPACITY_EQUIPMENT: readonly { value: string; defaultLengthFt?: number }[] = [
+  { value: 'Van', defaultLengthFt: 53 },
+  { value: 'Box truck', defaultLengthFt: 18 },
+  { value: 'Reefer' }, { value: 'Flatbed' }, { value: 'Step Deck' }, { value: 'Power Only' },
+  { value: 'Container' }, { value: 'Hotshot' }, { value: 'Conestoga' },
+]
+
+/** Maximum weight as the card reads it, 'max 40,000 lb'; '' when none. */
+export function formatMaxWeight(lbs: number | undefined): string {
+  return lbs ? `max ${lbs.toLocaleString('en-US')} lb` : ''
+}
+
+/** Biggest radius a card may ask for, in miles. */
+export const CAPACITY_MAX_RADIUS_MI = 500
+
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/
+
+function optionalTime(value: unknown, label: string): string | undefined {
+  if (value == null || value === '') return undefined
+  if (typeof value !== 'string' || !HHMM.test(value.trim())) throw new Error(`${label} must be a time`)
+  return value.trim()
+}
+
+/** A pair of wanted times: either, both, or neither; the end of a window is never before its start. */
+function timeWindow(from: unknown, to: unknown, label: string): { from?: string; to?: string } {
+  const f = optionalTime(from, `${label} time`)
+  const t = optionalTime(to, `${label} time (to)`)
+  if (f && t && t < f) throw new Error(`${label} window ends before it starts`)
+  return { ...(f ? { from: f } : {}), ...(t ? { to: t } : {}) }
+}
+
 /**
  * Check and tidy what a person typed. Throws an Error whose message says what to fix. Origin, equipment and length are required,
  * as on DAT; a missing destination means "anywhere".
@@ -153,15 +192,18 @@ export function parseCapacityFields(raw: Record<string, unknown>): CapacityField
   // Checked in the order the form asks: origin, destination, equipment, load type, length.
   const origin = text(raw.origin, 'Origin', 120, true)
   const destination = text(raw.destination, 'Destination', 120, false)
+  const originRadius = optionalNumber(raw.originRadiusMi, 'Pickup radius', 0, CAPACITY_MAX_RADIUS_MI)
+  // "Anywhere" has no place to measure from, so a destination radius is ignored without a destination.
+  const destRadius = destination ? optionalNumber(raw.destinationRadiusMi, 'Destination radius', 0, CAPACITY_MAX_RADIUS_MI) : undefined
+  const pickup = timeWindow(raw.pickupTimeFrom, raw.pickupTimeTo, 'Pickup')
+  const delivery = timeWindow(raw.deliveryTimeFrom, raw.deliveryTimeTo, 'Delivery')
   const equipment = text(raw.equipment, 'Equipment', 60, true)
   const loadType = raw.loadType == null || raw.loadType === '' ? 'FULL' : raw.loadType
   if (loadType !== 'FULL' && loadType !== 'PARTIAL') throw new Error('Load type must be Full or Partial')
   const lengthFt = optionalNumber(raw.lengthFt, 'Length', 1, 80)
   if (lengthFt === undefined) throw new Error('Length is required')
-  const weightLbs = optionalNumber(raw.weightLbs, 'Weight', 1, 200_000)
+  const weightLbs = optionalNumber(raw.weightLbs, 'Maximum weight', 1, 200_000)
   const ratePerMile = optionalNumber(raw.minRatePerMile ?? (raw.minRatePerMileCents != null ? Number(raw.minRatePerMileCents) / 100 : undefined), 'Minimum rate per mile', 0, 50)
-  const referenceId = text(raw.referenceId, 'Reference ID', 60, false)
-  const contactPhone = text(raw.contactPhone, 'Contact phone', 40, false)
   const comments = text(raw.comments, 'Comments', 500, false)
   const driverId = text(raw.driverId, 'Driver', 80, false)
   return {
@@ -169,13 +211,17 @@ export function parseCapacityFields(raw: Record<string, unknown>): CapacityField
     availableTo,
     origin,
     destination,
+    ...(originRadius ? { originRadiusMi: Math.round(originRadius) } : {}),
+    ...(destRadius ? { destinationRadiusMi: Math.round(destRadius) } : {}),
+    ...(pickup.from ? { pickupTimeFrom: pickup.from } : {}),
+    ...(pickup.to ? { pickupTimeTo: pickup.to } : {}),
+    ...(delivery.from ? { deliveryTimeFrom: delivery.from } : {}),
+    ...(delivery.to ? { deliveryTimeTo: delivery.to } : {}),
     equipment,
     loadType,
     lengthFt,
     ...(weightLbs !== undefined ? { weightLbs: Math.round(weightLbs) } : {}),
-    ...(referenceId ? { referenceId } : {}),
     ...(ratePerMile !== undefined ? { minRatePerMileCents: Math.round(ratePerMile * 100) } : {}),
-    ...(contactPhone ? { contactPhone } : {}),
     ...(comments ? { comments } : {}),
     ...(driverId ? { driverId } : {}),
   }
@@ -240,7 +286,7 @@ export function capacityColumns(board: CapacityBoard, days: readonly string[], s
 }
 
 function cardHaystack(c: CapacityCard): string {
-  return [c.origin, c.destination, c.equipment, c.referenceId, c.contactPhone, c.comments].filter(Boolean).join(' ').toLowerCase()
+  return [c.origin, c.originRadiusMi ? `${c.originRadiusMi} mi` : '', c.destination, c.destinationRadiusMi ? `${c.destinationRadiusMi} mi` : '', c.equipment, c.weightLbs ? `max ${c.weightLbs}` : '', c.comments].filter(Boolean).join(' ').toLowerCase()
 }
 
 /**
@@ -342,8 +388,29 @@ export function applyCapacityOp(current: CapacityBoard, op: CapacityOp, ctx: App
 }
 
 /** The text a card's phone and tooltip read: "Chicago, IL → anywhere · Dry Van · 53 ft". */
-export function capacityHeadline(c: Pick<CapacityCard, 'origin' | 'destination'>): string {
-  return `${c.origin} → ${c.destination || 'anywhere'}`
+export function capacityHeadline(c: Pick<CapacityCard, 'origin' | 'destination'> & { originRadiusMi?: number; destinationRadiusMi?: number }): string {
+  const place = (name: string, mi?: number) => (mi ? `${name} · ${mi} mi` : name)
+  return `${place(c.origin, c.originRadiusMi)} → ${c.destination ? place(c.destination, c.destinationRadiusMi) : 'anywhere'}`
+}
+
+/** '14:30' → '2:30p', '08:00' → '8:00a'. */
+export function formatClock(hhmm: string): string {
+  const [h, m] = hhmm.split(':').map(Number)
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')}${h < 12 ? 'a' : 'p'}`
+}
+
+function clockSpan(from?: string, to?: string): string {
+  if (from && to) return `${formatClock(from)}–${formatClock(to)}`
+  if (from) return formatClock(from)
+  if (to) return `by ${formatClock(to)}`
+  return ''
+}
+
+/** The wanted times on a card, 'PU 8:00a–12:00p · DEL 2:00p'; '' when none. */
+export function formatCapacityTimes(c: Pick<CapacityCard, 'pickupTimeFrom' | 'pickupTimeTo' | 'deliveryTimeFrom' | 'deliveryTimeTo'>): string {
+  const pu = clockSpan(c.pickupTimeFrom, c.pickupTimeTo)
+  const del = clockSpan(c.deliveryTimeFrom, c.deliveryTimeTo)
+  return [pu ? `PU ${pu}` : '', del ? `DEL ${del}` : ''].filter(Boolean).join(' · ')
 }
 
 /** Min rate per mile as dollars, '$2.50/mi'; '' when none. */

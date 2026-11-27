@@ -2,15 +2,8 @@ import { useId, useState } from 'react'
 import { TmsDialog } from '@/features/tms/kit/TmsDialog'
 import { TmsButton } from '@/features/tms/kit/TmsButton'
 import { CityInput } from '@/features/tms/kit/CityInput'
-import { EQUIPMENT_SUGGESTIONS } from '@/features/shipments/form/constants'
-import { parseCapacityFields, CAPACITY_MAX_SPAN_DAYS, type CapacityCard } from '@/lib/capacityBoard'
+import { parseCapacityFields, CAPACITY_EQUIPMENT, CAPACITY_MAX_SPAN_DAYS, type CapacityCard } from '@/lib/capacityBoard'
 import type { Driver } from '@/types'
-
-const PHONE_KEY = 'bcat.capacity.lastPhone'
-
-function lastPhone(): string {
-  try { return window.localStorage.getItem(PHONE_KEY) ?? '' } catch { return '' }
-}
 
 /** The card's fields as the form holds them: everything text, so a half-typed number never fights the person. */
 interface FormValues {
@@ -18,13 +11,17 @@ interface FormValues {
   availableTo: string
   origin: string
   destination: string
+  originRadiusMi: string
+  destinationRadiusMi: string
+  pickupTimeFrom: string
+  pickupTimeTo: string
+  deliveryTimeFrom: string
+  deliveryTimeTo: string
   equipment: string
   loadType: string
   lengthFt: string
   weightLbs: string
-  referenceId: string
   minRatePerMile: string
-  contactPhone: string
   comments: string
   driverId: string
 }
@@ -33,15 +30,19 @@ function initialValues(card: CapacityCard | null, day: string): FormValues {
   if (card) {
     return {
       availableFrom: card.availableFrom, availableTo: card.availableTo,
-      origin: card.origin, destination: card.destination, equipment: card.equipment, loadType: card.loadType,
+      origin: card.origin, destination: card.destination,
+      originRadiusMi: card.originRadiusMi != null ? String(card.originRadiusMi) : '', destinationRadiusMi: card.destinationRadiusMi != null ? String(card.destinationRadiusMi) : '',
+      pickupTimeFrom: card.pickupTimeFrom ?? '', pickupTimeTo: card.pickupTimeTo ?? '', deliveryTimeFrom: card.deliveryTimeFrom ?? '', deliveryTimeTo: card.deliveryTimeTo ?? '',
+      equipment: card.equipment, loadType: card.loadType,
       lengthFt: String(card.lengthFt), weightLbs: card.weightLbs != null ? String(card.weightLbs) : '',
-      referenceId: card.referenceId ?? '', minRatePerMile: card.minRatePerMileCents != null ? (card.minRatePerMileCents / 100).toFixed(2) : '',
-      contactPhone: card.contactPhone ?? '', comments: card.comments ?? '', driverId: card.driverId ?? '',
+      minRatePerMile: card.minRatePerMileCents != null ? (card.minRatePerMileCents / 100).toFixed(2) : '',
+      comments: card.comments ?? '', driverId: card.driverId ?? '',
     }
   }
   return {
-    availableFrom: day, availableTo: day, origin: '', destination: '', equipment: '', loadType: 'FULL', lengthFt: '',
-    weightLbs: '', referenceId: '', minRatePerMile: '', contactPhone: lastPhone(), comments: '', driverId: '',
+    availableFrom: day, availableTo: day, origin: '', destination: '', originRadiusMi: '', destinationRadiusMi: '',
+    pickupTimeFrom: '', pickupTimeTo: '', deliveryTimeFrom: '', deliveryTimeTo: '', equipment: CAPACITY_EQUIPMENT[0].value, loadType: 'FULL', lengthFt: String(CAPACITY_EQUIPMENT[0].defaultLengthFt),
+    weightLbs: '', minRatePerMile: '', comments: '', driverId: '',
   }
 }
 
@@ -75,6 +76,16 @@ export function CapacityCardDialog({ card, day, drivers, onSave, onClose }: {
   const id = (name: string) => `${uid}-${name}`
   const activeDrivers = drivers.filter((d) => d.active).sort((a, b) => a.name.localeCompare(b.name))
 
+  // An older card may hold a type that is not in the list (Dry Van); it stays selectable so editing never changes it silently.
+  const equipmentOptions = CAPACITY_EQUIPMENT.some((o) => o.value === v.equipment) || !v.equipment
+    ? CAPACITY_EQUIPMENT.map((o) => o.value)
+    : [v.equipment, ...CAPACITY_EQUIPMENT.map((o) => o.value)]
+  // Picking Van or Box truck fills in its usual length; the length stays editable.
+  function pickEquipment(value: string) {
+    const fill = CAPACITY_EQUIPMENT.find((o) => o.value === value)?.defaultLengthFt
+    setV((cur) => ({ ...cur, equipment: value, ...(fill ? { lengthFt: String(fill) } : {}) }))
+  }
+
   async function submit() {
     setError(null)
     // The same check the server runs, so a mistake is named before anything is sent.
@@ -82,10 +93,7 @@ export function CapacityCardDialog({ card, day, drivers, onSave, onClose }: {
       const fields = parseCapacityFields({ ...v, availableTo: v.availableTo || v.availableFrom })
       setSaving(true)
       const saved = await onSave({ ...v, availableTo: v.availableTo || v.availableFrom, lengthFt: fields.lengthFt }, card?.id)
-      if (saved) {
-        try { if (v.contactPhone) window.localStorage.setItem(PHONE_KEY, v.contactPhone) } catch { /* private mode */ }
-        onClose()
-      }
+      if (saved) onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Check the form')
     } finally {
@@ -127,9 +135,36 @@ export function CapacityCardDialog({ card, day, drivers, onSave, onClose }: {
           <CityInput id={id('dest')} value={v.destination} onChange={set('destination')} onPick={(o) => set('destination')(`${o.city}, ${o.state}`)} placeholder="Leave empty to go anywhere" />
         </div>
         <div>
+          <label style={labelStyle} htmlFor={id('oradius')}>Pickup radius (miles)</label>
+          <input id={id('oradius')} inputMode="numeric" style={inputStyle} placeholder="50" {...field('originRadiusMi')} />
+        </div>
+        {v.destination.trim() && (
+          <div>
+            <label style={labelStyle} htmlFor={id('dradius')}>Destination radius (miles)</label>
+            <input id={id('dradius')} inputMode="numeric" style={inputStyle} placeholder="50" {...field('destinationRadiusMi')} />
+          </div>
+        )}
+        <div>
+          <label style={labelStyle} htmlFor={id('puf')}>Pickup time from</label>
+          <input id={id('puf')} type="time" style={inputStyle} {...field('pickupTimeFrom')} />
+        </div>
+        <div>
+          <label style={labelStyle} htmlFor={id('put')}>Pickup time to</label>
+          <input id={id('put')} type="time" style={inputStyle} {...field('pickupTimeTo')} />
+        </div>
+        <div>
+          <label style={labelStyle} htmlFor={id('delf')}>Delivery time from</label>
+          <input id={id('delf')} type="time" style={inputStyle} {...field('deliveryTimeFrom')} />
+        </div>
+        <div>
+          <label style={labelStyle} htmlFor={id('delt')}>Delivery time to</label>
+          <input id={id('delt')} type="time" style={inputStyle} {...field('deliveryTimeTo')} />
+        </div>
+        <div>
           <label style={labelStyle} htmlFor={id('equip')}>Equipment *</label>
-          <input id={id('equip')} list={id('equip-list')} style={inputStyle} placeholder="Dry Van" {...field('equipment')} />
-          <datalist id={id('equip-list')}>{EQUIPMENT_SUGGESTIONS.map((e) => <option key={e} value={e} />)}</datalist>
+          <select id={id('equip')} style={inputStyle} value={v.equipment} onChange={(e) => pickEquipment(e.target.value)}>
+            {equipmentOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
         </div>
         <div>
           <label style={labelStyle} htmlFor={id('type')}>Load type</label>
@@ -143,20 +178,12 @@ export function CapacityCardDialog({ card, day, drivers, onSave, onClose }: {
           <input id={id('len')} inputMode="numeric" style={inputStyle} placeholder="53" {...field('lengthFt')} />
         </div>
         <div>
-          <label style={labelStyle} htmlFor={id('wt')}>Weight (lbs)</label>
+          <label style={labelStyle} htmlFor={id('wt')}>Maximum weight (lbs)</label>
           <input id={id('wt')} inputMode="numeric" style={inputStyle} placeholder="45,000" {...field('weightLbs')} />
         </div>
         <div>
           <label style={labelStyle} htmlFor={id('rate')}>Min. rate / mile ($)</label>
           <input id={id('rate')} inputMode="decimal" style={inputStyle} placeholder="2.50" {...field('minRatePerMile')} />
-        </div>
-        <div>
-          <label style={labelStyle} htmlFor={id('ref')}>Reference ID</label>
-          <input id={id('ref')} style={inputStyle} {...field('referenceId')} />
-        </div>
-        <div>
-          <label style={labelStyle} htmlFor={id('phone')}>Contact phone</label>
-          <input id={id('phone')} inputMode="tel" style={inputStyle} placeholder="(847) 555-0100" {...field('contactPhone')} />
         </div>
         <div>
           <label style={labelStyle} htmlFor={id('driver')}>Driver (optional)</label>
