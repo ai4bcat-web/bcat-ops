@@ -120,6 +120,7 @@ import {
   updateDocument,
   voidDocument,
   setLoadRequiredDocs,
+  setLoadPaidDirect,
   type DocumentDeps,
 } from './documents'
 import {
@@ -719,6 +720,7 @@ type Action =
   | 'VOID_DOCUMENT'
   // Extra documents one load needs on top of the customer's list (POD / RC are defaults).
   | 'SET_LOAD_REQUIRED_DOCS'
+  | 'SET_LOAD_PAID_DIRECT'
   | 'READY_TO_INVOICE'
   | 'REVIEW_LOAD'
   // Released loads missing from AR or AP; read-only unless createMissingFor names an order.
@@ -947,6 +949,8 @@ function isActionAuthorized(action: Action, caller: Caller): boolean {
   if (LOAD_REVIEW_ACTIONS[action]) return groups.includes(LOAD_REVIEW_PAGE_GROUP) || groups.includes(LOADS_PAGE_GROUP) || tms
   if (action === 'RECONCILE_BILLING') return BILLING_RECONCILE_GROUPS.some((g) => groups.includes(g)) || groups.includes(LOADS_PAGE_GROUP) || tms
   if (ADMIN_ONLY_ACTIONS[action]) return false
+  // Driver pay, so it goes to whoever may open the settlements pages, not to everyone who may edit a load.
+  if (action === 'SET_LOAD_PAID_DIRECT') return groups.includes('page-ownerOperatorPay') || groups.includes('page-driverPay')
   if (action === 'UPDATE_CARRIER_CHARGES') {
     return groups.includes(LOADS_PAGE_GROUP) || tms || groups.includes('page-carrierPay')
   }
@@ -10333,6 +10337,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return voidDocument(documentDeps, input, caller)
     case 'SET_LOAD_REQUIRED_DOCS':
       return setLoadRequiredDocs(documentDeps, input, caller)
+    case 'SET_LOAD_PAID_DIRECT':
+      return setLoadPaidDirect(documentDeps, input, caller)
     case 'READY_TO_INVOICE':
       return readyToInvoice(documentDeps, input, caller)
     case 'REVIEW_LOAD':

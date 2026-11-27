@@ -45,6 +45,8 @@ export interface OwnerOpLoadLike {
   customer?: string | null
   miles?: number | null
   rate?: number | null
+  /** Cents of the load's total the driver was already paid directly (a lumper the broker handed them). */
+  driverPaidDirectCents?: number | null
   deliveryAppt?: string | null
   deliveryDriverId?: string | null
   originCity?: string | null
@@ -60,7 +62,15 @@ export interface OwnerOpTrip {
   origin: string
   destination: string
   miles: number | null
-  freightAmount: number // dollars = rate / 100
+  /**
+   * Dollars the driver's percentage applies to: the load's total less anything already paid
+   * to the driver directly (`paidDirect`). Every settlement path reads THIS figure.
+   */
+  freightAmount: number
+  /** Dollars of the load's total the driver was paid directly, never more than the total. 0 when none. */
+  paidDirect: number
+  /** The load's total in dollars, before `paidDirect` came off. The customer invoice and the factored amount stay at this. */
+  loadTotal: number
   deliveredAt: string
   /** Factoring readiness, computed after trips are built by the hook. */
   readiness?: OtrReadiness
@@ -117,6 +127,19 @@ function addDays(periodStart: string, days: number): string {
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100
+
+/**
+ * Cents of a load's total that were paid to the driver directly, clamped to [0, total]. A lumper
+ * the broker paid the driver is already theirs, so no percentage of it is owed again: the amount
+ * comes off the load's total before the driver's share is worked out, and the customer invoice
+ * and the factored amount are left alone.
+ */
+export function paidDirectCents(load: Pick<OwnerOpLoadLike, 'rate' | 'driverPaidDirectCents'>): number {
+  const rate = load.rate
+  const v = load.driverPaidDirectCents
+  if (rate == null || !Number.isFinite(rate) || v == null || !Number.isFinite(v) || v <= 0) return 0
+  return Math.min(Math.round(v), Math.max(0, Math.round(rate)))
+}
 
 /**
  * Dollars per mile for one load, or null when it cannot be said.
@@ -185,7 +208,9 @@ export function ownerOpTripsFor(
       origin: firstText(load.originCity, load.originName),
       destination: firstText(load.destinationCity, load.destinationName),
       miles: load.miles ?? null,
-      freightAmount: round2(load.rate / 100),
+      freightAmount: round2((load.rate - paidDirectCents(load)) / 100),
+      paidDirect: round2(paidDirectCents(load) / 100),
+      loadTotal: round2(load.rate / 100),
       deliveredAt: load.deliveryAppt,
     })
   }

@@ -379,6 +379,8 @@ export interface Load extends ShipmentLoadFields {
   // Extended fields (nullable — populated as data becomes available)
   truckId?: string | null
   rate?: number | null      // total load revenue in cents
+  /** Cents of `rate` already paid to the driver directly (a lumper). Settlements work the driver's share off the rest; set only by SET_LOAD_PAID_DIRECT. */
+  driverPaidDirectCents?: number | null
   miles?: number | null     // load distance
   customer?: string | null  // customer/broker name
   customerId?: string | null
