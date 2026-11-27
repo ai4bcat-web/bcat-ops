@@ -73,6 +73,7 @@ import { CarrierSalesPage } from '@/features/tms/carrierSales/CarrierSalesPage'
 import { SpotCallbackPage } from '@/features/spot-quoter/SpotCallbackPage'
 import { QuoteRespondPage } from '@/features/quotes/public/QuoteRespondPage'
 import { InvoicingPage } from '@/features/ar/InvoicingPage'
+import { AutoShipperLoadsPage } from '@/features/car-shipping/AutoShipperLoadsPage'
 import { InvoiceDetail } from '@/features/ar/InvoiceDetail'
 import { BillDetail } from '@/features/ap/BillDetail'
 import { HoursPage } from '@/features/hours/HoursPage'
@@ -283,6 +284,7 @@ export default function App() {
               <Route path="/pods"     element={<RequirePage page="pods"><PodsPage /></RequirePage>} />
               <Route path="/tasks"   element={<RequirePage page="tasks"><TasksPage /></RequirePage>} />
               <Route path="/users" element={<ParamRedirect to="/tms/brokerage/users" />} />
+              <Route path="/auto-shipper-loads" element={<RequirePage page="autoShipperLoads"><AutoShipperLoadsPage /></RequirePage>} />
               <Route path="/vehicle-quote" element={<RequirePage page="vehicleQuote"><VehicleQuotePage /></RequirePage>} />
               <Route path="/vehicle-confirmation" element={<RequirePage page="vehicleConfirmation"><VehicleConfirmationPage /></RequirePage>} />
               {/* Retired — onboarding and the per-driver / per-truck compliance pages live in
