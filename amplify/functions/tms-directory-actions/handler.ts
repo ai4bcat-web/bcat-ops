@@ -2481,7 +2481,12 @@ async function capacityBoardAction(input: Record<string, unknown>, caller: Calle
       }))
     } catch (err) {
       if (attempt < 2 && /ConditionalCheckFailed/i.test(String(err))) continue
-      if (/ConditionalCheckFailed/i.test(String(err))) throw new Error('The capacity board changed while you were saving. Try again.', { cause: err })
+      if (/ConditionalCheckFailed/i.test(String(err))) {
+        // ES2020 lib lacks the ErrorOptions constructor, so the cause is attached the way conflictError does.
+        const lost = new Error('The capacity board changed while you were saving. Try again.')
+        ;(lost as Error & { cause?: unknown }).cause = err
+        throw lost
+      }
       throw err
     }
     await writeAudit('CapacityCard', card.id, `CAPACITY_${opName.toUpperCase()}`, caller, {
