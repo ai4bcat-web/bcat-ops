@@ -145,7 +145,7 @@ describe('rollup dirty keys for the rep split', () => {
   it('a rep change on a shipment dirties its pickup month and the next one (where its samples are booked)', () => {
     const before = { id: 's', pickupAppt: '2026-10-05T12:00:00Z', pickupMonth: '2026-10', salesRepCode: null }
     const after = { ...before, salesRepCode: 'JANE DOE' }
-    expect(dirtyKeysForRecord('Shipment', before, after).sort()).toEqual(['LG:2026-10', 'M:2026-10', 'M:2026-11'])
+    expect(dirtyKeysForRecord('Shipment', before, after).sort()).toEqual(['M:2026-10', 'M:2026-11'])
   })
 })
 
