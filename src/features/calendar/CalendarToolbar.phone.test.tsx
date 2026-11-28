@@ -43,6 +43,23 @@ describe('CalendarToolbar on a phone', () => {
   })
 })
 
+describe('CalendarToolbar on desktop', () => {
+  it('wraps every filter chip onto its own line below the controls instead of clipping them', () => {
+    render(<MemoryRouter><CalendarToolbar {...props} currentView="day" /></MemoryRouter>)
+    const chips = document.getElementById('calendar-filters')!
+    expect(chips.style.flexWrap).toBe('wrap')
+    expect(chips.style.flex).toBe('1 1 100%')
+    expect(chips.style.order).toBe('10')
+    expect(chips.style.overflow).not.toBe('hidden')
+    const bar = chips.parentElement!
+    expect(bar.style.flexWrap).toBe('wrap')
+    expect(bar.style.overflowX).not.toBe('auto')
+    for (const name of ['Waiting for Detention', 'Waiting for TONU', 'Needs Appt']) {
+      expect(screen.getByRole('button', { name: new RegExp(name) })).toBeTruthy()
+    }
+  })
+})
+
 describe('CalendarToolbar views', () => {
   it('offers Day and Capacity only: Week and Month are gone', () => {
     render(<MemoryRouter><CalendarToolbar {...props} /></MemoryRouter>)
