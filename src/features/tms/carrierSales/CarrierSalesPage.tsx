@@ -265,9 +265,9 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
   return (
     <>
       <div className="tms-dense-page tms-caps">
-        <TmsTabStrip aria-label="Carrier sales tabs" active={tab} onSelect={onTab} tabs={tabs} />
+        <TmsTabStrip aria-label="Find Capacity tabs" active={tab} onSelect={onTab} tabs={tabs} />
         <div className="tms-dense-bar">
-          <span className="tms-dense-title"><Truck size={18} aria-hidden="true" /> Book · Carrier sales</span>
+          <span className="tms-dense-title"><Truck size={18} aria-hidden="true" /> Book · Find Capacity</span>
           <Search size={14} className="tms-muted" aria-hidden="true" />
           <TmsInput className="tms-dense-search" aria-label="Search" placeholder="Search shipment, customer, carrier, lane…" value={search} onChange={(e) => { setSearch(e.target.value); setPageSize(PAGE_STEP) }} />
           {isCovered && (
