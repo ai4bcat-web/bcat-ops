@@ -66,10 +66,12 @@ export function CalendarToolbar({
       display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
       padding: '8px', background: 'var(--tms-card)', borderBottom: '1px solid var(--tms-border)', flexShrink: 0,
     } : {
-      display: 'flex', alignItems: 'center', gap: 8,
-      height: 56, padding: '0 20px',
+      // Desktop: the first line holds the views, date, search and New Shipment; the filter chips drop to their own line
+      // beneath and wrap, so none is ever cut off.
+      display: 'flex', alignItems: 'center', gap: 8, rowGap: 8,
+      minHeight: 56, padding: '10px 20px',
       background: 'var(--tms-card)', borderBottom: '1px solid var(--tms-border)',
-      flexShrink: 0, flexWrap: 'nowrap', overflowX: 'auto',
+      flexShrink: 0, flexWrap: 'wrap',
     }}>
 
       {/* ── Today ────────────────────────────────────────────────────────── */}
@@ -130,8 +132,6 @@ export function CalendarToolbar({
         {dateLabel}
       </span>
 
-      {!phone && !onCapacity && <div style={{ width: 1, height: 24, background: 'var(--tms-border)', flexShrink: 0 }} />}
-
       {phone && !onCapacity && (
         <button
           type="button"
@@ -151,7 +151,7 @@ export function CalendarToolbar({
         id="calendar-filters"
         style={phone
           ? { display: filtersOpen ? 'flex' : 'none', flexWrap: 'wrap', alignItems: 'center', gap: 6, flex: '1 1 100%', minWidth: 0, ...at(9) }
-          : { display: 'flex', alignItems: 'center', gap: 6, flex: 1, overflow: 'hidden', minWidth: 0 }}
+          : { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, flex: '1 1 100%', order: 10, minWidth: 0 }}
       >
         {/* Whose loads, before which loads: this decides the board's population, and the
             chips below only narrow what it lets through. */}
@@ -192,7 +192,7 @@ export function CalendarToolbar({
         })}
       </div>
       )}
-      {onCapacity && <div style={{ flex: 1 }} />}
+      {(onCapacity || !phone) && <div style={{ flex: 1, minWidth: 0 }} />}
 
       {/* ── Search ───────────────────────────────────────────────────────── */}
       {!onCapacity && (
