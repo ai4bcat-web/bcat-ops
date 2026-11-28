@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   autoShipperCsv, bothPaid, carrierPayCents, carrierPayTotal, buildAutoShipperRows, carrierAction, carrierRollupOf, customerAction, carrierUnpaid, customerUnpaid, inRange, inTab, isAutoShipperCustomer,
-  isAutoShipperShipment, payerText, rangeStart, summarize, tabCounts, vehicleText, type AutoShipperInput, type AutoShipperRow,
+  isAutoShipperShipment, payerText, rangeStart, shipmentAction, summarize, tabCounts, vehicleText, type AutoShipperInput, type AutoShipperRow,
 } from './autoShipperLoads'
 import type { CarrierBillRecord, InvoiceRecord, LoadCarrierRecord, OrderRecord, ShipmentRecord } from '@/types/tms'
 import type { CarShippingData } from '@/lib/squareInvoicing'
@@ -370,5 +370,28 @@ describe('carrier pay amount (Ryne 2026-11-27)', () => {
     expect(head).toContain('Carrier pay')
     expect(line).toContain('900.00; 250.00')
     expect(autoShipperCsv([row], { showAr: false, showAp: false })).not.toContain('Carrier pay')
+  })
+})
+
+describe('shipmentAction (auto shippers skip Load Review, Ryne 2026-11-28)', () => {
+  const customer = (state: 'NOT_INVOICED' | 'UNPAID' | 'PAID') => ({ state } as AutoShipperRow['customer'])
+  const base = { squareShipment: true, squareState: 'DRAFT' as const, delivered: false, customer: customer('NOT_INVOICED') }
+
+  it('offers Mark delivered first, to anyone who can see the page', () => {
+    expect(shipmentAction(base, true)?.kind).toBe('MARK_DELIVERED')
+    expect(shipmentAction({ ...base, customer: null }, false)?.kind).toBe('MARK_DELIVERED')
+  })
+
+  it('then makes or sends the Square invoice, only with the receivables grant', () => {
+    expect(shipmentAction({ ...base, delivered: true, squareState: 'NOT_CREATED' }, true)?.kind).toBe('CREATE_DRAFT')
+    expect(shipmentAction({ ...base, delivered: true, squareState: 'DRAFT' }, true)?.kind).toBe('SEND_INVOICE')
+    expect(shipmentAction({ ...base, delivered: true, squareState: 'DRAFT' }, false)).toBeNull()
+  })
+
+  it('offers nothing once invoiced, canceled or sent, and nothing on old imported history', () => {
+    expect(shipmentAction({ ...base, delivered: true, customer: customer('UNPAID') }, true)).toBeNull()
+    expect(shipmentAction({ ...base, delivered: true, squareState: 'SENT' }, true)).toBeNull()
+    expect(shipmentAction({ ...base, delivered: true, squareState: 'CANCELED' }, true)).toBeNull()
+    expect(shipmentAction({ ...base, squareShipment: false, squareState: null }, true)).toBeNull()
   })
 })

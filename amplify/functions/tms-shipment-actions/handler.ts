@@ -2976,16 +2976,18 @@ async function setLoadStatus(input: Row, caller: Caller): Promise<Row> {
   if (!load) throw new Error(`Load not found: ${loadId}`)
   const shipmentId = optionalString(load.shipmentId, 100)
   if (!shipmentId) throw new Error('That load is not part of a shipment yet')
-  await requireLiveShipment(shipmentId)
+  const liveShipment = await requireLiveShipment(shipmentId)
+  // An auto shipper (carShipping) has no dispatch ladder: someone just marks it Delivered, from wherever it is (Ryne 2026-11-28).
+  const autoShipperDelivery = requested === 'DELIVERED' && liveShipment.carShipping != null
 
   const current = (optionalEnum(load.status, LOAD_STATUS_VALUES, 'status') ?? null) as LoadWorkflowStatus | null
   if (requested === 'INVOICING') {
     throw new Error('INVOICING is set by invoicing, not by hand')
   }
-  if (!canTransitionLoadStatus(current, requested)) {
+  if (!autoShipperDelivery && !canTransitionLoadStatus(current, requested)) {
     throw new Error(`A load cannot go from ${current ?? 'SOURCING'} to ${requested}`)
   }
-  if (requested === 'DELIVERED') {
+  if (requested === 'DELIVERED' && !autoShipperDelivery) {
     const legs = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId)
     await assertOwnAssetDriver(load, legs.find((c) => c.status === 'ACTIVE') ?? null, 'DELIVERED')
   }
@@ -3526,7 +3528,9 @@ async function undoDelivered(input: Row, caller: Caller): Promise<Row> {
   if (shipment.status !== 'DELIVERED') throw new Error(`This shipment is ${String(shipment.status)}, not Delivered`)
 
   const orders = await queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId)
-  if (orders.some((o) => o.invoiceId || (o.arStatus && o.arStatus !== 'DOCS_NEEDED'))) {
+  // An auto shipper is released to Ready to invoice by its delivery itself: while nothing is invoiced it goes back with the delivery.
+  const autoShipperRelease = shipment.carShipping != null
+  if (orders.some((o) => o.invoiceId || (o.arStatus && o.arStatus !== 'DOCS_NEEDED' && !(autoShipperRelease && o.arStatus === 'UNBILLED')))) {
     throw new Error('This load is invoiced or already released to billing. Void the invoice and put it back to docs needed first.')
   }
   const assignments = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_SHIPMENT, 'shipmentId', shipmentId)
@@ -3599,6 +3603,22 @@ async function undoDelivered(input: Row, caller: Caller): Promise<Row> {
     }, null, { remove: ['deliveredAt', 'previousStatus', 'loadReviewPushedAt', 'loadReviewPushedBy', 'loadReviewHeldAt', 'loadReviewHeldBy', 'loadReviewHeldNote'] })],
     'undo delivered',
   )
+  // The auto shipper's delivery had released its order to Ready to invoice: take it back with the delivery.
+  if (autoShipperRelease) {
+    for (const o of orders) {
+      if (o.arStatus !== 'UNBILLED' || o.invoiceId) continue
+      await transact(
+        [updateItemTx(ORDER_TABLE_NAME, String(o.id), {
+          arStatus: 'DOCS_NEEDED',
+          arStatusChangedAt: now,
+          updatedBy: caller.email,
+          updatedAt: now,
+          version: (numberOrNull(o.version) ?? 1) + 1,
+        }, null, { remove: ['readyToInvoiceAt'] })],
+        'undo delivered order',
+      )
+    }
+  }
   await writeAudit('SHIPMENT', shipmentId, 'UNDO_DELIVERED', caller, {
     reason,
     from: 'DELIVERED',
@@ -3652,12 +3672,37 @@ async function autoPushToReview(shipmentId: string, caller: Caller): Promise<boo
   try {
     const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
     if (!shipment || shipment.status !== 'DELIVERED' || shipment.loadReviewPushedAt) return false
+    // Auto shippers skip Load Review (Ryne 2026-11-28): delivery moves them straight to Ready to invoice.
+    if (shipment.carShipping != null) return autoReleaseAutoShipper(shipment, caller)
     // Moved back to Active by a person: it stays there until somebody pushes it again.
     if (typeof shipment.loadReviewHeldAt === 'string' && shipment.loadReviewHeldAt) return false
     const done = await pushToReview(shipmentId, { ...caller, email: SYSTEM_CALLER_EMAIL })
     return done.reasons.length === 0 && !done.already
   } catch (err) {
     console.error('[shipment-actions] auto push to Load Review failed', shipmentId, err instanceof Error ? err.message : String(err))
+    return false
+  }
+}
+
+/**
+ * Auto shipper (a shipment carrying `carShipping`, Square channel): delivery releases it to billing by itself. No Load Review, no release
+ * gate, no documents, rep or references (Ryne 2026-11-28). Priced and delivered is all it needs; an unpriced one stays put until it has a
+ * price. The release also makes the carrier's AP record, exactly as a Load Review release does. Silent on any refusal: the next status
+ * change or the sweep tries again.
+ */
+async function autoReleaseAutoShipper(shipment: Row, caller: Caller): Promise<boolean> {
+  try {
+    if (shipment.voidedAt || shipment.status !== 'DELIVERED') return false
+    const orders = await queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', String(shipment.id))
+    const order = orders.find((o) => !o.voidedAt) ?? orders[0]
+    if (!order || order.arStatus !== 'DOCS_NEEDED' || order.invoiceId) return false
+    if (!(Number(order.revenueCents ?? order.customerRateCents ?? 0) > 0)) return false
+    const expectedUpdatedAt = typeof order.updatedAt === 'string' ? order.updatedAt : null
+    if (!expectedUpdatedAt) return false
+    await readyToInvoice(documentDeps, { orderId: String(order.id), expectedUpdatedAt }, caller, { autoShipper: true })
+    return true
+  } catch (err) {
+    console.error('[shipment-actions] auto shipper release failed', String(shipment.id), err instanceof Error ? err.message : String(err))
     return false
   }
 }

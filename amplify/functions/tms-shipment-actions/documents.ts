@@ -1163,6 +1163,8 @@ export async function voidDocument(deps: DocumentDeps, input: Row, caller: Calle
 }
 
 /** The refusal for a release that did not come through Load Review (single READY_TO_INVOICE, SET_AR_STATUS UNBILLED). */
+export const AUTO_SHIPPER_NO_REVIEW_MESSAGE = 'Auto shipper loads do not go through Load Review: marking one Delivered moves it straight to Ready to invoice'
+
 export const LOAD_REVIEW_ONLY_MESSAGE = 'Release happens in Load Review: push this shipment to Load Review and release it there'
 
 // ── READY_TO_INVOICE ─────────────────────────────────────────────────────────
@@ -1182,7 +1184,7 @@ export async function readyToInvoice(
   deps: DocumentDeps,
   input: Row,
   caller: Caller,
-  options: { batch?: boolean } = {},
+  options: { batch?: boolean; autoShipper?: boolean } = {},
 ): Promise<Row> {
   const orderId = assertString(input.orderId, 'orderId')
   const expectedUpdatedAt = assertExpectedUpdatedAt(input)
@@ -1203,7 +1205,8 @@ export async function readyToInvoice(
   // Step P5. Nothing downstream accepts a shipment that is still Building — a
   // load missing its bill-to or its revenue division has no business reaching
   // accounting, and the Needs: list says exactly what is missing.
-  assertBuilt(bundle.shipment)
+  // An auto shipper (Square channel) is released by its own delivery, with none of the regular requirements (Ryne 2026-11-28).
+  if (!options.autoShipper) assertBuilt(bundle.shipment)
 
   if (order.arStatus !== 'DOCS_NEEDED') {
     throw new Error(`That order is already ${String(order.arStatus ?? 'unset')}, not waiting on documents`)
@@ -1215,9 +1218,19 @@ export async function readyToInvoice(
     ? await getById(deps.store.db, deps.customerTable, customerId)
     : null
 
-  const release = await computeReleaseGate(deps, order, bundle, customer, settings)
   const review = reviewPayload(input.review)
-  if (review) {
+  if (options.autoShipper) {
+    // Delivered and priced is all an auto shipper needs: no release gate, no Load Review, no documents, no rep, no references.
+    if (bundle.shipment.carShipping == null) throw new Error('Only an auto shipper shipment is released without Load Review')
+    if (bundle.shipment.status !== 'DELIVERED') throw new Error('Mark the shipment Delivered first')
+    if (!(Number(order.revenueCents ?? order.customerRateCents ?? 0) > 0)) throw new Error('The shipment has no price yet')
+  }
+  const release = options.autoShipper
+    ? ({ ok: true, missing: [] } as unknown as Awaited<ReturnType<typeof computeReleaseGate>>)
+    : await computeReleaseGate(deps, order, bundle, customer, settings)
+  if (options.autoShipper) {
+    // fall through: nothing to refuse
+  } else if (review) {
     // Load Review adds three refusals the gate does not own. A gate failure and an
     // extras failure are one error so the reviewer sees everything at once.
     const extras = reviewExtras(bundle, order, customer, settings)
@@ -1231,7 +1244,7 @@ export async function readyToInvoice(
   // import engine), which has no review to go through. Already-released / invoiced
   // orders never get here (they stop at the arStatus check), and there is no
   // ADMIN bypass: an admin releases from Load Review like everybody else.
-  if (!review && bundle.shipment.legacyImported !== true) throw new Error(LOAD_REVIEW_ONLY_MESSAGE)
+  if (!review && !options.autoShipper && bundle.shipment.legacyImported !== true) throw new Error(LOAD_REVIEW_ONLY_MESSAGE)
 
   const now = nowIso()
   // No POD review step (Ryne 2026-11-16): nothing is accepted on Move to billing; every POD counts when it is filed.
@@ -1287,7 +1300,7 @@ export async function readyToInvoice(
       orderId, checks, warnings: verdict.warnings, batch: options.batch === true,
     })
   } else {
-    await deps.writeAudit('ORDER', orderId, 'READY_TO_INVOICE', caller, { missing: gate.missing })
+    await deps.writeAudit('ORDER', orderId, 'READY_TO_INVOICE', caller, { missing: gate.missing, ...(options.autoShipper ? { source: 'AUTO_SHIPPER', loadReview: false } : {}) })
   }
   return { bundle: await readBundle(deps.store, shipmentId), gate, releaseGate: release, apRecords }
 }
@@ -1661,6 +1674,8 @@ export async function pushToReviewVerdict(deps: DocumentDeps, shipmentId: string
   const shipment = bundle.shipment
   if (shipment.voidedAt || shipment.deletedAt) return { shipment, reasons: ['Voided shipment'] }
   if (shipment.status === 'CANCELED') return { shipment, reasons: ['Canceled shipment'] }
+  // Auto shippers (Square channel, carrying `carShipping`) skip Load Review altogether: delivery releases them (Ryne 2026-11-28).
+  if (shipment.carShipping != null) return { shipment, reasons: [AUTO_SHIPPER_NO_REVIEW_MESSAGE] }
   const order = bundle.orders[0]
   if (!order) return { shipment, reasons: ['Shipment has no order to review'] }
   if (order.arStatus !== 'DOCS_NEEDED') return { shipment, reasons: [`Already released (${String(order.arStatus ?? 'unset')})`] }

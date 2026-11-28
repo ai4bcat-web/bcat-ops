@@ -102,6 +102,10 @@ import { customerRefOf } from '@/lib/customerRef'
 import { ArInvoicedCard, ArReadyCard, ProfitCheckCard, ReviewReasonCard } from '@/features/finance/AccountingCards'
 import { arInvoicedStats, arReadyStats, reviewReasonCounts } from '@/features/finance/accountingStats'
 import type { CustomerRecord, InvoiceRecord, ShipmentRecord } from '@/types/tms'
+import { SquareSendDialog } from '@/features/car-shipping/SquareSendDialog'
+import { useCarShipping } from '@/features/car-shipping/useCarShipping'
+import { useShipmentActions } from '@/features/car-shipping/useShipmentActions'
+import { squareCardState, type CarShippingData } from '@/lib/squareInvoicing'
 
 /** Which dialog is open, and the one thing it is open about. Mount is the `open` flag. */
 type ArDialog =
@@ -113,6 +117,7 @@ type ArDialog =
   | { kind: 'pastDue'; groups: PastDueGroup[] }
   | { kind: 'otrOffset'; invoiceIds: string[]; clear: boolean }
   | { kind: 'markInvoiced'; orderIds: string[] }
+  | { kind: 'squareSend'; row: ArQueueRow }
   | { kind: 'credit'; customerId: string; customerName: string }
   | { kind: 'factor'; invoiceId: string }
   | { kind: 'batchFactor'; rows: ArQueueRow[] }
@@ -453,9 +458,17 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       .catch(() => undefined)
       .finally(() => setAutoRunning((prev) => new Set([...prev].filter((id) => !orderIds.includes(id)))))
   }, [])
+  // Auto shippers are invoiced through Square (Send Square invoice on the row), never from the standard template: they are left
+  // out of the automatic invoice run, and the run waits until the details are read so it never tries one first.
+  const [squareVersion, setSquareVersion] = useState(0)
+  const { byShipment: squareByShipment, loaded: squareLoaded } = useCarShipping(readyShipmentIds, squareVersion)
+  const refreshAfterSquare = useCallback(async () => { setSquareVersion((v) => v + 1); await refreshRef.current() }, [])
+  const squareActions = useShipmentActions(refreshAfterSquare)
   useEffect(() => {
-    if (tab === 'ready' && canRelease) generateMissing(ordersNeedingInvoice(queue.READY, autoAttempted.current))
-  }, [tab, canRelease, queue.READY, generateMissing])
+    if (tab === 'ready' && canRelease && squareLoaded) {
+      generateMissing(ordersNeedingInvoice(queue.READY.filter((row) => !squareByShipment.has(row.shipmentId)), autoAttempted.current))
+    }
+  }, [tab, canRelease, queue.READY, generateMissing, squareLoaded, squareByShipment])
   const retryInvoice = useCallback((orderId: string) => {
     setAutoErrors((prev) => { const next = new Map(prev); next.delete(orderId); return next })
     generateMissing([orderId])
@@ -549,7 +562,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           {tab === 'ready' && <RefusalsCard refusals={refusals} onDismiss={() => setRefusals([])} />}
           {tab === 'ready' && (
             <p className="text-sm tms-muted" data-testid="ar-ready-note">
-              Only shipments moved to billing from <Link to="/tms/load-review">Load Review</Link> appear here. Paperwork and undelivered loads stay in Load Review.
+              Shipments moved to billing from <Link to="/tms/load-review">Load Review</Link> appear here, and so do auto shippers once they are Delivered (they skip Load Review). Paperwork and undelivered loads stay in Load Review.
             </p>
           )}
         </>
@@ -573,6 +586,12 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onRetryInvoice: retryInvoice,
       onBatchGenerate: runBatchGenerate,
       onMarkInvoiced: (orderIds: string[]) => { if (orderIds.length > 0) setDialog({ kind: 'markInvoiced', orderIds }) },
+      squareFor: (row: ArQueueRow) => squareByShipment.get(row.shipmentId) ?? null,
+      squareBusyId: squareActions.busyId,
+      onSquareAction: (kind: 'CREATE_DRAFT' | 'SEND_INVOICE', row: ArQueueRow) => {
+        if (kind === 'SEND_INVOICE') setDialog({ kind: 'squareSend', row })
+        else void squareActions.run('CREATE_DRAFT', row.shipmentId)
+      },
       factorReadiness,
       onBatchFactor: (rows) => setDialog({ kind: 'batchFactor', rows }),
       onWhy: (row: ArQueueRow, reason: string) => setDialog({ kind: 'why', pro: String(row.shipmentNumber ?? row.orderId), reason, customerId: row.customerId, shipmentId: row.shipmentId, row }),
@@ -842,6 +861,22 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           }}
         />
       )}
+      {dialog?.kind === 'squareSend' && (() => {
+        const car = squareByShipment.get(dialog.row.shipmentId)
+        return (
+          <SquareSendDialog
+            target={{
+              pro: String(dialog.row.shipmentNumber ?? dialog.row.orderId),
+              payer: car?.payer?.company?.trim() || car?.payer?.name || dialog.row.customerName || '',
+              payerEmail: car?.payer?.email?.trim() || null,
+              amountCents: dialog.row.amountCents ?? null,
+            }}
+            busy={squareActions.busyId != null}
+            onCancel={() => setDialog(null)}
+            onConfirm={() => { const row = dialog.row; setDialog(null); void squareActions.run('SEND_INVOICE', row.shipmentId) }}
+          />
+        )
+      })()}
       {dialog?.kind === 'markInvoiced' && (
         <ReasonDialog
           title={`Mark ${dialog.orderIds.length} load${dialog.orderIds.length === 1 ? '' : 's'} invoiced (no e-mail)`}
@@ -999,7 +1034,7 @@ function dateCol<T>(key: string, header: string, of: (row: T) => string | null, 
 
 function queueView({
   status, noBuy, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, factorByItemId, customerById,
-  attachmentPlans, boardById, shipmentsById, months, month, paidLoading, onMonth, onSelect, invoiceErrors, invoicesRunning, onRetryInvoice, onBatchGenerate, onMarkInvoiced, onReview, onEdit,
+  attachmentPlans, boardById, shipmentsById, months, month, paidLoading, onMonth, onSelect, invoiceErrors, invoicesRunning, onRetryInvoice, onBatchGenerate, onMarkInvoiced, squareFor, squareBusyId, onSquareAction, onReview, onEdit,
   onStatement, onPastDue, onOtrOffset, paymentFacts,
   factorReadiness, onBatchFactor, onWhy, onDocs, onEditCustomer, onChangeMethod, onEditAmount, editedIds,
 }: {
@@ -1032,6 +1067,11 @@ function queueView({
   onBatchGenerate: () => void
   /** Ready to invoice: move these orders to Invoiced without e-mailing anyone (for loads billed outside the app, e.g. in Square). */
   onMarkInvoiced?: (orderIds: string[]) => void
+  /** Ready to invoice: the auto shipper details of a row's shipment (null for a regular shipment). */
+  squareFor?: (row: ArQueueRow) => CarShippingData | null
+  squareBusyId?: string | null
+  /** Ready to invoice, auto shipper row: make the Square draft or send it (the page confirms a send first). */
+  onSquareAction?: (kind: 'CREATE_DRAFT' | 'SEND_INVOICE', row: ArQueueRow) => void
   /** Ready to factor per row key (Ready to invoice only). */
   factorReadiness?: Map<string, FactorReadiness>
   onBatchFactor?: (rows: ArQueueRow[]) => void
@@ -1425,6 +1465,33 @@ function queueView({
         const inv = row.invoice
         if (ready && !inv) {
           if (row.orderId.startsWith('factor:')) return null
+          const car = squareFor?.(row) ?? null
+          if (car) {
+            // Auto shipper: billed through Square. Make or send the Square invoice; Mark invoiced stays for one billed some other way.
+            const state = squareCardState(car.square)
+            const wording = state === 'NOT_CREATED'
+              ? { kind: 'CREATE_DRAFT' as const, label: 'Create Square draft', title: 'Make the draft invoice in Square. Nothing is sent to the payer.' }
+              : state === 'DRAFT'
+                ? { kind: 'SEND_INVOICE' as const, label: 'Send Square invoice', title: 'Square e-mails the invoice to the payer' }
+                : null
+            return (
+              <span className="flex items-center justify-end gap-1" data-testid="ar-square-actions">
+                {wording && (
+                  <TmsButton size="sm" variant="primary" aria-label={`${wording.label} for ${row.shipmentNumber ?? row.orderId}`}
+                    disabled={busy || !canRelease || squareBusyId != null} title={canRelease ? wording.title : BILLING_GRANT_MESSAGE}
+                    onClick={() => onSquareAction?.(wording.kind, row)}>
+                    {squareBusyId === row.shipmentId ? 'Working…' : wording.label}
+                  </TmsButton>
+                )}
+                {onMarkInvoiced && (
+                  <TmsButton size="sm" aria-label={`Mark ${row.shipmentNumber ?? row.orderId} invoiced without e-mailing`}
+                    disabled={busy || !canRelease} title={canRelease ? 'Move to Invoiced without e-mailing anyone' : BILLING_GRANT_MESSAGE} onClick={() => onMarkInvoiced([row.orderId])}>
+                    Mark invoiced
+                  </TmsButton>
+                )}
+              </span>
+            )
+          }
           const error = invoiceErrors?.get(row.orderId)
           if (error) {
             return (

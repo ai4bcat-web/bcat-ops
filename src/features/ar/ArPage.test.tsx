@@ -69,6 +69,11 @@ vi.mock('@/lib/apiClient', () => ({
   previewInvoice: vi.fn(),
   previewInvoicePacket: vi.fn().mockResolvedValue({ invoiceId: 'x', name: 'Invoice.pdf', url: null, pages: [], separate: [], error: null }),
   readyToInvoice: vi.fn(),
+  // Auto shippers (Square): none of these shipments carries auto shipper details unless a test says so.
+  listCarShippingByShipmentIds: vi.fn().mockResolvedValue(new Map()),
+  createSquareInvoice: vi.fn(),
+  sendSquareInvoice: vi.fn(),
+  setLoadStatus: vi.fn(),
   // The invoice detail now carries a Commission card; it reads settings before it reads
   // anything else, and commissions are off here, so the card renders nothing.
   commissionModelsDeployed: () => true,
@@ -323,6 +328,29 @@ describe('the AR board', () => {
     const batch = screen.getByRole('button', { name: 'Batch generate invoices' }) as HTMLButtonElement
     expect(batch.title === '').toBe(called)
     authGroups.current = []
+  })
+
+  // Ryne 2026-11-28: an auto shipper is invoiced through Square from Ready to invoice, never made from the standard template.
+  it('an auto shipper in Ready to invoice gets Send Square invoice, asks before it sends, and is left out of the automatic invoice run', async () => {
+    authGroups.current = ['ADMIN']
+    ;(apiClient.listCarShippingByShipmentIds as Mock).mockResolvedValue(new Map([[
+      's1',
+      { payer: { name: 'Pat Example', email: 'pat@example.com', phone: '(847) 555-0100' }, vehicle: { year: '2018', make: 'Honda', model: 'Civic' }, square: { invoiceId: 'INV1', status: 'DRAFT' } },
+    ]]))
+    ;(apiClient.sendSquareInvoice as Mock).mockResolvedValue({ square: { status: 'UNPAID' } })
+    await setup({ UNBILLED: [worklistRow()] })
+    await settle()
+    expect(apiClient.batchGenerateInvoices).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: /Send Square invoice for S-1001/ }))
+    await settle()
+    // Nothing is sent until the dialog is confirmed, and it names the payer.
+    expect(apiClient.sendSquareInvoice).not.toHaveBeenCalled()
+    expect(screen.getAllByText(/pat@example.com/).length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByTestId('square-send-confirm'))
+    await settle()
+    expect(apiClient.sendSquareInvoice).toHaveBeenCalledWith({ shipmentId: 's1' })
+    authGroups.current = []
+    ;(apiClient.listCarShippingByShipmentIds as Mock).mockResolvedValue(new Map())
   })
 
   it('shows a refused invoice on its row with Retry, and Retry asks once more', async () => {

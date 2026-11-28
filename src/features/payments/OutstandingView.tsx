@@ -26,7 +26,7 @@ import type { DenseColumn, DenseOption } from '@/features/tms/grid/denseGridMode
 import { ArDenseTable } from '@/features/ar/components/ArDenseTable'
 import { AR_PAYMENT_METHOD_LABEL, formatDay } from '@/features/ar/arViews'
 import { useCustomerPaymentFacts } from '@/hooks/useCustomerPaymentFacts'
-import { getTmsSettings, graphqlErrorText, recordPayment, writeOffInvoice } from '@/lib/apiClient'
+import { getTmsSettings, graphqlErrorText, recordPayment, syncSquareInvoice, writeOffInvoice } from '@/lib/apiClient'
 import { termsVsActualText } from '@/lib/daysToPay'
 import { formatCents } from '@/lib/invoiceBuild'
 import type { ArPaymentMethod, CustomerRecord, InvoiceRecord } from '@/types/tms'
@@ -160,7 +160,13 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
     const { draft, plan } = confirm
     const reqId = crypto.randomUUID()
     let posted = 0
+    // Square invoices: read Square first, so a payment the payer already made there is applied before this one and never counted twice.
+    const squareLines = plan.lines.filter((l) => shown.find((r) => r.invoiceId === l.invoiceId)?.viaSquare)
     try {
+      for (const l of squareLines) {
+        const shipmentId = shown.find((r) => r.invoiceId === l.invoiceId)?.shipmentId
+        if (shipmentId) await syncSquareInvoice({ shipmentId }).catch(() => undefined)
+      }
       for (const p of plan.payments) {
         await recordPayment(recordPaymentInput(draft, p, `${reqId}-${p.customerId}`.slice(0, 64)))
         posted++
@@ -186,6 +192,9 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
         })
       }
       const accepted = plan.lines.filter((l) => l.accepted).length
+      if (squareLines.length > 0) {
+        toast.warning(`Recorded here only. Square cannot be updated from BCAT Ops, so ${squareLines.map((l) => l.pro).join(', ')} still shows open in Square. Record the payment in Square (Invoices, open it, Record payment) or cancel the Square invoice from the shipment so the payer is not asked again.`, { duration: 15000 })
+      }
       toast.success(`Received ${formatCents(plan.receivedCents)}${plan.feeCents ? ` · OTR fee ${formatCents(plan.feeCents)} closed` : ''}${accepted ? ` · ${accepted} accepted as paid in full` : ''}`)
       setTicked((t) => {
         const next = { ...t }
@@ -435,6 +444,13 @@ export function OutstandingView({ invoices, customers, loading, asOf, onReceived
                 </li>
               ))}
             </ul>
+            {confirm.plan.lines.some((l) => shown.find((r) => r.invoiceId === l.invoiceId)?.viaSquare) && (
+              <p data-testid="receive-square-note" style={{ color: 'var(--tms-badge-orange, inherit)' }}>
+                {confirm.plan.lines.filter((l) => shown.find((r) => r.invoiceId === l.invoiceId)?.viaSquare).map((l) => l.pro).join(', ')}
+                {' '}is billed through Square. Square does not let apps record a payment on an invoice, so this payment is recorded in BCAT Ops only and the Square invoice stays open.
+                Mark it paid in Square too, or cancel it from the shipment. A payment the payer already made in Square is applied first, and never counted twice.
+              </p>
+            )}
             <p className="tms-muted">
               {confirm.plan.payments.length === 1 ? 'One payment' : `${confirm.plan.payments.length} payments, one per customer,`} with this reference.
               {confirm.plan.feeCents > 0 ? ` OTR's fee is closed on each factored invoice as "${factorFeeReason(confirm.draft.feeBps)}".` : ''}

@@ -44,6 +44,8 @@ export interface OutstandingRow {
   paidCents: number
   balanceCents: number
   factored: boolean
+  /** Billed through Square (an auto shipper): Square cannot be told about a payment recorded here. */
+  viaSquare?: boolean
 }
 
 /** One open invoice as a table row: the grouping is gone, so each row carries what a group header used to say. */
@@ -104,6 +106,7 @@ export function outstandingRow(inv: InvoiceRecord, asOf: string): OutstandingRow
     paidCents: inv.paidCents ?? 0,
     balanceCents: inv.balanceCents ?? 0,
     factored: isFactoredInvoice(inv),
+    ...(inv.external?.provider === 'SQUARE' ? { viaSquare: true } : {}),
   }
 }
 

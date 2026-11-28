@@ -4986,6 +4986,19 @@ describe('Square invoicing for an auto shipper shipment', () => {
     expect(table(TABLES.invoice).size).toBe(1)
   })
 
+  it('waits for Delivered before sending: the draft stays a draft and nothing is published (Ryne 2026-11-28)', async () => {
+    seedSquare()
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    table(TABLES.shipment).set(SHIPMENT_ID, { ...table(TABLES.shipment).get(SHIPMENT_ID), status: 'IN_TRANSIT' })
+    calls.length = 0
+    await expect(call('SQUARE_SEND_INVOICE', { shipmentId: SHIPMENT_ID })).rejects.toThrow(/Delivered/)
+    expect(calls.some((c) => c.path.endsWith('/publish'))).toBe(false)
+    expect(squareOf()).toMatchObject({ status: 'DRAFT' })
+    table(TABLES.shipment).set(SHIPMENT_ID, { ...table(TABLES.shipment).get(SHIPMENT_ID), status: 'DELIVERED' })
+    await call('SQUARE_SEND_INVOICE', { shipmentId: SHIPMENT_ID })
+    expect(squareOf()).toMatchObject({ status: 'UNPAID' })
+  })
+
   it('records a Square payment once, however many times Square says so, and marks the invoice paid', async () => {
     seedSquare()
     await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
@@ -5001,6 +5014,25 @@ describe('Square invoicing for an auto shipper shipment', () => {
     expect(String(payments[0].reference)).toContain('VISA 4217')
     expect(table(TABLES.invoice).get('S000001')).toMatchObject({ status: 'PAID', paidCents: 120_900, balanceCents: 0 })
     expect(squareOf()).toMatchObject({ status: 'PAID', lastEventId: 'evt-1' })
+  })
+
+  it('never adds a Square payment twice when the invoice was already paid here by hand: it flags it for a person instead', async () => {
+    seedSquare()
+    await call('SQUARE_CREATE_INVOICE', { shipmentId: SHIPMENT_ID })
+    await call('SQUARE_SEND_INVOICE', { shipmentId: SHIPMENT_ID })
+    // The hand payment on Payments Received (Square's API cannot record it on the invoice, so Square still shows it open).
+    await call('RECORD_PAYMENT', { customerId: CUSTOMER_ID, receivedAt: '2026-10-29', method: 'CHECK', amountCents: 120_900, applications: [{ invoiceId: 'S000001', amountCents: 120_900 }], creditApplications: [] })
+    expect(table(TABLES.invoice).get('S000001')).toMatchObject({ status: 'PAID', balanceCents: 0 })
+    // Later the payer pays in Square too.
+    sq.invoiceStatus = 'PAID'
+    sq.tenders = [{ id: 'T9', payment_id: 'PAY9', created_at: '2026-10-30T15:00:00Z', amount_money: { amount: 120_900 }, type: 'CARD', card_details: { card: { card_brand: 'VISA', last_4: '4217' } } }]
+    await call('SQUARE_SYNC', { shipmentId: SHIPMENT_ID })
+    await call('SQUARE_SYNC', { shipmentId: SHIPMENT_ID })
+    const payments = [...table(TABLES.arPayment).values()].filter((p) => p.kind === 'PAYMENT')
+    expect(payments).toHaveLength(1)
+    expect(payments[0]).toMatchObject({ method: 'CHECK', amountCents: 120_900 })
+    expect(table(TABLES.invoice).get('S000001')).toMatchObject({ paidCents: 120_900, balanceCents: 0 })
+    expect(String(squareOf().reviewFlag)).toMatch(/already paid here/)
   })
 
   it('cancels a sent invoice in Square and voids the unpaid BCAT invoice with it', async () => {
