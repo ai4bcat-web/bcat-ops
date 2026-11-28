@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react'
-import { Plus, Trash2, Pencil, Check, RotateCcw } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, RotateCcw, CalendarRange, CircleDollarSign, Clock, User } from 'lucide-react'
 import { TmsButton } from '@/features/tms/kit/TmsButton'
 import { CapacityCardDialog } from './CapacityCardDialog'
+import { CapacityTruckArt } from './CapacityTruckArt'
+import { assignAccents, CAPACITY_ACCENTS, truckKindFor } from './capacityCardStyle'
+import './capacityBoard.css'
 import { useCapacityBoard } from './useCapacityBoard'
 import {
   capacityColumns, capacityHeadline, clampCapacityRange, formatCapacityTimes, formatMaxWeight, formatRatePerMile, rangeDays, todayChicagoYmd,
@@ -57,6 +60,8 @@ export function CapacityBoard({ from, to, onRangeChange, drivers, phone, userEma
   const [dragOver, setDragOver] = useState<string | null>(null)
   const days = useMemo(() => rangeDays(from, to), [from, to])
   const columns = useMemo(() => capacityColumns(board, days, showCovered, query), [board, days, showCovered, query])
+  // Colors are settled over the whole board, not the visible slice, so a card keeps its color whatever range or filter is on screen.
+  const accents = useMemo(() => assignAccents(board.cards), [board.cards])
   const driverName = useMemo(() => new Map(drivers.map((d) => [d.id, d.name])), [drivers])
   const today = todayChicagoYmd()
   const totalOpen = columns.reduce((n, c) => n + c.open, 0)
@@ -156,7 +161,7 @@ export function CapacityBoard({ from, to, onRangeChange, drivers, phone, userEma
                   )}
                   {col.cards.map((card) => (
                     <CapacityCardView
-                      key={card.id} card={card} day={col.day} driverName={card.driverId ? driverName.get(card.driverId) : undefined}
+                      key={card.id} card={card} day={col.day} accent={CAPACITY_ACCENTS[accents.get(card.id) ?? 0].hex} driverName={card.driverId ? driverName.get(card.driverId) : undefined}
                       onEdit={() => setDialog({ card, day: col.day })}
                       onCover={() => void cover(card.id)} onReopen={() => void reopen(card.id)} onDelete={() => void remove(card.id)}
                     />
@@ -175,9 +180,10 @@ export function CapacityBoard({ from, to, onRangeChange, drivers, phone, userEma
   )
 }
 
-function CapacityCardView({ card, day, driverName, onEdit, onCover, onReopen, onDelete }: {
+function CapacityCardView({ card, day, accent, driverName, onEdit, onCover, onReopen, onDelete }: {
   card: CapacityCard
   day: string
+  accent: string
   driverName: string | undefined
   onEdit: () => void
   onCover: () => void
@@ -188,56 +194,45 @@ function CapacityCardView({ card, day, driverName, onEdit, onCover, onReopen, on
   const span = spanLabel(card)
   const rate = formatRatePerMile(card.minRatePerMileCents)
   const times = formatCapacityTimes(card)
-  const meta = [card.equipment, `${card.lengthFt} ft`, card.loadType === 'PARTIAL' ? 'Partial' : 'Full', formatMaxWeight(card.weightLbs)]
-    .filter(Boolean).join(' · ')
-  const iconBtn: React.CSSProperties = {
-    display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, borderRadius: 6,
-    border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text-2)', cursor: 'pointer',
-  }
+  const kind = truckKindFor(card.equipment)
+  const chips = [card.equipment, `${card.lengthFt} ft`, card.loadType === 'PARTIAL' ? 'Partial' : 'Full', formatMaxWeight(card.weightLbs)].filter(Boolean)
   return (
     <article
+      className="cap-card"
       draggable
       data-testid="capacity-card"
       data-card-id={card.id}
       data-status={card.status}
+      data-accent={accent}
+      style={{ '--cap-accent': accent } as React.CSSProperties}
       onDragStart={(e) => {
         const payload = JSON.stringify({ id: card.id, fromDay: day })
         e.dataTransfer.setData(DRAG_TYPE, payload)
         e.dataTransfer.setData('text/plain', payload)
         e.dataTransfer.effectAllowed = 'move'
       }}
-      style={{
-        display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 10px', borderRadius: 9, cursor: 'grab',
-        border: `1px solid ${covered ? 'var(--tms-badge-green)' : 'var(--tms-badge-orange)'}`,
-        background: covered ? 'var(--tms-badge-green-tint)' : 'var(--tms-card)',
-        opacity: covered ? 0.72 : 1,
-      }}
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-        <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: 'var(--tms-text)', overflowWrap: 'anywhere' }}>{capacityHeadline(card)}</div>
-        <span style={{
-          flexShrink: 0, padding: '1px 7px', borderRadius: 10, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase',
-          background: covered ? 'var(--tms-badge-green-tint)' : 'var(--tms-badge-orange-tint)',
-          color: covered ? 'var(--tms-badge-green)' : 'var(--tms-badge-orange)',
-          border: `1px solid ${covered ? 'var(--tms-badge-green)' : 'var(--tms-badge-orange)'}`,
-        }}>{covered ? 'Covered' : 'Open'}</span>
+      <div className="cap-art">
+        <CapacityTruckArt kind={kind} accent={accent} label={`${card.equipment || 'Van'} truck`} />
+        {span && <span className="cap-span"><CalendarRange size={11} aria-hidden="true" />{span}</span>}
+        <span className="cap-pill">{covered && <Check size={11} aria-hidden="true" />}{covered ? 'Covered' : 'Open'}</span>
       </div>
-      <div style={{ fontSize: 12, color: 'var(--tms-text-2)' }}>{meta}</div>
-      {rate && <div style={{ fontSize: 12, color: 'var(--tms-text-2)' }}>{rate}</div>}
-      {times && <div style={{ fontSize: 12, color: 'var(--tms-text-2)' }}>{times}</div>}
-      {span && <div style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>{span}</div>}
-      {driverName && <div style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>Driver {driverName}</div>}
-      {card.comments && <div style={{ fontSize: 11.5, color: 'var(--tms-muted)', overflowWrap: 'anywhere' }}>{card.comments}</div>}
-      <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-        {covered ? (
-          <button type="button" onClick={onReopen} aria-label="Reopen card" title="Reopen" style={iconBtn}><RotateCcw size={13} /></button>
-        ) : (
-          <button type="button" onClick={onCover} aria-label="Mark covered" title="Mark covered" style={{ ...iconBtn, width: 'auto', padding: '0 8px', gap: 4, fontSize: 11.5, fontWeight: 600, color: 'var(--tms-badge-green)' }}>
-            <Check size={13} /> Covered
-          </button>
-        )}
-        <button type="button" onClick={onEdit} aria-label="Edit card" title="Edit" style={iconBtn}><Pencil size={13} /></button>
-        <button type="button" onClick={onDelete} aria-label="Delete card" title="Delete" style={{ ...iconBtn, marginLeft: 'auto' }}><Trash2 size={13} /></button>
+      <div className="cap-body">
+        <div className="cap-route">{capacityHeadline(card)}</div>
+        <div className="cap-chips">{chips.map((c, i) => <span key={`${c}-${i}`} className="cap-chip">{c}</span>)}</div>
+        {rate && <div className="cap-line"><CircleDollarSign size={13} aria-hidden="true" /><span>{rate}</span></div>}
+        {times && <div className="cap-line"><Clock size={13} aria-hidden="true" /><span>{times}</span></div>}
+        {driverName && <div className="cap-line"><User size={13} aria-hidden="true" /><span>Driver {driverName}</span></div>}
+        {card.comments && <div className="cap-note">{card.comments}</div>}
+        <div className="cap-actions">
+          {covered ? (
+            <button type="button" className="cap-btn" onClick={onReopen} aria-label="Reopen card" title="Reopen"><RotateCcw size={13} /></button>
+          ) : (
+            <button type="button" className="cap-btn cap-btn--cover" onClick={onCover} aria-label="Mark covered" title="Mark covered"><Check size={13} /> Covered</button>
+          )}
+          <button type="button" className="cap-btn" onClick={onEdit} aria-label="Edit card" title="Edit"><Pencil size={13} /></button>
+          <button type="button" className="cap-btn cap-btn--danger" onClick={onDelete} aria-label="Delete card" title="Delete"><Trash2 size={13} /></button>
+        </div>
       </div>
     </article>
   )
