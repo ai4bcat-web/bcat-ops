@@ -501,7 +501,7 @@ export interface TmsSettings {
   checkCallSkipWhenDriverActive?: boolean | null
   /** Which progress steps each revenue division shows, per variant (src/lib/progressSteps.ts). Null = the built-in defaults. */
   progressSteps?: Record<string, Record<string, Array<{ key: string; label: string; enabled: boolean }>>> | null
-  /** Dispatch > Empty trucks: what one idle truck-day is worth, in cents. Null or unset = no dollar figure is shown. */
+  /** Left over from the retired Dispatch Empty trucks view (now GPS): what one idle truck-day is worth, in cents. Nothing reads or sets it any more. */
   emptyTruckDailyValueCents?: number | null
   /** Settings > Cost to run: fixed monthly costs for services with no billing API (src/lib/costToRun.ts). */
   costManualEntries?: import('@/lib/costToRun').CostManualEntry[] | null

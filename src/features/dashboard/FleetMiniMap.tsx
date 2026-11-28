@@ -14,7 +14,7 @@ const isMoving = (loc: TruckLocation) =>
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n))
 
-/** A pin the caller places itself (the Dispatch empty-trucks view), coloured by how soon, over the same map. */
+/** A pin the caller places itself, coloured by how soon, over the same map. */
 export interface MapMarker {
   id: string
   lat: number
