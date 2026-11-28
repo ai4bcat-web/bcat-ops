@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight, Search, Wrench } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useEnsureLoadRange } from '@/hooks/useLoads'
 import { isLoadVoided } from '@/lib/shipmentVoid'
-import { auditFleetRevenue, type AuditBucket, type RevenueAudit } from '@/lib/revenueAudit'
+import { auditFleetRevenue, type AuditBucket, type OtherFleetKind, type RevenueAudit } from '@/lib/revenueAudit'
 import type { DateRange } from '@/lib/fleetProfitability'
 import type { FleetGroup } from '@/types/equipment'
 import { useDriverTypes } from '@/hooks/useDriverTypes'
@@ -53,13 +53,35 @@ function RateCell({ cents, onCommit }: { cents: number; onCommit: (cents: number
   )
 }
 
-// Display order + labels/tones for each bucket.
-const BUCKETS: { key: AuditBucket; label: string; hint: string; tone: string; countsToward: boolean }[] = [
+type SectionKey = AuditBucket | OtherFleetKind
+
+interface SectionDef {
+  key: SectionKey
+  label: string
+  hint: string
+  tone: string
+  countsToward: boolean
+  /** Reads rows from audit.otherFleetGroups instead of audit.buckets. */
+  other?: boolean
+  /** The 'otherFleet' bucket's smaller companions: shown a notch quieter, indented under its three main headings. */
+  minor?: boolean
+  /** Warning styling: something here needs a person to fix it. */
+  warn?: boolean
+}
+
+// Display order + labels/tones. The old single "On another fleet / no driver" bucket is shown as the
+// six causes below it (display only: their totals add up to that bucket and none of it counts toward revenue).
+const SECTIONS: SectionDef[] = [
   { key: 'counted',      label: 'Counted — on a fleet truck',     hint: 'Delivered this month on this fleet’s truck.',                          tone: 'var(--tms-badge-green)', countsToward: true },
   { key: 'zeroRate',     label: 'On a fleet truck, but $0 rate',  hint: 'Would count, but the load has no rate entered.',                       tone: 'var(--tms-badge-orange)', countsToward: true },
   { key: 'noTruck',      label: 'Counted — our driver, no truck on file', hint: 'Delivered by one of this fleet’s drivers; counts as fleet revenue. No truck row gets it until a truck is on file (drivers change trucks and the truck of record gets cleared).', tone: 'var(--tms-badge-green)', countsToward: true },
   { key: 'unattributed', label: 'Driver in no fleet, no truck',    hint: 'Delivered by a driver who is in no fleet and has no truck — set the fleet on the Drivers page.', tone: 'var(--tms-badge-orange)', countsToward: false },
-  { key: 'otherFleet',   label: 'On another fleet / no driver',   hint: 'Delivered on a truck in a different fleet, or with no resolvable driver/truck.', tone: 'var(--tms-muted)', countsToward: false },
+  { key: 'needsFix',     label: 'Own-fleet load, no driver assigned (needs fix)', hint: 'One of our own loads that nobody is driving and that is not imported history. Pick the driver in the Driver column so it counts in revenue and driver pay.', tone: 'var(--tms-badge-red)', countsToward: false, other: true, warn: true },
+  { key: 'otherFleetDriver', label: 'Run by another fleet’s driver', hint: 'Delivered by a driver or truck in a different fleet (for example an owner-operator while you view Local). It counts in that fleet’s revenue, not this one’s.', tone: 'var(--tms-muted)', countsToward: false, other: true },
+  { key: 'brokered',     label: 'Brokered to outside carrier (no driver)', hint: 'Covered by an outside carrier, so there is no driver of ours on it by design. Never counts toward truck revenue.', tone: 'var(--tms-muted)', countsToward: false, other: true },
+  { key: 'autoShipper',  label: 'Auto Shipper',                    hint: 'Loads for the AUTO SHIPPER customer with no driver of ours on them. Not a mistake.', tone: 'var(--tms-muted)', countsToward: false, other: true, minor: true },
+  { key: 'notCovered',   label: 'Not covered yet',                 hint: 'Booked with nobody covering it yet and delivery still ahead. It cannot have a driver until it is covered.', tone: 'var(--tms-muted)', countsToward: false, other: true, minor: true },
+  { key: 'history',      label: 'Imported history (no driver by design)', hint: 'Own-fleet loads imported from Aljex. History never gets a driver and nobody is asked for one.', tone: 'var(--tms-muted)', countsToward: false, other: true, minor: true },
   { key: 'broker',       label: 'Broker-covered (excluded)',      hint: 'Run by a broker / 3PL — intentionally excluded from truck revenue.',   tone: 'var(--tms-muted)', countsToward: false },
 ]
 
@@ -70,7 +92,7 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
 }) {
   const { fleetGroupLabel } = useDriverTypes()
   const [open, setOpen] = useState(false)
-  const [expanded, setExpanded] = useState<Set<AuditBucket>>(new Set(['noTruck', 'unattributed']))
+  const [expanded, setExpanded] = useState<Set<SectionKey>>(new Set(['noTruck', 'unattributed', 'needsFix']))
   const [q, setQ] = useState('')
 
   useEnsureLoadRange(range.start, range.end)
@@ -127,7 +149,7 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
   const delta = Math.round(audit.countedTotal - expectedRevenue)
   const reconciles = Math.abs(delta) < 1
 
-  const toggle = (k: AuditBucket) =>
+  const toggle = (k: SectionKey) =>
     setExpanded((prev) => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n })
 
   const filterRows = (rows: RevenueAudit['buckets'][AuditBucket]['rows']) => {
@@ -175,20 +197,20 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
           )}
 
           {/* Buckets */}
-          {BUCKETS.map((b) => {
-            const bucket = audit.buckets[b.key]
+          {SECTIONS.map((b) => {
+            const bucket = b.other ? audit.otherFleetGroups[b.key as OtherFleetKind] : audit.buckets[b.key as AuditBucket]
             if (bucket.rows.length === 0) return null
             const isOpen = expanded.has(b.key)
             const rows = filterRows(bucket.rows)
             return (
-              <div key={b.key} style={{ border: '1px solid var(--tms-border)', borderRadius: 8, overflow: 'hidden' }}>
+              <div key={b.key} style={{ border: `1px solid ${b.warn ? 'var(--tms-badge-red)' : 'var(--tms-border)'}`, borderRadius: 8, overflow: 'hidden', marginLeft: b.minor ? 16 : 0 }}>
                 <button
                   onClick={() => toggle(b.key)}
                   style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--tms-card)', border: 'none', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}
                 >
                   {isOpen ? <ChevronDown size={13} style={{ color: 'var(--tms-muted)' }} /> : <ChevronRight size={13} style={{ color: 'var(--tms-muted)' }} />}
                   <span style={{ width: 8, height: 8, borderRadius: 2, background: b.tone, flexShrink: 0 }} />
-                  <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text)' }}>{b.label}</span>
+                  <span style={{ fontSize: b.minor ? 12 : 12.5, fontWeight: b.minor ? 500 : 600, color: b.warn ? 'var(--tms-badge-red)' : 'var(--tms-text)' }}>{b.label}</span>
                   <span style={{ fontSize: 11, color: 'var(--tms-muted)' }}>· {bucket.rows.length}</span>
                   <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: b.countsToward ? 'var(--tms-text)' : 'var(--tms-muted)' }}>{money2(bucket.total)}</span>
                 </button>
