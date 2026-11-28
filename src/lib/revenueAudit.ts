@@ -22,7 +22,8 @@ export type AuditBucket =
  */
 export type OtherFleetKind =
   | 'needsFix'          // own-fleet load nobody is driving and that is not exempt history → fix it
-  | 'otherFleetDriver'  // run by a driver / truck of a different fleet (owner-operators, or Local drivers seen from Amazon)
+  | 'ownerOperator'     // run by an owner-operator's driver / truck
+  | 'otherFleetDriver'  // run by a driver / truck of a different company fleet (e.g. Local drivers seen from Amazon)
   | 'brokered'          // covered by an outside carrier, so there is no driver by design
   | 'autoShipper'       // the AUTO SHIPPER customer's loads
   | 'notCovered'        // booked, nobody covering yet, delivery still ahead
@@ -68,10 +69,10 @@ const nameKey = (n: string | null | undefined): string => (n ?? '').trim().repla
  */
 export function classifyOtherFleetLoad(
   load: Load,
-  ctx: { driverId?: string | null; hasTruck: boolean; driverNames: ReadonlySet<string>; today: string },
+  ctx: { driverId?: string | null; hasTruck: boolean; ownerOperator?: boolean; driverNames: ReadonlySet<string>; today: string },
 ): OtherFleetKind {
   if (isAutoShipperName(load.customer)) return 'autoShipper'
-  if (ctx.driverId || ctx.hasTruck) return 'otherFleetDriver'
+  if (ctx.driverId || ctx.hasTruck) return ctx.ownerOperator ? 'ownerOperator' : 'otherFleetDriver'
 
   const carrier = (load.carrierName ?? '').trim()
   const carrierIsOurDriver = !!carrier && ctx.driverNames.has(nameKey(carrier))
@@ -125,6 +126,10 @@ export function auditFleetRevenue(params: {
     if (d.fleetGroup === group || (group === 'LOCAL' && d.fleetGroup === 'BOX_TRUCK')) fleetDrivers.add(d.id)
   }
   const truckById = new Map(equipment.map((e) => [e.id, e]))
+  const isOwnerOperator = (driverId?: string | null): boolean => {
+    const d = driverId ? driverById.get(driverId) : undefined
+    return d?.fleetGroup === 'OWNER_OPERATOR' || d?.driverType === 'OWNER_OPERATOR'
+  }
   const truckLabelFor = (truckId?: string | null): string | null => {
     if (!truckId) return null
     if (truckId.startsWith('motive:')) return `#${truckId.slice('motive:'.length)}`
@@ -137,7 +142,7 @@ export function auditFleetRevenue(params: {
     otherFleet: emptyBucket(), broker: emptyBucket(), outOfRange: emptyBucket(),
   }
   const otherFleetGroups: Record<OtherFleetKind, { total: number; rows: AuditRow[] }> = {
-    needsFix: emptyBucket(), otherFleetDriver: emptyBucket(), brokered: emptyBucket(),
+    needsFix: emptyBucket(), ownerOperator: emptyBucket(), otherFleetDriver: emptyBucket(), brokered: emptyBucket(),
     autoShipper: emptyBucket(), notCovered: emptyBucket(), history: emptyBucket(),
   }
   let pickedUpThisMonthDeliveredLater = 0
@@ -199,7 +204,7 @@ export function auditFleetRevenue(params: {
     buckets[bucket].total += rev
     buckets[bucket].rows.push(row)
     if (bucket === 'otherFleet') {
-      row.otherKind = classifyOtherFleetLoad(load, { driverId, hasTruck: !!resolvedTruck, driverNames, today })
+      row.otherKind = classifyOtherFleetLoad(load, { driverId, hasTruck: !!resolvedTruck, ownerOperator: isOwnerOperator(driverId), driverNames, today })
       otherFleetGroups[row.otherKind].total += rev
       otherFleetGroups[row.otherKind].rows.push(row)
     }
