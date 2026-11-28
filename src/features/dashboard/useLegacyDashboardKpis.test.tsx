@@ -3,9 +3,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, render, screen, waitFor, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter } from 'react-router-dom'
-import { computeLegacyMonth, reduceLegacy, type LegacyMonthPayload, type LegacyLoadLite } from '@/lib/dashboardRollupLegacy'
+import { computeLegacyMonth, LEGACY_SCHEMA_VERSION, reduceLegacy, type LegacyMonthPayload, type LegacyLoadLite } from '@/lib/dashboardRollupLegacy'
 import { monthsCovering } from '@/lib/shipmentWindows'
-import type { ShipmentLite } from '@/lib/dashboardRollup'
 import type { RawRollupRow } from '@/lib/dashboardRollupClient'
 import type { Driver, Load } from '@/types'
 import { legacyKpisFromLoads, legacyWindow, type DateRangeKey } from './legacyKpiMath'
@@ -44,37 +43,45 @@ const drivers = [
   { id: 'brk', type: 'broker' },
 ] as unknown as Driver[]
 
-// Midday UTC: the same calendar day in Chicago and in the browser's zone, so the store
-// arithmetic (local days) and the rollup (Chicago days) are comparable in any CI zone.
+// Midday UTC: the same calendar day in Chicago and in the browser's zone. A load counts on its DELIVERY day (the first
+// ten characters of deliveryAppt, as on Finances), so the store arithmetic and the rollup are comparable in any CI zone.
 const PICKUPS = [
   '2026-07-14T17:00:00Z', '2026-08-18T17:00:00Z', '2026-09-28T17:00:00Z', '2026-10-05T17:00:00Z', '2026-10-27T17:00:00Z', '2026-10-30T17:00:00Z',
   '2026-11-02T17:00:00Z', '2026-11-03T17:00:00Z', '2026-11-04T17:00:00Z', '2026-11-12T17:00:00Z',
 ]
 const PAIRS: Array<[string | null, string | null]> = [['ivan', 'ivan'], ['oo', null], [null, 'box'], ['brk', 'ivan'], [null, 'brk'], [null, null]]
 
+const DAY_MS = 86_400_000
+const plusDays = (iso: string, n: number) => new Date(Date.parse(iso) + n * DAY_MS).toISOString()
+
 function fixture() {
-  const shipments: ShipmentLite[] = []
   const loads: Load[] = []
   for (let i = 0; i < 48; i++) {
     const pickup = PICKUPS[i % PICKUPS.length]!
     const [p, d] = PAIRS[i % PAIRS.length]!
     const voided = i % 13 === 0
-    shipments.push({ id: `s${i}`, pickupAppt: pickup, pickupMonth: pickup.slice(0, 7), voidedAt: voided ? 'v' : null })
+    // Delivered the next day, a few a month later, and some with no delivery date (in no period).
+    const delivery = i % 7 === 6 ? undefined : plusDays(pickup, i % 9 === 8 ? 35 : 1)
     loads.push({
-      id: `l${i}`, shipmentId: `s${i}`, pickupAppt: pickup, pickupDriverId: p ?? undefined, deliveryDriverId: d ?? undefined,
+      id: `l${i}`, shipmentId: `s${i}`, pickupAppt: pickup, deliveryAppt: delivery, pickupDriverId: p ?? undefined, deliveryDriverId: d ?? undefined,
       rate: i % 4 === 0 ? undefined : 100_000 + i, voidedAt: voided ? 'v' : undefined,
     } as unknown as Load)
   }
-  return { shipments, loads }
+  return { loads }
+}
+
+/** The month before the one `from` is in, from its first day: where the exact path starts reading loads. */
+function loadFromOf(from: string): string {
+  const [y = 0, m = 1] = from.slice(0, 7).split('-').map(Number)
+  return m === 1 ? `${y - 1}-12-01` : `${y}-${String(m - 1).padStart(2, '0')}-01`
 }
 
 async function legacyRows(rows: ReturnType<typeof fixture>, months: string[], computedAt: string): Promise<RawRollupRow[]> {
   const src = {
-    shipments: async (m: string) => rows.shipments.filter((s) => s.pickupMonth === m),
-    loadsOf: async (ids: string[]) => rows.loads.filter((l) => ids.includes(l.shipmentId!)) as unknown as LegacyLoadLite[],
+    loadsDeliveredIn: async (m: string) => rows.loads.filter((l) => (l.deliveryAppt ?? '').startsWith(m)) as unknown as LegacyLoadLite[],
   }
   return Promise.all(months.map(async (m) => ({
-    id: `LG:${m}`, kind: 'LG', periodKey: m, schemaVersion: 1, computedAt,
+    id: `LG:${m}`, kind: 'LG', periodKey: m, schemaVersion: LEGACY_SCHEMA_VERSION, computedAt,
     payload: await computeLegacyMonth(src, m) as LegacyMonthPayload,
   })))
 }
@@ -98,7 +105,7 @@ function seedStore(over: Record<string, unknown> = {}) {
 }
 
 describe('rollup reduction equals the store arithmetic', () => {
-  it.each(ranges)('%s: same figures, previous-period deltas, broker either-driver rule, unrated, revenueConnected', async (key) => {
+  it.each(ranges)('%s: same figures, previous-period deltas, broker delivery-driver rule, unrated, revenueConnected', async (key) => {
     const rows = fixture()
     const win = legacyWindow(key, new Date(NOW))
     const months = monthsCovering(win.prevFrom, win.to, 0)
@@ -107,7 +114,7 @@ describe('rollup reduction equals the store arithmetic', () => {
     const exact = legacyKpisFromLoads(rows.loads, drivers, win)
     expect(rolled).toEqual(exact)
     expect(exact.totalLoads).toBeGreaterThan(0)
-    expect(exact.brokerLoads).toBeGreaterThan(0)
+    if (key !== 'today') expect(exact.brokerLoads).toBeGreaterThan(0)
   })
 })
 
@@ -145,10 +152,10 @@ describe('useLegacyDashboardKpis', () => {
     seedStore({ loads: rows.loads })
     const ensure = useAppStore.getState().ensureLoadRange as ReturnType<typeof vi.fn>
     const b = renderHook(() => useLegacyDashboardKpis('this-month'))
-    await waitFor(() => expect(ensure).toHaveBeenCalledWith(win.prevFrom, win.to))
+    await waitFor(() => expect(ensure).toHaveBeenCalledWith(loadFromOf(win.prevFrom), win.to))
     // The window is not in yet: still no figures, never zeros.
     expect(b.result.current).toMatchObject({ kpis: null, state: 'loading' })
-    act(() => { useAppStore.setState({ loadedMonths: new Set(monthsCovering(win.prevFrom, win.to, 1)) }) })
+    act(() => { useAppStore.setState({ loadedMonths: new Set(monthsCovering(loadFromOf(win.prevFrom), win.to, 1)) }) })
     expect(b.result.current.source).toBe('live')
     expect(b.result.current.state).toBe('ready')
     expect(b.result.current.kpis).toEqual(legacyKpisFromLoads(rows.loads, drivers, win))
@@ -214,7 +221,7 @@ describe('useLegacyDashboardKpis', () => {
 
 describe('empty LG rows (the stage-3 incident)', () => {
   const emptyRow = (m: string): RawRollupRow => ({
-    id: `LG:${m}`, kind: 'LG', periodKey: m, schemaVersion: 1, computedAt: NOW,
+    id: `LG:${m}`, kind: 'LG', periodKey: m, schemaVersion: LEGACY_SCHEMA_VERSION, computedAt: NOW,
     payload: { v: 1, days: {} }, sourceCounts: { shipments: 0 },
   })
 
@@ -223,7 +230,7 @@ describe('empty LG rows (the stage-3 incident)', () => {
     const win = legacyWindow('this-month', new Date(NOW))
     const months = monthsCovering(win.prevFrom, win.to, 0)
     readRollupRows.mockReturnValue({ fresh: Promise.resolve(months.map(emptyRow)) })
-    seedStore({ loads: rows.loads, loadedMonths: new Set(monthsCovering(win.prevFrom, win.to, 1)) })
+    seedStore({ loads: rows.loads, loadedMonths: new Set(monthsCovering(loadFromOf(win.prevFrom), win.to, 1)) })
     const { result } = renderHook(() => useLegacyDashboardKpis('this-month'))
     await waitFor(() => expect(result.current.source).toBe('live'))
     const exact = legacyKpisFromLoads(rows.loads, drivers, win)
@@ -236,7 +243,7 @@ describe('empty LG rows (the stage-3 incident)', () => {
 describe('usableLegacyRows', () => {
   const NOW_MS = Date.parse(NOW)
   const lg = (month: string, extra: Partial<RawRollupRow> = {}): RawRollupRow => ({
-    id: `LG:${month}`, kind: 'LG', periodKey: month, schemaVersion: 1, computedAt: NOW,
+    id: `LG:${month}`, kind: 'LG', periodKey: month, schemaVersion: LEGACY_SCHEMA_VERSION, computedAt: NOW,
     payload: { v: 1, days: { [`${month}-02`]: {} } }, ...extra,
   })
 
@@ -247,6 +254,10 @@ describe('usableLegacyRows', () => {
   it('a month with days stays usable, with or without sourceCounts', () => {
     expect(usableLegacyRows([lg('2026-10')], ['2026-10'], NOW_MS)?.payloads).toHaveLength(1)
     expect(usableLegacyRows([lg('2026-10', { sourceCounts: { shipments: 3, loads: 4 } })], ['2026-10'], NOW_MS)?.payloads).toHaveLength(1)
+  })
+
+  it('a stored v1 row (counted by pickup day) is never read as delivery figures', () => {
+    expect(usableLegacyRows([lg('2026-10', { schemaVersion: 1 })], ['2026-10'], NOW_MS)).toBeNull()
   })
 
   it('an empty-source row is not trusted even when its payload has days', () => {

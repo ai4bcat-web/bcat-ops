@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { marshall } from '@aws-sdk/util-dynamodb'
 import { ROLLUP_SCHEMA_VERSION, type MonthPayload } from '../../../src/lib/dashboardRollup'
+import { LEGACY_SCHEMA_VERSION } from '../../../src/lib/dashboardRollupLegacy'
 import {
   addMonths,
   MAX_PAYLOAD_BYTES,
@@ -158,6 +159,7 @@ describe('empty source (the stage-3 incident: rows computed from an empty Shipme
   const emptySource: RollupSource = {
     shipments: async () => [],
     loadsOf: async () => [],
+    loadsDeliveredIn: async () => [],
     samples: async () => [],
     deliveredOrders: async () => [],
     openInvoices: async () => [],
@@ -206,16 +208,17 @@ describe('empty source (the stage-3 incident: rows computed from an empty Shipme
     expect([...store.rows.keys()].filter((id) => !id.startsWith('K:') && !id.startsWith('D:'))).toEqual([])
   })
 
-  it('an LG month with shipments but no loads is not written; a month with a load is', async () => {
+  it('an LG month with no delivered loads is not written (even with shipments picked up in it); a month with a delivered load is, as schema 2', async () => {
     const ship = { id: 's1', pickupAppt: '2026-11-03T17:00:00Z', pickupMonth: '2026-11', status: 'BOOKED' }
     const noLoads = { ...emptySource, shipments: async () => [ship] } as unknown as RollupSource
     const store = fakeStore()
     expect(await recomputeKey(withRealComputes(store, noLoads), 'LG:2026-11', { respectMinInterval: false })).toBe('empty-source')
     expect(store.rows.has('LG:2026-11')).toBe(false)
 
-    const withLoad = { ...noLoads, loadsOf: async () => [{ id: 'l1', shipmentId: 's1', pickupAppt: '2026-11-03T17:00:00Z', rate: 100_000 }] } as unknown as RollupSource
+    const withLoad = { ...noLoads, loadsDeliveredIn: async () => [{ id: 'l1', shipmentId: 's1', deliveryAppt: '2026-11-03T17:00:00Z', rate: 100_000 }] } as unknown as RollupSource
     expect(await recomputeKey(withRealComputes(store, withLoad), 'LG:2026-11', { respectMinInterval: false })).toBe('written')
     expect(JSON.parse(store.rows.get('LG:2026-11')!.payload as string).days).not.toEqual({})
+    expect(store.rows.get('LG:2026-11')?.schemaVersion).toBe(LEGACY_SCHEMA_VERSION)
   })
 
   it('a month with shipments is still written, with its sourceCounts', async () => {
@@ -329,7 +332,7 @@ describe('processStream', () => {
 })
 
 describe('runSweep', () => {
-  const current = (id: string, schemaVersion = ROLLUP_SCHEMA_VERSION): RollupRow => ({ id, kind: id.split(':')[0]!, periodKey: id.split(':')[1]!, schemaVersion, payload: '{}', computedAt: '2026-11-04T14:00:00.000Z', version: 1 })
+  const current = (id: string, schemaVersion = id.startsWith('LG:') ? LEGACY_SCHEMA_VERSION : ROLLUP_SCHEMA_VERSION): RollupRow => ({ id, kind: id.split(':')[0]!, periodKey: id.split(':')[1]!, schemaVersion, payload: '{}', computedAt: '2026-11-04T14:00:00.000Z', version: 1 })
 
   it('always refreshes the live row, the previous / current / next month and dirty keys', async () => {
     const all: RollupRow[] = []
@@ -357,6 +360,17 @@ describe('runSweep', () => {
     expect(summary.written[0]).toBe('L:CURRENT')
     expect(summary.remaining.length).toBeGreaterThan(0)
     expect(summary.remaining).toContain('M:2026-05')
+  })
+
+  it('rewrites a stored v1 LG row (counted by pickup day) as v2 (delivery day), and leaves current M rows alone', async () => {
+    const all: RollupRow[] = []
+    for (const m of monthsDescending('2024-01', '2026-12')) all.push(current(`M:${m}`), current(`LG:${m}`, 1))
+    const store = fakeStore([...all, current('L:CURRENT')])
+    const { deps } = harness({ store })
+    const summary = await runSweep(deps)
+    expect(store.rows.get('LG:2026-10')?.schemaVersion).toBe(LEGACY_SCHEMA_VERSION)
+    expect(summary.written.filter((k) => k.startsWith('LG:')).length).toBeGreaterThan(2)
+    expect(summary.written).not.toContain('M:2025-04')
   })
 
   it('rewrites an old-schema month once the budget allows', async () => {

@@ -242,13 +242,13 @@ describe('month payload shape', () => {
 describe('dirtyKeysForRecord', () => {
   const ship = { id: 's', status: 'BOOKED', pickupAppt: '2026-10-31T12:00:00Z', pickupMonth: '2026-10', revDivision: 'BROKERAGE', updatedAt: 'a', notes: 'x' }
 
-  it('a status change marks the month and its legacy row once', () => {
-    expect(dirtyKeysForRecord('Shipment', ship, { ...ship, status: 'DELIVERED' })).toEqual(['M:2026-10', 'LG:2026-10'])
+  it('a shipment status change marks its month; the legacy rows (by load delivery date) are not touched by a shipment write', () => {
+    expect(dirtyKeysForRecord('Shipment', ship, { ...ship, status: 'DELIVERED' })).toEqual(['M:2026-10'])
   })
 
   it('a pickupMonth change marks both months', () => {
     const moved = { ...ship, pickupAppt: '2026-11-02T12:00:00Z', pickupMonth: '2026-11' }
-    expect(dirtyKeysForRecord('Shipment', ship, moved).sort()).toEqual(['LG:2026-10', 'LG:2026-11', 'M:2026-10', 'M:2026-11'])
+    expect(dirtyKeysForRecord('Shipment', ship, moved).sort()).toEqual(['M:2026-10', 'M:2026-11'])
   })
 
   it('a change to an irrelevant field marks nothing', () => {
@@ -256,19 +256,36 @@ describe('dirtyKeysForRecord', () => {
   })
 
   it('a void marks the pickup month and the next, where a delivered sample may sit', () => {
-    expect(dirtyKeysForRecord('Shipment', ship, { ...ship, voidedAt: 'v' }).sort()).toEqual(['LG:2026-10', 'M:2026-10', 'M:2026-11'])
+    expect(dirtyKeysForRecord('Shipment', ship, { ...ship, voidedAt: 'v' }).sort()).toEqual(['M:2026-10', 'M:2026-11'])
     const december = { ...ship, pickupAppt: '2026-12-31T12:00:00Z', pickupMonth: '2026-12' }
     expect(dirtyKeysForRecord('Shipment', { ...december, voidedAt: 'v' }, december)).toContain('M:2027-01')
   })
 
   it('removing or inserting a row marks its month; a voided removal still counts', () => {
-    expect(dirtyKeysForRecord('Shipment', { ...ship, voidedAt: 'v' }, undefined)).toEqual(['M:2026-10', 'LG:2026-10'])
+    expect(dirtyKeysForRecord('Shipment', { ...ship, voidedAt: 'v' }, undefined)).toEqual(['M:2026-10'])
     expect(dirtyKeysForRecord('LaneRateSample', undefined, { date: '2026-10-05', sampleMonth: '2026-10', revenueCents: 1 })).toEqual(['M:2026-10'])
   })
 
-  it('a load re-tag marks its month and legacy row', () => {
-    const load = { id: 'l', pickupAppt: '2026-10-05T00:00:00Z', revDivision: 'ASSETS' }
-    expect(dirtyKeysForRecord('Load', load, { ...load, revDivision: 'BROKERAGE' })).toEqual(['M:2026-10', 'LG:2026-10'])
+  it('a load re-tag marks its pickup month and the legacy row of its DELIVERY month', () => {
+    const load = { id: 'l', pickupAppt: '2026-10-05T00:00:00Z', deliveryAppt: '2026-11-02T15:00:00Z', revDivision: 'ASSETS' }
+    expect(dirtyKeysForRecord('Load', load, { ...load, revDivision: 'BROKERAGE' }).sort()).toEqual(['LG:2026-11', 'M:2026-10'])
+  })
+
+  it('moving a load\'s delivery date marks the legacy row it left and the one it joins', () => {
+    const load = { id: 'l', pickupAppt: '2026-10-28T00:00:00Z', deliveryAppt: '2026-10-31T15:00:00Z' }
+    expect(dirtyKeysForRecord('Load', load, { ...load, deliveryAppt: '2026-11-01T15:00:00Z' }).sort()).toEqual(['LG:2026-10', 'LG:2026-11', 'M:2026-10'])
+  })
+
+  it('a rate, delivery driver or void change on a load marks the legacy row of its delivery month', () => {
+    const load = { id: 'l', pickupAppt: '2026-10-05T00:00:00Z', deliveryAppt: '2026-10-07T00:00:00Z', rate: 100, deliveryDriverId: 'a' }
+    for (const change of [{ rate: 200 }, { deliveryDriverId: 'b' }, { voidedAt: 'v' }]) {
+      expect(dirtyKeysForRecord('Load', load, { ...load, ...change })).toContain('LG:2026-10')
+    }
+  })
+
+  it('a load with no delivery date marks no legacy row', () => {
+    const load = { id: 'l', pickupAppt: '2026-10-05T00:00:00Z' }
+    expect(dirtyKeysForRecord('Load', load, { ...load, rate: 5 })).toEqual(['M:2026-10'])
   })
 
   it('an invoice leaving the open set marks the live row; a non-open insert marks nothing', () => {

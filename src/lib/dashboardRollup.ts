@@ -299,7 +299,7 @@ export const LIVE_ROW_ID = 'L:CURRENT'
 const COMPARED: Record<RollupSourceTable, readonly string[]> = {
   Shipment: ['status', 'pickupAppt', 'pickupMonth', 'revDivision', 'revSubdivision', 'voidedAt', 'deletedAt', 'salesRepId', 'salesRepCode'],
   Order: ['docsMissing', 'shipmentId', 'pickupAppt'],
-  Load: ['status', 'pickupAppt', 'pickupMonth', 'shipmentId', 'revDivision', 'revSubdivision', 'pickupDriverId', 'deliveryDriverId', 'rate', 'voidedAt'],
+  Load: ['status', 'pickupAppt', 'pickupMonth', 'deliveryAppt', 'shipmentId', 'revDivision', 'revSubdivision', 'pickupDriverId', 'deliveryDriverId', 'rate', 'voidedAt'],
   LaneRateSample: ['excluded', 'date', 'sampleMonth', 'revenueCents', 'costCents', 'profitCents', 'revDivision', 'revSubdivision', 'podReceivedAt', 'shipmentId', 'salesRepId'],
   Invoice: ['arOpen', 'balanceCents', 'shipmentId', 'status'],
   CarrierBill: ['apOpen', 'balanceCents', 'loadId', 'status'],
@@ -349,9 +349,13 @@ export function dirtyKeysForRecord(table: RollupSourceTable, oldImage: unknown, 
   const keys = new Set<string>()
   for (const image of [before, after]) {
     const month = monthOfImage(table, image)
-    if (!month) continue
-    keys.add(`M:${month}`)
-    if (table === 'Shipment' || table === 'Load') keys.add(`LG:${month}`)
+    if (month) keys.add(`M:${month}`)
+    // The legacy KPI rows count a load in the month it was delivered, so only a Load write moves them, and
+    // the row is the one named by the load's delivery date (old and new), never its pickup month.
+    if (table === 'Load') {
+      const delivered = monthOfValue(typeof image?.deliveryAppt === 'string' ? image.deliveryAppt : null)
+      if (delivered) keys.add(`LG:${delivered}`)
+    }
   }
   // A rep change on a shipment moves its samples between rep rows, and they sit in the delivery month (often the next).
   if (table === 'Shipment' && before && after && (JSON.stringify(before.salesRepId) !== JSON.stringify(after.salesRepId) || JSON.stringify(before.salesRepCode) !== JSON.stringify(after.salesRepCode))) {

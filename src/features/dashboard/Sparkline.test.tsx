@@ -4,7 +4,7 @@ import { render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { Sparkline, type TrendPoint } from './Sparkline'
 import { legacyTrendFrom } from './useLegacyTrend'
-import { ROLLUP_SCHEMA_VERSION } from '@/lib/dashboardRollup'
+import { LEGACY_SCHEMA_VERSION } from '@/lib/dashboardRollupLegacy'
 
 const pts = (partialLast: boolean): TrendPoint[] => [
   { month: '2026-09', label: 'Sep 2026', value: 100 },
@@ -29,7 +29,7 @@ describe('Sparkline', () => {
 
 describe('legacyTrendFrom', () => {
   const row = (month: string, n: number, rev: number) => ({
-    id: `LG:${month}`, schemaVersion: ROLLUP_SCHEMA_VERSION, computedAt: '2026-11-17T12:00:00Z',
+    id: `LG:${month}`, schemaVersion: LEGACY_SCHEMA_VERSION, computedAt: '2026-11-17T12:00:00Z',
     payload: { v: 1, days: { [`${month}-05`]: { 'd1|d1': { n, rev, rated: n } } } },
   }) as never
   it('turns month rows into one point per month, skipping months with no row and marking the current one', () => {
@@ -41,7 +41,7 @@ describe('legacyTrendFrom', () => {
 
   it('draws the month in progress to date: days after today are left out, a finished month stays whole', () => {
     const later = {
-      id: 'LG:2026-11', schemaVersion: ROLLUP_SCHEMA_VERSION, computedAt: '2026-11-17T12:00:00Z',
+      id: 'LG:2026-11', schemaVersion: LEGACY_SCHEMA_VERSION, computedAt: '2026-11-17T12:00:00Z',
       payload: { v: 1, days: { '2026-11-05': { 'd1|d1': { n: 2, rev: 150_000, rated: 2 } }, '2026-11-25': { 'd1|d1': { n: 9, rev: 900_000, rated: 9 } } } },
     } as never
     const drivers = [{ id: 'd1', type: 'owner_op' }] as never

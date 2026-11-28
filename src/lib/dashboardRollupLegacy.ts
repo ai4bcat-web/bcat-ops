@@ -2,20 +2,28 @@
  * Legacy `/dashboard` KPI rollup (Step AF): loads, revenue and broker-covered per day per
  * driver pair, so the six KPI cards never need the year's loads in the browser.
  *
- * Relative imports only (the Lambda bundles this). Days are America/Chicago calendar days
- * (the legacy page computed ranges in browser-local time, which is Chicago for the office).
+ * Relative imports only (the Lambda bundles this).
+ *
+ * A load counts on the day it was DELIVERED, the same date basis and rules as the Finances page
+ * (`fleetProfitability`): the day is the first ten characters of the stored `deliveryAppt`, a voided load
+ * counts nowhere, and a load with no delivery date counts in no month. It is attributed to its delivery
+ * driver. (Schema v1 counted by Chicago pickup day and the pickup driver; `LEGACY_SCHEMA_VERSION` 2 marks
+ * the change, so a stored v1 row is never read as delivery figures.)
  *
  * `reduceLegacy` reproduces the arithmetic of the old `useDashboardMetrics` KPI block
  * (`loadsByFleet`, `revenueByFleet`, `revenueConnected`, deltas, broker-covered).
  */
 import { fleetBucketOf, loadsByFleet, revenueByFleet } from './revenueByFleet'
 import type { FleetDriver, FleetBucket, LoadsSplit, RevenueSplit } from './revenueByFleet'
-import type { ShipmentLite } from './dashboardRollup'
+
+/** Schema of the `LG:` rows. v2: counted by delivery day and delivery driver (v1: Chicago pickup day, pickup driver). */
+export const LEGACY_SCHEMA_VERSION = 2
 
 export interface LegacyLoadLite {
   id: string
   shipmentId?: string | null
   pickupAppt?: string | null
+  deliveryAppt?: string | null
   pickupDriverId?: string | null
   deliveryDriverId?: string | null
   /** Cents. */
@@ -24,48 +32,32 @@ export interface LegacyLoadLite {
 }
 
 export interface LegacyMonthSource {
-  shipments(month: string): Promise<ShipmentLite[]>
-  loadsOf(shipmentIds: string[]): Promise<LegacyLoadLite[]>
+  /** Every load whose `deliveryAppt` starts with `month` ('YYYY-MM'); voided ones may be included (compute drops them). */
+  loadsDeliveredIn(month: string): Promise<LegacyLoadLite[]>
 }
 
 export interface LegacyPair { n: number; rev: number; rated: number }
 export interface LegacyMonthPayload {
   v: 1
-  /** `'YYYY-MM-DD'` (Chicago) → `'<pickupDriverId>|<deliveryDriverId>'` → counters. */
+  /** `'YYYY-MM-DD'` (delivery day) → `'<pickupDriverId>|<deliveryDriverId>'` → counters. */
   days: Record<string, Record<string, LegacyPair>>
 }
 
-const chicago = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' })
-
-/** `'YYYY-MM-DD'` of an instant in America/Chicago; `''` for an unparsable value. */
-export function chicagoDay(iso: string): string {
-  const at = new Date(iso)
-  return Number.isNaN(at.getTime()) ? '' : chicago.format(at)
-}
-
-function adjacentMonth(month: string, delta: number): string {
-  const [y, m] = month.split('-').map(Number) as [number, number]
-  const index = y * 12 + (m - 1) + delta
-  return `${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, '0')}`
+/** `'YYYY-MM-DD'` of a stored delivery time: its first ten characters, exactly what Finances reads; `''` when absent or not a date. */
+export function deliveryDay(deliveryAppt: string | null | undefined): string {
+  const day = (deliveryAppt ?? '').slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : ''
 }
 
 /**
- * One month of legacy counters (Chicago month). Reads the shipments of the month and both
- * neighbours (a Chicago day can sit across the UTC month edge) and keeps the loads whose
- * Chicago pickup day is inside `month`. Voided shipments' loads are not counted.
+ * One month of legacy counters: the loads delivered in `month` (by `deliveryDay`). A voided load is not
+ * counted, and a load with no delivery date is in no month.
  */
 export async function computeLegacyMonth(src: LegacyMonthSource, month: string): Promise<LegacyMonthPayload> {
-  const live = new Map<string, ShipmentLite>()
-  for (const m of [adjacentMonth(month, -1), month, adjacentMonth(month, 1)]) {
-    for (const shipment of await src.shipments(m)) if (!shipment.voidedAt) live.set(shipment.id, shipment)
-  }
   const payload: LegacyMonthPayload = { v: 1, days: {} }
-  const ids = [...live.keys()]
-  if (ids.length === 0) return payload
-
-  for (const load of await src.loadsOf(ids)) {
-    if (load.voidedAt || !load.shipmentId || !live.has(load.shipmentId) || !load.pickupAppt) continue
-    const day = chicagoDay(load.pickupAppt)
+  for (const load of await src.loadsDeliveredIn(month)) {
+    if (load.voidedAt) continue
+    const day = deliveryDay(load.deliveryAppt)
     if (!day.startsWith(`${month}-`)) continue
     const pair = `${load.pickupDriverId ?? ''}|${load.deliveryDriverId ?? ''}`
     const byPair = (payload.days[day] ??= {})
@@ -78,7 +70,7 @@ export async function computeLegacyMonth(src: LegacyMonthSource, month: string):
 }
 
 export interface LegacyRange {
-  /** Inclusive `YYYY-MM-DD` (Chicago). */
+  /** Inclusive `YYYY-MM-DD`. */
   from: string
   to: string
   prevFrom: string
@@ -110,9 +102,8 @@ interface Period {
 }
 
 function bucketOfPair(pair: string, byId: Map<string, FleetDriver>): FleetBucket {
-  const [pickup = '', delivery = ''] = pair.split('|')
-  const id = pickup || delivery
-  return fleetBucketOf(id ? byId.get(id) : undefined)
+  const delivery = pair.split('|')[1] ?? ''
+  return fleetBucketOf(delivery ? byId.get(delivery) : undefined)
 }
 
 function reducePeriod(rows: LegacyMonthPayload[], from: string, to: string, byId: Map<string, FleetDriver>, brokerIds: Set<string>): Period {
@@ -121,12 +112,12 @@ function reducePeriod(rows: LegacyMonthPayload[], from: string, to: string, byId
     for (const [day, pairs] of Object.entries(row.days)) {
       if (day < from || day > to) continue
       for (const [pair, v] of Object.entries(pairs)) {
-        const [pickup = '', delivery = ''] = pair.split('|')
+        const delivery = pair.split('|')[1] ?? ''
         period.loads += v.n
         period.revenue += v.rev
         period.rated += v.rated
         period.unrated += v.n - v.rated
-        if ((delivery && brokerIds.has(delivery)) || (pickup && brokerIds.has(pickup))) {
+        if (delivery && brokerIds.has(delivery)) {
           period.brokerLoads += v.n
           period.brokerRevenue += v.rev
         }
@@ -150,11 +141,11 @@ export function reduceLegacy(rows: LegacyMonthPayload[], range: LegacyRange, dri
   const previous = reducePeriod(rows, range.prevFrom, range.prevTo, byId, brokerIds)
 
   // Start from the empty split so bucket order and labels stay the single source of truth.
-  const loadsSplit = loadsByFleet([], drivers)
+  const loadsSplit = loadsByFleet([], drivers, 'delivery')
   for (const row of loadsSplit.byBucket) row.loads = current.byFleet.get(row.bucket)?.loads ?? 0
   loadsSplit.total = current.loads
 
-  const revenueSplit = revenueByFleet([], drivers)
+  const revenueSplit = revenueByFleet([], drivers, 'delivery')
   for (const row of revenueSplit.byBucket) {
     const slot = current.byFleet.get(row.bucket)
     row.revenue = slot?.ratedLoads ? slot.revenue : 0

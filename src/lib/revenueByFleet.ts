@@ -22,6 +22,14 @@
 import { isOwnerOperator } from './driverOwnership'
 import type { Driver, Load } from '../types'
 
+/**
+ * Which driver a load is attributed to: the PICKUP driver (falling back to the delivery driver; the
+ * long-standing convention on the loads-per-driver charts), or the DELIVERY driver only, which is what the
+ * Finances page uses (a load counts where it was delivered, so a load with no delivery driver is
+ * "no driver" rather than the pickup driver's).
+ */
+export type FleetAttribution = 'pickup' | 'delivery'
+
 export type FleetBucket = 'OWNER_OP' | 'IVAN' | 'BOX_TRUCK' | 'BROKER' | 'UNASSIGNED'
 
 export const FLEET_BUCKET_LABEL: Record<FleetBucket, string> = {
@@ -72,8 +80,9 @@ export interface RevenueSplit {
 export function loadFleetBucket(
   load: Pick<Load, 'pickupDriverId' | 'deliveryDriverId'>,
   driversById: Map<string, FleetDriver>,
+  by: FleetAttribution = 'pickup',
 ): FleetBucket {
-  const id = load.pickupDriverId ?? load.deliveryDriverId
+  const id = by === 'delivery' ? load.deliveryDriverId : load.pickupDriverId ?? load.deliveryDriverId
   return fleetBucketOf(id ? driversById.get(id) : undefined)
 }
 
@@ -83,6 +92,7 @@ const ORDER: FleetBucket[] = ['OWNER_OP', 'IVAN', 'BOX_TRUCK', 'BROKER', 'UNASSI
 export function revenueByFleet(
   loads: Pick<Load, 'rate' | 'pickupDriverId' | 'deliveryDriverId'>[],
   drivers: FleetDriver[],
+  by: FleetAttribution = 'pickup',
 ): RevenueSplit {
   const byId = new Map(drivers.map((d) => [d.id, d]))
   const revenue = new Map<FleetBucket, { revenue: number; loads: number }>()
@@ -92,7 +102,7 @@ export function revenueByFleet(
   for (const load of loads) {
     const rate = load.rate ?? 0
     if (!rate) { unrated++; continue }
-    const bucket = loadFleetBucket(load, byId)
+    const bucket = loadFleetBucket(load, byId, by)
     const cur = revenue.get(bucket) ?? { revenue: 0, loads: 0 }
     cur.revenue += rate
     cur.loads++
@@ -139,11 +149,12 @@ export interface LoadsSplit {
 export function loadsByFleet(
   loads: Pick<Load, 'pickupDriverId' | 'deliveryDriverId'>[],
   drivers: FleetDriver[],
+  by: FleetAttribution = 'pickup',
 ): LoadsSplit {
   const byId = new Map(drivers.map((d) => [d.id, d]))
   const counts = new Map<FleetBucket, number>()
   for (const load of loads) {
-    const bucket = loadFleetBucket(load, byId)
+    const bucket = loadFleetBucket(load, byId, by)
     counts.set(bucket, (counts.get(bucket) ?? 0) + 1)
   }
   return {
