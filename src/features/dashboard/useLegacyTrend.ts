@@ -3,8 +3,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { chicagoDateStr } from '@/lib/date'
 import { trailingMonths } from '@/lib/brokerageRevenue'
 import { readRollupRows, type RawRollupRow } from '@/lib/dashboardRollupClient'
-import { ROLLUP_SCHEMA_VERSION } from '@/lib/dashboardRollup'
-import { reduceLegacy, type LegacyMonthPayload } from '@/lib/dashboardRollupLegacy'
+import { LEGACY_SCHEMA_VERSION, reduceLegacy, type LegacyMonthPayload } from '@/lib/dashboardRollupLegacy'
 import type { TrendPoint } from './Sparkline'
 
 export interface LegacyTrend { loads: TrendPoint[]; revenue: TrendPoint[]; broker: TrendPoint[] }
@@ -24,7 +23,7 @@ export function legacyTrendFrom(rows: RawRollupRow[], months: string[], current:
   for (const month of months) {
     const row = byId.get(`LG:${month}`)
     const p = row?.payload as Partial<LegacyMonthPayload> | null | undefined
-    if (!row || row.schemaVersion !== ROLLUP_SCHEMA_VERSION || !p || p.v !== 1 || typeof p.days !== 'object' || p.days === null) continue
+    if (!row || row.schemaVersion !== LEGACY_SCHEMA_VERSION || !p || p.v !== 1 || typeof p.days !== 'object' || p.days === null) continue
     // The month in progress is drawn to date (the same days its card counts), a finished month in full.
     const range = { from: `${month}-01`, to: month === current && today ? today : `${month}-31`, prevFrom: '0000-00-00', prevTo: '0000-00-00' }
     const k = reduceLegacy([p as LegacyMonthPayload], range, drivers)

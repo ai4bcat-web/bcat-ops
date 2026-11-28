@@ -181,6 +181,10 @@ export interface SourceTables {
 
 const SHIPMENT_FIELDS = ['id', 'status', 'pickupAppt', 'pickupMonth', 'revDivision', 'revSubdivision', 'voidedAt', 'deletedAt', 'salesRepId', 'salesRepCode']
 const LOAD_FIELDS = ['id', 'shipmentId', 'status', 'pickupAppt', 'revDivision', 'revSubdivision', 'voidedAt', 'pickupDriverId', 'deliveryDriverId', 'rate']
+/** What the legacy KPI rows read of a load: the delivery date decides its month. */
+const DELIVERED_LOAD_FIELDS = ['id', 'shipmentId', 'deliveryAppt', 'voidedAt', 'pickupDriverId', 'deliveryDriverId', 'rate']
+/** Parallel scan segments for the one pass over the Load table (its index is by pickup month, not delivery). */
+const SCAN_SEGMENTS = 8
 const SAMPLE_FIELDS = ['shipmentId', 'date', 'excluded', 'revenueCents', 'costCents', 'profitCents', 'revDivision', 'revSubdivision', 'podReceivedAt', 'salesRepId']
 
 const names = (fields: string[]): Record<string, string> => Object.fromEntries(fields.map((f) => [`#${f}`, f]))
@@ -191,7 +195,37 @@ export interface RollupSource extends MonthSource, LiveSource, LegacyMonthSource
   loadsOf(shipmentIds: string[]): Promise<Array<LoadLite & LegacyLoadLite>>
 }
 
+/**
+ * Every load that has a delivery date and is not voided, in one parallel scan (the Load table has no index by
+ * delivery month). A stored explicit NULL `voidedAt` counts as not voided.
+ */
+async function scanDeliveredLoads(db: DynamoDBDocumentClient, table: string): Promise<LegacyLoadLite[]> {
+  const segments = Array.from({ length: SCAN_SEGMENTS }, (_, segment) => segment)
+  const per = await pool(segments, SCAN_SEGMENTS, async (segment) => {
+    const rows: Row[] = []
+    let key: Record<string, unknown> | undefined
+    do {
+      const out = await db.send(new ScanCommand({
+        TableName: table,
+        Segment: segment,
+        TotalSegments: SCAN_SEGMENTS,
+        FilterExpression: 'attribute_exists(#deliveryAppt) AND (attribute_not_exists(#voidedAt) OR attribute_type(#voidedAt, :nul))',
+        ProjectionExpression: projection(DELIVERED_LOAD_FIELDS),
+        ExpressionAttributeNames: names(DELIVERED_LOAD_FIELDS),
+        ExpressionAttributeValues: { ':nul': 'NULL' },
+        ...(key ? { ExclusiveStartKey: key } : {}),
+      }))
+      rows.push(...((out.Items ?? []) as Row[]))
+      key = out.LastEvaluatedKey
+    } while (key)
+    return rows
+  })
+  return per.flat() as unknown as LegacyLoadLite[]
+}
+
 export function rollupSource(db: DynamoDBDocumentClient, t: SourceTables): RollupSource {
+  // One scan serves every month this invocation recomputes.
+  let deliveredLoads: Promise<LegacyLoadLite[]> | undefined
   const shipmentsByIds = async (ids: string[]) => (await batchGet(db, t.shipment, ids, SHIPMENT_FIELDS)) as unknown as ShipmentLite[]
   return {
     async shipments(month) {
@@ -220,6 +254,11 @@ export function rollupSource(db: DynamoDBDocumentClient, t: SourceTables): Rollu
         }),
       )
       return per.flat() as unknown as Array<LoadLite & LegacyLoadLite>
+    },
+
+    async loadsDeliveredIn(month) {
+      deliveredLoads ??= scanDeliveredLoads(db, t.load)
+      return (await deliveredLoads).filter((l) => typeof l.deliveryAppt === 'string' && l.deliveryAppt.startsWith(month))
     },
 
     async deliveredOrders(shipmentIds) {

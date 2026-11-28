@@ -157,3 +157,21 @@ describe('loadsByFleet — the Total Loads breakdown', () => {
     expect(l.byBucket.map((b) => b.label)).toEqual(r.byBucket.map((b) => b.label))
   })
 })
+
+describe('attribution by the delivery driver (what Finances does)', () => {
+  it('uses the delivery driver only: a load with no delivery driver is "no driver", whatever the pickup driver', () => {
+    expect(loadFleetBucket(load(1, 'ivan', null), new Map(DRIVERS.map((d) => [d.id, d])), 'delivery')).toBe('UNASSIGNED')
+    expect(loadFleetBucket(load(1, 'ivan', null), new Map(DRIVERS.map((d) => [d.id, d])))).toBe('IVAN') // the pickup convention is unchanged
+  })
+
+  it('splits revenue and counts by who delivered, and still adds up to the headline', () => {
+    const loads = [load(100, 'bk', 'ivan'), load(200, 'ivan', 'bk'), load(300, 'ivan', 'oo'), load(null, 'box', 'box'), load(50, null, null)]
+    const r = revenueByFleet(loads, DRIVERS, 'delivery')
+    expect(bucket(r, 'IVAN').revenue).toBe(100)
+    expect(bucket(r, 'BROKER').revenue).toBe(200)
+    expect(bucket(r, 'OWNER_OP').revenue).toBe(300)
+    expect(bucket(r, 'UNASSIGNED').revenue).toBe(50)
+    expect(r.total).toBe(650)
+    expect(loadsByFleet(loads, DRIVERS, 'delivery').total).toBe(5)
+  })
+})

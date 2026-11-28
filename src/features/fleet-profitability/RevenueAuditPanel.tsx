@@ -83,6 +83,7 @@ const SECTIONS: SectionDef[] = [
   { key: 'autoShipper',  label: 'Auto Shipper',                    hint: 'Loads for the AUTO SHIPPER customer with no driver of ours on them. Not a mistake.', tone: 'var(--tms-muted)', countsToward: false, other: true, minor: true },
   { key: 'notCovered',   label: 'Not covered yet',                 hint: 'Booked with nobody covering it yet and delivery still ahead. It cannot have a driver until it is covered.', tone: 'var(--tms-muted)', countsToward: false, other: true, minor: true },
   { key: 'history',      label: 'Imported history (no driver by design)', hint: 'Own-fleet loads imported from Aljex. History never gets a driver and nobody is asked for one.', tone: 'var(--tms-muted)', countsToward: false, other: true, minor: true },
+  { key: 'noDeliveryDate', label: 'No delivery date (in no month’s revenue)', hint: 'Picked up this month but with no delivery date, so Finances and the dashboard count it in no month. Open the load and enter the delivery date and it counts on that day.', tone: 'var(--tms-badge-orange)', countsToward: false },
   { key: 'broker',       label: 'Broker-covered (excluded)',      hint: 'Run by a broker / 3PL — intentionally excluded from truck revenue.',   tone: 'var(--tms-muted)', countsToward: false },
 ]
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { reduceLegacy, type LegacyMonthPayload } from '@/lib/dashboardRollupLegacy'
-import type { Driver } from '@/types'
-import { compareLabel, legacyWindow, periodLabel, type DateRangeKey } from './legacyKpiMath'
+import type { Driver, Load } from '@/types'
+import { compareLabel, legacyKpisFromLoads, legacyWindow, periodLabel, type DateRangeKey } from './legacyKpiMath'
 
 /** Local noon, so the calendar day is the same in any CI zone. */
 const at = (y: number, m: number, d: number) => new Date(y, m - 1, d, 12)
@@ -93,5 +93,25 @@ describe('the change badge counts only the matching days of the previous period'
     const k = reduceLegacy([firsts, today], win('this-month', 2026, 11, 1), drivers)
     expect(k.totalLoads).toBe(3)
     expect(k.totalLoadsDelta).toBe(1)
+  })
+})
+
+describe('the exact path counts a load on the day it was delivered (the Finances rule)', () => {
+  const drivers = [{ id: 'ivan', fleetGroup: 'COMPANY', driverType: 'COMPANY' }, { id: 'brk', type: 'broker' }] as unknown as Driver[]
+  const l = (id: string, over: Record<string, unknown>) => ({ id, pickupAppt: '2026-10-28T15:00:00Z', deliveryAppt: '2026-11-02T15:00:00Z', rate: 100_000, ...over }) as unknown as Load
+
+  it('a load picked up in October and delivered Nov 2 is in November, by its delivery driver, and a voided or undated one is nowhere', () => {
+    const w = win('this-month', 2026, 11, 18)
+    const k = legacyKpisFromLoads([
+      l('a', { deliveryDriverId: 'ivan' }),
+      l('b', { deliveryDriverId: 'brk', pickupDriverId: 'ivan' }),
+      l('c', { deliveryDriverId: 'ivan', voidedAt: 'v' }),
+      l('d', { deliveryDriverId: 'ivan', deliveryAppt: '' }),
+      l('e', { deliveryDriverId: 'ivan', deliveryAppt: '2026-11-19T15:00:00Z' }), // after today
+    ], drivers, w)
+    expect(k.totalLoads).toBe(2)
+    expect(k.revenue).toBe(200_000)
+    expect(k.brokerLoads).toBe(1)
+    expect(k.brokerRevenue).toBe(100_000)
   })
 })

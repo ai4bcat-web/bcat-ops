@@ -3,8 +3,8 @@ import { useAppStore } from '@/store/useAppStore'
 import { monthsCovering } from '@/lib/shipmentWindows'
 import { chicagoDateStr } from '@/lib/date'
 import { readRollupRows, ROLLUP_MAX_AGE_MS, ROLLUP_STALE_MS, type RawRollupRow } from '@/lib/dashboardRollupClient'
-import { ROLLUP_SCHEMA_VERSION, rollupSourceEmpty } from '@/lib/dashboardRollup'
-import { reduceLegacy, type LegacyKpis, type LegacyMonthPayload } from '@/lib/dashboardRollupLegacy'
+import { rollupSourceEmpty } from '@/lib/dashboardRollup'
+import { LEGACY_SCHEMA_VERSION, reduceLegacy, type LegacyKpis, type LegacyMonthPayload } from '@/lib/dashboardRollupLegacy'
 import { compareLabel, legacyKpisFromLoads, legacyWindow, type DateRangeKey } from './legacyKpiMath'
 
 export type { DateRangeKey }
@@ -25,8 +25,8 @@ export interface LegacyKpiResult {
 }
 
 const SEED_MAX_AGE_MS = 30 * 60_000
-// v2: the periods are cut to today and the previous one to the same day; a v1 seed holds whole-period figures.
-const SEED_PREFIX = 'bcat.dash.legacy.v2:'
+// v3: loads count on the day they were delivered; a v2 seed holds pickup-day figures (v1: whole-period figures).
+const SEED_PREFIX = 'bcat.dash.legacy.v3:'
 
 interface Seed { from: string; kpis: LegacyKpis; asOf: string | null; savedAt: number }
 
@@ -68,7 +68,7 @@ export function usableLegacyRows(rows: RawRollupRow[], months: string[], now: nu
   for (const month of months) {
     if (month > current && !byId.has(`LG:${month}`)) continue
     const row = byId.get(`LG:${month}`)
-    if (!row || row.schemaVersion !== ROLLUP_SCHEMA_VERSION) return null
+    if (!row || row.schemaVersion !== LEGACY_SCHEMA_VERSION) return null
     const p = row.payload as Partial<LegacyMonthPayload> | null
     if (!p || p.v !== 1 || typeof p.days !== 'object' || p.days === null) return null
     // A month row with no counted loads (or computed from an empty source) is never trusted: the
@@ -139,17 +139,20 @@ export function useLegacyDashboardKpis(rangeKey: DateRangeKey): LegacyKpiResult 
   const rollup = read?.key === rangeKey ? read.value : undefined
   const exactNeeded = rollup === null
 
+  // A load counts on the day it was delivered, and was usually picked up in the month before: read from the start of that month.
+  const loadFrom = useMemo(() => `${prevMonth(win.prevFrom.slice(0, 7))}-01`, [win.prevFrom])
+
   useEffect(() => {
     if (!exactNeeded) return
-    ensureLoadRange(win.prevFrom, win.to).catch((err: unknown) => console.warn('[legacy dashboard] ensureLoadRange failed', err))
-  }, [exactNeeded, ensureLoadRange, win.prevFrom, win.to])
+    ensureLoadRange(loadFrom, win.to).catch((err: unknown) => console.warn('[legacy dashboard] ensureLoadRange failed', err))
+  }, [exactNeeded, ensureLoadRange, loadFrom, win.to])
 
   const driversReady = drivers.length > 0
   const rollupKpis = useMemo(
     () => (rollup && driversReady ? reduceLegacy(rollup.payloads, win, drivers) : null),
     [rollup, driversReady, drivers, win],
   )
-  const exactReady = exactNeeded && driversReady && !isLoading && monthsCovering(win.prevFrom, win.to, 1).every((m) => loadedMonths.has(m))
+  const exactReady = exactNeeded && driversReady && !isLoading && monthsCovering(loadFrom, win.to, 1).every((m) => loadedMonths.has(m))
   const exactKpis = useMemo(
     () => (exactReady ? legacyKpisFromLoads(allLoads, drivers, win) : null),
     [exactReady, allLoads, drivers, win],

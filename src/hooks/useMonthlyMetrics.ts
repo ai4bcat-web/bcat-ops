@@ -1,6 +1,8 @@
 import { useMemo } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import { isLoadVoided } from '@/lib/shipmentVoid'
+import { deliveryDay } from '@/lib/dashboardRollupLegacy'
+import { fleetBucketOf } from '@/lib/revenueByFleet'
 import { useEnsureLoadRange } from './useLoads'
 import type { Load } from '@/types'
 
@@ -10,13 +12,14 @@ export interface MonthBucket {
   fullLabel: string  // 'Jul 2026'
   year: number
   loads: number
-  loadsBroker: number       // loads covered by a broker-type driver
-  loadsIvan: number         // loads run by Ivan's own (non-broker) drivers
-  loadsUnassigned: number   // loads with no pickup driver / unknown driver
+  // The three-way split Finances uses, by the DELIVERY driver's fleet.
+  loadsLocal: number        // loads delivered by Local (Ivan's own) drivers and box trucks
+  loadsOwnerOp: number      // loads delivered by owner operators
+  loadsOther: number        // loads covered by a broker, or with no delivery driver / an unknown one
   revenue: number           // cents — all loads
-  revenueBroker: number     // cents — loads covered by a broker-type driver
-  revenueIvan: number       // cents — loads run by Ivan's own (non-broker) drivers
-  revenueUnassigned: number // cents — loads with a rate but no pickup driver / unknown driver
+  revenueLocal: number      // cents — delivered by Local drivers and box trucks
+  revenueOwnerOp: number    // cents — delivered by owner operators
+  revenueOther: number      // cents — covered by a broker, or with no delivery driver / an unknown one
   miles: number             // total loaded miles
   revenuePerMile: number    // dollars per mile (revenue / miles), 0 when no miles
   readyToInvoice: number
@@ -42,7 +45,9 @@ function monthKey(d: Date): string {
 /**
  * Aggregates loads into calendar-month buckets for the trailing `monthsBack`
  * months plus the current month (so a 6 → 7 buckets, ending with the live month).
- * Load date is `pickupAppt`; revenue is the sum of `rate` (cents).
+ * A load counts in the month it was DELIVERED (the first ten characters of `deliveryAppt`, the Finances
+ * rule): one with no delivery date, or delivering after today, is in no bucket yet. Revenue is the sum of
+ * `rate` (cents), split by the delivery driver's fleet.
  */
 export function useMonthlyMetrics(monthsBack = 6): MonthlyMetrics {
   const allLoads  = useAppStore((s) => s.loads)
@@ -52,15 +57,16 @@ export function useMonthlyMetrics(monthsBack = 6): MonthlyMetrics {
   const loads     = useMemo(() => allLoads.filter((l) => !isLoadVoided(l)), [allLoads])
   const drivers   = useAppStore((s) => s.drivers)
   const equipment = useAppStore((s) => s.equipment)
-  useEnsureLoadRange(`${monthKey(new Date(new Date().getFullYear(), new Date().getMonth() - monthsBack, 1))}-01`, `${monthKey(new Date())}-01`)
+  // One month earlier than the oldest bucket: a load delivered then was usually picked up the month before.
+  useEnsureLoadRange(`${monthKey(new Date(new Date().getFullYear(), new Date().getMonth() - monthsBack - 1, 1))}-01`, `${monthKey(new Date())}-01`)
 
   return useMemo(() => {
     const now = new Date()
     const curKey = monthKey(now)
 
-    // Which driver IDs are brokers (outsourced carriers) vs Ivan's own drivers.
-    const brokerIds = new Set(drivers.filter((d) => d.type === 'broker').map((d) => d.id))
-    const knownIds  = new Set(drivers.map((d) => d.id))
+    const driversById = new Map(drivers.map((d) => [d.id, d]))
+    // Finances caps the current month at today (UTC), so a load scheduled to deliver later is not revenue yet.
+    const today = now.toISOString().slice(0, 10)
 
     // Classify each active truck once (fleet + when it entered the fleet). fleetGroup
     // is the source of truth; anything not tagged AMAZON counts as Ivan (LOCAL) fleet.
@@ -85,13 +91,13 @@ export function useMonthlyMetrics(monthsBack = 6): MonthlyMetrics {
         fullLabel: d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
         year: d.getFullYear(),
         loads: 0,
-        loadsBroker: 0,
-        loadsIvan: 0,
-        loadsUnassigned: 0,
+        loadsLocal: 0,
+        loadsOwnerOp: 0,
+        loadsOther: 0,
         revenue: 0,
-        revenueBroker: 0,
-        revenueIvan: 0,
-        revenueUnassigned: 0,
+        revenueLocal: 0,
+        revenueOwnerOp: 0,
+        revenueOther: 0,
         miles: 0,
         revenuePerMile: 0,
         readyToInvoice: 0,
@@ -103,23 +109,24 @@ export function useMonthlyMetrics(monthsBack = 6): MonthlyMetrics {
     }
 
     const addLoad = (l: Load) => {
-      const key = l.pickupAppt.slice(0, 7) // 'YYYY-MM'
-      const b = buckets.get(key)
+      const day = deliveryDay(l.deliveryAppt)
+      if (!day || day > today) return
+      const b = buckets.get(day.slice(0, 7)) // 'YYYY-MM'
       if (!b) return
       b.loads += 1
       const rate = l.rate ?? 0
       b.revenue += rate
-      // Attribute loads & revenue by the pickup driver's type (same convention as loads-per-driver).
-      const did = l.pickupDriverId
-      if (did && brokerIds.has(did)) {
-        b.loadsBroker += 1
-        b.revenueBroker += rate
-      } else if (did && knownIds.has(did)) {
-        b.loadsIvan += 1
-        b.revenueIvan += rate
+      // Attribute by the delivery driver's fleet, the same split Finances makes.
+      const bucket = fleetBucketOf(l.deliveryDriverId ? driversById.get(l.deliveryDriverId) : undefined)
+      if (bucket === 'IVAN' || bucket === 'BOX_TRUCK') {
+        b.loadsLocal += 1
+        b.revenueLocal += rate
+      } else if (bucket === 'OWNER_OP') {
+        b.loadsOwnerOp += 1
+        b.revenueOwnerOp += rate
       } else {
-        b.loadsUnassigned += 1
-        b.revenueUnassigned += rate
+        b.loadsOther += 1
+        b.revenueOther += rate
       }
       b.miles += l.miles ?? 0
       if (l.readyToInvoice) b.readyToInvoice += 1

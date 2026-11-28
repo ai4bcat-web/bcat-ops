@@ -175,6 +175,8 @@ export function DashboardPage() {
   const kpiFinal = kpi.state !== 'loading'
   const needsAppt = useBatoryApptCount()
   const trend = useLegacyTrend()
+  // Loads, Revenue and Broker covered count a load on the day it was delivered (the Finances rule); say so on each card.
+  const compare = `${kpi.compareLabel} · by delivery date`
 
   const navigate = useNavigate()
   const { hasPageAccess, isAdmin } = useAuth()
@@ -285,7 +287,7 @@ export function DashboardPage() {
                       split={metrics.loadsSplit}
                       delta={metrics.totalLoadsDelta > 0 ? `+${metrics.totalLoadsDelta}` : String(metrics.totalLoadsDelta)}
                       deltaDir={metrics.totalLoadsDelta > 0 ? 'up' : metrics.totalLoadsDelta < 0 ? 'down' : 'neutral'}
-                      sublabel={kpi.compareLabel}
+                      sublabel={compare}
                       trend={trend?.loads}
                     />
                   ) : <KpiSkeleton label="Total Loads" />}
@@ -297,7 +299,7 @@ export function DashboardPage() {
                       connected={metrics.revenueConnected}
                       delta={metrics.revenueConnected ? `${metrics.revenueDelta >= 0 ? '+' : '−'}${cents(Math.abs(metrics.revenueDelta))}` : undefined}
                       deltaDir={metrics.revenueDelta > 0 ? 'up' : metrics.revenueDelta < 0 ? 'down' : 'neutral'}
-                      sublabel={metrics.revenueConnected ? kpi.compareLabel : 'Connect rates to loads'}
+                      sublabel={metrics.revenueConnected ? compare : 'Connect rates to loads'}
                       trend={trend?.revenue}
                     />
                   ) : <KpiSkeleton label="Revenue" />}
@@ -309,7 +311,7 @@ export function DashboardPage() {
                       countDelta={metrics.brokerLoadsDelta}
                       revenue={metrics.brokerRevenue}
                       revenueDelta={metrics.brokerRevenueDelta}
-                      sublabel={kpi.compareLabel}
+                      sublabel={compare}
                       trend={trend?.broker}
                     />
                   ) : <KpiSkeleton label="Broker Covered" />}

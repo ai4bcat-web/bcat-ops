@@ -26,7 +26,7 @@ import {
   type MonthPayload,
   type RollupSourceTable,
 } from '../../../src/lib/dashboardRollup'
-import { computeLegacyMonth, type LegacyMonthPayload } from '../../../src/lib/dashboardRollupLegacy'
+import { computeLegacyMonth, LEGACY_SCHEMA_VERSION, type LegacyMonthPayload } from '../../../src/lib/dashboardRollupLegacy'
 import { unmarshall } from '@aws-sdk/util-dynamodb'
 import type { AttributeValue } from '@aws-sdk/client-dynamodb'
 import {
@@ -55,6 +55,9 @@ export const SWEEP_BUDGET_MS = 240_000
 export const BACKFILL_FLOOR = '2024-01'
 /** What one recompute is expected to cost at most; a key is not started when less time is left. */
 const KEY_RESERVE_MS = 12_000
+
+/** The schema a row of `kind` is written with: the `LG:` rows have their own (they changed to a delivery-day basis alone). */
+const schemaVersionOf = (kind: string): number => (kind === 'LG' ? LEGACY_SCHEMA_VERSION : ROLLUP_SCHEMA_VERSION)
 
 export type RecomputeOutcome = 'written' | 'too-large' | 'throttled' | 'leased' | 'empty-source'
 
@@ -134,6 +137,7 @@ const TALLY_LABEL: Record<string, string> = {
   shipments: 'shipments',
   samples: 'samples',
   loadsOf: 'loads',
+  loadsDeliveredIn: 'deliveredLoads',
   deliveredOrders: 'orders',
   openInvoices: 'invoices',
   openBills: 'bills',
@@ -207,7 +211,7 @@ export async function recomputeKey(
       periodKey: period,
       // A too-large payload is replaced by an empty marker row: the client reads "no payload"
       // as unusable and falls back to the exact path; a stale old payload must not linger.
-      schemaVersion: ROLLUP_SCHEMA_VERSION,
+      schemaVersion: schemaVersionOf(kind),
       payload: tooLarge ? null : json,
       computedAt: started.toISOString(),
       computeMs: deps.now().getTime() - started.getTime(),
@@ -345,7 +349,7 @@ export async function runSweep(deps: RollupDeps, budgetMs = SWEEP_BUDGET_MS): Pr
   // 3. Progressive backfill: absent or old-schema rows, newest first.
   for (const month of monthsDescending(BACKFILL_FLOOR, addMonths(current, 1))) {
     for (const k of [`M:${month}`, `LG:${month}`]) {
-      if (byId.get(k)?.schemaVersion !== ROLLUP_SCHEMA_VERSION) keys.add(k)
+      if (byId.get(k)?.schemaVersion !== schemaVersionOf(kindOf(k))) keys.add(k)
     }
   }
 

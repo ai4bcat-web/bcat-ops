@@ -50,9 +50,8 @@ const METRICS: MetricDef[] = [
   { key: 'trucks',         label: 'Trucks',     color: 'var(--tms-chart-4)', icon: <Truck size={13} />,        get: (m) => m.trucks,         fmt: num,      axisWidth: 28 },
 ]
 
-// Segments for the stacked Revenue view — who covered the load, by driver type.
-// Metrics that break down by who covered the load (driver type). Each renders as a
-// stacked bar; the Unassigned segment (optional) is hidden when no month has any.
+// Segments for the stacked Loads / Revenue views: the split Finances makes, by the fleet of the driver who
+// delivered the load. Each renders as a stacked bar; an optional segment is hidden when no month has any.
 interface StackSeg { key: keyof MonthBucket; label: string; color: string; optional?: boolean }
 interface StackDef { fmt: (n: number) => string; segments: StackSeg[] }
 
@@ -60,17 +59,17 @@ const STACKS: Partial<Record<MetricKey, StackDef>> = {
   loads: {
     fmt: num,
     segments: [
-      { key: 'loadsBroker',     label: 'Broker covered', color: 'var(--tms-chart-4)' },
-      { key: 'loadsIvan',       label: 'Ivan drivers',   color: 'var(--tms-primary)' },
-      { key: 'loadsUnassigned', label: 'Unassigned',     color: 'var(--tms-chart-9)', optional: true },
+      { key: 'loadsLocal',   label: 'Local',                  color: 'var(--tms-primary)' },
+      { key: 'loadsOwnerOp', label: 'Owner operators',        color: 'var(--tms-chart-4)' },
+      { key: 'loadsOther',   label: 'Brokered / no driver',   color: 'var(--tms-chart-9)', optional: true },
     ],
   },
   revenue: {
     fmt: money,
     segments: [
-      { key: 'revenueBroker',     label: 'Broker covered', color: 'var(--tms-chart-4)' },
-      { key: 'revenueIvan',       label: 'Ivan drivers',   color: 'var(--tms-badge-green)' },
-      { key: 'revenueUnassigned', label: 'Unassigned',     color: 'var(--tms-chart-9)', optional: true },
+      { key: 'revenueLocal',   label: 'Local',                color: 'var(--tms-badge-green)' },
+      { key: 'revenueOwnerOp', label: 'Owner operators',      color: 'var(--tms-chart-4)' },
+      { key: 'revenueOther',   label: 'Brokered / no driver', color: 'var(--tms-chart-9)', optional: true },
     ],
   },
   trucks: {
@@ -170,7 +169,7 @@ export function MonthlyComparisonWidget() {
         <div>
           <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Monthly Comparison</div>
           <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 2 }}>
-            Last {months.length} months · current month to date
+            Last {months.length} months · current month to date · by delivery date
           </div>
         </div>
         <div style={{ display: 'flex', gap: 4, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', borderRadius: 9, padding: 3 }}>

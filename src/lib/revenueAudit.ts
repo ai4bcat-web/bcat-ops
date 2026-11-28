@@ -15,6 +15,7 @@ export type AuditBucket =
   | 'otherFleet'     // resolved to a truck that isn't in THIS fleet (e.g. Amazon)
   | 'broker'         // broker/3PL covered — intentionally excluded
   | 'outOfRange'     // delivered outside the month (see deliveredElsewhere)
+  | 'noDeliveryDate' // no delivery date: counted in no month's revenue (listed in the month it was picked up)
 
 /**
  * What is really inside the 'otherFleet' bucket. The bucket stays one number for the P&L reconciliation;
@@ -58,6 +59,12 @@ const emptyBucket = () => ({ total: 0, rows: [] as AuditRow[] })
 
 function ymd(iso: string): string { return iso.slice(0, 10) }
 
+/** A load's delivery day, or '' when it has none (or not a date): such a load is in no month's revenue. */
+function deliveryDayOf(load: Pick<Load, 'deliveryAppt'>): string {
+  const day = load.deliveryAppt ? ymd(load.deliveryAppt) : ''
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : ''
+}
+
 const nameKey = (n: string | null | undefined): string => (n ?? '').trim().replace(/\s+/g, ' ').toUpperCase()
 
 /**
@@ -87,7 +94,7 @@ export function classifyOtherFleetLoad(
   // Nobody on it. Booked and still ahead of us is a to-do, not a mistake; anything else is.
   if (load.legacyImported === true) return 'history'
   const stillCovering = load.assignmentType === 'NEED_TO_COVER' || load.status === 'SOURCING'
-  if (stillCovering && ymd(load.deliveryAppt) >= ctx.today) return 'notCovered'
+  if (stillCovering && deliveryDayOf(load) >= ctx.today) return 'notCovered'
   return 'needsFix'
 }
 
@@ -139,7 +146,7 @@ export function auditFleetRevenue(params: {
 
   const buckets: Record<AuditBucket, { total: number; rows: AuditRow[] }> = {
     counted: emptyBucket(), zeroRate: emptyBucket(), noTruck: emptyBucket(), unattributed: emptyBucket(),
-    otherFleet: emptyBucket(), broker: emptyBucket(), outOfRange: emptyBucket(),
+    otherFleet: emptyBucket(), broker: emptyBucket(), outOfRange: emptyBucket(), noDeliveryDate: emptyBucket(),
   }
   const otherFleetGroups: Record<OtherFleetKind, { total: number; rows: AuditRow[] }> = {
     needsFix: emptyBucket(), ownerOperator: emptyBucket(), otherFleetDriver: emptyBucket(), brokered: emptyBucket(),
@@ -149,13 +156,35 @@ export function auditFleetRevenue(params: {
   let pickedUpThisMonthDeliveredLaterCount = 0
 
   for (const load of loads) {
-    const deliveryDate = ymd(load.deliveryAppt)
+    const deliveryDate = deliveryDayOf(load)
     const pickupDate = load.pickupAppt ? ymd(load.pickupAppt) : ''
     const inRange = deliveryDate >= range.start && deliveryDate <= range.end
     const rev = (load.rate ?? 0) / 100
     const driverId = load.deliveryDriverId ?? undefined
     const driverName = driverId ? driverById.get(driverId)?.name ?? null : null
     const resolvedTruck = load.truckId ?? (driverId ? truckForDriver.get(driverId) : undefined)
+
+    // No delivery date: the load is in no month's revenue (Finances and the dashboard both count on the
+    // delivery day). It is listed in the month it was picked up so it does not silently disappear.
+    if (!deliveryDate) {
+      if (!(pickupDate >= range.start && pickupDate <= range.end)) continue
+      const row: AuditRow = {
+        id: load.id,
+        ref: load.aljexId || load.tmsId || load.pickupNumber || load.id.slice(0, 6),
+        route: [load.originCity, load.destinationCity].filter(Boolean).join(' → ') || '—',
+        customer: load.customer ?? null,
+        rate: rev,
+        deliveryDate: '',
+        pickupDate,
+        driverId: driverId ?? null,
+        driverName,
+        truckLabel: truckLabelFor(resolvedTruck),
+        bucket: 'noDeliveryDate',
+      }
+      buckets.noDeliveryDate.total += rev
+      buckets.noDeliveryDate.rows.push(row)
+      continue
+    }
 
     // Track loads that will bill NEXT month (picked up now, delivered later) — the
     // most common "where did my revenue go" cause.

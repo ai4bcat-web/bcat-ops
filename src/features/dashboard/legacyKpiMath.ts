@@ -6,6 +6,7 @@
  */
 import { isLoadVoided } from '@/lib/shipmentVoid'
 import { revenueByFleet, loadsByFleet } from '@/lib/revenueByFleet'
+import { deliveryDay } from '@/lib/dashboardRollupLegacy'
 import type { LegacyKpis, LegacyRange } from '@/lib/dashboardRollupLegacy'
 import type { Driver, Load } from '@/types'
 
@@ -13,7 +14,7 @@ export type DateRangeKey = 'today' | 'this-week' | 'this-month' | 'this-quarter'
 
 /**
  * The range chip's current period, to date: week, month and quarter end TODAY (not at their last day), so a card reads
- * "Nov 1-18" in the middle of November and the previous period can be cut to the same length. A load picked up later this
+ * "Nov 1-18" in the middle of November and the previous period can be cut to the same length. A load delivering later this
  * month is counted when its day arrives. Today is just today.
  */
 function getRange(key: DateRangeKey, now: Date): { start: Date; end: Date } {
@@ -21,8 +22,7 @@ function getRange(key: DateRangeKey, now: Date): { start: Date; end: Date } {
 
   switch (key) {
     case 'today':
-      // `end` is a day start like every other range's: `loadsInRange` already adds the day.
-      // (The old `+ 1 day - 1 ms` made Today also count tomorrow's pickups.)
+      // `end` is a day start like every other range's: `loadsInRange` compares whole days.
       return { start: today, end: today }
 
     case 'this-week': {
@@ -123,12 +123,16 @@ export function compareLabel(key: DateRangeKey, win: Pick<LegacyWindow, 'prevSta
   return key === 'today' ? 'vs. yesterday' : `vs. ${periodLabel(win.prevStart, win.prevEnd)}`
 }
 
+/**
+ * The loads delivered from `start` through `end` (inclusive days). A load counts on its delivery day, the first ten
+ * characters of `deliveryAppt`, exactly as on the Finances page; one with no delivery date is in no period.
+ */
 function loadsInRange(loads: Load[], start: Date, end: Date): Load[] {
-  const s = start.getTime()
-  const e = end.getTime() + 86_400_000  // inclusive end
+  const from = localDay(start)
+  const to = localDay(end)
   return loads.filter((l) => {
-    const t = new Date(l.pickupAppt).getTime()
-    return t >= s && t < e
+    const day = deliveryDay(l.deliveryAppt)
+    return day !== '' && day >= from && day <= to
   })
 }
 
@@ -143,17 +147,16 @@ export function legacyKpisFromLoads(allLoads: Load[], drivers: Driver[], win: Pi
   const totalLoadsDelta = totalLoads - previous.length
 
   const revenue          = current.reduce((sum, l) => sum + (l.rate ?? 0), 0)
-  const revenueSplit     = revenueByFleet(current, drivers)
-  const loadsSplit       = loadsByFleet(current, drivers)
+  const revenueSplit     = revenueByFleet(current, drivers, 'delivery')
+  const loadsSplit       = loadsByFleet(current, drivers, 'delivery')
   const prevRevenue      = previous.reduce((sum, l) => sum + (l.rate ?? 0), 0)
   const revenueConnected = current.some((l) => l.rate != null && l.rate > 0)
   const revenueConnectedPrev = previous.some((l) => l.rate != null && l.rate > 0)
   const revenueDelta     = revenueConnected || revenueConnectedPrev ? revenue - prevRevenue : 0
 
-  // Broker-covered loads = a load whose pickup or delivery driver is a broker.
+  // Broker-covered loads = a load whose delivery driver is a broker (the Finances rule).
   const brokerIds = new Set(drivers.filter((d) => d.type === 'broker').map((d) => d.id))
-  const isBrokerCovered = (l: Load) =>
-    (!!l.deliveryDriverId && brokerIds.has(l.deliveryDriverId)) || (!!l.pickupDriverId && brokerIds.has(l.pickupDriverId))
+  const isBrokerCovered = (l: Load) => !!l.deliveryDriverId && brokerIds.has(l.deliveryDriverId)
   const brokerCur  = current.filter(isBrokerCovered)
   const brokerPrev = previous.filter(isBrokerCovered)
   const brokerLoads        = brokerCur.length

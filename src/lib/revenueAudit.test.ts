@@ -124,3 +124,19 @@ describe('auditFleetRevenue: the split only explains the bucket, it never moves 
     expect(audit.countedTotal).toBe(0)
   })
 })
+
+describe('loads with no delivery date', () => {
+  it('are in no month: they list under "No delivery date" in the month they were picked up, and never count toward revenue', () => {
+    const undated = load({ id: 'u1', aljexId: '14619', customer: 'AUTO SHIPPER', rate: 120900, deliveryAppt: '', pickupAppt: '2026-11-10T15:00:00.000Z' })
+    const undatedOtherMonth = load({ id: 'u2', aljexId: '14364', rate: 790000, deliveryAppt: '', pickupAppt: '2026-09-10T15:00:00.000Z' })
+    const dated = load({ id: 'd1', aljexId: '20001', rate: 50000, deliveryAppt: '2026-11-12T15:00:00.000Z', truckId: undefined })
+    const audit = auditFleetRevenue({ loads: [undated, undatedOtherMonth, dated], drivers, equipment, range: RANGE, group: 'LOCAL', today: TODAY })
+    expect(audit.buckets.noDeliveryDate.rows.map((r) => r.ref)).toEqual(['14619'])
+    expect(audit.buckets.noDeliveryDate.total).toBeCloseTo(1209, 2)
+    expect(audit.buckets.noDeliveryDate.rows[0]!.deliveryDate).toBe('')
+    expect(audit.countedTotal).toBe(0)
+    // Not in the other-fleet groups or the "delivered elsewhere" bucket either: one home each.
+    expect(audit.buckets.otherFleet.rows.map((r) => r.ref)).toEqual(['20001'])
+    expect(audit.buckets.outOfRange.rows).toEqual([])
+  })
+})
