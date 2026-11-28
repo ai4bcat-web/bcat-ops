@@ -5,6 +5,7 @@ import type { Equipment, FleetGroup } from '@/types/equipment'
 import type { Load, Driver } from '@/types'
 import { ORPHAN_UNITS_BY_GROUP, orphanTruckId, truckInFleet } from './fleetGroups'
 import type { DateRange } from './fleetProfitability'
+import { isAutoShipperName } from './reviewRequirements'
 
 export type AuditBucket =
   | 'counted'        // on a member truck of THIS fleet → in the revenue total
@@ -14,6 +15,18 @@ export type AuditBucket =
   | 'otherFleet'     // resolved to a truck that isn't in THIS fleet (e.g. Amazon)
   | 'broker'         // broker/3PL covered — intentionally excluded
   | 'outOfRange'     // delivered outside the month (see deliveredElsewhere)
+
+/**
+ * What is really inside the 'otherFleet' bucket. The bucket stays one number for the P&L reconciliation;
+ * this only explains it (display only — nothing here moves revenue).
+ */
+export type OtherFleetKind =
+  | 'needsFix'          // own-fleet load nobody is driving and that is not exempt history → fix it
+  | 'otherFleetDriver'  // run by a driver / truck of a different fleet (owner-operators, or Local drivers seen from Amazon)
+  | 'brokered'          // covered by an outside carrier, so there is no driver by design
+  | 'autoShipper'       // the AUTO SHIPPER customer's loads
+  | 'notCovered'        // booked, nobody covering yet, delivery still ahead
+  | 'history'           // imported own-fleet history: no driver by design
 
 export interface AuditRow {
   id: string
@@ -27,11 +40,15 @@ export interface AuditRow {
   driverName: string | null
   truckLabel: string | null
   bucket: AuditBucket
+  /** Set on 'otherFleet' rows only. */
+  otherKind?: OtherFleetKind
 }
 
 export interface RevenueAudit {
   countedTotal: number       // == the P&L Revenue number for this fleet+month
   buckets: Record<AuditBucket, { total: number; rows: AuditRow[] }>
+  /** The 'otherFleet' bucket split by cause; the totals add up to buckets.otherFleet. */
+  otherFleetGroups: Record<OtherFleetKind, { total: number; rows: AuditRow[] }>
   // Loads picked up in this month but delivered in another month (why revenue "moved").
   pickedUpThisMonthDeliveredLater: { total: number; count: number }
 }
@@ -40,14 +57,51 @@ const emptyBucket = () => ({ total: 0, rows: [] as AuditRow[] })
 
 function ymd(iso: string): string { return iso.slice(0, 10) }
 
+const nameKey = (n: string | null | undefined): string => (n ?? '').trim().replace(/\s+/g, ' ').toUpperCase()
+
+/**
+ * Why a load that did not count toward this fleet is in the 'otherFleet' bucket. The order matters:
+ * Auto Shipper first (its own customer), then anything with a driver or truck (another fleet's),
+ * then the loads nobody is expected to drive (imported history, brokered), then the ones that look wrong.
+ * Uses the same notions as the shipments list (needsDriver, carrierIsDriverName): imported Aljex history is
+ * exempt, a carrier "name" that is really one of our drivers is our own freight.
+ */
+export function classifyOtherFleetLoad(
+  load: Load,
+  ctx: { driverId?: string | null; hasTruck: boolean; driverNames: ReadonlySet<string>; today: string },
+): OtherFleetKind {
+  if (isAutoShipperName(load.customer)) return 'autoShipper'
+  if (ctx.driverId || ctx.hasTruck) return 'otherFleetDriver'
+
+  const carrier = (load.carrierName ?? '').trim()
+  const carrierIsOurDriver = !!carrier && ctx.driverNames.has(nameKey(carrier))
+  const hasOutsideCarrier = (!!carrier && !carrierIsOurDriver) || !!load.activeLoadCarrierId
+  const ownFleet = load.assignmentType === 'OWN_ASSET' || carrierIsOurDriver
+
+  if (ownFleet) {
+    return load.legacyImported === true ? 'history' : 'needsFix'
+  }
+  if (hasOutsideCarrier || load.assignmentType === 'CARRIER') return 'brokered'
+
+  // Nobody on it. Booked and still ahead of us is a to-do, not a mistake; anything else is.
+  if (load.legacyImported === true) return 'history'
+  const stillCovering = load.assignmentType === 'NEED_TO_COVER' || load.status === 'SOURCING'
+  if (stillCovering && ymd(load.deliveryAppt) >= ctx.today) return 'notCovered'
+  return 'needsFix'
+}
+
 export function auditFleetRevenue(params: {
   loads: Load[]
   drivers: Driver[]
   equipment: Equipment[]
   range: DateRange
   group: FleetGroup
+  /** YYYY-MM-DD "today" for the not-covered-yet rule; defaults to the real date. */
+  today?: string
 }): RevenueAudit {
   const { loads, drivers, equipment, range, group } = params
+  const today = params.today ?? new Date().toISOString().slice(0, 10)
+  const driverNames = new Set(drivers.map((d) => nameKey(d.name)).filter(Boolean))
 
   // ── Members of THIS fleet — same rule as useFleetProfitability ────────────────
   const memberIds = new Set<string>()
@@ -81,6 +135,10 @@ export function auditFleetRevenue(params: {
   const buckets: Record<AuditBucket, { total: number; rows: AuditRow[] }> = {
     counted: emptyBucket(), zeroRate: emptyBucket(), noTruck: emptyBucket(), unattributed: emptyBucket(),
     otherFleet: emptyBucket(), broker: emptyBucket(), outOfRange: emptyBucket(),
+  }
+  const otherFleetGroups: Record<OtherFleetKind, { total: number; rows: AuditRow[] }> = {
+    needsFix: emptyBucket(), otherFleetDriver: emptyBucket(), brokered: emptyBucket(),
+    autoShipper: emptyBucket(), notCovered: emptyBucket(), history: emptyBucket(),
   }
   let pickedUpThisMonthDeliveredLater = 0
   let pickedUpThisMonthDeliveredLaterCount = 0
@@ -140,6 +198,11 @@ export function auditFleetRevenue(params: {
     }
     buckets[bucket].total += rev
     buckets[bucket].rows.push(row)
+    if (bucket === 'otherFleet') {
+      row.otherKind = classifyOtherFleetLoad(load, { driverId, hasTruck: !!resolvedTruck, driverNames, today })
+      otherFleetGroups[row.otherKind].total += rev
+      otherFleetGroups[row.otherKind].rows.push(row)
+    }
   }
 
   // Newest delivery first within each bucket.
@@ -147,7 +210,12 @@ export function auditFleetRevenue(params: {
     buckets[k].rows.sort((a, b) => (a.deliveryDate < b.deliveryDate ? 1 : -1))
   }
 
+  for (const k of Object.keys(otherFleetGroups) as OtherFleetKind[]) {
+    otherFleetGroups[k].rows.sort((a, b) => (a.deliveryDate < b.deliveryDate ? 1 : -1))
+  }
+
   return {
+    otherFleetGroups,
     countedTotal: buckets.counted.total + buckets.zeroRate.total + buckets.noTruck.total,
     buckets,
     pickedUpThisMonthDeliveredLater: { total: pickedUpThisMonthDeliveredLater, count: pickedUpThisMonthDeliveredLaterCount },
