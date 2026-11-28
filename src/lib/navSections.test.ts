@@ -458,7 +458,7 @@ describe('tmsBreadcrumb', () => {
     expect(labels('/tms/carriers')).toEqual(['Carriers', 'Carrier list'])
     expect(labels('/tms/carriers/CAR-7')).toEqual(['Carriers', 'Details'])
     expect(labels('/tms/shipments/SHP-1')).toEqual(['Shipments', 'Shipment'])
-    expect(labels('/tms/carrier-sales')).toEqual(['Carrier Sales'])
+    expect(labels('/tms/carrier-sales')).toEqual(['Find Capacity'])
     expect(labels('/tms/load-review')).toEqual(['Load Review'])
   })
 

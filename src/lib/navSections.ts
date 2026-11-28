@@ -256,7 +256,7 @@ const CRUMBS: CrumbRule[] = [
   { path: INTAKE_PATH, crumbs: [SHIPMENTS, { label: 'Intake' }] },
   { path: INTAKE_PATH, prefix: true, crumbs: [SHIPMENTS, { label: 'Intake', to: INTAKE_PATH }, { label: 'Load' }] },
   { path: '/tms/tracking', crumbs: [{ label: 'Load Tracking' }] },
-  { path: '/tms/carrier-sales', prefix: true, crumbs: [{ label: 'Carrier Sales' }] },
+  { path: '/tms/carrier-sales', prefix: true, crumbs: [{ label: 'Find Capacity' }] },
   { path: '/tms/load-review', prefix: true, crumbs: [{ label: 'Load Review' }] },
   { path: '/tms/tracking/links', crumbs: [LOAD_TRACKING, { label: 'Customer links' }] },
   { path: '/tms/carriers', crumbs: [{ label: 'Carriers', to: '/tms/carriers/find' }, { label: 'Carrier list' }] },

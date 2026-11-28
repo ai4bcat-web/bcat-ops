@@ -59,7 +59,7 @@ export const LIFECYCLE_TABS: readonly LifecycleTab[] = [
   {
     key: 'book',
     label: 'Book',
-    caption: 'Carrier sales',
+    caption: 'Find Capacity',
     to: '/tms/carrier-sales',
     matches: ['/tms/carrier-sales', '/tms/carrier-sales/*'],
     pageKey: 'loads',
