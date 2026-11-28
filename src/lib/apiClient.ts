@@ -798,6 +798,26 @@ const FUEL_TX_FIELDS = `
   currency sourceFile importedAt createdAt updatedAt
 `
 
+/**
+ * Every FuelTransaction, following nextToken. One DynamoDB scan page is capped at 1 MB, so
+ * a single request silently stops short once the table outgrows that, and every fuel
+ * figure downstream (settlements, truck cost) would quietly lose the newest rows.
+ */
+async function fetchAllFuelTransactions(): Promise<FuelTransaction[]> {
+  type Page = { data: { listFuelTransactions: { items: FuelTransaction[]; nextToken?: string | null } } }
+  const out: FuelTransaction[] = []
+  let nextToken: string | null = null
+  do {
+    const result = await client.graphql({
+      query: `query ListFuelTransactions($nextToken: String) { listFuelTransactions(limit: 10000, nextToken: $nextToken) { items { ${FUEL_TX_FIELDS} } nextToken } }`,
+      variables: { nextToken },
+    }) as Page
+    out.push(...(result.data.listFuelTransactions.items ?? []))
+    nextToken = result.data.listFuelTransactions.nextToken ?? null
+  } while (nextToken)
+  return out
+}
+
 export async function listFuelTransactions(filter?: {
   truckId?: string
   cardNumber?: string
@@ -805,12 +825,7 @@ export async function listFuelTransactions(filter?: {
   endDate?: string
 }): Promise<FuelTransaction[]> {
   // Load all and filter client-side for simplicity (dataset is small enough)
-  let items = await sharedRead('fuelTransactions', async () => {
-    const result = await client.graphql({
-      query: `query ListFuelTransactions { listFuelTransactions(limit: 10000) { items { ${FUEL_TX_FIELDS} } } }`,
-    }) as { data: { listFuelTransactions: { items: FuelTransaction[] } } }
-    return result.data.listFuelTransactions.items ?? []
-  })
+  let items = await sharedRead('fuelTransactions', fetchAllFuelTransactions)
   if (filter?.truckId)   items = items.filter((t) => t.truckId === filter.truckId)
   if (filter?.cardNumber) items = items.filter((t) => t.cardNumber === filter.cardNumber)
   if (filter?.startDate) items = items.filter((t) => t.transactionDate >= filter.startDate!)
@@ -874,10 +889,19 @@ export async function cleanupDuplicateFuelTransactions(): Promise<{ removed: num
 }
 
 /**
- * Is this fill already stored? Matches on the invoice-agnostic identity
- * (date + card + fuelType + amount + gallons) so the same fill re-uploaded with a
- * different invoice number is still skipped.
+ * The identity keys (see fuelDedupKey) of every stored fill, read fresh, for skipping
+ * fills that are already stored when a report is uploaded.
+ *
+ * This replaces a per-row filtered query with `limit: 1`. DynamoDB applies the limit
+ * BEFORE the filter, so that query only ever looked at one arbitrary row and nearly always
+ * answered "not stored": overlapping uploads were re-inserted as duplicates (the two PDF
+ * uploads on 2026-06-12 and 2026-11-08 left seven twin pairs behind).
  */
+export async function loadStoredFuelKeys(): Promise<Set<string>> {
+  return new Set((await fetchAllFuelTransactions()).map((t) => fuelDedupKey(t)))
+}
+
+/** One-off check of a single fill. A whole upload should call loadStoredFuelKeys once instead. */
 export async function checkFuelTxExists(
   transactionDate: string,
   cardNumber: string,
@@ -885,21 +909,7 @@ export async function checkFuelTxExists(
   amount: number,
   quantity: number,
 ): Promise<boolean> {
-  const result = await client.graphql({
-    query: `query ListFuelTransactions($filter: ModelFuelTransactionFilterInput) {
-      listFuelTransactions(filter: $filter, limit: 1) { items { id } }
-    }`,
-    variables: {
-      filter: {
-        transactionDate: { eq: transactionDate },
-        cardNumber:      { eq: cardNumber },
-        fuelType:        { eq: fuelType },
-        amount:          { eq: amount },
-        quantity:        { eq: quantity },
-      },
-    },
-  }) as { data: { listFuelTransactions: { items: { id: string }[] } } }
-  return (result.data.listFuelTransactions.items ?? []).length > 0
+  return (await loadStoredFuelKeys()).has(fuelDedupKey({ transactionDate, cardNumber, fuelType, amount, quantity }))
 }
 
 // ── Intake items ──────────────────────────────────────────────────────────────

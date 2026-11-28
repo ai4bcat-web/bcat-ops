@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { listDriverPaySettings, type DriverPaySetting } from '@/lib/apiClient'
 import { boxTruckPayEstimate } from '@/lib/profitReview'
+import { isFuelTx } from '@/lib/driverFuel'
 import { startOfMonth, endOfMonth, addMonths, format, getDaysInMonth } from 'date-fns'
 import { useFleetProfitability } from './useFleetProfitability'
 import { useFleetFixedCosts } from './useFleetFixedCosts'
@@ -112,7 +113,7 @@ export function useProfitReview(monthsBack: number, today: Date = new Date()): P
       const galByTruck = new Map<string, number>()
       let gallons = 0
       for (const t of fuelTxs) {
-        if ((t.itemCategory ?? '') !== 'FUEL' || !inRange(t.transactionDate) || !t.truckId || !memberIds.has(t.truckId)) continue
+        if (!isFuelTx(t) || !inRange(t.transactionDate) || !t.truckId || !memberIds.has(t.truckId)) continue
         const q = t.quantity ?? 0
         gallons += q
         galByTruck.set(t.truckId, (galByTruck.get(t.truckId) ?? 0) + q)
@@ -196,7 +197,7 @@ export function useProfitReview(monthsBack: number, today: Date = new Date()): P
     if (!first) return { count: 0, amount: 0 }
     let count = 0, amount = 0
     for (const t of fuelTxs) {
-      if ((t.itemCategory ?? '') !== 'FUEL' || t.truckId || (t.transactionDate ?? '') < `${first}-01`) continue
+      if (!isFuelTx(t) || t.truckId || (t.transactionDate ?? '') < `${first}-01`) continue
       count += 1; amount += t.amount ?? 0
     }
     return { count, amount }

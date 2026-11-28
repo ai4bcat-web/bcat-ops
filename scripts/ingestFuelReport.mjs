@@ -7,14 +7,16 @@
  *   BCAT_EMAIL=you@example.com BCAT_PASSWORD=... node scripts/ingestFuelReport.mjs <report.txt|report.pdf> [--dry-run]
  *
  * - PDF input requires `pdftotext -layout` (poppler) on PATH.
- * - Dedup: a transaction is skipped if an existing row matches on
- *   (transactionDate, cardNumber, invoiceNumber, fuelType, amount).
+ * - Dedup: a transaction is skipped if a row stored before this run has the same date, card, fuel
+ *   type and gallons and the same amount (to within 10 cents). The invoice number is NOT part of it
+ *   (see scripts/lib/fuelDedup.mjs).
  * - sourceFile is set to the input filename so imports are traceable.
  * - Exit codes: 0 ok, 1 fatal error, 2 parsed zero transactions (likely format change).
  */
 import { readFileSync, existsSync } from 'fs'
 import { execFileSync } from 'child_process'
 import { fileURLToPath } from 'url'
+import { storedFillMatcher } from './lib/fuelDedup.mjs'
 import { dirname, resolve, basename } from 'path'
 import { Amplify } from 'aws-amplify'
 import { signIn, fetchAuthSession } from 'aws-amplify/auth'
@@ -62,8 +64,8 @@ async function buildCardMap(idToken) {
 // Handles both the URL-download text format ("USD/Gallon", indented card #)
 // and the PDF -> pdftotext -layout format ("USD/Gallons", card # at col 0).
 const FUEL_ITEM_TYPES = new Set(['ULSD', 'FUEL', 'DEFD', 'BIO', 'B5', 'B20', 'REG', 'PREM', 'DSL'])
-const TX_LINE_RE = /[A-Z]\s{1,4}USD\/Gallons?\s*$/
-const RIGHT_RE = /(\S+)\s+(?:([\d,]+\.?\d*)\s+)?([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([A-Z])\s+USD\/Gallons?/
+const TX_LINE_RE = /[A-Z]\s{1,4}USD\/Gallo(?:ns?)?\s*$/
+const RIGHT_RE = /(\S+)\s+(?:([\d,]+\.?\d*)\s+)?([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([A-Z])\s+USD\/Gallo(?:ns?)?/
 const CARD_RE = /^\s{0,8}(\d{5})\s/
 const DATE_RE = /\b(\d{4}-\d{2}-\d{2})\b|\b(\d{1,2}\/\d{1,2}\/\d{4})\b/
 
@@ -84,6 +86,8 @@ function categorize(itemType) {
 }
 
 function parseReport(text) {
+  // Normalize CRLF / CR line endings (EFS reports may use Windows-style).
+  text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
   const lines = text.split('\n')
   const transactions = []
   let prev = null
@@ -146,9 +150,10 @@ function parseReport(text) {
 }
 
 // ─── GraphQL ──────────────────────────────────────────────────────────────────
-const LIST_QUERY = `query ListFuelTransactions {
-  listFuelTransactions(limit: 10000) {
-    items { id transactionDate cardNumber invoiceNumber fuelType amount }
+const LIST_QUERY = `query ListFuelTransactions($nextToken: String) {
+  listFuelTransactions(limit: 10000, nextToken: $nextToken) {
+    items { id transactionDate cardNumber fuelType quantity amount }
+    nextToken
   }
 }`
 const CREATE_MUTATION = `mutation CreateFuelTransaction($input: CreateFuelTransactionInput!) {
@@ -219,19 +224,22 @@ async function main() {
   const cardToTruck = await buildCardMap(idToken)
   console.log(`Card → truck: ${Object.entries(cardToTruck).map(([c, id]) => `${c}→${id}`).join(', ')}`)
 
-  // Dedup against existing rows.
-  const listed = await callAppSync(LIST_QUERY, {}, idToken)
-  if (listed.errors) { console.error('List failed:', listed.errors[0].message); process.exit(1) }
-  const existing = new Set(
-    (listed.data.listFuelTransactions.items ?? []).map(
-      (t) => `${t.transactionDate}|${t.cardNumber}|${t.invoiceNumber ?? ''}|${t.fuelType}|${t.amount}`,
-    ),
-  )
+  // Dedup against the rows stored before this run (see lib/fuelDedup.mjs). Every page: one scan
+  // page stops at 1 MB, and a short list would let already-stored fills in again.
+  const stored = []
+  let nextToken = null
+  do {
+    const listed = await callAppSync(LIST_QUERY, { nextToken }, idToken)
+    if (listed.errors) { console.error('List failed:', listed.errors[0].message); process.exit(1) }
+    stored.push(...(listed.data.listFuelTransactions.items ?? []))
+    nextToken = listed.data.listFuelTransactions.nextToken ?? null
+  } while (nextToken)
+  const alreadyStored = storedFillMatcher(stored)
 
   let inserted = 0, duplicates = 0, failed = 0
   for (const tx of parsed) {
     const key = `${tx.transactionDate}|${tx.cardNumber}|${tx.invoiceNumber}|${tx.fuelType}|${tx.amount}`
-    if (existing.has(key)) { duplicates++; continue }
+    if (alreadyStored(tx)) { duplicates++; continue }
 
     const input = {
       transactionDate: tx.transactionDate,
@@ -259,7 +267,6 @@ async function main() {
       console.error(`  FAIL ${key}: ${result.errors[0].message}`)
       failed++
     } else {
-      existing.add(key)
       inserted++
     }
   }

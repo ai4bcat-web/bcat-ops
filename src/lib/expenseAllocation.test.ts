@@ -85,6 +85,33 @@ describe('DIRECT — fuel from FuelTransaction', () => {
   })
 })
 
+describe('DIRECT — fuel rules match the driver settlements', () => {
+  const base = { transactionDate: '2026-05-19', cardNumber: '00007', quantity: 99.67 }
+
+  it('counts a row with no category by its fuelType instead of dropping it', () => {
+    const res = getExpensesByTruck(MAY.start, MAY.end, [
+      { ...base, truckId: TRUCK_685, amount: 597.92, itemCategory: null, fuelType: 'ULSD' },
+      { ...base, truckId: TRUCK_685, amount: 5, quantity: 1, itemCategory: null, fuelType: 'SCLE' },
+    ], [], [], expenseTypes)
+    expect(res[TRUCK_685]?.fuel).toBeCloseTo(597.92, 2)
+  })
+
+  it('counts the same fill stored twice once', () => {
+    const fill = { ...base, truckId: TRUCK_685, amount: 597.92, itemCategory: 'FUEL', fuelType: 'ULSD' }
+    const res = getExpensesByTruck(MAY.start, MAY.end, [fill, { ...fill, invoiceNumber: 'other' } as typeof fill], [], [], expenseTypes)
+    expect(res[TRUCK_685]?.fuel).toBeCloseTo(597.92, 2)
+  })
+
+  it('keeps two different fills the same day', () => {
+    const fill = { ...base, truckId: TRUCK_685, itemCategory: 'FUEL', fuelType: 'ULSD' }
+    const res = getExpensesByTruck(MAY.start, MAY.end, [
+      { ...fill, amount: 597.92 },
+      { ...fill, amount: 120.5, quantity: 20 },
+    ], [], [], expenseTypes)
+    expect(res[TRUCK_685]?.fuel).toBeCloseTo(718.42, 2)
+  })
+})
+
 // ── DIRECT repair ─────────────────────────────────────────────────────────────
 
 describe('DIRECT — repair via ExpenseRecord.directTruckId', () => {
