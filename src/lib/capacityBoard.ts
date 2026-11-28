@@ -144,13 +144,36 @@ function optionalNumber(value: unknown, label: string, min: number, max: number)
   return n
 }
 
-/** The equipment choices on a card. Van and Box truck carry the length a new card starts with; the rest leave length to the person. */
+/** The equipment choices on a card, by their trade names. Each carries the length a new card starts with; Power Only leaves length to the person. */
 export const CAPACITY_EQUIPMENT: readonly { value: string; defaultLengthFt?: number }[] = [
-  { value: 'Van', defaultLengthFt: 53 },
-  { value: 'Box truck', defaultLengthFt: 18 },
-  { value: 'Reefer' }, { value: 'Flatbed' }, { value: 'Step Deck' }, { value: 'Power Only' },
-  { value: 'Container' }, { value: 'Hotshot' }, { value: 'Conestoga' },
+  { value: 'Dry Van', defaultLengthFt: 53 },
+  { value: 'Straight Truck', defaultLengthFt: 18 },
+  { value: 'Power Only' },
+  { value: 'Step Deck', defaultLengthFt: 48 },
+  { value: 'Flatbed', defaultLengthFt: 48 },
+  { value: 'Reefer', defaultLengthFt: 53 },
+  { value: 'Container', defaultLengthFt: 40 },
+  { value: 'Hotshot', defaultLengthFt: 40 },
+  { value: 'Conestoga', defaultLengthFt: 48 },
 ]
+
+const VAN_LIKE = /^(?:53\s*(?:ft|')?\s*)?(?:dry[\s-]*)?van$/i
+const STRAIGHT_LIKE = /^(?:box|straight)[\s-]*(?:truck)?$/i
+
+/**
+ * The trade name a stored equipment value goes by. Cards saved before the names settled said "Van" or "Box truck"; those read as
+ * Dry Van and Straight Truck. A value that is already a listed name comes back in the list's spelling, and anything else (older
+ * free text) comes back as written.
+ */
+export function canonicalEquipment(value: string | undefined | null): string {
+  const v = (value ?? '').trim()
+  if (!v) return ''
+  const listed = CAPACITY_EQUIPMENT.find((o) => o.value.toLowerCase() === v.toLowerCase())
+  if (listed) return listed.value
+  if (VAN_LIKE.test(v)) return 'Dry Van'
+  if (STRAIGHT_LIKE.test(v)) return 'Straight Truck'
+  return v
+}
 
 /** Maximum weight as the card reads it, 'max 40,000 lb'; '' when none. */
 export function formatMaxWeight(lbs: number | undefined): string {
@@ -286,7 +309,7 @@ export function capacityColumns(board: CapacityBoard, days: readonly string[], s
 }
 
 function cardHaystack(c: CapacityCard): string {
-  return [c.origin, c.originRadiusMi ? `${c.originRadiusMi} mi` : '', c.destination, c.destinationRadiusMi ? `${c.destinationRadiusMi} mi` : '', c.equipment, c.weightLbs ? `max ${c.weightLbs}` : '', c.comments].filter(Boolean).join(' ').toLowerCase()
+  return [c.origin, c.originRadiusMi ? `${c.originRadiusMi} mi` : '', c.destination, c.destinationRadiusMi ? `${c.destinationRadiusMi} mi` : '', c.equipment, canonicalEquipment(c.equipment), c.weightLbs ? `max ${c.weightLbs}` : '', c.comments].filter(Boolean).join(' ').toLowerCase()
 }
 
 /**

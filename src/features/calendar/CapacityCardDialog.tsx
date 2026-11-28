@@ -2,7 +2,7 @@ import { useId, useState } from 'react'
 import { TmsDialog } from '@/features/tms/kit/TmsDialog'
 import { TmsButton } from '@/features/tms/kit/TmsButton'
 import { CityInput } from '@/features/tms/kit/CityInput'
-import { parseCapacityFields, CAPACITY_EQUIPMENT, CAPACITY_MAX_SPAN_DAYS, type CapacityCard } from '@/lib/capacityBoard'
+import { parseCapacityFields, canonicalEquipment, CAPACITY_EQUIPMENT, CAPACITY_MAX_SPAN_DAYS, type CapacityCard } from '@/lib/capacityBoard'
 import type { Driver } from '@/types'
 
 /** The card's fields as the form holds them: everything text, so a half-typed number never fights the person. */
@@ -33,7 +33,7 @@ function initialValues(card: CapacityCard | null, day: string): FormValues {
       origin: card.origin, destination: card.destination,
       originRadiusMi: card.originRadiusMi != null ? String(card.originRadiusMi) : '', destinationRadiusMi: card.destinationRadiusMi != null ? String(card.destinationRadiusMi) : '',
       pickupTimeFrom: card.pickupTimeFrom ?? '', pickupTimeTo: card.pickupTimeTo ?? '', deliveryTimeFrom: card.deliveryTimeFrom ?? '', deliveryTimeTo: card.deliveryTimeTo ?? '',
-      equipment: card.equipment, loadType: card.loadType,
+      equipment: canonicalEquipment(card.equipment), loadType: card.loadType,
       lengthFt: String(card.lengthFt), weightLbs: card.weightLbs != null ? String(card.weightLbs) : '',
       minRatePerMile: card.minRatePerMileCents != null ? (card.minRatePerMileCents / 100).toFixed(2) : '',
       comments: card.comments ?? '', driverId: card.driverId ?? '',
@@ -76,11 +76,11 @@ export function CapacityCardDialog({ card, day, drivers, onSave, onClose }: {
   const id = (name: string) => `${uid}-${name}`
   const activeDrivers = drivers.filter((d) => d.active).sort((a, b) => a.name.localeCompare(b.name))
 
-  // An older card may hold a type that is not in the list (Dry Van); it stays selectable so editing never changes it silently.
+  // An older card may hold a type that is not in the list (free text); it stays selectable so editing never changes it silently.
   const equipmentOptions = CAPACITY_EQUIPMENT.some((o) => o.value === v.equipment) || !v.equipment
     ? CAPACITY_EQUIPMENT.map((o) => o.value)
     : [v.equipment, ...CAPACITY_EQUIPMENT.map((o) => o.value)]
-  // Picking Van or Box truck fills in its usual length; the length stays editable.
+  // Picking a type fills in its usual length; the length stays editable.
   function pickEquipment(value: string) {
     const fill = CAPACITY_EQUIPMENT.find((o) => o.value === value)?.defaultLengthFt
     setV((cur) => ({ ...cur, equipment: value, ...(fill ? { lengthFt: String(fill) } : {}) }))

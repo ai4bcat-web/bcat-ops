@@ -53,13 +53,13 @@ afterEach(() => { cleanup(); vi.useRealTimers() })
 
 describe('CapacityBoard', () => {
   it('draws a truck for each card and gives cards on one day their own colors', async () => {
-    seed({ id: 'a', equipment: 'Van' }, { id: 'b', equipment: 'Box truck', lengthFt: 18 }, { id: 'c', equipment: 'Reefer' })
+    seed({ id: 'a', equipment: 'Dry Van' }, { id: 'b', equipment: 'Straight Truck', lengthFt: 18 }, { id: 'c', equipment: 'Reefer' })
     render(board())
     await loaded()
     const cards = Array.from(column('2026-11-27').querySelectorAll('[data-testid="capacity-card"]')) as HTMLElement[]
     expect(cards).toHaveLength(3)
     expect(new Set(cards.map((c) => c.dataset.accent)).size).toBe(3)
-    expect(cards.map((c) => c.querySelector('svg')?.getAttribute('data-truck')).sort()).toEqual(['box', 'reefer', 'van'])
+    expect(cards.map((c) => c.querySelector('svg')?.getAttribute('data-truck')).sort()).toEqual(['reefer', 'straight', 'van'])
     expect(cards.every((c) => c.style.getPropertyValue('--cap-accent') === c.dataset.accent)).toBe(true)
   })
 
@@ -142,8 +142,9 @@ describe('CapacityBoard', () => {
     expect(old.textContent).not.toContain('555-0100')
     fireEvent.click(screen.getByRole('button', { name: 'New card' }))
     const length = screen.getByLabelText(/Length/) as HTMLInputElement
-    expect(length.value).toBe('53') // Van is the default
-    fireEvent.change(screen.getByLabelText(/Equipment/), { target: { value: 'Box truck' } })
+    expect(length.value).toBe('53') // Dry Van is the default
+    expect((screen.getByLabelText(/Equipment/) as HTMLSelectElement).value).toBe('Dry Van')
+    fireEvent.change(screen.getByLabelText(/Equipment/), { target: { value: 'Straight Truck' } })
     expect(length.value).toBe('18')
     fireEvent.change(length, { target: { value: '20' } })
     expect(length.value).toBe('20')
@@ -205,14 +206,20 @@ describe('CapacityBoard', () => {
     render(board())
     await loaded()
     await loaded()
-    fireEvent.click(within(column('2026-11-27')).getAllByRole('button', { name: 'Mark covered' })[0])
+    const markBtn = within(column('2026-11-27')).getAllByRole('button', { name: 'Mark as covered' })[0]
+    expect(markBtn.textContent).toContain('Mark as covered')
+    expect(markBtn.getAttribute('title')).toBe('Mark this truck as covered')
+    fireEvent.click(markBtn)
     await waitFor(() => expect(within(column('2026-11-27')).getAllByTestId('capacity-card').map((c) => c.getAttribute('data-status'))).toEqual(['OPEN', 'COVERED']))
     expect(screen.getByTestId('count-2026-11-27').textContent).toBe('1 open · 1 covered')
     fireEvent.click(screen.getByLabelText('Show covered'))
     expect(within(column('2026-11-27')).getAllByTestId('capacity-card')).toHaveLength(1)
     expect(screen.getByTestId('count-2026-11-27').textContent).toBe('1 open · 1 covered')
     fireEvent.click(screen.getByLabelText('Show covered'))
-    fireEvent.click(within(column('2026-11-27')).getByRole('button', { name: 'Reopen card' }))
+    const reopenBtn = within(column('2026-11-27')).getByRole('button', { name: 'Reopen' })
+    expect(reopenBtn.textContent).toContain('Reopen')
+    expect(reopenBtn.getAttribute('title')).toBe('Move back to open')
+    fireEvent.click(reopenBtn)
     await waitFor(() => expect(screen.getByTestId('count-2026-11-27').textContent).toBe('2 open'))
   })
 
@@ -228,6 +235,18 @@ describe('CapacityBoard', () => {
     const undo = (toast as unknown as { mock: { calls: [string, { action: { onClick: () => void } }][] } }).mock.calls.at(-1)![1].action.onClick
     undo()
     await within(column('2026-11-27')).findByTestId('capacity-card')
+  })
+
+  it('shows an older Van / Box truck card by its trade name and selects it when edited', async () => {
+    seed({ id: 'old1', equipment: 'Van' }, { id: 'old2', equipment: 'Box truck', lengthFt: 18 })
+    render(board())
+    await loaded()
+    const cards = Array.from(column('2026-11-27').querySelectorAll('[data-testid="capacity-card"]')) as HTMLElement[]
+    expect(cards.map((c) => c.textContent).join(' ')).toContain('Dry Van')
+    expect(cards.map((c) => c.textContent).join(' ')).toContain('Straight Truck')
+    expect(cards.map((c) => c.querySelector('svg')?.getAttribute('data-truck')).sort()).toEqual(['straight', 'van'])
+    fireEvent.click(within(cards.find((c) => c.dataset.cardId === 'old2') as HTMLElement).getByRole('button', { name: 'Edit card' }))
+    expect((screen.getByLabelText(/Equipment/) as HTMLSelectElement).value).toBe('Straight Truck')
   })
 })
 

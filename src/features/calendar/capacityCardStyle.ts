@@ -52,7 +52,7 @@ export function assignAccents(cards: readonly Span[], palette = CAPACITY_ACCENTS
   return out
 }
 
-export type TruckKind = 'van' | 'box' | 'reefer' | 'flatbed' | 'stepdeck' | 'power' | 'container' | 'hotshot' | 'conestoga'
+export type TruckKind = 'van' | 'straight' | 'reefer' | 'flatbed' | 'stepdeck' | 'power' | 'container' | 'hotshot' | 'conestoga'
 
 /** Which truck drawing an equipment value gets; anything unfamiliar (older free-text cards) is drawn as a van. */
 export function truckKindFor(equipment: string): TruckKind {
@@ -62,7 +62,7 @@ export function truckKindFor(equipment: string): TruckKind {
   if (e.includes('step') || e.includes('drop deck') || e.includes('lowboy')) return 'stepdeck'
   if (e.includes('flat')) return 'flatbed'
   if (e.includes('reefer') || e.includes('refrig')) return 'reefer'
-  if (e.includes('box') || e.includes('straight')) return 'box'
+  if (e.includes('box') || e.includes('straight')) return 'straight'
   if (e.includes('power')) return 'power'
   if (e.includes('container') || e.includes('chassis')) return 'container'
   if (e.includes('hot')) return 'hotshot'
