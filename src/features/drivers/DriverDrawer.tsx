@@ -20,6 +20,8 @@ import { activeUnits } from '@/lib/fleetActive'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAppStore } from '@/store/useAppStore'
 import { uploadDriverPhoto, deleteDriverPhoto } from '@/lib/apiClient'
+import { ownerOperatorChange, recordOwnerOperatorChange, type OwnerOperatorChange } from '@/lib/ownerOperatorChange'
+import { OwnerOperatorDateDialog } from './OwnerOperatorDateDialog'
 import { COLOR_MAP } from '@/lib/driverColors'
 import { useDriverTypes } from '@/hooks/useDriverTypes'
 import { classificationForFleet, driverExpiry } from '@/lib/fileHub'
@@ -101,6 +103,8 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
   const driver = driverProp ? (liveDrivers.find((d) => d.id === driverProp.id) ?? driverProp) : driverProp
   const { addDriver, updateDriver, deleteDriver } = useDrivers()
   const isEdit = driver !== null
+  // An existing driver switched to or from owner operator: ask which date before saving.
+  const [ownerOpAsk, setOwnerOpAsk] = useState<{ values: DriverFormValues; change: OwnerOperatorChange } | null>(null)
 
   // Photo state
   const photoInputRef = useRef<HTMLInputElement>(null)
@@ -222,6 +226,12 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
   )).sort()
 
   const onSubmit = async (values: DriverFormValues) => {
+    const change = isEdit ? ownerOperatorChange(driver.fleetGroup, values.fleetGroup) : null
+    if (change) { setOwnerOpAsk({ values, change }); return }
+    await save(values)
+  }
+
+  const save = async (values: DriverFormValues, ownerOp?: { change: OwnerOperatorChange; day: string; who: string }) => {
     // Auto-assign a color if none chosen
     const autoColor = values.colorKey ?? randomDriverColor()
     const normalized = { ...values, phone: normalizePhone(values.phone), colorKey: autoColor, dispatcherPrimary: values.dispatcherPrimary || null, dispatcherBackup: values.dispatcherBackup || null }
@@ -235,6 +245,19 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
         // and are deliberately never offered onboarding.
         const newDriver = await addDriver({ ...normalized, onboardingStatus: 'NOT_STARTED' })
         driverId = newDriver.id
+      }
+
+      // The date asked for when they were switched to or from owner operator: it decides which settlement weeks are theirs.
+      if (ownerOp && isEdit) {
+        try {
+          await recordOwnerOperatorChange({
+            driverId, driverName: normalized.name, change: ownerOp.change, day: ownerOp.day, who: ownerOp.who,
+            fromFleet: driver.fleetGroup, toFleet: normalized.fleetGroup,
+          })
+        } catch (err) {
+          console.error('Owner operator date save error:', err)
+          toast.error(`Driver saved, but the owner operator date was not recorded: ${errorMessage(err)}. Open the driver and save again.`)
+        }
       }
 
       // Enforce one-driver-per-truck via the single shared assignment path, which also
@@ -288,6 +311,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
   if (!open) return null
 
   return (
+    <>
     <SidePanel
       title={isEdit ? driver.name : 'Add driver'}
       subtitle={isEdit ? 'Edit driver' : 'New driver'}
@@ -578,6 +602,15 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
 
         </form>
     </SidePanel>
+    {ownerOpAsk && isEdit && (
+      <OwnerOperatorDateDialog
+        change={ownerOpAsk.change}
+        driverName={ownerOpAsk.values.name}
+        onCancel={() => setOwnerOpAsk(null)}
+        onConfirm={(day, who) => { const ask = ownerOpAsk; setOwnerOpAsk(null); void save(ask.values, { change: ask.change, day, who }) }}
+      />
+    )}
+    </>
   )
 }
 

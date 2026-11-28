@@ -476,6 +476,17 @@ export function OwnerOperatorPayPage({ week, onWeek, viewSwitch, initialDriverId
           </div>
         )}
 
+        {selectedRow && (selectedRow.payTermsPending || selectedRow.noHireDate) && (
+          <div role="note" style={{ borderRadius: 10, border: '1px solid var(--tms-warning, var(--tms-border))', background: 'var(--tms-card)', padding: '10px 14px', fontSize: 13, color: 'var(--tms-text)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {selectedRow.payTermsPending && (
+              <span><b>Pay terms not set.</b> {selectedRow.driver.name} is listed because they are set up as an owner operator, at 0% until you set their pay percent. <button type="button" onClick={() => setSettings(selectedRow.driver)} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--tms-primary)', fontFamily: 'inherit', fontSize: 13, textDecoration: 'underline' }}>Set pay terms</button></span>
+            )}
+            {selectedRow.noHireDate && (
+              <span><b>No hire date on file.</b> {selectedRow.startsOn ? `Listed from ${selectedRow.startsOn}, the day they were set up. ` : 'All of their weeks are listed. '}Add the hire date on the driver profile; settlements start from it.</span>
+            )}
+          </div>
+        )}
+
         {selectedRow && (
           <StatementCard
             key={selectedRow.driver.id}
@@ -556,7 +567,7 @@ export function OwnerOperatorPayPage({ week, onWeek, viewSwitch, initialDriverId
           onClose={() => setCreditFor(null)}
         />
       )}
-      {settingsFor && <SettingsModal driver={settingsFor} existing={pay.rows.find((r) => r.driver.id === settingsFor.id)?.baseSetting} onSave={async (patch, expectedUpdatedAt) => { await pay.saveSetting(settingsFor.id, patch, expectedUpdatedAt); setSettings(null) }} onClose={() => setSettings(null)} />}
+      {settingsFor && <SettingsModal driver={settingsFor} existing={(() => { const r = pay.rows.find((x) => x.driver.id === settingsFor.id); return r && !r.payTermsPending ? r.baseSetting : undefined })()} onSave={async (patch, expectedUpdatedAt) => { await pay.saveSetting(settingsFor.id, patch, expectedUpdatedAt); setSettings(null) }} onClose={() => setSettings(null)} />}
     </TmsScrollPage>
   )
 }

@@ -76,7 +76,14 @@ export interface PayRateOverride {
    * operator ('OWNER_OPERATOR'). Absent on every window written before per-week modes existed (they pin only the rate), so those
    * weeks keep the setting's own pay group exactly as before.
    */
-  payGroup?: 'AMAZON' | 'OWNER_OPERATOR'
+  payGroup?: 'AMAZON' | 'OWNER_OPERATOR' | 'NONE'
+  /**
+   * Owner-operator service markers, carried by a 'NONE' window ("not on the owner-operator payroll these weeks"):
+   * `ownerOpFrom` on the window before the first week, the first day (YYYY-MM-DD) the driver is on it, as chosen when they were switched to
+   * owner operator; `ownerOpTo` on the window after the last week, the last day they are. See `withOwnerOpFrom` / `withOwnerOpTo`.
+   */
+  ownerOpFrom?: string
+  ownerOpTo?: string
 }
 
 export interface FixedExpenseMileage {
@@ -270,7 +277,60 @@ function windowFor(rateHistory: PayRateOverride[] | null | undefined, periodStar
 
 /** The mode this exact week was set to by hand, or null when it simply follows the driver's pay group (every week before modes existed). */
 export function explicitWeekMode(setting: ModeSetting, periodStart: string): WeekPayMode | null {
-  return windowFor(setting.rateHistory, periodStart)?.payGroup ?? null
+  const g = windowFor(setting.rateHistory, periodStart)?.payGroup
+  return g === 'NONE' ? null : g ?? null
+}
+
+/** The week sits inside a window that says the driver is not on the owner-operator payroll (before they were switched, or after they left). */
+export function notOnOwnerOperatorPayroll(setting: ModeSetting, periodStart: string): boolean {
+  return windowFor(setting.rateHistory, periodStart)?.payGroup === 'NONE'
+}
+
+/** The first and last day on the owner-operator payroll set when the driver was switched, or null for either when none was set. */
+export function ownerOpServiceDays(setting: ModeSetting): { from: string | null; to: string | null } {
+  let from: string | null = null
+  let to: string | null = null
+  for (const w of setting.rateHistory ?? []) {
+    if (w.payGroup !== 'NONE') continue
+    if (w.ownerOpFrom) from = w.ownerOpFrom
+    if (w.ownerOpTo) to = w.ownerOpTo
+  }
+  return { from, to }
+}
+
+function weekStartOfDay(day: string): string {
+  const d = new Date(`${day}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() - d.getUTCDay())
+  return d.toISOString().slice(0, 10)
+}
+
+function withoutMarker(history: PayRateOverride[] | null | undefined, key: 'ownerOpFrom' | 'ownerOpTo'): PayRateOverride[] {
+  return (history ?? []).filter((w) => !(w.payGroup === 'NONE' && w[key]))
+}
+
+/**
+ * The window list with the driver on the owner-operator payroll from `day`: every pay week before the week holding it is marked 'NONE'.
+ * The week holding it stays on the payroll, and the settlement leaves out loads delivered before `day`. Weeks that already settled
+ * before this are never touched: they are not owner-operator weeks and nothing here changes their windows.
+ */
+export function withOwnerOpFrom(history: PayRateOverride[] | null | undefined, day: string, base: { payPercent: number; expensesBeforePercent: boolean }): PayRateOverride[] {
+  const until = weekStartOfDay(day)
+  const kept = withoutMarker(history, 'ownerOpFrom')
+  return [{ from: '2000-01-01', until, payPercent: base.payPercent, expensesBeforePercent: base.expensesBeforePercent, payGroup: 'NONE' as const, ownerOpFrom: day }, ...kept]
+    .sort((a, b) => a.from.localeCompare(b.from))
+}
+
+/** The window list with the driver leaving the owner-operator payroll after `day` (the last day, inclusive): later weeks are marked 'NONE'. */
+export function withOwnerOpTo(history: PayRateOverride[] | null | undefined, day: string, base: { payPercent: number; expensesBeforePercent: boolean }): PayRateOverride[] {
+  const from = addWeek(weekStartOfDay(day), 1)
+  const kept = withoutMarker(history, 'ownerOpTo')
+  return [...kept, { from, until: '2999-12-31', payPercent: base.payPercent, expensesBeforePercent: base.expensesBeforePercent, payGroup: 'NONE' as const, ownerOpTo: day }]
+    .sort((a, b) => a.from.localeCompare(b.from))
+}
+
+/** A start day was set when the driver was switched to owner operator, so they are listed whatever pay group their setting still carries. */
+export function hasOwnerOpService(setting: ModeSetting): boolean {
+  return ownerOpServiceDays(setting).from != null
 }
 
 /**
@@ -314,7 +374,9 @@ export function onAmazonStatement(setting: ModeSetting, periodStart: string, has
 /** The standard owner-operator statement lists this driver for the week (it carries the weekly charges; an overlap week appears on both). */
 export function onOwnerOperatorStatement(setting: ModeSetting, periodStart: string): boolean {
   const pinned = explicitWeekMode(setting, periodStart)
-  return pinned ? pinned === 'OWNER_OPERATOR' : isOwnerOperatorGroup(setting.payGroup)
+  if (pinned) return pinned === 'OWNER_OPERATOR'
+  if (notOnOwnerOperatorPayroll(setting, periodStart)) return false
+  return isOwnerOperatorGroup(setting.payGroup) || hasOwnerOpService(setting)
 }
 
 /** Why a week's pay mode cannot be changed by this person, or null. A closed week (before this pay week) is the owner's/ADMIN's call only. */
@@ -355,7 +417,7 @@ export function pinWeekPayMode(
 /** Every week-range pinned to a mode, oldest first: the "mode history" shown beside a driver's pay. */
 export function payModeHistory(setting: ModeSetting): Array<{ from: string; until: string; mode: WeekPayMode; payPercent: number; expensesBeforePercent: boolean }> {
   return (setting.rateHistory ?? [])
-    .filter((w): w is PayRateOverride & { payGroup: WeekPayMode } => !!w.payGroup)
+    .filter((w): w is PayRateOverride & { payGroup: WeekPayMode } => !!w.payGroup && w.payGroup !== 'NONE')
     .map((w) => ({ from: w.from, until: w.until, mode: w.payGroup, payPercent: w.payPercent, expensesBeforePercent: w.expensesBeforePercent }))
     .sort((a, b) => a.from.localeCompare(b.from))
 }
@@ -371,7 +433,7 @@ export function clearWeekPayMode(
 ): PayRateOverride[] {
   const out: PayRateOverride[] = []
   for (const w of rateHistory ?? []) {
-    if (!(w.from <= weekStart && weekStart < w.until) || !w.payGroup) { out.push(w); continue }
+    if (!(w.from <= weekStart && weekStart < w.until) || !w.payGroup || w.payGroup === 'NONE') { out.push(w); continue }
     const { payGroup: _mode, ...rate } = w
     if (rate.payPercent === base.payPercent && rate.expensesBeforePercent === base.expensesBeforePercent) continue
     out.push(rate)

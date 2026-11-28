@@ -114,6 +114,32 @@ export function settlementDateLabel(d: SettlementDate | undefined): string {
   return t.toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: '2-digit', day: '2-digit' })
 }
 
+/**
+ * The first day a driver is on the owner-operator payroll: their hire date (YYYY-MM-DD, a longer ISO stamp is cut to its day), or null when
+ * none is on file or it is not a date. Null means "no start limit", so a driver already settling keeps every week they have today.
+ */
+export function ownerOpStartDate(hireDate: string | null | undefined): string | null {
+  const day = (hireDate ?? '').trim().slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null
+  const t = new Date(`${day}T12:00:00Z`)
+  return Number.isNaN(t.getTime()) || t.toISOString().slice(0, 10) !== day ? null : day
+}
+
+/** Whether a driver starting on `startDate` has any day in the pay week that begins `periodStart` (the week holding the start date counts). */
+export function ownerOpOnPayroll(startDate: string | null, periodStart: string): boolean {
+  return startDate == null || addDays(periodStart, 6) >= startDate
+}
+
+/** Whether a driver whose last day is `endDate` still has a day in the pay week that begins `periodStart`. */
+export function ownerOpBeforeEnd(endDate: string | null, periodStart: string): boolean {
+  return endDate == null || periodStart <= endDate
+}
+
+/** The first day of the week the driver is paid for: the week's start, or the start date when it falls inside the week. */
+export function ownerOpWeekFrom(startDate: string | null, periodStart: string): string {
+  return startDate != null && startDate > periodStart ? startDate : periodStart
+}
+
 /** If the requested period is before the first owner-operator week, clamp to it. */
 export function ownerOpWeekAtOrAfterFirst(periodStart: string): string {
   if (periodStart >= OWNER_OP_FIRST_PERIOD) return periodStart
@@ -191,6 +217,10 @@ export function ownerOpTripsFor(
   loads: OwnerOpLoadLike[],
   driverId: string,
   periodStart: string,
+  /** First day this driver is on the owner-operator payroll (`ownerOpStartDate`); loads delivered before it are not theirs. */
+  notBefore?: string | null,
+  /** Last day they are on it; loads delivered after it are not theirs. */
+  notAfter?: string | null,
 ): OwnerOpTrip[] {
   const periodEnd = addDays(periodStart, 6)
   const out: OwnerOpTrip[] = []
@@ -200,6 +230,8 @@ export function ownerOpTripsFor(
 
     const date = load.deliveryAppt.slice(0, 10)
     if (!date || date < periodStart || date > periodEnd) continue
+    if (notBefore && date < notBefore) continue
+    if (notAfter && date > notAfter) continue
 
     out.push({
       id: load.id,
