@@ -1,15 +1,18 @@
 import { useMemo, useState } from 'react'
-import { Plus, Trash2, Pencil, Check, RotateCcw, CalendarRange, CircleDollarSign, Clock, User } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, RotateCcw, CalendarRange, CircleDollarSign, Clock, User, Ban, History } from 'lucide-react'
 import { TmsButton } from '@/features/tms/kit/TmsButton'
 import { CapacityCardDialog } from './CapacityCardDialog'
+import { CapacityNoGoStrip } from './CapacityNoGoStrip'
 import { CapacityTruckArt } from './CapacityTruckArt'
 import { assignAccents, CAPACITY_ACCENTS, truckKindFor } from './capacityCardStyle'
 import './capacityBoard.css'
 import { useCapacityBoard } from './useCapacityBoard'
 import {
-  canonicalEquipment, capacityColumns, capacityHeadline, clampCapacityRange, formatCapacityTimes, formatMaxWeight, formatRatePerMile, rangeDays, todayChicagoYmd,
+  canonicalEquipment, capacityColumns, capacityHeadline, clampCapacityRange, formatCapacityTimes, formatMaxWeight, formatRatePerMile, rangeDays, readCapacityHistory,
+  summarizeNoGoStates, todayChicagoYmd,
   type CapacityCard,
 } from '@/lib/capacityBoard'
+import { displayName } from '@/lib/roles'
 import type { Driver } from '@/types'
 
 const WEEKDAY = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'UTC' })
@@ -27,6 +30,16 @@ function spanLabel(c: Pick<CapacityCard, 'availableFrom' | 'availableTo'>): stri
   const b = dayParts(c.availableTo)
   return `${a.weekday} ${a.date} – ${b.weekday} ${b.date}`
 }
+
+const WHEN = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'America/Chicago' })
+
+/** "Sat Nov 28, 2:15 PM" in Chicago time, the office's clock. */
+function formatWhen(iso: string): string {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '' : WHEN.format(d).replace(/^(\w{3}),/, '$1')
+}
+
+const EVENT_VERB = { created: 'Created', covered: 'Marked covered', reopened: 'Reopened' } as const
 
 const DRAG_TYPE = 'application/x-bcat-capacity-card'
 
@@ -53,7 +66,7 @@ export function CapacityBoard({ from, to, onRangeChange, drivers, phone, userEma
   phone: boolean
   userEmail: string
 }) {
-  const { board, loading, error, save, move, cover, reopen, remove } = useCapacityBoard(true, userEmail)
+  const { board, loading, error, save, move, cover, reopen, remove, setNoGoStates } = useCapacityBoard(true, userEmail)
   const [showCovered, setShowCovered] = useState(true)
   const [query, setQuery] = useState('')
   const [dialog, setDialog] = useState<{ card: CapacityCard | null; day: string } | null>(null)
@@ -65,6 +78,7 @@ export function CapacityBoard({ from, to, onRangeChange, drivers, phone, userEma
   const driverName = useMemo(() => new Map(drivers.map((d) => [d.id, d.name])), [drivers])
   const today = todayChicagoYmd()
   const totalOpen = columns.reduce((n, c) => n + c.open, 0)
+  const noGoStates = board.noGoStates ?? []
 
   const inputStyle: React.CSSProperties = {
     height: 30, padding: '0 8px', borderRadius: 6, border: '1px solid var(--tms-border)', background: 'var(--tms-bg)',
@@ -106,6 +120,8 @@ export function CapacityBoard({ from, to, onRangeChange, drivers, phone, userEma
           <Plus size={14} aria-hidden="true" /> New card
         </TmsButton>
       </div>
+
+      <CapacityNoGoStrip states={noGoStates} onSave={setNoGoStates} phone={phone} />
 
       {error && <p role="alert" style={{ margin: 0, padding: '8px 14px', fontSize: 12.5, color: 'var(--tms-badge-red)' }}>{error}</p>}
 
@@ -161,7 +177,7 @@ export function CapacityBoard({ from, to, onRangeChange, drivers, phone, userEma
                   )}
                   {col.cards.map((card) => (
                     <CapacityCardView
-                      key={card.id} card={card} day={col.day} accent={CAPACITY_ACCENTS[accents.get(card.id) ?? 0].hex} driverName={card.driverId ? driverName.get(card.driverId) : undefined}
+                      key={card.id} card={card} day={col.day} noGoStates={noGoStates} accent={CAPACITY_ACCENTS[accents.get(card.id) ?? 0].hex} driverName={card.driverId ? driverName.get(card.driverId) : undefined}
                       onEdit={() => setDialog({ card, day: col.day })}
                       onCover={() => void cover(card.id)} onReopen={() => void reopen(card.id)} onDelete={() => void remove(card.id)}
                     />
@@ -174,15 +190,16 @@ export function CapacityBoard({ from, to, onRangeChange, drivers, phone, userEma
       </div>
 
       {dialog && (
-        <CapacityCardDialog card={dialog.card} day={dialog.day} drivers={drivers} onSave={save} onClose={() => setDialog(null)} />
+        <CapacityCardDialog card={dialog.card} day={dialog.day} drivers={drivers} noGoStates={noGoStates} onSave={save} onClose={() => setDialog(null)} />
       )}
     </div>
   )
 }
 
-function CapacityCardView({ card, day, accent, driverName, onEdit, onCover, onReopen, onDelete }: {
+function CapacityCardView({ card, day, noGoStates, accent, driverName, onEdit, onCover, onReopen, onDelete }: {
   card: CapacityCard
   day: string
+  noGoStates: readonly string[]
   accent: string
   driverName: string | undefined
   onEdit: () => void
@@ -196,6 +213,10 @@ function CapacityCardView({ card, day, accent, driverName, onEdit, onCover, onRe
   const times = formatCapacityTimes(card)
   const kind = truckKindFor(card.equipment)
   const equipment = canonicalEquipment(card.equipment)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const history = readCapacityHistory(card)
+  const coveredWhen = covered && card.coveredBy ? `Covered by ${displayName(card.coveredBy)}${card.coveredAt ? ` · ${formatWhen(card.coveredAt)}` : ''}` : ''
+  const noGo = summarizeNoGoStates(noGoStates)
   const chips = [equipment, `${card.lengthFt} ft`, card.loadType === 'PARTIAL' ? 'Partial' : 'Full', formatMaxWeight(card.weightLbs)].filter(Boolean)
   return (
     <article
@@ -216,7 +237,7 @@ function CapacityCardView({ card, day, accent, driverName, onEdit, onCover, onRe
       <div className="cap-art">
         <CapacityTruckArt kind={kind} accent={accent} label={`${equipment || 'Dry Van'} truck`} />
         {span && <span className="cap-span"><CalendarRange size={11} aria-hidden="true" />{span}</span>}
-        <span className="cap-pill">{covered && <Check size={11} aria-hidden="true" />}{covered ? 'Covered' : 'Open'}</span>
+        <span className="cap-pill" title={coveredWhen || undefined}>{covered && <Check size={11} aria-hidden="true" />}{covered ? 'Covered' : 'Open'}</span>
       </div>
       <div className="cap-body">
         <div className="cap-route">{capacityHeadline(card)}</div>
@@ -225,11 +246,28 @@ function CapacityCardView({ card, day, accent, driverName, onEdit, onCover, onRe
         {times && <div className="cap-line"><Clock size={13} aria-hidden="true" /><span>{times}</span></div>}
         {driverName && <div className="cap-line"><User size={13} aria-hidden="true" /><span>Driver {driverName}</span></div>}
         {card.comments && <div className="cap-note">{card.comments}</div>}
+        {noGo.shown.length > 0 && (
+          <div className="cap-line cap-line--nogo" data-testid="card-nogo" title={`We do not travel to: ${noGo.all}`}>
+            <Ban size={13} aria-hidden="true" />
+            <span>No-go: {noGo.shown.join(', ')}{noGo.more > 0 ? ` +${noGo.more}` : ''}</span>
+          </div>
+        )}
+        {coveredWhen && <div className="cap-covered-by" data-testid="covered-by">{coveredWhen}</div>}
+        {historyOpen && history.length > 0 && (
+          <ul className="cap-history" aria-label="Card history" data-testid="card-history">
+            {[...history].reverse().map((e, i) => (
+              <li key={`${e.at}-${i}`}><strong>{EVENT_VERB[e.action]}</strong> by {displayName(e.by)} · {formatWhen(e.at)}</li>
+            ))}
+          </ul>
+        )}
         <div className="cap-actions">
           {covered ? (
             <button type="button" className="cap-btn cap-btn--reopen" onClick={onReopen} aria-label="Reopen" title="Move back to open"><RotateCcw size={13} aria-hidden="true" /> Reopen</button>
           ) : (
             <button type="button" className="cap-btn cap-btn--cover" onClick={onCover} aria-label="Mark as covered" title="Mark this truck as covered"><Check size={13} aria-hidden="true" /> Mark as covered</button>
+          )}
+          {history.length > 0 && (
+            <button type="button" className="cap-btn" onClick={() => setHistoryOpen((o) => !o)} aria-label="History" aria-expanded={historyOpen} title="Who did what, and when"><History size={13} /></button>
           )}
           <button type="button" className="cap-btn" onClick={onEdit} aria-label="Edit card" title="Edit"><Pencil size={13} /></button>
           <button type="button" className="cap-btn cap-btn--danger" onClick={onDelete} aria-label="Delete card" title="Delete"><Trash2 size={13} /></button>

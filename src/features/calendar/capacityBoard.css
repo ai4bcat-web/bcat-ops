@@ -63,3 +63,37 @@
 @media (prefers-reduced-motion: reduce) {
   .cap-card, .cap-card:hover { transition: none; transform: none; }
 }
+
+/* States we do not travel to: the strip across the board, the picker, the line on each card, and the card form's warning. */
+.cap-nogo {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex-shrink: 0; border-bottom: 1px solid var(--tms-border);
+  background: color-mix(in srgb, var(--tms-badge-red) 5%, var(--tms-bg));
+}
+.cap-nogo-label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: var(--tms-badge-red); text-transform: uppercase; letter-spacing: 0.04em; }
+.cap-nogo-empty { font-size: 12.5px; color: var(--tms-muted); }
+.cap-nogo-list { display: flex; flex-wrap: wrap; gap: 5px; }
+.cap-nogo-chip {
+  padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 700; line-height: 1.6; letter-spacing: 0.03em;
+  color: var(--tms-badge-red); background: var(--tms-card); border: 1px solid color-mix(in srgb, var(--tms-badge-red) 45%, var(--tms-border));
+}
+.cap-nogo-edit { padding: 0 10px; margin-left: auto; white-space: nowrap; }
+.cap-nogo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 6px; max-height: 46vh; overflow: auto; padding: 2px; }
+.cap-nogo-toggle {
+  display: flex; align-items: center; gap: 6px; min-height: 34px; padding: 4px 8px; border-radius: 8px; text-align: left; cursor: pointer;
+  border: 1px solid var(--tms-border); background: var(--tms-card); color: var(--tms-text-2); font: inherit; font-size: 12px;
+}
+.cap-nogo-toggle strong { font-size: 12.5px; color: var(--tms-text); }
+.cap-nogo-toggle span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cap-nogo-toggle:hover { background: var(--tms-bg); }
+.cap-nogo-toggle:focus-visible { outline: 2px solid var(--tms-primary); outline-offset: 2px; }
+.cap-nogo-toggle[aria-pressed='true'] { background: color-mix(in srgb, var(--tms-badge-red) 12%, var(--tms-card)); border-color: var(--tms-badge-red); }
+.cap-nogo-toggle[aria-pressed='true'] strong { color: var(--tms-badge-red); }
+.cap-line--nogo { color: var(--tms-badge-red); }
+.cap-line--nogo svg { color: var(--tms-badge-red); }
+.cap-card[data-status='COVERED'] .cap-line--nogo, .cap-card[data-status='COVERED'] .cap-line--nogo svg { color: var(--tms-muted); }
+.cap-warn { margin: 4px 0 0; font-size: 11.5px; font-weight: 600; color: var(--tms-badge-red); }
+
+/* Who covered a card, and its status history. */
+.cap-covered-by { font-size: 11.5px; line-height: 1.35; color: var(--tms-badge-green); font-weight: 600; }
+.cap-history { margin: 0; padding: 6px 0 0 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; line-height: 1.35; color: var(--tms-text-2); }
+.cap-history strong { color: var(--tms-text); }
