@@ -16,7 +16,7 @@ import type { CustomerRecord, TmsSettings } from '@/types/tms'
 import { TRUCKLOAD_MODES } from '../orderDraft'
 import { LABEL, SECTION_TITLE } from './labels'
 import { MAX } from './constants'
-import { carrierLinehaulLine, financialPreview, firstPickupIndex, lastDeliveryIndex } from './mapping'
+import { carrierLinehaulLine, financialPreview, firstPickupIndex, isFuelCode, lastDeliveryIndex, percentToBps } from './mapping'
 import { isShipmentTypeKey } from '@/lib/shipmentTypes'
 import { factorGapsAtCreate, type FactorGapCode } from '@/lib/factorReadyAtCreate'
 import { isFactoredLoad } from '@/lib/factorBilling'
@@ -186,6 +186,13 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
   if (values.rates.fscPercent.trim() && values.rates.fscPerMile.trim()) {
     push('rates', 'fsc', LABEL.rates.fscPerMile.testId, LABEL.rates.fscPerMile.text, 'Use FSC % or FSC/Mile, not both. FSC/Mile wins.', 'warn')
   }
+  // A fuel surcharge row typed as a percentage: 0 to 100, two decimals at most. An empty box is just an empty line.
+  values.rates.lines.forEach((row, i) => {
+    if (!isFuelCode(row.code)) return
+    const bad = (mode: string | undefined, text: string) => mode === 'PERCENT' && text.trim() !== '' && percentToBps(text) === undefined
+    if (bad(row.customerMode, row.customerAmount)) push('rates', `fscRowCustomer:${i}`, LABEL.rates.lineCustomerAmount.testId, LABEL.rates.lineCustomerAmount.text, 'Fuel surcharge percent must be between 0 and 100, with at most two decimals.')
+    if (bad(row.carrierMode, row.carrierAmount)) push('rates', `fscRowCarrier:${i}`, LABEL.rates.lineCarrierAmount.testId, LABEL.rates.lineCarrierAmount.text, 'Fuel surcharge percent must be between 0 and 100, with at most two decimals.')
+  })
   if (values.rates.carrier.rateType === 'PCT_OF_CUSTOMER') {
     const pct = Number(values.rates.carrier.payPct)
     if (values.rates.carrier.payPct.trim() && !(pct >= 0 && pct <= 100)) push('rates', 'payPct', LABEL.rates.payPct.testId, LABEL.rates.payPct.text, 'Pay % must be between 0 and 100.')

@@ -153,11 +153,22 @@ export interface AccessorialLine {
   paidTo: string
   code: string
   label: string
-  /** Dollars. */
+  /**
+   * Dollars, or a percentage of the linehaul when that side's mode is PERCENT. Only a Fuel surcharge (FSC) row
+   * offers the percentage; every other row is dollars.
+   */
   carrierAmount: string
   customerAmount: string
+  /** How each side's amount is read. Absent = FLAT, so a draft saved before the percentage option still opens. */
+  customerMode?: AccessorialMode
+  carrierMode?: AccessorialMode
   note: string
 }
+
+export type AccessorialMode = 'FLAT' | 'PERCENT'
+
+/** Sort order the shipment form gives its first accessorial row; the Rates box lines (linehaul, FSC) sit below it. */
+export const ACCESSORIAL_SORT_BASE = 10
 
 export interface QueuedFile { file: File; audience: 'ALL' | 'INTERNAL'; type: ShipmentDocumentType }
 
@@ -589,7 +600,22 @@ export interface BundleSeedCtx {
 
 /** Charge lines the form edits as accessorial rows: FLAT × 1, not a reserved code. */
 export function isAccessorialShape(c: Pick<LoadChargeRecord, 'calculatedBy' | 'count' | 'code'>): boolean {
-  return c.calculatedBy === 'FLAT' && (c.count ?? 1) === 1 && !RESERVED_CHARGE_CODES.includes(c.code)
+  if (RESERVED_CHARGE_CODES.includes(c.code) || (c.count ?? 1) !== 1) return false
+  // A fuel surcharge row may be a percentage of the linehaul; no other row is.
+  return c.calculatedBy === 'FLAT' || (c.calculatedBy === 'PERCENT' && c.code === CODE_FSC)
+}
+
+/**
+ * The Rates box's own customer fuel surcharge (FSC % / FSC per mile): the first fuel line, written under the accessorial
+ * rows. A fuel surcharge in the accessorial table is written from sort order 10 up, so the two never read as each other.
+ */
+export function isBoxFsc(c: Pick<LoadChargeRecord, 'side' | 'code' | 'calculatedBy' | 'sortOrder'>): boolean {
+  return c.side === 'CUSTOMER' && c.code === CODE_FSC && (c.calculatedBy === 'PERCENT' || c.calculatedBy === 'PER_MILE') && c.sortOrder < ACCESSORIAL_SORT_BASE
+}
+
+/** An accessorial row's amount box, from the stored line: dollars, or the percentage (basis points / 100) of a percentage line. */
+export function accessorialAmountText(c: Pick<LoadChargeRecord, 'calculatedBy' | 'rateCents' | 'amountCents'>): string {
+  return c.calculatedBy === 'PERCENT' ? trimZeros((c.rateCents / 100).toFixed(2)) : centsToDollars(c.amountCents)
 }
 
 function referenceCode(r: OrderReference): string {
@@ -700,7 +726,7 @@ export function valuesFromBundle(bundle: ShipmentBundle, ctx: BundleSeedCtx = {}
   // ── rates ──
   const charges = bundle.charges
   const custLH = charges.find((c) => c.side === 'CUSTOMER' && c.code === CODE_LINEHAUL && ['FLAT', 'PER_MILE', 'PER_CWT'].includes(c.calculatedBy))
-  const custFSC = charges.find((c) => c.side === 'CUSTOMER' && c.code === CODE_FSC && ['PERCENT', 'PER_MILE'].includes(c.calculatedBy))
+  const custFSC = charges.find(isBoxFsc)
   const carLHOf = (lc: LoadCarrierRecord): LoadChargeRecord | undefined =>
     charges.find((c) => c.side === 'CARRIER' && c.code === CODE_LINEHAUL && c.loadCarrierId === lc.id && ['FLAT', 'PER_MILE', 'PER_CWT'].includes(c.calculatedBy))
   const liveLH = live.map(carLHOf)
@@ -717,10 +743,10 @@ export function valuesFromBundle(bundle: ShipmentBundle, ctx: BundleSeedCtx = {}
     if (!mine || !isAccessorialShape(c) || isRateTarget(c)) { passthrough.push(c); continue }
     if (c.side === 'CARRIER') {
       const host = lines.find((l) => !l.carrierLineId && l.code === c.code && l.release === str(c.release))
-      if (host) { host.carrierLineId = c.id; host.carrierAmount = centsToDollars(c.amountCents); if (live.length >= 2) host.paidTo = str(c.loadCarrierId); continue }
-      lines.push({ id: '', carrierLineId: c.id, release: str(c.release), paidTo: live.length >= 2 ? str(c.loadCarrierId) : '', code: c.code, label: str(c.label), carrierAmount: centsToDollars(c.amountCents), customerAmount: '', note: str(c.note) })
+      if (host) { host.carrierLineId = c.id; host.carrierAmount = accessorialAmountText(c); if (isPercent(c)) host.carrierMode = 'PERCENT'; if (live.length >= 2) host.paidTo = str(c.loadCarrierId); continue }
+      lines.push({ id: '', carrierLineId: c.id, release: str(c.release), paidTo: live.length >= 2 ? str(c.loadCarrierId) : '', code: c.code, label: str(c.label), carrierAmount: accessorialAmountText(c), customerAmount: '', ...(isPercent(c) ? { carrierMode: 'PERCENT' as const } : {}), note: str(c.note) })
     } else {
-      lines.push({ id: c.id, carrierLineId: '', release: str(c.release), paidTo: '', code: c.code, label: str(c.label), carrierAmount: '', customerAmount: centsToDollars(c.amountCents), note: str(c.note) })
+      lines.push({ id: c.id, carrierLineId: '', release: str(c.release), paidTo: '', code: c.code, label: str(c.label), carrierAmount: '', customerAmount: accessorialAmountText(c), ...(isPercent(c) ? { customerMode: 'PERCENT' as const } : {}), note: str(c.note) })
     }
   }
 
@@ -885,7 +911,12 @@ export function valuesFromBundle(bundle: ShipmentBundle, ctx: BundleSeedCtx = {}
 
 /** A charge a different flow owns by shape (rate rows are claimed first by `valuesFromBundle`). */
 function isRateTarget(c: LoadChargeRecord): boolean {
-  return c.code === CODE_LINEHAUL || c.code === CODE_FSC
+  // Any other fuel surcharge (flat, or a percentage of the linehaul) is an accessorial row the office can edit.
+  return c.code === CODE_LINEHAUL || (c.code === CODE_FSC && !isAccessorialShape(c))
+}
+/** A percentage row says so; a dollar row carries no mode at all, exactly as a row saved before the option existed. */
+function isPercent(c: Pick<LoadChargeRecord, 'calculatedBy'>): boolean {
+  return c.calculatedBy === 'PERCENT'
 }
 function trimZeros(s: string): string {
   return s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s

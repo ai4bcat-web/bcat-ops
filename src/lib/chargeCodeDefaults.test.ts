@@ -20,6 +20,8 @@ describe('withDefaultChargeCodes', () => {
     expect(new Set(codes).size).toBe(codes.length)
     for (const c of DEFAULT_CHARGE_CODES) { expect(c.code).toBe(c.code.toUpperCase()); expect(c.defaultAmountCents).toBeNull() }
     expect(codes).not.toContain('LINEHAUL')
-    expect(codes).not.toContain('FSC')
+  })
+  it('offers a Fuel surcharge accessorial (flat or a percentage of the linehaul is chosen on the row)', () => {
+    expect(withDefaultChargeCodes(null).find((c) => c.code === 'FSC')).toMatchObject({ label: 'Fuel surcharge', calculatedBy: 'FLAT', defaultAmountCents: null })
   })
 })

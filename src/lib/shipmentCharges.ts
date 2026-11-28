@@ -101,11 +101,40 @@ export function rateBaseCents(
   return base
 }
 
+/**
+ * A fuel surcharge entered as a percentage. Unlike another PERCENT line, which is a percentage of every
+ * Rate line, this is a percentage of the linehaul alone, so a flat fuel line sitting next to it never
+ * becomes part of what it is a percentage of.
+ */
+export function isFuelPercent(line: Pick<ChargeLineInput, 'code' | 'calculatedBy'>): boolean {
+  return line.calculatedBy === 'PERCENT' && line.code.trim().toUpperCase() === 'FSC'
+}
+
+/** The side's linehaul lines only (the base of a percentage fuel surcharge); same carrier tagging rule as `rateBaseCents`. */
+export function linehaulBaseCents(
+  lines: ChargeLineInput[],
+  side: ChargeSide,
+  ctx: ChargeContext = {},
+  loadCarrierId?: string | null,
+): number {
+  let base = 0
+  for (const line of lines) {
+    if (line.side !== side || line.code.trim().toUpperCase() !== 'LINEHAUL' || line.calculatedBy === 'PERCENT') continue
+    if (loadCarrierId != null && (line.loadCarrierId ?? null) !== loadCarrierId) continue
+    base += chargeAmount(line, { miles: ctx.miles, weightLbs: ctx.weightLbs, sideRateBaseCents: 0 })
+  }
+  return base
+}
+
 /** Every line with its computed amount, each side's PERCENT base resolved first. */
 export function priceCharges(lines: ChargeLineInput[], ctx: ChargeContext = {}): PricedCharge[] {
   const base: Record<ChargeSide, number> = {
     CUSTOMER: rateBaseCents(lines, 'CUSTOMER', ctx),
     CARRIER: rateBaseCents(lines, 'CARRIER', ctx),
+  }
+  const linehaul: Record<ChargeSide, number> = {
+    CUSTOMER: linehaulBaseCents(lines, 'CUSTOMER', ctx),
+    CARRIER: linehaulBaseCents(lines, 'CARRIER', ctx),
   }
   // Two or more carriers named on the CARRIER side: a tagged PERCENT line is a
   // percentage of ITS carrier's rate lines, not of the sum over carriers. With one
@@ -115,20 +144,29 @@ export function priceCharges(lines: ChargeLineInput[], ctx: ChargeContext = {}):
     if (line.side === 'CARRIER' && line.loadCarrierId != null) taggedIds.add(line.loadCarrierId)
   }
   const perCarrier = new Map<string, number>()
+  const perCarrierLinehaul = new Map<string, number>()
   if (taggedIds.size > 1) {
-    for (const id of taggedIds) perCarrier.set(id, rateBaseCents(lines, 'CARRIER', ctx, id))
+    for (const id of taggedIds) {
+      perCarrier.set(id, rateBaseCents(lines, 'CARRIER', ctx, id))
+      perCarrierLinehaul.set(id, linehaulBaseCents(lines, 'CARRIER', ctx, id))
+    }
   }
-  return lines.map((line) => ({
-    ...line,
-    amountCents: chargeAmount(line, {
-      miles: ctx.miles,
-      weightLbs: ctx.weightLbs,
-      sideRateBaseCents:
-        line.side === 'CARRIER' && line.loadCarrierId != null && perCarrier.has(line.loadCarrierId)
-          ? perCarrier.get(line.loadCarrierId)
-          : base[line.side],
-    }),
-  }))
+  return lines.map((line) => {
+    const fuel = isFuelPercent(line)
+    const sideBase = fuel ? linehaul : base
+    const carriers = fuel ? perCarrierLinehaul : perCarrier
+    return {
+      ...line,
+      amountCents: chargeAmount(line, {
+        miles: ctx.miles,
+        weightLbs: ctx.weightLbs,
+        sideRateBaseCents:
+          line.side === 'CARRIER' && line.loadCarrierId != null && carriers.has(line.loadCarrierId)
+            ? carriers.get(line.loadCarrierId)
+            : sideBase[line.side],
+      }),
+    }
+  })
 }
 
 /**

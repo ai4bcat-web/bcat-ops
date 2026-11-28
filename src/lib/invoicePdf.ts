@@ -420,8 +420,15 @@ interface Row {
   pitch: number
 }
 
-function describeLine(line: InvoiceLine): string {
+/** 850 basis points → "8.5": trailing zeros dropped. */
+function percentText(bps: number): string {
+  return String(Number((bps / 100).toFixed(2)))
+}
+
+export function describeLine(line: InvoiceLine): string {
   const label = (line.label ?? '').trim() || line.code.replace(/_/g, ' ')
+  // A fuel surcharge that is a percentage of the linehaul says so: "Fuel surcharge (8.5%)". A flat one is just "Fuel surcharge".
+  if (line.calculatedBy === 'PERCENT' && line.code.trim().toUpperCase() === 'FSC' && line.rateCents > 0) return `${label} (${percentText(line.rateCents)}%)`
   return label
 }
 
