@@ -36,6 +36,8 @@ import {
   calcDriverPay,
   effectivePayRate,
   onOwnerOperatorStatement,
+  ownerOpServiceDays,
+  hasOwnerOpService,
   effectiveFixedExpenses,
   fixedExpenseLineLabel,
   type DriverPayStatement,
@@ -44,7 +46,7 @@ import {
 } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 import { matchedFuelForCard, sumFuel, effectiveFuelCard } from '@/lib/driverFuel'
-import { ownerOpTripsFor, ownerOpWeekAtOrAfterFirst, type OwnerOpTrip, isOwnerOperatorGroup, settlementStopDates } from '@/lib/ownerOperatorTrips'
+import { ownerOpTripsFor, ownerOpWeekAtOrAfterFirst, ownerOpStartDate, ownerOpOnPayroll, ownerOpBeforeEnd, ownerOpWeekFrom, type OwnerOpTrip, isOwnerOperatorGroup, settlementStopDates } from '@/lib/ownerOperatorTrips'
 import { otrSettlementReadiness } from '@/lib/otrSettlementFields'
 import { duplicateTripIds as dupIdsForWeek } from '@/lib/tripDedup'
 import type { Driver } from '@/types'
@@ -76,6 +78,35 @@ export interface OwnerOperatorPayRow {
   heldFreight: number
   /** Ids of this week's loads whose Load ID also settled last week (likely entered twice). */
   duplicateTripIds: Set<string>
+  /** First day they are on this page (the day chosen when switched to owner operator, else hire date, else setup date for a driver added without one), or null when there is no limit. */
+  startsOn: string | null
+  /** Last day they are on this page, set when they were switched away from owner operator, or null. */
+  endsOn: string | null
+  /** No hire date on the driver's file: the page says so rather than hiding the driver. */
+  noHireDate: boolean
+  /**
+   * An owner operator who has no pay setting yet. They are listed from their hire date at 0% so nothing can be paid by mistake, until
+   * someone sets their pay terms (Settings on the statement).
+   */
+  payTermsPending: boolean
+}
+
+/** What a driver with no pay setting is listed with: owner operator, 0%, nothing saved. Never written anywhere. */
+function pendingSetting(driver: Driver): DriverPaySetting {
+  return {
+    id: `pending:${driver.id}`, driverId: driver.id, payGroup: 'OWNER_OPERATOR', payPercent: 0, expensesBeforePercent: false,
+    email: null, fuelCardNumber: null, fixedExpenses: [], active: true, notes: null,
+    createdAt: driver.createdAt, updatedAt: driver.createdAt,
+  }
+}
+
+/** Active owner operators (by fleet or driver type) with no owner-operator pay setting yet. */
+function ownerOperatorsWithoutSetting(drivers: Driver[], settings: DriverPaySetting[]): Driver[] {
+  const configured = new Set(settings.filter((s) => isOwnerOperatorGroup(s.payGroup) || hasOwnerOpService(s)).map((s) => s.driverId))
+  return drivers.filter(
+    (d) => d.active !== false && d.type !== 'broker'
+      && (classificationForFleet(d.fleetGroup) === 'OWNER_OPERATOR' || d.driverType === 'OWNER_OPERATOR') && !configured.has(d.id),
+  )
 }
 
 export interface OwnerOperatorPayState {
@@ -236,6 +267,8 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
   const [podsKnown, setPodsKnown] = useState(false)
   const [manualByLoadId, setManualByLoadId] = useState<Map<string, ManualOverrides>>(new Map())
   const [settings, setSettings] = useState<DriverPaySetting[]>([])
+  // False until the pay settings have been read: before that every owner operator looks like one with no setting.
+  const [settingsRead, setSettingsRead] = useState(false)
   const [deductions, setDeductions] = useState<DriverPayDeduction[]>([])
   const [credits, setCredits] = useState<DriverPayCredit[]>([])
   const [loading, setLoading] = useState(true)
@@ -263,6 +296,7 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
         setCustomers(dir.customers)
         setLocations(dir.locations)
         setSettings(s)
+        setSettingsRead(true)
         setDeductions(d)
         setCredits(creds)
         setPodInputs(pods.inputs)
@@ -306,18 +340,37 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
     const customersById = new Map(customers.map((c) => [c.id, c]))
     const locationsById = new Map(locations.map((l) => [l.id, l]))
     const loadsById = new Map(loads.map((l) => [l.id, l]))
-    return settings
-      // A week pinned to Amazon mode settles on the Amazon page; a week pinned to standard owner operator settles here even for a legacy
-      // Amazon-group driver. Unpinned weeks follow the pay group exactly as before.
-      .filter((s) => onOwnerOperatorStatement(s, periodStart) && s.active !== false)
-      .map((baseSetting): OwnerOperatorPayRow | null => {
+    // An owner operator with no pay setting yet is listed too (at 0%), so setting a driver up as an owner operator is all it takes to
+    // see them here; the hire date below decides which weeks.
+    const entries: Array<{ baseSetting: DriverPaySetting; pending: boolean }> = [
+      ...settings
+        // A week pinned to Amazon mode settles on the Amazon page; a week pinned to standard owner operator settles here even for a legacy
+        // Amazon-group driver. Unpinned weeks follow the pay group exactly as before.
+        .filter((s) => onOwnerOperatorStatement(s, periodStart) && s.active !== false)
+        .map((baseSetting) => ({ baseSetting, pending: false })),
+      ...(settingsRead ? ownerOperatorsWithoutSetting(drivers, settings) : []).map((d) => ({ baseSetting: pendingSetting(d), pending: true })),
+    ]
+    return entries
+      .map(({ baseSetting, pending }): OwnerOperatorPayRow | null => {
         const setting: DriverPaySetting = { ...baseSetting, ...effectivePayRate(baseSetting, periodStart) }
         const driver = driverById.get(setting.driverId)
         // 'BROKER COVERED' and friends are pseudo-drivers that carry real loads; paying
         // one would cut a cheque to nobody. Same guard the box-truck hook uses.
         if (!driver || driver.type === 'broker') return null
 
-        const driverTrips = ownerOpTripsFor(loads, setting.driverId, periodStart)
+        // From the hire date: earlier weeks are not theirs, the week holding it counts from that day, and loads delivered before it are
+        // left out. With no hire date a driver who already settles keeps every week; one added without a setting starts the day they
+        // were set up. Either way they stay listed and the page says the hire date is missing.
+        // The day chosen when they were switched to (or from) owner operator wins over the hire date.
+        const service = ownerOpServiceDays(baseSetting)
+        const hire = ownerOpStartDate(driver.hireDate)
+        const startsOn = service.from ?? hire ?? (pending ? ownerOpStartDate(driver.createdAt) : null)
+        const endsOn = service.to
+        if (!ownerOpOnPayroll(startsOn, periodStart) || !ownerOpBeforeEnd(endsOn, periodStart)) return null
+        const weekFrom = ownerOpWeekFrom(startsOn, periodStart)
+        const weekTo = endsOn && endsOn < end ? endsOn : end
+
+        const driverTrips = ownerOpTripsFor(loads, setting.driverId, periodStart, startsOn, endsOn)
         const tripsWithReadiness = driverTrips.map((trip) => {
           const load = loadsById.get(trip.id)
           if (!load) return trip
@@ -337,19 +390,29 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
         })
         // Same guard the Amazon statement uses: a reference that already paid out last
         // week is flagged, never dropped, because only a human knows a real repeat.
-        const duplicateTripIds = dupIdsForWeek(tripsWithReadiness, ownerOpTripsFor(loads, setting.driverId, prevStart))
+        const duplicateTripIds = dupIdsForWeek(tripsWithReadiness, ownerOpTripsFor(loads, setting.driverId, prevStart, startsOn, endsOn))
 
         // The weekly charges — fixed expenses, the fuel card, one-off deductions — are
         // per driver-week, not per page, so exactly ONE statement carries them. The
         // boundary is a fixed date: through Amazon's last week they stay on the Amazon
         // statement and move here afterwards. periodStart is clamped to the first
         // owner-operator week above, so every week rendered here owns its charges.
-        const fuelTxns = matchedFuelForCard(fuelTxs, effectiveFuelCard(setting, periodStart), periodStart, end)
+        const fuelTxns = matchedFuelForCard(fuelTxs, effectiveFuelCard(setting, periodStart), weekFrom, weekTo)
         const fuel = sumFuel(fuelTxns)
 
         const oneOffs = deductions.filter((x) => x.driverId === setting.driverId && x.periodStart === periodStart)
 
-        const fixed = effectiveFixedExpenses(setting.fixedExpenses, periodStart, end)
+        // A hire inside the week prorates the weekly charges from that day, the way a charge that starts mid-week already is.
+        const dayAfter = (day: string) => { const d = new Date(`${day}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10) }
+        const clipped = weekFrom > periodStart || weekTo < end
+        const fixedFor = clipped
+          ? (setting.fixedExpenses ?? []).map((f) => ({
+            ...f,
+            from: f.from && f.from > weekFrom ? f.from : weekFrom,
+            until: weekTo < end && (!f.until || f.until > dayAfter(weekTo)) ? dayAfter(weekTo) : f.until,
+          }))
+          : setting.fixedExpenses
+        const fixed = effectiveFixedExpenses(fixedFor, periodStart, end)
         const fixedDebits: PayDebitInput[] = fixed
           .filter((f) => f.afterPercent)
           .map((f) => ({ label: fixedExpenseLineLabel(f), amount: f.amount }))
@@ -380,21 +443,17 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
           [...fixedDebits, ...driverDebits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode }))],
         )
 
-        return { driver, setting, baseSetting, trips: tripsWithReadiness, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, debits: driverDebits, fixedDebits, statement, heldTrips: held, heldFreight, duplicateTripIds }
+        return { driver, setting, baseSetting, trips: tripsWithReadiness, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, debits: driverDebits, fixedDebits, statement, heldTrips: held, heldFreight, duplicateTripIds, startsOn, endsOn, noHireDate: hire == null && service.from == null, payTermsPending: pending }
       })
       .filter((r): r is OwnerOperatorPayRow => r !== null)
       .sort((a, b) => a.driver.name.localeCompare(b.driver.name))
-  }, [settings, drivers, loads, customers, locations, podIndex, podsKnown, manualByLoadId, deductions, credits, fuelTxs, periodStart, prevStart, end])
+  }, [settings, settingsRead, drivers, loads, customers, locations, podIndex, podsKnown, manualByLoadId, deductions, credits, fuelTxs, periodStart, prevStart, end])
 
+  // Owner operators with no setting who are not listed this week (their hire date is later): shown as the set-up chips, as before.
   const unconfigured = useMemo(() => {
-    const configured = new Set(
-      settings.filter((s) => isOwnerOperatorGroup(s.payGroup)).map((s) => s.driverId),
-    )
-    return drivers.filter(
-      (d) => d.active !== false && d.type !== 'broker'
-        && (classificationForFleet(d.fleetGroup) === 'OWNER_OPERATOR' || d.driverType === 'OWNER_OPERATOR') && !configured.has(d.id),
-    )
-  }, [drivers, settings])
+    const listed = new Set(rows.map((r) => r.driver.id))
+    return settingsRead ? ownerOperatorsWithoutSetting(drivers, settings).filter((d) => !listed.has(d.id)) : []
+  }, [drivers, settings, settingsRead, rows])
 
   const saveSetting = useCallback(async (driverId: string, patch: Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>, expectedUpdatedAt: string | undefined) => {
     const existing = settings.find((s) => s.driverId === driverId && isOwnerOperatorGroup(s.payGroup))

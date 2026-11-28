@@ -16,7 +16,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useFileHub } from '@/hooks/useFileHub'
 import { activeUnits } from '@/lib/fleetActive'
 import { earnsPto, needsHireDate } from '@/lib/ptoAllowance'
-import { driverExpiryPatch, driverExpiry, slotsForDriver, visibleSlots } from '@/lib/fileHub'
+import { driverExpiryPatch, driverExpiry, slotsForDriver, visibleSlots, classificationForFleet } from '@/lib/fileHub'
 import * as api from '@/lib/apiClient'
 import { driverTrailerFieldDeployed } from '@/lib/apiClient'
 import { ProfileDocuments } from '../shared/ProfileDocuments'
@@ -199,7 +199,7 @@ export function DriverProfilePage() {
                 { label: 'E-mail', value: driver.email ?? '' },
                 { label: 'Primary dispatcher', value: driver.dispatcherPrimary ?? '' },
                 { label: 'Backup dispatcher', value: driver.dispatcherBackup ?? '' },
-                { label: 'Hire date', value: driver.hireDate ?? '', hint: needsHireDate(driver) ? (earnsPto(driver) ? 'Needed for PTO' : 'Needed') : undefined },
+                { label: 'Hire date', value: driver.hireDate ?? '', hint: needsHireDate(driver) ? (earnsPto(driver) ? 'Needed for PTO' : (classificationForFleet(driver.fleetGroup) === 'OWNER_OPERATOR' || driver.driverType === 'OWNER_OPERATOR') ? 'Needed: owner operator settlements start from it' : 'Needed') : undefined },
               ]} />
             </ProfileSection>
             <ProfileSection title="Licence & medical" action={<TmsButton size="sm" onClick={() => setEditing(true)}>Edit</TmsButton>}>

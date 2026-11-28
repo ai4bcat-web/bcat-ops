@@ -6,9 +6,9 @@ import { useDrivers } from './useDrivers'
 import { useLoads, useEnsureLoadRange } from './useLoads'
 import { periodEnd } from './useAmazonPay'
 import { matchedFuelForCard, sumFuel, effectiveFuelCard } from '@/lib/driverFuel'
-import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type PayDebitInput } from '@/lib/driverPay'
+import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, ownerOpServiceDays, hasOwnerOpService, type PayDebitInput } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
-import { ownerOpTripsFor, isOwnerOperatorGroup, OWNER_OP_FIRST_PERIOD } from '@/lib/ownerOperatorTrips'
+import { ownerOpTripsFor, isOwnerOperatorGroup, OWNER_OP_FIRST_PERIOD, ownerOpStartDate, ownerOpOnPayroll, ownerOpBeforeEnd } from '@/lib/ownerOperatorTrips'
 import { aggregateOwnerOperator, type OwnerOpWeekProfit, ownerOperatorWeeksFromLoads } from '@/lib/ownerOperatorProfit'
 import { errorText } from '@/lib/errorText'
 
@@ -59,13 +59,17 @@ export function useOwnerOperatorProfitability(): OwnerOperatorProfitabilityState
 
   const { weeks, rows } = useMemo(() => {
     const driverById = new Map(drivers.map((d) => [d.id, d]))
-    const ownerOpSettings = settings.filter((s) => isOwnerOperatorGroup(s.payGroup) && s.active !== false)
+    const ownerOpSettings = settings.filter((s) => (isOwnerOperatorGroup(s.payGroup) || hasOwnerOpService(s)) && s.active !== false)
 
     const rows: OwnerOpWeekProfit[] = []
     for (const setting of ownerOpSettings) {
       const weeks = ownerOperatorWeeksFromLoads(loads, setting.driverId)
+      const service = ownerOpServiceDays(setting)
+      const startsOn = service.from ?? ownerOpStartDate(driverById.get(setting.driverId)?.hireDate)
+      const endsOn = service.to
       for (const periodStart of weeks) {
-        const driverTrips = ownerOpTripsFor(loads, setting.driverId, periodStart)
+        if (!ownerOpOnPayroll(startsOn, periodStart) || !ownerOpBeforeEnd(endsOn, periodStart)) continue
+        const driverTrips = ownerOpTripsFor(loads, setting.driverId, periodStart, startsOn, endsOn)
         if (driverTrips.length === 0) continue
         const end = periodEnd(periodStart)
 
