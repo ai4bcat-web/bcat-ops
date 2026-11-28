@@ -381,7 +381,7 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
         // shipment's Square card with a Retry. Nothing is sent to the payer; this only makes the draft.
         try {
           const made = await createSquareInvoice({ shipmentId: bundle.shipment.id })
-          if (made.skipped) toast.message(`Square draft not made: ${made.skipped}`)
+          if (made.skipped) toast.warning(`Shipment saved, but no Square draft was made: ${made.skipped} Then use Create Square draft on Auto Shipper Loads.`, { duration: 15000 })
           else toast.success('Square draft invoice created. Send it from the shipment when ready.')
         } catch (err) {
           toast.warning(`Shipment ${bundle.shipment.number} created, but the Square draft was not: ${errorMessage(err)}`)

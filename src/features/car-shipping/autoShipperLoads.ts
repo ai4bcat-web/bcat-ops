@@ -11,7 +11,7 @@
  * access no carrier money, so a view built for someone without the grant has nothing to leak.
  */
 import { daysLate } from '@/lib/arAging'
-import { squareStatusLabel, isSquareChannel, type CarShippingData, type SquareInvoiceStatus } from '@/lib/squareInvoicing'
+import { squareStatusLabel, squareCardState, isSquareChannel, type CarShippingData, type SquareInvoiceStatus } from '@/lib/squareInvoicing'
 import { payeeLabel } from '@/features/ap/apViews'
 import { AP_FROM_AUTO_SHIPPER, openBillPath, payBillPath, recordLegBillPath } from '@/features/ap/apLinks'
 import { recordPaymentPath } from '@/features/payments/links'
@@ -236,6 +236,12 @@ export interface AutoShipperRow {
   vehicle: string
   status: ShipmentStatus
   delivered: boolean
+  /** An auto shipper shipment made in BCAT Ops (it carries payer and vehicle details); old Aljex history does not. */
+  squareShipment: boolean
+  /** Who Square e-mails the invoice to; null for a shipment with no details. */
+  payerEmail: string | null
+  /** Where the shipment's Square invoice stands; null for a shipment with no auto shipper details. */
+  squareState: ReturnType<typeof squareCardState> | null
   /** Customer price; null when the viewer has no AR access. */
   priceCents: number | null
   /** Null when the viewer has no AR access. */
@@ -323,6 +329,9 @@ export function buildAutoShipperRows(input: AutoShipperInput): AutoShipperRow[] 
       vehicle: vehicleText(car),
       status: s.status,
       delivered: s.status === 'DELIVERED' || Boolean(s.deliveredAt),
+      squareShipment: car != null,
+      payerEmail: car?.payer?.email?.trim() || null,
+      squareState: car ? squareCardState(car.square) : null,
       priceCents: showAr ? price : null,
       customer: showAr ? customerPayFor(price, invoicesByShipment.get(s.id) ?? [], order, car, asOf) : null,
       carriers,
@@ -539,4 +548,37 @@ export function carrierAction(carrier: CarrierPay, shipmentId: string): RowActio
     return { label: 'Review bill', to: openBillPath(carrier.billId, AP_FROM_AUTO_SHIPPER), note: 'The bill is still in review. Approve it in Accounts Payable, then pay it.' }
   }
   return { label: 'Pay carrier', to: payBillPath(carrier.billId, AP_FROM_AUTO_SHIPPER), note: null }
+}
+
+
+// ── Shipment actions (Ryne 2026-11-28) ──────────────────────────────────────
+// An auto shipper skips Load Review. It is marked Delivered (from here or the shipment), which moves it to Ready to invoice, and
+// the Square invoice made when it was saved is sent from here or from Receivables. Sending is the one step that reaches the payer.
+
+export type ShipmentActionKind = 'MARK_DELIVERED' | 'CREATE_DRAFT' | 'SEND_INVOICE'
+
+export interface ShipmentAction {
+  kind: ShipmentActionKind
+  label: string
+  title: string
+}
+
+/**
+ * The next step of a shipment made in BCAT Ops: Mark delivered, then (with the Accounts Receivable grant, `canInvoice`) make or send
+ * the Square invoice. Nothing once it is invoiced; old imported history carries no Square details and gets no button.
+ */
+export function shipmentAction(
+  row: Pick<AutoShipperRow, 'squareShipment' | 'squareState' | 'delivered' | 'customer'>,
+  canInvoice: boolean,
+): ShipmentAction | null {
+  if (!row.squareShipment) return null
+  if (!row.delivered) {
+    return { kind: 'MARK_DELIVERED', label: 'Mark delivered', title: 'Delivered: the load moves to Ready to invoice. It does not go through Load Review.' }
+  }
+  if (!canInvoice || !row.customer || row.customer.state !== 'NOT_INVOICED') return null
+  switch (row.squareState) {
+    case 'NOT_CREATED': return { kind: 'CREATE_DRAFT', label: 'Create Square draft', title: 'Make the draft invoice in Square. Nothing is sent to the payer.' }
+    case 'DRAFT': return { kind: 'SEND_INVOICE', label: 'Send Square invoice', title: 'Square e-mails the invoice to the payer' }
+    default: return null
+  }
 }

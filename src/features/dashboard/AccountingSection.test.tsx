@@ -48,6 +48,12 @@ vi.mock('@/lib/apiClient', () => ({
   batchGenerateInvoices: vi.fn(),
   voidInvoice: vi.fn(),
   reversePayment: vi.fn(),
+  // Ready to invoice reads the auto shipper details of its shipments; none of these carries any.
+  listCarShippingByShipmentIds: vi.fn().mockResolvedValue(new Map()),
+  createSquareInvoice: vi.fn(),
+  sendSquareInvoice: vi.fn(),
+  setLoadStatus: vi.fn(),
+  getShipmentBundle: vi.fn(),
 }))
 vi.mock('@/hooks/useShipments', () => ({ useShipments: () => ({ shipments: [], loading: false, error: null, partial: false }) }))
 

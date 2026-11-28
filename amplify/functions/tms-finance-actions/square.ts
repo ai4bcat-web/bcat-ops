@@ -337,6 +337,10 @@ export async function sendSquareInvoice(input: Row, caller: Caller): Promise<Row
   if (state.environment && state.environment !== cfg.environment) {
     throw new Error(`This invoice was made in ${state.environment}; the active environment is ${cfg.environment}`)
   }
+  // An auto shipper is invoiced once it is delivered (Ryne 2026-11-28). A draft waits; an invoice already published is only finished.
+  if (state.status === 'DRAFT' && ctx.shipment.status !== 'DELIVERED') {
+    throw new Error('Mark the shipment Delivered before sending the Square invoice. The draft is ready and waits.')
+  }
   try {
     if (state.status === 'DRAFT') {
       const made = await sq<{ invoice?: SquareInvoiceObj }>(cfg, 'POST', `/v2/invoices/${state.invoiceId}/publish`, {
@@ -470,16 +474,29 @@ async function applyStatus(ctx: ShipmentCtx, cfg: SquareConfig, actor: Caller, r
     if (!key || !(amountCents > 0)) continue
     const card = tender.card_details?.card
     const reference = `Square ${card?.card_brand ? `${card.card_brand} ${card.last_4 ?? ''}`.trim() : (tender.type ?? 'payment')}`.slice(0, 120)
-    await recordPayment({
-      customerId: String(invoice.customerId),
-      receivedAt: (tender.created_at ?? nowIso()).slice(0, 10),
-      method: tender.type === 'CARD' || card ? 'CARD' : 'OTHER',
-      reference,
-      amountCents,
-      applications: [{ invoiceId: bcatId, amountCents }],
-      note: `Paid on the Square invoice ${state.invoiceNumber ?? ''}`.trim(),
-      clientRequestId: `sq:${key}`.slice(0, 64),
-    }, actor)
+    try {
+      await recordPayment({
+        customerId: String(invoice.customerId),
+        receivedAt: (tender.created_at ?? nowIso()).slice(0, 10),
+        method: tender.type === 'CARD' || card ? 'CARD' : 'OTHER',
+        reference,
+        amountCents,
+        applications: [{ invoiceId: bcatId, amountCents }],
+        note: `Paid on the Square invoice ${state.invoiceNumber ?? ''}`.trim(),
+        clientRequestId: `sq:${key}`.slice(0, 64),
+      }, actor)
+    } catch (err) {
+      // Square cannot be told about a payment recorded here by hand (its API refuses payments on an invoice's order), so the payer can
+      // still pay in Square after the invoice was settled here. That money is never added a second time: the invoice has no balance for
+      // it, so it is flagged for a person (refund it in Square, or reverse the hand payment) and the rest of the sync carries on.
+      const fresh = await getById(INVOICE_TABLE_NAME, bcatId)
+      if (fresh && Number(fresh.balanceCents ?? 0) < amountCents) {
+        const flag = `Square shows a payment of $${(amountCents / 100).toFixed(2)} on this invoice, but it is already paid here (recorded by hand). It was not added again. If the payer paid twice, refund the extra in Square; if the hand payment was wrong, reverse it on Payments Received.`
+        if (state.reviewFlag !== flag) await saveSquare(ctx, { reviewFlag: flag })
+        continue
+      }
+      throw err
+    }
   }
 }
 

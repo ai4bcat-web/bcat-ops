@@ -24,9 +24,11 @@ import { formatCents } from '@/lib/invoiceBuild'
 import { formatDay } from '@/features/ar/arViews'
 import { shipmentEditorPath } from '@/lib/shipmentLinks'
 import { useAutoShipperLoads } from './useAutoShipperLoads'
+import { SquareSendDialog } from './SquareSendDialog'
+import { useShipmentActions } from './useShipmentActions'
 import {
   AUTO_SHIPPER_TABS, CARRIER_PAY_LABEL, CARRIER_ROLLUP_LABEL, CUSTOMER_PAY_LABEL, DATE_RANGE_OPTIONS,
-  autoShipperCsv, carrierAction, carrierPayCents, carrierPayTotal, customerAction, inRange, inTab, summarize, tabCounts,
+  autoShipperCsv, carrierAction, carrierPayCents, carrierPayTotal, customerAction, inRange, inTab, shipmentAction, summarize, tabCounts,
   type AutoShipperRow, type AutoShipperTab, type CarrierPayState, type CustomerPayState, type DateRangeKey,
 } from './autoShipperLoads'
 
@@ -52,6 +54,8 @@ export function AutoShipperLoadsPage() {
   const [tab, setTab] = useState<AutoShipperTab>('all')
   const [range, setRange] = useState<DateRangeKey>('all')
   const [shown, setShown] = useState<AutoShipperRow[]>([])
+  const [confirmSend, setConfirmSend] = useState<AutoShipperRow | null>(null)
+  const { busyId, run: runAction } = useShipmentActions(refresh)
 
   const inRangeRows = useMemo(() => rows.filter((r) => inRange(r, range, asOf)), [rows, range, asOf])
   const counts = useMemo(() => tabCounts(inRangeRows), [inRangeRows])
@@ -101,6 +105,7 @@ export function AutoShipperLoadsPage() {
       { key: 'route', header: 'Route', text: (r) => r.route, group: 'Shipment' },
       { key: 'vehicle', header: 'Vehicle', text: (r) => r.vehicle, group: 'Shipment' },
       { key: 'status', header: 'Shipment status', text: (r) => r.status.replace(/_/g, ' ').toLowerCase(), group: 'Shipment', filter: 'multi' },
+      { key: 'shipmentAction', header: 'Shipment action', text: (r) => shipmentAction(r, showAr)?.label ?? '', extraPx: 150, group: 'Shipment' },
     ]
     if (showAr) {
       cols.push(
@@ -148,6 +153,26 @@ export function AutoShipperLoadsPage() {
           {c.invoiceNumber ? <span className="asl-sub">{c.invoiceNumber}</span> : null}
           {c.squareLabel ? <TmsBadge tone="gray" title="Square invoice status">Square: {c.squareLabel}</TmsBadge> : null}
         </span>
+      )
+    }
+    if (key === 'shipmentAction') {
+      const a = shipmentAction(row, showAr)
+      if (!a) return undefined
+      return (
+        <button
+          type="button"
+          className="tms-btn tms-btn-secondary tms-btn-sm"
+          data-testid={`asl-shipment-action-${row.pro}`}
+          disabled={busyId != null}
+          title={a.title}
+          onClick={(e) => {
+            e.stopPropagation()
+            if (a.kind === 'SEND_INVOICE') setConfirmSend(row)
+            else void runAction(a.kind, row.id)
+          }}
+        >
+          {busyId === row.id ? 'Working…' : a.label}
+        </button>
       )
     }
     if (key === 'customerAction') {
@@ -207,7 +232,7 @@ export function AutoShipperLoadsPage() {
       )
     }
     return undefined
-  }, [])
+  }, [showAr, busyId, runAction])
 
   const exportCsv = () => {
     const rowsOut = shown.length > 0 || listed.length === 0 ? shown : listed
@@ -249,12 +274,20 @@ export function AutoShipperLoadsPage() {
           rowKey: (r) => r.id,
           renderCell,
           onFiltered: setShown,
-          defaultColumns: ['pro', 'payer', 'pickup', 'route', 'vehicle', ...(showAr ? ['price', 'customerPay', 'owed', 'customerAction'] : []), ...(showAp ? ['carrier', 'carrierAmount', 'carrierPay', 'carrierAction', 'payTo'] : [])],
-          introduceColumns: showAp ? [{ key: 'carrierAmount', after: 'carrier' }] : undefined,
+          defaultColumns: ['pro', 'payer', 'pickup', 'route', 'vehicle', 'shipmentAction', ...(showAr ? ['price', 'customerPay', 'owed', 'customerAction'] : []), ...(showAp ? ['carrier', 'carrierAmount', 'carrierPay', 'carrierAction', 'payTo'] : [])],
+          introduceColumns: [{ key: 'shipmentAction', after: 'vehicle' }, ...(showAp ? [{ key: 'carrierAmount', after: 'carrier' }] : [])],
           cardLayout: { title: 'pro', party: 'payer', amount: showAr ? 'owed' : 'route', pills: [...(showAr ? ['customerPay'] : []), ...(showAp ? ['carrierPay'] : [])] },
           empty: loading ? 'Loading…' : error ? 'The loads could not load. Refresh to try again.' : `No auto shipper loads for ${rangeLabel.toLowerCase()}.`,
         }}
       />
+      {confirmSend && (
+        <SquareSendDialog
+          target={{ pro: confirmSend.pro, payer: confirmSend.payer, payerEmail: confirmSend.payerEmail, amountCents: confirmSend.priceCents }}
+          busy={busyId != null}
+          onCancel={() => setConfirmSend(null)}
+          onConfirm={() => { const row = confirmSend; setConfirmSend(null); void runAction('SEND_INVOICE', row.id) }}
+        />
+      )}
     </div>
   )
 }

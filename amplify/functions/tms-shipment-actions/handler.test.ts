@@ -880,6 +880,48 @@ describe('CREATE_SHIPMENT', () => {
       const bundle = (await call('CREATE_SHIPMENT', { customerId: 'cus-1' })) as { shipment: Row }
       expect('carShipping' in bundle.shipment).toBe(false)
     })
+
+    describe('delivery and Load Review (Ryne 2026-11-28)', () => {
+      const makeAutoShipper = async () => {
+        seedCustomer({ invoiceChannel: 'SQUARE' })
+        return (await call('CREATE_SHIPMENT', { customerId: 'cus-1', carShipping: details, load: { rateCents: 120_900 } })) as { shipment: Row; loads: Row[]; orders: Row[] }
+      }
+
+      it('marks Delivered from wherever it is and releases the order to Ready to invoice with no Load Review', async () => {
+        const made = await makeAutoShipper()
+        const loadId = String(made.loads[0].id)
+        const orderId = String(made.orders[0].id)
+        const bundle = (await call('SET_LOAD_STATUS', { loadId, status: 'DELIVERED' })) as { shipment: Row }
+        expect(bundle.shipment.status).toBe('DELIVERED')
+        const order = table(TABLES.order).get(orderId)
+        expect(order?.arStatus).toBe('UNBILLED')
+        expect(order?.readyToInvoiceAt).toBeTruthy()
+        expect(table(TABLES.shipment).get(String(made.shipment.id))?.loadReviewPushedAt).toBeUndefined()
+        const audit = [...table(TABLES.audit).values()].find((row) => row.action === 'READY_TO_INVOICE')
+        expect(String(audit?.changes)).toContain('AUTO_SHIPPER')
+      })
+
+      it('never pushes an auto shipper to Load Review: the sweep leaves the push stamp off', async () => {
+        const made = await makeAutoShipper()
+        await call('SET_LOAD_STATUS', { loadId: String(made.loads[0].id), status: 'DELIVERED' })
+        await call('PUSH_READY_TO_LOAD_REVIEW', {})
+        expect(table(TABLES.shipment).get(String(made.shipment.id))?.loadReviewPushedAt).toBeUndefined()
+        expect(table(TABLES.order).get(String(made.orders[0].id))?.arStatus).toBe('UNBILLED')
+      })
+
+      it('does not release an unpriced auto shipper, and a regular delivered load is not released on its own', async () => {
+        const made = await makeAutoShipper()
+        const orderId = String(made.orders[0].id)
+        table(TABLES.order).set(orderId, { ...table(TABLES.order).get(orderId)!, revenueCents: 0, customerRateCents: 0 })
+        await call('SET_LOAD_STATUS', { loadId: String(made.loads[0].id), status: 'DELIVERED' })
+        expect(table(TABLES.order).get(orderId)?.arStatus).toBe('DOCS_NEEDED')
+        seedCustomer({ id: 'cus-2', name: 'Regular Co' })
+        const regular = (await call('CREATE_SHIPMENT', { customerId: 'cus-2' })) as { loads: Row[] }
+        await call('SET_LOAD_STATUS', { loadId: String(regular.loads[0].id), status: 'DELIVERED' })
+        const regularOrder = [...table(TABLES.order).values()].find((o) => o.customerId === 'cus-2')
+        expect(regularOrder?.arStatus).toBe('DOCS_NEEDED')
+      })
+    })
   })
 
   it('audits the void when the leg cannot be created, so the consumed PRO has a history', async () => {

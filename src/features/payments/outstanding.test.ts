@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { InvoiceRecord } from '@/types/tms'
 import {
   allocateOldestFirst, daysLate, factorFeeCents, factorFeeReason, filterOutstanding, filterTableRows, groupOutstanding, lateBucket, planReceive, prefillCents,
-  recordPaymentInput, tableRows, type ReceiveDraft,
+  outstandingRow, recordPaymentInput, tableRows, type ReceiveDraft,
 } from './outstanding'
 
 const inv = (id: string, p: Partial<InvoiceRecord>): InvoiceRecord => ({
@@ -250,5 +250,13 @@ describe('allocateOldestFirst (a check spent on the oldest invoices first)', () 
     const f = groupOutstanding([inv('F', { factored: true, balanceCents: 100_00, totalCents: 100_00 })], nameOf, '2026-11-16')[0].groups[0].rows
     expect([...allocateOldestFirst(f, 98_00, 200)]).toEqual([['F', 98_00]])
     expect([...allocateOldestFirst(f, 50_00, 200)]).toEqual([['F', 50_00]])
+  })
+})
+
+describe('Square invoices on Payments Received', () => {
+  it('marks a Square invoice so the receive dialog can say Square is not updated, and leaves every other invoice unmarked', () => {
+    const square = inv('S1', { external: { provider: 'SQUARE', invoiceId: 'INV1' } })
+    expect(outstandingRow(square, '2026-11-28').viaSquare).toBe(true)
+    expect('viaSquare' in outstandingRow(inv('A1', {}), '2026-11-28')).toBe(false)
   })
 })
