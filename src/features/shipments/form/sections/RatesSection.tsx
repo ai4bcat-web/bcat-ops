@@ -12,11 +12,11 @@ import { ChargeCodeInput, TmsButton, TmsIconButton, TmsInput, TmsSelect } from '
 import { formatCents } from '@/lib/tmsDirectory'
 import { CARRIER_RATE_KIND_OPTIONS, RATE_KIND_OPTIONS } from '../constants'
 import { LABEL } from '../labels'
-import { financialPreview, paidSlotIndex, paidToOf } from '../mapping'
+import { financialPreview, fuelPreview, isFuelCode, paidSlotIndex, paidToOf, type FuelRowAmount } from '../mapping'
 import { carrierLabel } from '../cards/ratesSummary'
 import {
   PAID_TO_NONE, carrierSlotsOf, isLocked, liveCarriers, lockReason,
-  type AccessorialLine, type CarrierRate, type CarrierRateKind, type CarrierSlot, type FormRateKind,
+  type AccessorialLine, type AccessorialMode, type CarrierRate, type CarrierRateKind, type CarrierSlot, type FormRateKind,
 } from '../model'
 import type { RatesSectionProps as SliceProps } from '../sectionRegistry'
 import { Field, FieldGrid, spread } from '../fieldGrid'
@@ -38,6 +38,35 @@ const lhPlaceholder = (kind: string): string =>
  */
 function Calculated({ cents, attrs }: { cents: number; attrs: { 'aria-label': string; 'data-testid': string } }) {
   return <output className="tms-rate-calculated" {...attrs}>{cents ? usd(cents) : '—'}</output>
+}
+
+/** The $ | % switch of a fuel surcharge amount: dollars, or a percentage of that side's linehaul. */
+function AmountMode({ mode, onChange, disabled, label, testId }: {
+  mode: AccessorialMode | undefined; onChange: (mode: AccessorialMode) => void; disabled: boolean; label: string; testId: string
+}) {
+  const on = mode ?? 'FLAT'
+  return (
+    <span className="tms-acc-mode" role="group" aria-label={label} data-testid={testId}>
+      {([['FLAT', '$', 'Flat amount'], ['PERCENT', '%', 'Percentage of the linehaul']] as const).map(([m, text, title]) => (
+        <button
+          key={m} type="button" className={`tms-acc-mode-btn${on === m ? ' is-on' : ''}`}
+          aria-pressed={on === m} aria-label={title} title={title} disabled={disabled} onClick={() => on !== m && onChange(m)}
+        >{text}</button>
+      ))}
+    </span>
+  )
+}
+
+/** "8.5% of $3,650.00 = $310.25": what a percentage fuel surcharge comes to, under its amount box. */
+function FuelCalc({ percent, amount }: { percent: string; amount: FuelRowAmount | undefined }) {
+  if (!percent.trim()) return null
+  return (
+    <output className="tms-acc-fsc-calc" data-testid="rates-fsc-calc">
+      {amount && amount.baseCents > 0
+        ? `${percent.trim()}% of ${usd(amount.baseCents)} = ${usd(amount.amountCents)}`
+        : 'Enter the linehaul rate to price this'}
+    </output>
+  )
 }
 
 function emptyAccessorialLine(): AccessorialLine {
@@ -78,6 +107,11 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form, carriers }: RatesS
   const preview = useMemo(
     () => financialPreview({ ...form.getValues(), rates: value, ship, carriers: slots }, ctx.customer, ctx.settings),
     [form, value, ship, slots, ctx.customer, ctx.settings],
+  )
+
+  const fuel = useMemo(
+    () => fuelPreview({ ...form.getValues(), rates: value, ship, carriers: slots }),
+    [form, value, ship, slots],
   )
 
   const cust = value.customer
@@ -147,12 +181,10 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form, carriers }: RatesS
     ]
   }
 
-  // Column sums come off the priced lines (the same ones the rate con and invoice read): rate lines vs the rest.
-  const sumSide = (side: 'CARRIER' | 'CUSTOMER', rate: boolean) =>
-    preview.totals.lines.filter((l) => l.side === side && l.isRate === rate).reduce((t, l) => t + l.amountCents, 0)
-  const accCarrierCents = sumSide('CARRIER', false)
-  const accCustomerCents = sumSide('CUSTOMER', false)
-  const fscCents = preview.totals.lines.filter((l) => l.side === 'CUSTOMER' && l.code === 'FSC').reduce((t, l) => t + l.amountCents, 0)
+  // Column sums come off the priced lines (the same ones the rate con and invoice read): the lines that are not rate lines, plus the fuel surcharge rows typed in the table.
+  const accCarrierCents = fuel.accessorialCents.CARRIER
+  const accCustomerCents = fuel.accessorialCents.CUSTOMER
+  const fscCents = fuel.boxFscCents
 
   const pctSum = slots.reduce((sum, s) => sum + (s.rate.rateType === 'PCT_OF_CUSTOMER' && Number(s.rate.payPct) > 0 ? Number(s.rate.payPct) : 0), 0)
 
@@ -258,29 +290,52 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form, carriers }: RatesS
                       disabled={disabled || ratesLocked}
                       onChange={(code) => {
                         const known = codes.find((c) => c.code === code)
-                        setLine(i, { code, label: known?.label ?? line.label })
+                        // Only a fuel surcharge can be a percentage; leaving it puts the amounts back to dollars.
+                        setLine(i, isFuelCode(code)
+                          ? { code, label: known?.label ?? line.label }
+                          : { code, label: known?.label ?? line.label, customerMode: undefined, carrierMode: undefined })
                       }}
                     />
                   </td>
                   <td className="tms-acc-col-carrier" data-label="Pay carrier">
-                    <TmsInput
-                      aria-label={`${LABEL.rates.lineCarrierAmount.text} ${i + 1}`}
-                      inputMode="decimal"
-                      placeholder="0.00"
-                      value={line.carrierAmount}
-                      disabled={disabled || carrierLockedAll || (multi && paidTo === PAID_TO_NONE)}
-                      onChange={(e) => setLine(i, { carrierAmount: e.target.value })}
-                    />
+                    <div className="tms-acc-amount">
+                      {isFuelCode(line.code) && (
+                        <AmountMode
+                          mode={line.carrierMode} label={`Fuel surcharge pay carrier mode ${i + 1}`} testId={`rates-line-${i}-carrier-mode`}
+                          disabled={disabled || carrierLockedAll || (multi && paidTo === PAID_TO_NONE)}
+                          onChange={(carrierMode) => setLine(i, { carrierMode, carrierAmount: '' })}
+                        />
+                      )}
+                      <TmsInput
+                        aria-label={`${LABEL.rates.lineCarrierAmount.text} ${i + 1}`}
+                        inputMode="decimal"
+                        placeholder={line.carrierMode === 'PERCENT' && isFuelCode(line.code) ? '0.0 %' : '0.00'}
+                        value={line.carrierAmount}
+                        disabled={disabled || carrierLockedAll || (multi && paidTo === PAID_TO_NONE)}
+                        onChange={(e) => setLine(i, { carrierAmount: e.target.value })}
+                      />
+                    </div>
+                    {isFuelCode(line.code) && line.carrierMode === 'PERCENT' && <FuelCalc percent={line.carrierAmount} amount={fuel.rows[i]?.carrier} />}
                   </td>
                   <td className="tms-acc-col-customer" data-label="Charge customer">
-                    <TmsInput
-                      aria-label={`${LABEL.rates.lineCustomerAmount.text} ${i + 1}`}
-                      inputMode="decimal"
-                      placeholder="0.00"
-                      value={line.customerAmount}
-                      disabled={disabled || ratesLocked}
-                      onChange={(e) => setLine(i, { customerAmount: e.target.value })}
-                    />
+                    <div className="tms-acc-amount">
+                      {isFuelCode(line.code) && (
+                        <AmountMode
+                          mode={line.customerMode} label={`Fuel surcharge charge customer mode ${i + 1}`} testId={`rates-line-${i}-customer-mode`}
+                          disabled={disabled || ratesLocked}
+                          onChange={(customerMode) => setLine(i, { customerMode, customerAmount: '' })}
+                        />
+                      )}
+                      <TmsInput
+                        aria-label={`${LABEL.rates.lineCustomerAmount.text} ${i + 1}`}
+                        inputMode="decimal"
+                        placeholder={line.customerMode === 'PERCENT' && isFuelCode(line.code) ? '0.0 %' : '0.00'}
+                        value={line.customerAmount}
+                        disabled={disabled || ratesLocked}
+                        onChange={(e) => setLine(i, { customerAmount: e.target.value })}
+                      />
+                    </div>
+                    {isFuelCode(line.code) && line.customerMode === 'PERCENT' && <FuelCalc percent={line.customerAmount} amount={fuel.rows[i]?.customer} />}
                   </td>
                   <td>
                     <TmsIconButton

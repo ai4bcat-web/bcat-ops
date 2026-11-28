@@ -3829,6 +3829,55 @@ describe('RECALC_CHARGES', () => {
     ).rejects.toThrow(/frozen/)
   })
 
+  it('prices a percentage fuel surcharge off the linehaul on each side, and reprices it when the linehaul moves', async () => {
+    const { shipmentId, loadId, orderId } = await priced()
+    const recalc = (linehaulCustomer: number, linehaulCarrier: number) => call('RECALC_CHARGES', {
+      shipmentId,
+      expectedVersion: Number(table(TABLES.shipment).get(shipmentId)!.version),
+      charges: [
+        { side: 'CUSTOMER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: linehaulCustomer, sortOrder: 0 },
+        { side: 'CUSTOMER', code: 'FSC', calculatedBy: 'PERCENT', rateCents: 850, count: 1, sortOrder: 10 },
+        { side: 'CUSTOMER', code: 'FSC', calculatedBy: 'FLAT', rateCents: 2_000, count: 1, sortOrder: 11 },
+        { side: 'CARRIER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: linehaulCarrier, sortOrder: 0 },
+        { side: 'CARRIER', code: 'FSC', calculatedBy: 'PERCENT', rateCents: 500, count: 1, sortOrder: 10 },
+      ],
+    }) as Promise<{ charges: Row[]; financials: Row[] }>
+
+    const first = await recalc(365_000, 300_000)
+    const amounts = (rows: Row[]) => rows.map((c) => [c.side, c.code, c.calculatedBy, c.amountCents])
+    expect(amounts(first.charges)).toEqual(expect.arrayContaining([
+      ['CUSTOMER', 'FSC', 'PERCENT', 31_025], // 8.5% of $3,650.00; the flat $20.00 beside it is not part of the base
+      ['CUSTOMER', 'FSC', 'FLAT', 2_000],
+      ['CARRIER', 'FSC', 'PERCENT', 15_000], // 5% of the carrier's $3,000.00
+    ]))
+    expect(first.financials[0]).toMatchObject({ customerRateCents: 398_025, revenueCents: 398_025, carrierRateCents: 315_000, costCents: 315_000 })
+    expect(table(TABLES.order).get(orderId)!.revenueCents).toBe(398_025)
+    expect(table(TABLES.load).get(loadId)!.rate).toBe(398_025)
+
+    // The linehaul is edited: the percentage lines follow it, the flat one does not.
+    const second = await recalc(400_000, 320_000)
+    expect(amounts(second.charges)).toEqual(expect.arrayContaining([
+      ['CUSTOMER', 'FSC', 'PERCENT', 34_000],
+      ['CUSTOMER', 'FSC', 'FLAT', 2_000],
+      ['CARRIER', 'FSC', 'PERCENT', 16_000],
+    ]))
+    expect(second.financials[0]).toMatchObject({ revenueCents: 436_000, costCents: 336_000 })
+    expect(table(TABLES.load).get(loadId)!.rate).toBe(436_000)
+  })
+
+  it('refuses a fuel surcharge percentage over 100 percent or below zero', async () => {
+    const { shipmentId } = await priced()
+    for (const rateCents of [10_001, -1]) {
+      await expect(
+        call('RECALC_CHARGES', {
+          shipmentId,
+          expectedVersion: Number(table(TABLES.shipment).get(shipmentId)!.version),
+          charges: [{ side: 'CUSTOMER', code: 'FSC', calculatedBy: 'PERCENT', rateCents, sortOrder: 1 }],
+        }),
+      ).rejects.toThrow(/between 0 and 100 percent/)
+    }
+  })
+
   it('refuses a negative carrier rate', async () => {
     const { shipmentId } = await priced()
     await expect(

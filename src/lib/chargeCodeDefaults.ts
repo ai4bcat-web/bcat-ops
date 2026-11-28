@@ -51,6 +51,7 @@ export const DEFAULT_CHARGE_CODES: readonly ChargeCodeDef[] = [
   def('STORAGE', 'Storage', 'Port'),
   def('DEMURRAGE', 'Demurrage', 'Port'),
   // Surcharges
+  def('FSC', 'Fuel surcharge', 'Surcharge'),
   def('EXPEDITE', 'Expedite / rush', 'Surcharge'),
   def('AFTERHOURS', 'After hours', 'Surcharge'),
   def('WEEKEND', 'Weekend / holiday', 'Surcharge'),

@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest'
 import {
   chargeAmount,
   computeFinancials,
+  isFuelPercent,
   isRateCode,
+  linehaulBaseCents,
   priceCharges,
   rateBaseCents,
 } from './shipmentCharges'
@@ -103,6 +105,77 @@ describe('per-carrier PERCENT base', () => {
   it('leaves the customer side on the customer base', () => {
     const cust = [line({ rateCents: 100_000 }), line({ code: 'FSC', calculatedBy: 'PERCENT', rateCents: 1000, isRate: false })]
     expect(priceCharges([...cust, ...lines])[1].amountCents).toBe(10_000)
+  })
+})
+
+describe('a fuel surcharge entered as a percentage', () => {
+  const fsc = (over: Partial<ChargeLineInput>): ChargeLineInput => line({ code: 'FSC', calculatedBy: 'PERCENT', rateCents: 850, count: 1, ...over })
+
+  it('is a percentage of the linehaul alone, in basis points, rounded to the cent', () => {
+    // 8.5% of $3,650.00 = $310.25
+    const priced = priceCharges([line({ rateCents: 365_000 }), fsc({})])
+    expect(priced[1].amountCents).toBe(31_025)
+    expect(isFuelPercent(fsc({}))).toBe(true)
+    expect(isFuelPercent(line({ code: 'DETENTION', calculatedBy: 'PERCENT' }))).toBe(false)
+    expect(isFuelPercent(fsc({ calculatedBy: 'FLAT' }))).toBe(false)
+  })
+
+  it('rounds a half cent up, once', () => {
+    // 8.5% of $0.10 is 0.85 cents
+    expect(priceCharges([line({ rateCents: 10 }), fsc({})])[1].amountCents).toBe(1)
+    // 12.34% of $333.33 = 41.1332 -> 4113 cents
+    expect(priceCharges([line({ rateCents: 33_333 }), fsc({ rateCents: 1234 })])[1].amountCents).toBe(4113)
+  })
+
+  it('ignores a flat fuel line that sits next to it, but another percentage line still sees it', () => {
+    const lines = [
+      line({ rateCents: 200_000 }),
+      line({ code: 'FSC', rateCents: 20_000, isRate: true }),
+      fsc({ rateCents: 1000 }),
+      line({ code: 'DEADHEAD', calculatedBy: 'PERCENT', rateCents: 1000, isRate: false }),
+    ]
+    const priced = priceCharges(lines)
+    expect(priced[2].amountCents).toBe(20_000) // 10% of the $2,000.00 linehaul
+    expect(priced[3].amountCents).toBe(22_000) // an ordinary percentage line keeps its wider base
+    expect(linehaulBaseCents(lines, 'CUSTOMER')).toBe(200_000)
+  })
+
+  it('prices each side against its own linehaul', () => {
+    const priced = priceCharges([
+      line({ rateCents: 365_000 }), fsc({ rateCents: 850 }),
+      line({ side: 'CARRIER', rateCents: 300_000 }), fsc({ side: 'CARRIER', rateCents: 500 }),
+    ])
+    expect(priced.map((p) => p.amountCents)).toEqual([365_000, 31_025, 300_000, 15_000])
+  })
+
+  it('prices a tagged carrier line against its own carrier linehaul when two carriers are named', () => {
+    const carrier = (over: Partial<ChargeLineInput>) => line({ side: 'CARRIER', ...over })
+    const priced = priceCharges([
+      carrier({ loadCarrierId: 'A', rateCents: 100_000 }),
+      carrier({ loadCarrierId: 'B', rateCents: 50_000 }),
+      fsc({ side: 'CARRIER', loadCarrierId: 'B', rateCents: 1000 }),
+    ])
+    expect(priced[2].amountCents).toBe(5_000)
+  })
+
+  it('moves with the linehaul when the linehaul is edited, and a flat fuel line does not', () => {
+    const at = (linehaul: number) => priceCharges([
+      line({ rateCents: linehaul }), fsc({ rateCents: 1000 }), line({ code: 'FSC', rateCents: 7_500, isRate: true }),
+    ]).map((p) => p.amountCents)
+    expect(at(300_000)).toEqual([300_000, 30_000, 7_500])
+    expect(at(400_000)).toEqual([400_000, 40_000, 7_500])
+  })
+
+  it('counts toward revenue and the customer rate like any rate line', () => {
+    const t = computeFinancials([
+      line({ rateCents: 365_000 }), fsc({ rateCents: 850, isRate: true }),
+      line({ side: 'CARRIER', rateCents: 300_000 }), fsc({ side: 'CARRIER', rateCents: 500, isRate: true }),
+    ])
+    expect(t.customerRateCents).toBe(396_025)
+    expect(t.revenueCents).toBe(396_025)
+    expect(t.carrierRateCents).toBe(315_000)
+    expect(t.costCents).toBe(315_000)
+    expect(t.profitCents).toBe(81_025)
   })
 })
 

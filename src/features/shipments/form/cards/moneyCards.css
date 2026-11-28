@@ -80,3 +80,14 @@
 .tms-shell .tms-card-more-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
 .tms-shell .tms-card-counter { font-size: 12px; color: var(--tms-muted); }
 .tms-shell .tms-card-counter[data-over='true'] { color: var(--tms-badge-red); }
+
+/* A fuel surcharge row: the $ | % switch sits beside the amount box, and a percentage shows what it comes to underneath. */
+.tms-shell .tms-acc-amount { display: flex; align-items: center; gap: 6px; }
+.tms-shell .tms-acc-amount > input { flex: 1 1 auto; min-width: 0; }
+.tms-shell .tms-acc-mode { display: inline-flex; flex: 0 0 auto; border: 1px solid var(--tms-border); border-radius: 6px; overflow: hidden; }
+.tms-shell .tms-acc-mode-btn { min-width: 28px; padding: 4px 8px; font-size: 12px; font-weight: 600; line-height: 1.2; background: transparent; color: var(--tms-muted, inherit); border: 0; cursor: pointer; }
+.tms-shell .tms-acc-mode-btn + .tms-acc-mode-btn { border-left: 1px solid var(--tms-border); }
+.tms-shell .tms-acc-mode-btn.is-on { background: var(--tms-badge-green-tint); color: var(--tms-badge-green); }
+.tms-shell .tms-acc-mode-btn:disabled { cursor: not-allowed; opacity: 0.55; }
+.tms-shell .tms-acc-mode-btn:focus-visible { outline: 2px solid var(--tms-badge-green); outline-offset: -2px; }
+.tms-shell .tms-acc-fsc-calc { display: block; margin-top: 4px; font-size: 11px; color: var(--tms-muted, inherit); font-variant-numeric: tabular-nums; }

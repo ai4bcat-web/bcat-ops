@@ -177,7 +177,7 @@ export function LoadReviewCharges({ shipmentId, readOnly = false, disabled = fal
               <ChargeCodeInput aria-label="Charge code" className="lr-charge-code" options={codeOptions} value={line.code} onChange={(code) => update(line.key, { code })} />
               <TmsInput aria-label="Description" className="lr-charge-label" placeholder="Description" value={line.label} onChange={(e) => update(line.key, { label: e.target.value })} />
               <TmsSelect aria-label="Calculated by" value={line.calculatedBy} onChange={(e) => update(line.key, { calculatedBy: e.target.value as ChargeCalc })}>
-                {(Object.keys(CALC_LABEL) as ChargeCalc[]).map((c) => <option key={c} value={c}>{CALC_LABEL[c]}</option>)}
+                {(Object.keys(CALC_LABEL) as ChargeCalc[]).map((c) => <option key={c} value={c}>{c === 'PERCENT' && line.code.trim().toUpperCase() === 'FSC' ? '% of linehaul' : CALC_LABEL[c]}</option>)}
               </TmsSelect>
               <TmsInput key={`${line.key}-${line.calculatedBy}`} aria-label={line.calculatedBy === 'PERCENT' ? 'Percent' : 'Rate'} inputMode="decimal" className="lr-charge-rate" autoFocus={line.key === focusKey}
                 defaultValue={line.calculatedBy === 'PERCENT' ? String(line.rateCents / 100) : (line.rateCents / 100).toFixed(2)}

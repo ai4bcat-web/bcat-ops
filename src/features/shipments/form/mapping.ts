@@ -6,7 +6,7 @@ import { fromDateTimeInput } from '@/lib/date'
 import { distanceMeters } from '@/lib/tmsDirectory'
 import { carrierTotals, marginOf, type CarrierTotals } from '@/lib/carrierTotals'
 import {
-  chargeAmount, computeFinancials, isRateCode, type ChargeLineInput, type FinancialTotals,
+  chargeAmount, computeFinancials, isFuelPercent, isRateCode, linehaulBaseCents, priceCharges, type ChargeLineInput, type FinancialTotals,
 } from '@/lib/shipmentCharges'
 import type {
   AddCarrierInput, BookCarrierInput, CreateShipmentInput, SaveOrderFormInput, UpdateOrderDetailsInput,
@@ -18,8 +18,8 @@ import type {
 } from '@/types/tms'
 import {
   CODE_FSC, CODE_LINEHAUL, MAIN_FREIGHT_ID, PAID_TO_NONE, REF_DELIVERY, REF_PICKUP, REF_PO,
-  carrierSlotsOf, centsToDollars, dollarsToCents, liveCarriers, parseCount, parseInteger, readExtras,
-  type AccessorialLine, type CarrierRate, type CarrierSlot, type FormRateKind, type FormStop, type ShipmentFormValues,
+  ACCESSORIAL_SORT_BASE, accessorialAmountText, carrierSlotsOf, dollarsToCents, isAccessorialShape, isBoxFsc, liveCarriers, parseCount, parseInteger, readExtras,
+  type AccessorialLine, type AccessorialMode, type CarrierRate, type CarrierSlot, type FormRateKind, type FormStop, type ShipmentFormValues,
 } from './model'
 
 const blank = (s: string | null | undefined): boolean => !(s ?? '').trim()
@@ -308,6 +308,34 @@ export function toSpecialRequirements(values: ShipmentFormValues, prior?: Specia
 
 // ── charges ──────────────────────────────────────────────────────────────────
 
+/** Whether an accessorial row is the fuel surcharge, the one row type that can be a percentage of the linehaul. */
+export function isFuelCode(code: string): boolean {
+  return code.trim().toUpperCase() === CODE_FSC
+}
+
+/** A percentage the office typed: 0 to 100 with at most two decimals, else undefined. Basis points are what the server stores. */
+export function percentToBps(text: string | null | undefined): number | undefined {
+  const t = (text ?? '').replace(/[%\s]/g, '')
+  if (!/^\d+(\.\d{1,2})?$/.test(t)) return undefined
+  const n = Number(t)
+  return n >= 0 && n <= 100 ? Math.round(n * 100) : undefined
+}
+
+/**
+ * One side of an accessorial row as the pricing of a charge line: dollars (FLAT), or for a fuel surcharge in PERCENT mode
+ * a percentage of that side's linehaul (basis points). undefined = nothing typed, or not a valid amount.
+ */
+export function accessorialPricing(
+  code: string, mode: AccessorialMode | undefined, text: string,
+): { calculatedBy: ChargeCalc; rateCents: number } | undefined {
+  if (mode === 'PERCENT' && isFuelCode(code)) {
+    const bps = percentToBps(text)
+    return bps === undefined ? undefined : { calculatedBy: 'PERCENT', rateCents: bps }
+  }
+  const cents = dollarsToCents(text)
+  return cents === undefined ? undefined : { calculatedBy: 'FLAT', rateCents: cents }
+}
+
 function rateCalc(kind: FormRateKind): ChargeCalc {
   return kind === 'PER_MILE' ? 'PER_MILE' : kind === 'PER_CWT' ? 'PER_CWT' : 'FLAT'
 }
@@ -430,13 +458,13 @@ export function toCharges(values: ShipmentFormValues, ctx: ChargeBuildCtx): Load
   values.rates.lines.forEach((row, i) => {
     const code = row.code.trim()
     if (!code) return
-    const base = { code, label: row.label.trim() || null, calculatedBy: 'FLAT' as const, count: 1, isRate: isRateCode(code), release: row.release.trim() || null, note: row.note.trim() || null, sortOrder: 10 + i }
-    const c = dollarsToCents(row.customerAmount)
-    if (c !== undefined) out.push(cust({ ...base, id: row.id || undefined, side: 'CUSTOMER', rateCents: c }))
-    const k = dollarsToCents(row.carrierAmount)
+    const base = { code, label: row.label.trim() || null, count: 1, isRate: isRateCode(code), release: row.release.trim() || null, note: row.note.trim() || null, sortOrder: ACCESSORIAL_SORT_BASE + i }
+    const c = accessorialPricing(code, row.customerMode, row.customerAmount)
+    if (c !== undefined) out.push(cust({ ...base, ...c, id: row.id || undefined, side: 'CUSTOMER' }))
+    const k = accessorialPricing(code, row.carrierMode, row.carrierAmount)
     const target = paidSlotIndex(slots, row.paidTo)
     const id = target >= 0 ? idOf(target) : null
-    if (id && k !== undefined) out.push(car({ ...base, id: row.carrierLineId || undefined, side: 'CARRIER', rateCents: k }, id))
+    if (id && k !== undefined) out.push(car({ ...base, ...k, id: row.carrierLineId || undefined, side: 'CARRIER' }, id))
   })
   slots.forEach((s, i) => {
     const id = idOf(i)
@@ -502,6 +530,44 @@ export function financialPreview(
   }
 }
 
+/** What a fuel surcharge row is worth on one side: the dollars and the linehaul a percentage of it is taken from. */
+export interface FuelRowAmount { amountCents: number; baseCents: number }
+
+/**
+ * The form's priced lines with the row each came from, for the fuel surcharge rows: the amount of every accessorial row that is a
+ * fuel surcharge (flat or percentage, either side), and the Rates box fuel surcharge on its own. Priced by the same `priceCharges`
+ * the preview and the server use, so "8.5% of $3,650.00 = $310.25" is the number that lands on the invoice.
+ */
+export function fuelPreview(values: ShipmentFormValues): {
+  rows: Record<number, { customer?: FuelRowAmount; carrier?: FuelRowAmount }>
+  boxFscCents: number
+  /** Accessorial rows only: everything that is not a rate line, plus the fuel surcharge rows (those are rate lines). */
+  accessorialCents: { CUSTOMER: number; CARRIER: number }
+} {
+  const lines = toCharges(values, { orderId: null, loadId: null, includeCarrier: true })
+  const inputs = lines.map(asLine)
+  const ctx = ctxOf(values)
+  const priced = priceCharges(inputs, ctx)
+  const taggedCarriers = new Set(inputs.filter((l) => l.side === 'CARRIER' && l.loadCarrierId != null).map((l) => l.loadCarrierId))
+  const rows: Record<number, { customer?: FuelRowAmount; carrier?: FuelRowAmount }> = {}
+  let boxFscCents = 0
+  const accessorialCents = { CUSTOMER: 0, CARRIER: 0 }
+  lines.forEach((line, i) => {
+    const amount = priced[i]?.amountCents ?? 0
+    const row = line.sortOrder - ACCESSORIAL_SORT_BASE
+    const isRow = line.sortOrder >= ACCESSORIAL_SORT_BASE && row < values.rates.lines.length
+    const fuel = isRow && isFuelCode(line.code)
+    if (!line.isRate || fuel) accessorialCents[line.side] += amount
+    if (line.side === 'CUSTOMER' && isFuelCode(line.code) && !isRow) boxFscCents += amount
+    if (!fuel) return
+    const tagged = line.side === 'CARRIER' && taggedCarriers.size > 1 ? line.loadCarrierId : undefined
+    const base = isFuelPercent(inputs[i]) ? linehaulBaseCents(inputs, line.side, ctx, tagged) : 0
+    const side = line.side === 'CUSTOMER' ? 'customer' : 'carrier'
+    rows[row] = { ...rows[row], [side]: { amountCents: amount, baseCents: base } }
+  })
+  return { rows, boxFscCents, accessorialCents }
+}
+
 /**
  * After CREATE_SHIPMENT: adopt the server's charge ids and keep every line it seeded
  * (customer default charges) instead of letting the replace-all of SAVE_ORDER_FORM drop them.
@@ -516,20 +582,21 @@ export function rebaseCharges(values: ShipmentFormValues, bundle: ShipmentBundle
   }
   const lines = values.rates.lines.map((l) => {
     if (l.id) { claimed.add(l.id); return l }
-    const hit = claim((c) => c.code === l.code && c.calculatedBy === 'FLAT' && (c.count ?? 1) === 1)
+    const mode = l.customerMode === 'PERCENT' && isFuelCode(l.code) ? 'PERCENT' : 'FLAT'
+    const hit = claim((c) => c.code === l.code && c.calculatedBy === mode && (c.count ?? 1) === 1)
     return hit ? { ...l, id: hit.id } : l
   })
   const passthrough = [...values.rates.passthrough]
   const known = new Set(passthrough.map((p) => p.id))
   for (const c of server) {
     if (claimed.has(c.id) || known.has(c.id)) continue
-    if (c.code === CODE_LINEHAUL || c.code === CODE_FSC) {
+    if (c.code === CODE_LINEHAUL || (c.code === CODE_FSC && (isBoxFsc(c) || !isAccessorialShape(c)))) {
       if (c.code === CODE_LINEHAUL && !values.rates.customer.lineId) values = { ...values, rates: { ...values.rates, customer: { ...values.rates.customer, lineId: c.id } } }
       if (c.code === CODE_FSC && !values.rates.fscLineId) values = { ...values, rates: { ...values.rates, fscLineId: c.id } }
       continue
     }
-    if (c.calculatedBy === 'FLAT' && (c.count ?? 1) === 1 && !['QUICKPAY_FEE', 'ADVANCE_FEE'].includes(c.code)) {
-      lines.push({ id: c.id, carrierLineId: '', release: c.release ?? '', paidTo: '', code: c.code, label: c.label ?? '', carrierAmount: '', customerAmount: centsToDollars(c.amountCents), note: c.note ?? '' })
+    if (isAccessorialShape(c)) {
+      lines.push({ id: c.id, carrierLineId: '', release: c.release ?? '', paidTo: '', code: c.code, label: c.label ?? '', carrierAmount: '', customerAmount: accessorialAmountText(c), ...(c.calculatedBy === 'PERCENT' ? { customerMode: 'PERCENT' as const } : {}), note: c.note ?? '' })
     } else passthrough.push(c)
   }
   return { ...values, rates: { ...values.rates, lines, passthrough } }
@@ -644,11 +711,11 @@ export function carrierAccessorialInputs(values: ShipmentFormValues, slotIndex =
   const slots = carrierSlotsOf(values)
   const out: LoadChargeInput[] = []
   values.rates.lines.forEach((row, i) => {
-    const k = dollarsToCents(row.carrierAmount)
+    const k = accessorialPricing(row.code, row.carrierMode, row.carrierAmount)
     if (!row.code.trim() || k === undefined || paidSlotIndex(slots, row.paidTo) !== slotIndex) return
     out.push({
-      side: 'CARRIER', code: row.code.trim(), label: row.label.trim() || null, calculatedBy: 'FLAT', rateCents: k, count: 1,
-      isRate: isRateCode(row.code), release: row.release.trim() || null, note: row.note.trim() || null, sortOrder: 10 + i,
+      side: 'CARRIER', code: row.code.trim(), label: row.label.trim() || null, ...k, count: 1,
+      isRate: isRateCode(row.code), release: row.release.trim() || null, note: row.note.trim() || null, sortOrder: ACCESSORIAL_SORT_BASE + i,
     })
   })
   return out

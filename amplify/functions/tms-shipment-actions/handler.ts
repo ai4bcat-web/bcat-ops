@@ -1389,6 +1389,10 @@ function validateChargeInput(
   if (side === 'CARRIER' && rateCents < 0) {
     throw new Error(`charges[${index}].rateCents cannot be negative on a CARRIER line`)
   }
+  // A fuel surcharge given as a percentage of the linehaul is basis points: 0 to 100 percent, never more.
+  if (calculatedBy === 'PERCENT' && code === 'FSC' && (rateCents < 0 || rateCents > 10_000)) {
+    throw new Error(`charges[${index}].rateCents is a percentage of the linehaul and must be between 0 and 100 percent`)
+  }
   const count = optionalInteger(c.count, { min: 0, label: `charges[${index}].count` }) ?? 1
   return {
     id: optionalString(c.id, 100),

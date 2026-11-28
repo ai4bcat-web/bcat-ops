@@ -89,7 +89,7 @@ export function InvoiceRateEditor({ invoice, onSaved, onCancel }: {
                 defaultValue={percent ? String(line.rateCents / 100) : (line.rateCents / 100).toFixed(2)}
                 onBlur={(e) => update(line.key, { rateCents: percent ? Math.round(Number(e.target.value) * 100) || 0 : centsFromInput(e.target.value) })}
               />
-              {UNIT[line.calculatedBy] && <span className="ire-unit">{UNIT[line.calculatedBy]}</span>}
+              {UNIT[line.calculatedBy] && <span className="ire-unit">{percent && line.code.trim().toUpperCase() === 'FSC' ? '% of the linehaul' : UNIT[line.calculatedBy]}</span>}
               {line.calculatedBy === 'FLAT' && (line.count ?? 1) !== 1 && (
                 <TmsInput aria-label={`${line.label || line.code} quantity`} inputMode="numeric" className="ire-qty" value={line.count ?? 1}
                   onChange={(e) => update(line.key, { count: Math.max(0, Math.round(Number(e.target.value) || 0)) })} />
