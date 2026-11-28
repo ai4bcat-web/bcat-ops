@@ -9,11 +9,13 @@ const TODAY = '2026-11-28'
 const drivers = [
   { id: 'd-chad', name: 'Chad Salerno', phone: '', active: true, fleetGroup: 'OWNER_OPERATOR', assignedTruckId: 'truck-oo' },
   { id: 'd-mike', name: 'Michael Bodle', phone: '', active: true, fleetGroup: 'OWNER_OPERATOR', assignedTruckId: 'truck-oo2' },
+  { id: 'd-local', name: 'John Brittich', phone: '', active: true, fleetGroup: 'LOCAL', assignedTruckId: 'truck-local' },
   { id: 'd-zak', name: 'Zak Pace', phone: '', active: true, fleetGroup: 'BOX_TRUCK', assignedTruckId: null },
 ] as unknown as Driver[]
 
 const equipment = [
   { id: 'truck-oo', type: 'truck', unitNumber: '27', fleetGroup: 'OWNER_OPERATOR', active: true },
+  { id: 'truck-local', type: 'truck', unitNumber: '4', fleetGroup: 'LOCAL', active: true },
   { id: 'truck-oo2', type: 'truck', unitNumber: '23', fleetGroup: 'OWNER_OPERATOR', active: true },
 ] as unknown as Equipment[]
 
@@ -68,9 +70,15 @@ describe('classifyOtherFleetLoad: why a load is in "On another fleet / no driver
     expect(kindOf(load({ id: 'l14', aljexId: '12000', carrierName: 'ROAD RUNNERS EXPRESS LLC', legacyImported: true }))).toBe('brokered')
   })
 
-  it("owner-operator loads are another fleet's driver (Chad 20132, Michael 20169)", () => {
-    expect(kindOf(load({ id: 'l15', aljexId: '20132', deliveryDriverId: 'd-chad', truckId: 'truck-oo' }))).toBe('otherFleetDriver')
-    expect(kindOf(load({ id: 'l16', aljexId: '20169', deliveryDriverId: 'd-mike' }))).toBe('otherFleetDriver')
+  it('owner-operator loads are "owner operators" (Chad 20132, Michael 20169)', () => {
+    expect(kindOf(load({ id: 'l15', aljexId: '20132', deliveryDriverId: 'd-chad', truckId: 'truck-oo' }))).toBe('ownerOperator')
+    expect(kindOf(load({ id: 'l16', aljexId: '20169', deliveryDriverId: 'd-mike' }))).toBe('ownerOperator')
+  })
+
+  it("a company driver of another fleet is not an owner operator (Local driver seen from Amazon)", () => {
+    const l = load({ id: 'l18', aljexId: '20200', deliveryDriverId: 'd-local', truckId: 'truck-local' })
+    const audit = auditFleetRevenue({ loads: [l], drivers, equipment, range: RANGE, group: 'AMAZON', today: TODAY })
+    expect(audit.buckets.otherFleet.rows[0]?.otherKind).toBe('otherFleetDriver')
   })
 
   it('a carrier name that is really one of our drivers counts as own fleet', () => {
@@ -105,7 +113,8 @@ describe('auditFleetRevenue: the split only explains the bucket, it never moves 
     const g = audit.otherFleetGroups
     expect(g.needsFix.rows.map((r) => r.ref)).toEqual(['14638'])
     expect(g.brokered.rows.map((r) => r.ref)).toEqual(['14662'])
-    expect(g.otherFleetDriver.rows.map((r) => r.ref)).toEqual(['20132'])
+    expect(g.ownerOperator.rows.map((r) => r.ref)).toEqual(['20132'])
+    expect(g.otherFleetDriver.rows).toEqual([])
     expect(g.autoShipper.rows.map((r) => r.ref)).toEqual(['20003'])
     expect(g.notCovered.rows.map((r) => r.ref)).toEqual(['20165'])
     expect(g.history.rows.map((r) => r.ref)).toEqual(['11111'])
