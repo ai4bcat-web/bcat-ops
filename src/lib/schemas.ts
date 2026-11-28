@@ -3,12 +3,9 @@ import { differenceInCalendarDays, parseISO, subYears } from 'date-fns'
 
 export const driverSchema = z.object({
   name: z.string().min(1, 'Name is required'),
-  phone: z
-    .string()
-    .refine(
-      (v) => v.replace(/\D/g, '').length >= 10,
-      'Phone must contain at least 10 digits'
-    ),
+  // A phone that is blank or short is a WARNING (see driverWarnings), never a reason to refuse
+  // the save: a driver with no number on file must still be editable. Only the type is hard.
+  phone: z.string(),
   active: z.boolean(),
   type: z.enum(['driver', 'broker']),
   colorKey: z.enum([
@@ -34,14 +31,48 @@ export const driverSchema = z.object({
    */
   motiveDriverId: z.number().int().positive().nullable().optional(),
   // Dedicated dispatcher and backup: staff emails, blank allowed.
-  dispatcherPrimary: z.string().trim().toLowerCase().email().or(z.literal('')).nullable().optional(),
-  dispatcherBackup: z.string().trim().toLowerCase().email().or(z.literal('')).nullable().optional(),
+  // Format problems are warnings (driverWarnings); the value is still a string and stores fine.
+  dispatcherPrimary: z.string().trim().toLowerCase().nullable().optional(),
+  dispatcherBackup: z.string().trim().toLowerCase().nullable().optional(),
   ivanApp: z.boolean().nullable().optional(),
   timeClock: z.boolean().nullable().optional(),
   bobtail: z.boolean().nullable().optional(),
   ptoEligible: z.boolean().nullable().optional(),
   unitType: z.enum(['DRY_VAN', 'FLATBED', 'POWER_ONLY']).nullable().optional(),
 })
+
+export interface DriverWarning {
+  /** The form field the warning belongs to, so it can sit next to that field. */
+  field: 'phone' | 'email' | 'dispatcherPrimary' | 'dispatcherBackup'
+  /** Short field name for the summary line ("Phone", "Dispatcher"). */
+  label: string
+  message: string
+}
+
+const emailShape = z.string().email()
+
+/**
+ * Problems with a driver profile that are worth telling someone about but never worth
+ * refusing a save over. The profile has to stay editable when a number is missing or a
+ * dispatcher email was mistyped; the page shows these next to the field and in the summary,
+ * and the save goes through with a note. Hard rules (a name, a valid type/colour/fleet/unit)
+ * stay in `driverSchema`.
+ */
+export function driverWarnings(values: Partial<Pick<DriverFormValues, 'phone' | 'email' | 'dispatcherPrimary' | 'dispatcherBackup'>>): DriverWarning[] {
+  const out: DriverWarning[] = []
+  const phone = (values.phone ?? '').trim()
+  const digits = phone.replace(/\D/g, '')
+  if (!phone) out.push({ field: 'phone', label: 'Phone', message: 'No phone number on file.' })
+  else if (digits.length < 10) out.push({ field: 'phone', label: 'Phone', message: 'Phone has fewer than 10 digits.' })
+  const email = (field: 'email' | 'dispatcherPrimary' | 'dispatcherBackup', label: string) => {
+    const v = (values[field] ?? '').trim()
+    if (v && !emailShape.safeParse(v).success) out.push({ field, label, message: `"${v}" is not a valid e-mail address.` })
+  }
+  email('email', 'E-mail')
+  email('dispatcherPrimary', 'Dispatcher')
+  email('dispatcherBackup', 'Backup dispatcher')
+  return out
+}
 
 const apptTypeEnum = z.enum(['exact', 'range', 'fcfs', 'tbd'])
 

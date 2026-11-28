@@ -35,7 +35,7 @@ import { DriverPhones } from '@/components/DriverPhones'
 import { useTruckConfigs } from '@/hooks/useTruckConfigs'
 import { workPhoneFor } from '@/lib/workPhone'
 import { panelBtn } from '@/lib/ui/panel-btn'
-import { driverSchema, type DriverFormValues } from '@/lib/schemas'
+import { driverSchema, driverWarnings, type DriverFormValues } from '@/lib/schemas'
 import type { Driver } from '@/types'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -48,6 +48,11 @@ function PtoUsed({ driverId }: { driverId: string }) {
       PTO used in {year}: {days === null ? '—' : `${days} ${days === 1 ? 'day' : 'days'}`}
     </span>
   )
+}
+
+/** Field names for the footer when a hard rule blocks the save. */
+const HARD_FIELD_LABELS: Record<string, string> = {
+  name: 'Name', type: 'Type', colorKey: 'Calendar colour', fleetGroup: 'Fleet', unitType: 'Unit type', motiveDriverId: 'Motive driver id',
 }
 
 function getInitials(name: string): string {
@@ -134,6 +139,11 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
     control,
     name: ['type', 'name', 'colorKey', 'fleetGroup', 'assignedTruckId', 'bobtail'],
   })
+  // Problems that never block a save: shown beside the field and in the footer, and noted when it saves.
+  const [wPhone, wEmail, wDispatcher, wBackup] = useWatch({ control, name: ['phone', 'email', 'dispatcherPrimary', 'dispatcherBackup'] })
+  const warnings = driverWarnings({ phone: wPhone, email: wEmail, dispatcherPrimary: wDispatcher, dispatcherBackup: wBackup })
+  const warningFor = (field: string) => warnings.find((w) => w.field === field)
+  const warningNames = Array.from(new Set(warnings.map((w) => w.label)))
 
   // The work phone belongs to the truck selected in the form, so it follows the select live.
   // The personal number is the editable Phone field above it, so it is left out here.
@@ -251,7 +261,11 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
         toast.error('Driver saved but photo upload failed')
       }
 
-      toast(isEdit ? 'Driver updated' : 'Driver added', { description: normalized.name })
+      const saved = isEdit ? 'Driver updated' : 'Driver added'
+      const noted = driverWarnings(normalized)
+      toast(noted.length ? `${saved} with ${noted.length} ${noted.length === 1 ? 'warning' : 'warnings'}` : saved, {
+        description: noted.length ? `${normalized.name}: check ${Array.from(new Set(noted.map((w) => w.label))).join(', ')}` : normalized.name,
+      })
       onClose()
     } catch (err) {
       // Log the raw error so GraphQL error objects are visible in the console
@@ -286,8 +300,14 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
             </button>
           )}
           <div style={{ flex: 1 }} />
-          {Object.keys(errors).length > 0 && (
-            <span style={{ fontSize: 11.5, color: 'var(--tms-badge-red)', marginRight: 8 }}>Fix the errors above before saving.</span>
+          {Object.keys(errors).length > 0 ? (
+            <span style={{ fontSize: 11.5, color: 'var(--tms-badge-red)', marginRight: 8 }}>
+              Can't save yet. Fix: {Object.keys(errors).map((k) => HARD_FIELD_LABELS[k] ?? k).join(', ')}.
+            </span>
+          ) : warningNames.length > 0 && (
+            <span style={{ fontSize: 11.5, color: 'var(--tms-badge-orange)', marginRight: 8 }}>
+              Check: {warningNames.join(', ')}. You can still save.
+            </span>
           )}
           <button type="button" onClick={onClose} style={panelBtn.secondary}>Cancel</button>
           <button type="submit" form="driver-form" disabled={isSubmitting}
@@ -298,7 +318,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
       }
     >
 
-        <form id="driver-form" onSubmit={handleSubmit(onSubmit)}>
+        <form id="driver-form" noValidate onSubmit={handleSubmit(onSubmit)}>
           <div>
             <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoSelect} />
 
@@ -339,9 +359,10 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                       <Input {...register('name')} placeholder="Full name" className={cn('h-9', errors.name && 'border-destructive')} />
                       {errors.name && <p className="text-xs text-destructive mt-1">{errors.name.message}</p>}
                     </Field>
-                    <Field label="Personal phone *" hint="10-digit US">
+                    <Field label="Personal phone" hint="10-digit US">
                       <Input {...register('phone')} placeholder="(312) 555-0100" type="tel" className={cn('h-9', errors.phone && 'border-destructive')} />
                       {errors.phone && <p className="text-xs text-destructive mt-1">{errors.phone.message}</p>}
+                      {warningFor('phone') && <p className="text-xs mt-1" style={{ color: 'var(--tms-badge-orange)' }}>{warningFor('phone')!.message} You can still save.</p>}
                       {workPhones.truckId && (
                         <div style={{ fontSize: 12, marginTop: 4 }} data-testid="driver-drawer-work-phone">
                           <DriverPhones phones={workPhones} variant="stacked" />
@@ -350,6 +371,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                     </Field>
                     <Field label="Email" hint="for onboarding portal invite">
                       <Input {...register('email')} placeholder="driver@example.com" className="h-9" type="email" />
+                      {warningFor('email') && <p className="text-xs mt-1" style={{ color: 'var(--tms-badge-orange)' }}>{warningFor('email')!.message} You can still save.</p>}
                     </Field>
                   </div>
                 </div>
@@ -442,9 +464,11 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                     */}
                   <Field label="Dispatcher" hint="owns this driver's texts and calls on the Dispatch page">
                     <Input type="email" list="bcat-dispatcher-emails" placeholder="jenny@bcatcorp.com" {...register('dispatcherPrimary')} />
+                    {warningFor('dispatcherPrimary') && <p className="text-xs mt-1" style={{ color: 'var(--tms-badge-orange)' }}>{warningFor('dispatcherPrimary')!.message} Calls will not route to them until it is fixed.</p>}
                   </Field>
                   <Field label="Backup dispatcher" hint="covers when the dispatcher is out">
                     <Input type="email" list="bcat-dispatcher-emails" placeholder="dennis@bcatcorp.com" {...register('dispatcherBackup')} />
+                    {warningFor('dispatcherBackup') && <p className="text-xs mt-1" style={{ color: 'var(--tms-badge-orange)' }}>{warningFor('dispatcherBackup')!.message}</p>}
                   </Field>
                   <datalist id="bcat-dispatcher-emails">
                     {knownDispatchers.map((e) => <option key={e} value={e} />)}
