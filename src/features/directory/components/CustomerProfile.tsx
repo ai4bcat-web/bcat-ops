@@ -391,6 +391,17 @@ export function CustomerProfile({
                     />
                   </TmsField>
                 </div>
+                <TmsField label="Invoice channel" hint="Auto shipper: each shipment is billed to its own payer through Square. Admins only.">
+                  <TmsSelect
+                    value={value.invoiceChannel}
+                    onChange={(e) => set('invoiceChannel', e.target.value as '' | 'SQUARE')}
+                    disabled={!isAdmin}
+                    options={[
+                      { value: '', label: 'Standard invoice' },
+                      { value: 'SQUARE', label: 'Auto shipper (invoice via Square)' },
+                    ]}
+                  />
+                </TmsField>
                 <TmsField label="Notes">
                   <TmsTextarea value={value.notes} onChange={(e) => set('notes', e.target.value)} />
                 </TmsField>
