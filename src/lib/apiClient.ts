@@ -8752,10 +8752,10 @@ export async function getCapacityBoard(): Promise<CapacityBoard> {
   return parseCapacityBoard(r.data.getTmsSettings?.capacityBoard)
 }
 
-/** One change to the Capacity board (save, move, cover, reopen, delete, restore); the answer is the whole board and the changed card. */
-export async function capacityBoardOp(op: CapacityOp): Promise<{ board: CapacityBoard; card: CapacityCard }> {
-  const r = await directoryAction<{ cards: CapacityCard[]; card: CapacityCard }>('CAPACITY_BOARD', op)
-  return { board: parseCapacityBoard({ cards: r.cards }), card: r.card }
+/** One change to the Capacity board (save, move, cover, reopen, delete, restore, or the list of states we do not travel to); the answer is the whole board and the changed card. */
+export async function capacityBoardOp(op: CapacityOp): Promise<{ board: CapacityBoard; card: CapacityCard | null }> {
+  const r = await directoryAction<{ cards: CapacityCard[]; noGoStates?: string[]; card: CapacityCard | null }>('CAPACITY_BOARD', op)
+  return { board: parseCapacityBoard({ cards: r.cards, noGoStates: r.noGoStates }), card: r.card }
 }
 
 /** Set (or clear, with '') a pay-to's remittance e-mail (a factor's or a direct payee's). One address serves every carrier paid to that name. */

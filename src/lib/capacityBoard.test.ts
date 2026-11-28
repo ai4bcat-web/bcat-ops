@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   addDaysYmd, applyCapacityOp, capacityColumns, clampCapacityRange, daysBetweenYmd, defaultCapacityRange, parseCapacityBoard,
   parseCapacityFields, canonicalEquipment, formatCapacityTimes, formatMaxWeight, CAPACITY_EQUIPMENT, capacityHeadline, pruneBoard, rangeDays, shiftCardRange, CAPACITY_MAX_CARDS, EMPTY_CAPACITY_BOARD,
-  type CapacityBoard, type CapacityOp,
+  parseNoGoStates, stateOfPlace, noGoStateOf, summarizeNoGoStates, readCapacityHistory, appendCapacityEvent, CAPACITY_HISTORY_MAX, US_STATES,
+  type CapacityBoard, type CapacityOp, type CapacityEvent,
 } from './capacityBoard'
 
 const NOW = '2026-11-27T15:00:00.000Z'
@@ -208,5 +209,138 @@ describe('canonicalEquipment', () => {
     const a = run({ cards: [] }, { op: 'save', fields: { ...fields, equipment: 'Box truck', lengthFt: '18' } })
     expect(capacityColumns(a.board, ['2026-11-27'], true, 'straight truck')[0].cards).toHaveLength(1)
     expect(capacityColumns(a.board, ['2026-11-27'], true, 'dry van')[0].cards).toHaveLength(0)
+  })
+})
+
+describe('states we do not travel to', () => {
+  it('knows the fifty states and DC', () => {
+    expect(US_STATES).toHaveLength(51)
+    expect(new Set(US_STATES.map((x) => x.code)).size).toBe(51)
+  })
+
+  it('checks a picked list: real codes only, upper-cased, no repeats, sorted', () => {
+    expect(parseNoGoStates(['ny', 'CA', 'NY', ' wa '])).toEqual(['CA', 'NY', 'WA'])
+    expect(parseNoGoStates([])).toEqual([])
+    expect(parseNoGoStates(undefined)).toEqual([])
+    expect(() => parseNoGoStates(['XX'])).toThrow('"XX" is not a state')
+    expect(() => parseNoGoStates(['CA', 5])).toThrow('two-letter code')
+    expect(() => parseNoGoStates('CA')).toThrow('must be a list')
+    expect(parseNoGoStates(US_STATES.map((x) => x.code))).toHaveLength(51)
+  })
+
+  it('sets the list on the board without touching the cards, and clears it with an empty list', () => {
+    const a = run({ cards: [] }, { op: 'save', fields })
+    const b = run(a.board, { op: 'setNoGo', states: ['wa', 'CA'] })
+    expect(b.card).toBeNull()
+    expect(b.board.noGoStates).toEqual(['CA', 'WA'])
+    expect(b.board.cards).toEqual(a.board.cards)
+    // The list survives every card operation and the weekly prune.
+    const covered = run(b.board, { op: 'cover', id: a.card.id })
+    expect(covered.board.noGoStates).toEqual(['CA', 'WA'])
+    expect(run(covered.board, { op: 'save', fields }).board.noGoStates).toEqual(['CA', 'WA'])
+    expect(pruneBoard(covered.board, TODAY, NOW).noGoStates).toEqual(['CA', 'WA'])
+    const cleared = run(covered.board, { op: 'setNoGo', states: [] })
+    expect('noGoStates' in cleared.board).toBe(false)
+  })
+
+  it('refuses a bad list and leaves the board as it was', () => {
+    expect(() => run({ cards: [] }, { op: 'setNoGo', states: ['ZZ'] })).toThrow('not a state')
+  })
+
+  it('reads a board saved before the list existed as having none, and keeps a stored list through the JSON', () => {
+    expect(parseCapacityBoard({ cards: [] }).noGoStates).toBeUndefined()
+    expect(parseCapacityBoard(JSON.stringify({ cards: [], noGoStates: ['tx', 'ZZ', 7, 'CA'] })).noGoStates).toEqual(['CA', 'TX'])
+    expect(parseCapacityBoard({ cards: [], noGoStates: 'CA' }).noGoStates).toBeUndefined()
+  })
+
+  it('finds the state in a typed place, with or without a ZIP, and nothing in a zone or bare ZIP', () => {
+    expect(stateOfPlace('Chicago, IL')).toBe('IL')
+    expect(stateOfPlace('Los Angeles, ca 90001')).toBe('CA')
+    expect(stateOfPlace('St. Louis, MO 63101-1234')).toBe('MO')
+    expect(stateOfPlace('Midwest')).toBe('')
+    expect(stateOfPlace('60601')).toBe('')
+    expect(stateOfPlace('Portland, XX')).toBe('')
+    expect(stateOfPlace(undefined)).toBe('')
+  })
+
+  it('warns only when the place is in an excluded state', () => {
+    expect(noGoStateOf('Los Angeles, CA', ['CA', 'NY'])).toBe('CA')
+    expect(noGoStateOf('Dallas, TX', ['CA', 'NY'])).toBe('')
+    expect(noGoStateOf('Los Angeles, CA', [])).toBe('')
+    expect(noGoStateOf('Los Angeles, CA', undefined)).toBe('')
+  })
+
+  it('shortens a long list for a card and keeps the whole list for the tooltip', () => {
+    const s = summarizeNoGoStates(['AK', 'CA', 'HI', 'NY', 'OR', 'WA', 'MT', 'ND'])
+    expect(s.shown).toEqual(['AK', 'CA', 'HI', 'NY', 'OR', 'WA'])
+    expect(s.more).toBe(2)
+    expect(s.all).toBe('AK, CA, HI, NY, OR, WA, MT, ND')
+    expect(summarizeNoGoStates(undefined)).toEqual({ shown: [], more: 0, all: '' })
+  })
+})
+
+describe('who covered a card', () => {
+  const created = () => run({ cards: [] }, { op: 'save', fields })
+
+  it('stamps the covering caller and the time on the card and in its history', () => {
+    const a = created()
+    expect(a.card.history).toEqual([{ action: 'created', by: 'dennis@bcatcorp.com', at: NOW }])
+    const later = { ...ctx, user: 'ruben@bcatcorp.com', nowIso: '2026-11-28T20:15:00.000Z' }
+    const c = applyCapacityOp(a.board, { op: 'cover', id: a.card.id }, later)
+    expect(c.card.status).toBe('COVERED')
+    expect(c.card.coveredBy).toBe('ruben@bcatcorp.com')
+    expect(c.card.coveredAt).toBe('2026-11-28T20:15:00.000Z')
+    expect(c.card.history?.at(-1)).toEqual({ action: 'covered', by: 'ruben@bcatcorp.com', at: '2026-11-28T20:15:00.000Z' })
+  })
+
+  it('ignores a coveredBy, coveredAt or history the page sends', () => {
+    const a = created()
+    const forged = { op: 'cover', id: a.card.id, coveredBy: 'someone.else@bcatcorp.com', coveredAt: '2020-01-01T00:00:00.000Z', history: [] } as unknown as CapacityOp
+    const c = run(a.board, forged)
+    expect(c.card?.coveredBy).toBe('dennis@bcatcorp.com')
+    expect(c.card?.coveredAt).toBe(NOW)
+    expect(c.card?.history).toHaveLength(2)
+    // Nor can an edit rewrite them.
+    const edited = run(c.board, { op: 'save', id: a.card.id, fields: { ...fields, coveredBy: 'x@y.com', history: [], status: 'OPEN' } })
+    expect(edited.card.coveredBy).toBe('dennis@bcatcorp.com')
+    expect(edited.card.status).toBe('COVERED')
+    expect(edited.card.history).toHaveLength(2)
+  })
+
+  it('clears the covered-by line on reopen and keeps who covered and who reopened in the history', () => {
+    const a = created()
+    const c = applyCapacityOp(a.board, { op: 'cover', id: a.card.id }, { ...ctx, user: 'ruben@bcatcorp.com' })
+    const r = applyCapacityOp(c.board, { op: 'reopen', id: a.card.id }, { ...ctx, user: 'dennis@bcatcorp.com', nowIso: '2026-11-27T18:00:00.000Z' })
+    expect(r.card.status).toBe('OPEN')
+    expect(r.card.coveredBy).toBeUndefined()
+    expect(r.card.coveredAt).toBeUndefined()
+    expect(r.card.history?.map((e) => `${e.action}:${e.by}`)).toEqual(['created:dennis@bcatcorp.com', 'covered:ruben@bcatcorp.com', 'reopened:dennis@bcatcorp.com'])
+  })
+
+  it('does not add an event when the card is already in that state', () => {
+    const a = created()
+    expect(run(a.board, { op: 'reopen', id: a.card.id }).card.history).toHaveLength(1)
+    const c = run(a.board, { op: 'cover', id: a.card.id })
+    expect(run(c.board, { op: 'cover', id: a.card.id }).card.history).toHaveLength(2)
+  })
+
+  it('keeps only the most recent events', () => {
+    let h: CapacityEvent[] | undefined
+    for (let i = 0; i < CAPACITY_HISTORY_MAX + 5; i += 1) h = appendCapacityEvent(h, { action: i % 2 ? 'reopened' : 'covered', by: 'a@b.com', at: `2026-11-27T10:${String(i).padStart(2, '0')}:00.000Z` })
+    expect(h).toHaveLength(CAPACITY_HISTORY_MAX)
+    expect(h?.[0].at).toBe('2026-11-27T10:05:00.000Z')
+    expect(h?.at(-1)?.at).toBe(`2026-11-27T10:${String(CAPACITY_HISTORY_MAX + 4).padStart(2, '0')}:00.000Z`)
+  })
+
+  it('reads a card with no history, or a damaged one, as having none', () => {
+    expect(readCapacityHistory({})).toEqual([])
+    expect(readCapacityHistory({ history: 'x' })).toEqual([])
+    expect(readCapacityHistory({ history: [{ action: 'covered', by: 'a@b.com', at: NOW }, { action: 'nope', by: 'a', at: NOW }, null, { action: 'covered' }] })).toEqual([{ action: 'covered', by: 'a@b.com', at: NOW }])
+  })
+
+  it('covers a card saved before history existed without breaking', () => {
+    const old = { cards: [{ id: 'old', status: 'OPEN', availableFrom: '2026-11-27', availableTo: '2026-11-27', origin: 'Chicago, IL', destination: '', equipment: 'Dry Van', loadType: 'FULL', lengthFt: 53, createdAt: NOW, createdBy: 'x', updatedAt: NOW, updatedBy: 'x' }] }
+    const c = run(parseCapacityBoard(old), { op: 'cover', id: 'old' })
+    expect(c.card.history).toEqual([{ action: 'covered', by: 'dennis@bcatcorp.com', at: NOW }])
   })
 })

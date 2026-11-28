@@ -40,11 +40,41 @@ export interface CapacityFields {
   driverId?: string
 }
 
+/** One entry in a card's short status history: who did what, and when. Always stamped by the server from the signed-in caller. */
+export interface CapacityEvent {
+  action: 'created' | 'covered' | 'reopened'
+  /** The caller's login e-mail, the name every audit row carries; the page prints it as a display name. */
+  by: string
+  /** ISO time. */
+  at: string
+}
+
+/** A card keeps its most recent events only, so the one settings row stays small. */
+export const CAPACITY_HISTORY_MAX = 20
+
+/** The history with one more event on the end, trimmed to the most recent CAPACITY_HISTORY_MAX. */
+export function appendCapacityEvent(history: readonly CapacityEvent[] | undefined, event: CapacityEvent): CapacityEvent[] {
+  return [...(history ?? []), event].slice(-CAPACITY_HISTORY_MAX)
+}
+
+/** A card's stored history, keeping only well-formed events (a stored card is data from the settings row, so it is read defensively). */
+export function readCapacityHistory(card: { history?: unknown }): CapacityEvent[] {
+  if (!Array.isArray(card.history)) return []
+  return card.history.filter((e): e is CapacityEvent => {
+    if (!e || typeof e !== 'object') return false
+    const o = e as Record<string, unknown>
+    return (o.action === 'created' || o.action === 'covered' || o.action === 'reopened') && typeof o.by === 'string' && typeof o.at === 'string'
+  })
+}
+
 export interface CapacityCard extends CapacityFields {
   id: string
   status: CapacityStatus
+  /** Who marked the card Covered and when; cleared when it is reopened (the history keeps both). Stamped by the server. */
   coveredAt?: string
   coveredBy?: string
+  /** Created / covered / reopened events, oldest first, at most CAPACITY_HISTORY_MAX. A card saved before this existed has none. */
+  history?: CapacityEvent[]
   /** Set when a card is deleted; it is hidden at once and dropped for good a week later, so Undo can bring it back. */
   deletedAt?: string
   deletedBy?: string
@@ -56,6 +86,11 @@ export interface CapacityCard extends CapacityFields {
 
 export interface CapacityBoard {
   cards: CapacityCard[]
+  /**
+   * States we do not travel to, two-letter codes, sorted. It is one list for the whole board, so it applies to every truck; a board
+   * saved before the list existed has none, which reads as "no states excluded".
+   */
+  noGoStates?: string[]
 }
 
 export const EMPTY_CAPACITY_BOARD: CapacityBoard = { cards: [] }
@@ -120,6 +155,76 @@ export function clampCapacityRange(from: string, to: string): { from: string; to
   if (b < a) b = a
   const last = addDaysYmd(a, CAPACITY_MAX_SPAN_DAYS - 1)
   return { from: a, to: b > last ? last : b }
+}
+
+// ── States we do not travel to ──────────────────────────────────────────────
+
+/** The fifty states and DC, the codes a place's ", ST" can hold. */
+export const US_STATES: readonly { code: string; name: string }[] = [
+  { code: 'AL', name: 'Alabama' }, { code: 'AK', name: 'Alaska' }, { code: 'AZ', name: 'Arizona' }, { code: 'AR', name: 'Arkansas' },
+  { code: 'CA', name: 'California' }, { code: 'CO', name: 'Colorado' }, { code: 'CT', name: 'Connecticut' }, { code: 'DE', name: 'Delaware' },
+  { code: 'DC', name: 'District of Columbia' }, { code: 'FL', name: 'Florida' }, { code: 'GA', name: 'Georgia' }, { code: 'HI', name: 'Hawaii' },
+  { code: 'ID', name: 'Idaho' }, { code: 'IL', name: 'Illinois' }, { code: 'IN', name: 'Indiana' }, { code: 'IA', name: 'Iowa' },
+  { code: 'KS', name: 'Kansas' }, { code: 'KY', name: 'Kentucky' }, { code: 'LA', name: 'Louisiana' }, { code: 'ME', name: 'Maine' },
+  { code: 'MD', name: 'Maryland' }, { code: 'MA', name: 'Massachusetts' }, { code: 'MI', name: 'Michigan' }, { code: 'MN', name: 'Minnesota' },
+  { code: 'MS', name: 'Mississippi' }, { code: 'MO', name: 'Missouri' }, { code: 'MT', name: 'Montana' }, { code: 'NE', name: 'Nebraska' },
+  { code: 'NV', name: 'Nevada' }, { code: 'NH', name: 'New Hampshire' }, { code: 'NJ', name: 'New Jersey' }, { code: 'NM', name: 'New Mexico' },
+  { code: 'NY', name: 'New York' }, { code: 'NC', name: 'North Carolina' }, { code: 'ND', name: 'North Dakota' }, { code: 'OH', name: 'Ohio' },
+  { code: 'OK', name: 'Oklahoma' }, { code: 'OR', name: 'Oregon' }, { code: 'PA', name: 'Pennsylvania' }, { code: 'RI', name: 'Rhode Island' },
+  { code: 'SC', name: 'South Carolina' }, { code: 'SD', name: 'South Dakota' }, { code: 'TN', name: 'Tennessee' }, { code: 'TX', name: 'Texas' },
+  { code: 'UT', name: 'Utah' }, { code: 'VT', name: 'Vermont' }, { code: 'VA', name: 'Virginia' }, { code: 'WA', name: 'Washington' },
+  { code: 'WV', name: 'West Virginia' }, { code: 'WI', name: 'Wisconsin' }, { code: 'WY', name: 'Wyoming' },
+]
+
+const STATE_CODES: ReadonlySet<string> = new Set(US_STATES.map((s) => s.code))
+
+/** The most states the list can hold: every one of them. */
+export const CAPACITY_MAX_NOGO_STATES = US_STATES.length
+
+/**
+ * Check a list of states a person picked: two-letter codes, each a real state or DC, no repeats (a repeat is dropped), sorted. Throws an
+ * Error whose message says what to fix; an empty list is fine and means no state is excluded.
+ */
+export function parseNoGoStates(raw: unknown): string[] {
+  if (raw == null || raw === '') return []
+  if (!Array.isArray(raw)) throw new Error('States we do not travel to must be a list')
+  const seen = new Set<string>()
+  for (const item of raw) {
+    if (typeof item !== 'string') throw new Error('Each state must be a two-letter code')
+    const code = item.trim().toUpperCase()
+    if (!STATE_CODES.has(code)) throw new Error(`"${item}" is not a state`)
+    seen.add(code)
+  }
+  if (seen.size > CAPACITY_MAX_NOGO_STATES) throw new Error(`At most ${CAPACITY_MAX_NOGO_STATES} states can be listed`)
+  return [...seen].sort()
+}
+
+/** Read a stored list leniently: whatever is not a state is dropped, so one bad entry never hides the rest. */
+function readNoGoStates(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return parseNoGoStates(raw.filter((x): x is string => typeof x === 'string' && STATE_CODES.has(x.trim().toUpperCase())))
+}
+
+/**
+ * The state a typed place is in: ", ST" at the end of the text, with or without a ZIP after it ("Chicago, IL", "Chicago, IL 60601").
+ * '' for a bare ZIP, a zone ("Midwest") or anything that does not end in a state.
+ */
+export function stateOfPlace(place: string | undefined | null): string {
+  const m = /,\s*([A-Za-z]{2})(?:\s+\d{5}(?:-\d{4})?)?\s*$/.exec((place ?? '').trim())
+  const code = m ? m[1].toUpperCase() : ''
+  return STATE_CODES.has(code) ? code : ''
+}
+
+/** The excluded state a place is in, or '' when it is not in one (or the list is empty). */
+export function noGoStateOf(place: string | undefined | null, noGo: readonly string[] | undefined): string {
+  const code = stateOfPlace(place)
+  return code && noGo?.includes(code) ? code : ''
+}
+
+/** The list as a card reads it: the first few codes and how many more there are, plus every code for a tooltip. */
+export function summarizeNoGoStates(states: readonly string[] | undefined, show = 6): { shown: string[]; more: number; all: string } {
+  const list = states ?? []
+  return { shown: list.slice(0, show), more: Math.max(0, list.length - show), all: list.join(', ') }
 }
 
 // ── Validation (the page and the Lambda use the same rules) ─────────────────
@@ -259,8 +364,10 @@ export function parseCapacityBoard(raw: unknown): CapacityBoard {
     try { v = JSON.parse(v) } catch { return { cards: [] } }
   }
   if (!v || typeof v !== 'object') return { cards: [] }
+  const noGo = readNoGoStates((v as { noGoStates?: unknown }).noGoStates)
+  const withList = (cards: CapacityCard[]): CapacityBoard => (noGo.length ? { cards, noGoStates: noGo } : { cards })
   const list = (v as { cards?: unknown }).cards
-  if (!Array.isArray(list)) return { cards: [] }
+  if (!Array.isArray(list)) return withList([])
   const cards: CapacityCard[] = []
   for (const c of list) {
     if (!c || typeof c !== 'object') continue
@@ -268,7 +375,7 @@ export function parseCapacityBoard(raw: unknown): CapacityBoard {
     if (typeof o.id !== 'string' || !isYmd(o.availableFrom)) continue
     cards.push(o as unknown as CapacityCard)
   }
-  return { cards }
+  return withList(cards)
 }
 
 // ── Day columns ─────────────────────────────────────────────────────────────
@@ -323,7 +430,7 @@ export function shiftCardRange(card: Pick<CapacityCard, 'availableFrom' | 'avail
 
 // ── Operations (what the Lambda applies to the stored board) ────────────────
 
-export type CapacityOp =
+export type CapacityCardOp =
   | { op: 'save'; id?: string; fields: Record<string, unknown> }
   | { op: 'move'; id: string; fromDay: string; toDay: string }
   | { op: 'cover'; id: string }
@@ -331,11 +438,17 @@ export type CapacityOp =
   | { op: 'delete'; id: string }
   | { op: 'restore'; id: string }
 
+/** Replace the board-wide list of states we do not travel to. */
+export interface CapacitySetNoGoOp { op: 'setNoGo'; states: string[] }
+
+export type CapacityOp = CapacityCardOp | CapacitySetNoGoOp
+
 /** Drop what is old enough to forget: deleted cards a week after deletion, any card a week after its last available day. */
 export function pruneBoard(board: CapacityBoard, today: string, nowIso: string): CapacityBoard {
   const cutoffDay = addDaysYmd(today, -CAPACITY_KEEP_DAYS)
   const cutoffTime = new Date(new Date(nowIso).getTime() - CAPACITY_KEEP_DAYS * 86_400_000).toISOString()
   return {
+    ...board,
     cards: board.cards.filter((c) => {
       if (c.deletedAt) return c.deletedAt >= cutoffTime
       return c.availableTo >= cutoffDay
@@ -351,17 +464,33 @@ export interface ApplyContext {
   newId: () => string
 }
 
-/** Apply one operation and return the new board. Throws an Error whose message is shown to the person. */
-export function applyCapacityOp(current: CapacityBoard, op: CapacityOp, ctx: ApplyContext): { board: CapacityBoard; card: CapacityCard } {
+/**
+ * Apply one operation and return the new board. Throws an Error whose message is shown to the person. A card operation also returns
+ * the card it changed; changing the list of states we do not travel to changes no card, so its `card` is null.
+ */
+export function applyCapacityOp(current: CapacityBoard, op: CapacitySetNoGoOp, ctx: ApplyContext): { board: CapacityBoard; card: null }
+export function applyCapacityOp(current: CapacityBoard, op: CapacityCardOp, ctx: ApplyContext): { board: CapacityBoard; card: CapacityCard }
+export function applyCapacityOp(current: CapacityBoard, op: CapacityOp, ctx: ApplyContext): { board: CapacityBoard; card: CapacityCard | null }
+export function applyCapacityOp(current: CapacityBoard, op: CapacityOp, ctx: ApplyContext): { board: CapacityBoard; card: CapacityCard | null } {
   const board = pruneBoard(current, ctx.today, ctx.nowIso)
   const stamp = { updatedAt: ctx.nowIso, updatedBy: ctx.user }
+
+  if (op.op === 'setNoGo') {
+    const states = parseNoGoStates(op.states)
+    const { noGoStates: _old, ...rest } = board
+    void _old
+    return { board: { ...rest, ...(states.length ? { noGoStates: states } : {}) }, card: null }
+  }
 
   if (op.op === 'save') {
     const fields = parseCapacityFields(op.fields)
     if (!op.id) {
       if (board.cards.filter(isLive).length >= CAPACITY_MAX_CARDS) throw new Error('The capacity board is full; mark some cards covered or delete old ones')
-      const card: CapacityCard = { id: ctx.newId(), status: 'OPEN', ...fields, createdAt: ctx.nowIso, createdBy: ctx.user, ...stamp }
-      return { board: { cards: [...board.cards, card] }, card }
+      const card: CapacityCard = {
+        id: ctx.newId(), status: 'OPEN', ...fields, createdAt: ctx.nowIso, createdBy: ctx.user, ...stamp,
+        history: [{ action: 'created', by: ctx.user, at: ctx.nowIso }],
+      }
+      return { board: { ...board, cards: [...board.cards, card] }, card }
     }
     const existing = board.cards.find((c) => c.id === op.id && isLive(c))
     if (!existing) throw new Error('That card is gone: it was deleted or has aged off the board')
@@ -369,9 +498,10 @@ export function applyCapacityOp(current: CapacityBoard, op: CapacityOp, ctx: App
     const card: CapacityCard = {
       id: existing.id, status: existing.status,
       ...(existing.coveredAt ? { coveredAt: existing.coveredAt } : {}), ...(existing.coveredBy ? { coveredBy: existing.coveredBy } : {}),
+      ...(existing.history ? { history: existing.history } : {}),
       ...fields, createdAt: existing.createdAt, createdBy: existing.createdBy, ...stamp,
     }
-    return { board: { cards: board.cards.map((c) => (c.id === card.id ? card : c)) }, card }
+    return { board: { ...board, cards: board.cards.map((c) => (c.id === card.id ? card : c)) }, card }
   }
 
   const existing = board.cards.find((c) => c.id === op.id)
@@ -386,14 +516,18 @@ export function applyCapacityOp(current: CapacityBoard, op: CapacityOp, ctx: App
     }
     case 'cover': {
       if (existing.deletedAt) throw new Error('That card was deleted')
-      card = { ...existing, status: 'COVERED', coveredAt: ctx.nowIso, coveredBy: ctx.user, ...stamp }
+      // Who covered it is the signed-in caller, never anything the page sent. Covering a card that is already covered changes nothing.
+      if (existing.status === 'COVERED') { card = existing; break }
+      card = { ...existing, status: 'COVERED', coveredAt: ctx.nowIso, coveredBy: ctx.user, history: appendCapacityEvent(existing.history, { action: 'covered', by: ctx.user, at: ctx.nowIso }), ...stamp }
       break
     }
     case 'reopen': {
       if (existing.deletedAt) throw new Error('That card was deleted')
+      if (existing.status === 'OPEN') { card = existing; break }
+      // The "covered by" line goes away; the history keeps who covered it and who reopened it.
       const { coveredAt: _a, coveredBy: _b, ...rest } = existing
       void _a; void _b
-      card = { ...rest, status: 'OPEN', ...stamp }
+      card = { ...rest, status: 'OPEN', history: appendCapacityEvent(existing.history, { action: 'reopened', by: ctx.user, at: ctx.nowIso }), ...stamp }
       break
     }
     case 'delete': {
@@ -407,7 +541,7 @@ export function applyCapacityOp(current: CapacityBoard, op: CapacityOp, ctx: App
       break
     }
   }
-  return { board: { cards: board.cards.map((c) => (c.id === card.id ? card : c)) }, card }
+  return { board: { ...board, cards: board.cards.map((c) => (c.id === card.id ? card : c)) }, card }
 }
 
 /** The text a card's phone and tooltip read: "Chicago, IL → anywhere · Dry Van · 53 ft". */

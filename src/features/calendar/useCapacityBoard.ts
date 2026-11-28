@@ -55,7 +55,7 @@ export function useCapacityBoard(enabled: boolean, user: string) {
   }, [enabled, refresh])
 
   /** Run one operation. `optimistic` shows the change before the server answers; a refusal puts the board back and says why. */
-  const run = useCallback(async (op: CapacityOp, optimistic: boolean): Promise<CapacityCard | null> => {
+  const exec = useCallback(async (op: CapacityOp, optimistic: boolean): Promise<{ card: CapacityCard | null } | null> => {
     const previous = boardRef.current
     inFlight.current += 1
     if (optimistic) {
@@ -68,7 +68,7 @@ export function useCapacityBoard(enabled: boolean, user: string) {
       const result = await api.capacityBoardOp(op)
       setBoard(result.board)
       setError(null)
-      return result.card
+      return { card: result.card }
     } catch (err) {
       setBoard(previous)
       toast.error(err instanceof Error ? err.message : 'The capacity board could not be saved')
@@ -77,7 +77,11 @@ export function useCapacityBoard(enabled: boolean, user: string) {
       inFlight.current -= 1
     }
   }, [user])
+  /** A card operation: the changed card, or null when the server refused. */
+  const run = useCallback(async (op: CapacityOp, optimistic: boolean): Promise<CapacityCard | null> => (await exec(op, optimistic))?.card ?? null, [exec])
 
+  /** Replace the list of states we do not travel to; true once the server has it. */
+  const setNoGoStates = useCallback(async (states: string[]): Promise<boolean> => (await exec({ op: 'setNoGo', states }, true)) !== null, [exec])
   const save = useCallback((fields: Record<string, unknown>, id?: string) => run({ op: 'save', id, fields }, false), [run])
   const move = useCallback((id: string, fromDay: string, toDay: string) => run({ op: 'move', id, fromDay, toDay }, true), [run])
   const cover = useCallback((id: string) => run({ op: 'cover', id }, true), [run])
@@ -91,5 +95,5 @@ export function useCapacityBoard(enabled: boolean, user: string) {
     return done
   }, [run, restore])
 
-  return { board, loading, error, refresh, save, move, cover, reopen, remove, restore }
+  return { board, loading, error, refresh, save, move, cover, reopen, remove, restore, setNoGoStates }
 }

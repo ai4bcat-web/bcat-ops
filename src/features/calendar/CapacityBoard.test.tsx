@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react'
-import type { CapacityBoard as BoardData, CapacityOp } from '@/lib/capacityBoard'
+import type { CapacityOp } from '@/lib/capacityBoard'
 
 // The "server": the same pure rules the Lambda applies, over a board that outlives a remount.
-const server = vi.hoisted(() => ({ board: { cards: [] } as { cards: unknown[] }, n: 0 }))
+const server = vi.hoisted(() => ({ board: { cards: [] } as { cards: unknown[]; noGoStates?: string[] }, n: 0 }))
 vi.mock('@/lib/apiClient', async () => {
   const lib = await import('@/lib/capacityBoard')
   return {
@@ -119,7 +119,7 @@ describe('CapacityBoard', () => {
     fireEvent.change(screen.getByLabelText(/Origin/), { target: { value: 'Joliet, IL' } })
     fireEvent.change(screen.getByLabelText(/Equipment/), { target: { value: 'Reefer' } })
     fireEvent.change(screen.getByLabelText(/Length/), { target: { value: '53' } })
-    expect(screen.queryByLabelText(/Destination radius/)).toBeNull()
+    expect((screen.getByLabelText(/Destination radius/) as HTMLInputElement).disabled).toBe(true)
     fireEvent.change(screen.getByLabelText(/Destination \(/), { target: { value: 'Atlanta, GA' } })
     fireEvent.change(screen.getByLabelText(/Pickup radius/), { target: { value: '50' } })
     fireEvent.change(screen.getByLabelText(/Destination radius/), { target: { value: '100' } })
@@ -248,7 +248,117 @@ describe('CapacityBoard', () => {
     fireEvent.click(within(cards.find((c) => c.dataset.cardId === 'old2') as HTMLElement).getByRole('button', { name: 'Edit card' }))
     expect((screen.getByLabelText(/Equipment/) as HTMLSelectElement).value).toBe('Straight Truck')
   })
-})
+  it('shows the destination radius from the start, greyed with a hint until there is a destination, and clears it with "anywhere"', async () => {
+    render(board())
+    await screen.findByText('Fri Nov 27')
+    fireEvent.click(screen.getByRole('button', { name: 'New card' }))
+    const radius = screen.getByLabelText(/Destination radius/) as HTMLInputElement
+    expect(radius.disabled).toBe(true)
+    expect(screen.getByText('Enter a destination to use a radius')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText(/Destination \(/), { target: { value: 'Atlanta, GA' } })
+    expect(radius.disabled).toBe(false)
+    expect(screen.queryByText('Enter a destination to use a radius')).toBeNull()
+    fireEvent.change(radius, { target: { value: '100' } })
+    expect(radius.value).toBe('100')
+    fireEvent.change(screen.getByLabelText(/Destination \(/), { target: { value: '' } })
+    expect(radius.disabled).toBe(true)
+    expect(radius.value).toBe('')
+  })
 
-// Keep the shared type import honest for the test's seed helper.
-export type { BoardData }
+  it('opens an existing card with both radii in the form', async () => {
+    seed({ id: 'r1', origin: 'Joliet, IL', destination: 'Atlanta, GA', originRadiusMi: 50, destinationRadiusMi: 100 })
+    render(board())
+    await loaded()
+    const card = await within(column('2026-11-27')).findByTestId('capacity-card')
+    expect(card.textContent).toContain('Joliet, IL · 50 mi → Atlanta, GA · 100 mi')
+    fireEvent.click(within(card).getByRole('button', { name: 'Edit card' }))
+    expect((screen.getByLabelText(/Pickup radius/) as HTMLInputElement).value).toBe('50')
+    expect((screen.getByLabelText(/Destination radius/) as HTMLInputElement).value).toBe('100')
+  })
+
+  it('shows "No states excluded" until a list is set, then the list on the strip and on every card', async () => {
+    seed({ id: 'a' }, { id: 'b', origin: 'Dallas, TX' })
+    render(board())
+    await loaded()
+    const strip = screen.getByTestId('capacity-nogo')
+    expect(strip.textContent).toContain('No states excluded')
+    expect(screen.queryAllByTestId('card-nogo')).toHaveLength(0)
+    fireEvent.click(within(strip).getByRole('button', { name: /Edit states/ }))
+    fireEvent.change(screen.getByLabelText('Search states'), { target: { value: 'cali' } })
+    fireEvent.click(screen.getByRole('button', { name: /CA\s*California/ }))
+    fireEvent.change(screen.getByLabelText('Search states'), { target: { value: 'new york' } })
+    fireEvent.click(screen.getByRole('button', { name: /NY\s*New York/ }))
+    expect(screen.getByText('2 selected')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.getByTestId('capacity-nogo').textContent).toContain('CA'))
+    expect(server.board.noGoStates).toEqual(['CA', 'NY'])
+    const lines = await screen.findAllByTestId('card-nogo')
+    expect(lines).toHaveLength(2) // the one list applies to every card
+    expect(lines[0].textContent).toContain('No-go: CA, NY')
+  })
+
+  it('selects shown states and clears them all in the picker, and a saved empty list goes back to "No states excluded"', async () => {
+    server.board = { cards: [], noGoStates: ['CA', 'WA'] }
+    render(board())
+    await loaded()
+    expect(screen.getByTestId('capacity-nogo').textContent).toContain('WA')
+    fireEvent.click(screen.getByRole('button', { name: /Edit states/ }))
+    expect(screen.getByText('2 selected')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Clear all' }))
+    expect(screen.getByText('No states selected')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('Search states'), { target: { value: 'north' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Select shown' }))
+    expect(screen.getByText('2 selected')).toBeTruthy() // North Carolina, North Dakota
+    fireEvent.click(screen.getByRole('button', { name: 'Clear all' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.getByTestId('capacity-nogo').textContent).toContain('No states excluded'))
+    expect(server.board.noGoStates).toBeUndefined()
+  })
+
+  it('warns, without blocking, when a card is for an excluded state', async () => {
+    server.board = { cards: [], noGoStates: ['CA'] }
+    render(board())
+    await loaded()
+    fireEvent.click(screen.getByRole('button', { name: 'New card' }))
+    expect(screen.queryByText(/We do not travel to CA/)).toBeNull()
+    fireEvent.change(screen.getByLabelText(/Origin/), { target: { value: 'Los Angeles, CA' } })
+    expect(screen.getAllByText('We do not travel to CA')).toHaveLength(1)
+    fireEvent.change(screen.getByLabelText(/Destination \(/), { target: { value: 'Fresno, CA 93650' } })
+    expect(screen.getAllByText('We do not travel to CA')).toHaveLength(2)
+    fireEvent.change(screen.getByLabelText(/Destination \(/), { target: { value: 'Reno, NV' } })
+    expect(screen.getAllByText('We do not travel to CA')).toHaveLength(1)
+    fireEvent.change(screen.getByLabelText(/Length/), { target: { value: '53' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add card' }))
+    await within(column('2026-11-27')).findByText('Los Angeles, CA → Reno, NV')
+  })
+
+  it('names who covered a card and when, keeps a history, and drops the line when it is reopened', async () => {
+    seed({ id: 'h1', history: [{ action: 'created', by: 'dennis@bcatcorp.com', at: '2026-11-27T15:00:00.000Z' }] })
+    render(board())
+    await loaded()
+    const card = await within(column('2026-11-27')).findByTestId('capacity-card')
+    expect(within(card).queryByTestId('covered-by')).toBeNull()
+    fireEvent.click(within(card).getByRole('button', { name: 'Mark as covered' }))
+    const line = await within(column('2026-11-27')).findByTestId('covered-by')
+    expect(line.textContent).toMatch(/^Covered by Dennis · \w{3} \w{3} \d+, \d+:\d{2} (AM|PM)$/)
+    expect(within(column('2026-11-27')).getByText('Covered').getAttribute('title')).toContain('Covered by Dennis')
+    fireEvent.click(within(column('2026-11-27')).getByRole('button', { name: 'History' }))
+    const items = within(screen.getByTestId('card-history')).getAllByRole('listitem')
+    expect(items).toHaveLength(2)
+    expect(items[0].textContent).toContain('Marked covered by Dennis') // newest first
+    expect(items[1].textContent).toContain('Created by Dennis')
+    fireEvent.click(within(column('2026-11-27')).getByRole('button', { name: 'Reopen' }))
+    await waitFor(() => expect(within(column('2026-11-27')).queryByTestId('covered-by')).toBeNull())
+    expect(within(column('2026-11-27')).getAllByRole('listitem').map((i) => i.textContent).join(' ')).toContain('Reopened by Dennis')
+  })
+
+  it('shows an older covered card, which has no history, as Covered with no name and no History button', async () => {
+    seed({ id: 'old', status: 'COVERED' })
+    render(board())
+    await loaded()
+    const card = await within(column('2026-11-27')).findByTestId('capacity-card')
+    expect(within(card).queryByTestId('covered-by')).toBeNull()
+    expect(within(card).queryByRole('button', { name: 'History' })).toBeNull()
+    expect(within(card).getByText('Covered')).toBeTruthy()
+  })
+})

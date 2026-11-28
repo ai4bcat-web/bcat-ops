@@ -4203,4 +4203,44 @@ describe('CAPACITY_BOARD', () => {
     settingsWith(undefined)
     await expect(handler(rawEvent('CAPACITY_BOARD', { op: 'explode' }, dispatcher()))).rejects.toThrow('Unknown capacity operation')
   })
+
+  it('stores the states we do not travel to on the board itself, sorted, and audits who changed them', async () => {
+    const db = settingsWith({ cards: [] })
+    const out = await handler(rawEvent('CAPACITY_BOARD', { op: 'setNoGo', states: ['wa', 'CA', 'ca'] }, dispatcher())) as { cards: unknown[]; noGoStates: string[]; card: unknown }
+    expect(out.noGoStates).toEqual(['CA', 'WA'])
+    expect(out.card).toBeNull()
+    expect(db.updates).toHaveLength(1)
+    expect(db.updates[0].input.ExpressionAttributeNames).toEqual({ '#board': 'capacityBoard' })
+    expect((db.board() as unknown as { noGoStates: string[] }).noGoStates).toEqual(['CA', 'WA'])
+    const audit = unmarshall(db.audits[0].input.Item!)
+    expect(audit).toMatchObject({ entityType: 'CapacityBoard', action: 'CAPACITY_SETNOGO', user: 'dennis@bcatcorp.com' })
+    expect(JSON.parse(audit.changes as string)).toMatchObject({ actor: 'dennis@bcatcorp.com', before: [], after: ['CA', 'WA'] })
+  })
+
+  it('keeps the list when a card changes, and refuses a list with something that is not a state', async () => {
+    const db = settingsWith({ cards: [], noGoStates: ['NY'] })
+    await handler(rawEvent('CAPACITY_BOARD', { op: 'save', fields: CARD }, dispatcher()))
+    expect((db.board() as unknown as { noGoStates: string[] }).noGoStates).toEqual(['NY'])
+    await expect(handler(rawEvent('CAPACITY_BOARD', { op: 'setNoGo', states: ['ZZ'] }, dispatcher()))).rejects.toThrow('not a state')
+    expect(db.updates).toHaveLength(1)
+  })
+
+  it('is closed to the fleet-profiles-only user for the list too', async () => {
+    const db = settingsWith({ cards: [] })
+    await expect(handler(rawEvent('CAPACITY_BOARD', { op: 'setNoGo', states: ['CA'] }, identity({ email: 'jason@bcatcorp.com', groups: ['page-calendar'] }))))
+      .rejects.toThrow('limited to Assets and Drivers')
+    expect(db.updates).toHaveLength(0)
+  })
+
+  it('stamps who covered a card from the signed-in caller, ignoring what the page sent, and audits the actor and card', async () => {
+    const db = settingsWith(undefined)
+    const saved = await handler(rawEvent('CAPACITY_BOARD', { op: 'save', fields: CARD }, dispatcher())) as { card: { id: string } }
+    await handler(rawEvent('CAPACITY_BOARD', { op: 'cover', id: saved.card.id, coveredBy: 'someone.else@bcatcorp.com', history: [] }, identity({ email: 'ruben@bcatcorp.com', groups: ['page-dispatch'] })))
+    const card = db.board().cards[0] as { coveredBy: string; history: { action: string; by: string }[] }
+    expect(card.coveredBy).toBe('ruben@bcatcorp.com')
+    expect(card.history.map((e) => `${e.action}:${e.by}`)).toEqual(['created:dennis@bcatcorp.com', 'covered:ruben@bcatcorp.com'])
+    const audit = db.audits.map((a) => unmarshall(a.input.Item!)).find((a) => a.action === 'CAPACITY_COVER')!
+    expect(audit).toMatchObject({ entityType: 'CapacityCard', entityId: saved.card.id, user: 'ruben@bcatcorp.com' })
+    expect(JSON.parse(audit.changes as string)).toMatchObject({ actor: 'ruben@bcatcorp.com', cardId: saved.card.id, op: 'cover', status: 'COVERED' })
+  })
 })

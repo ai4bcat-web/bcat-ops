@@ -2,7 +2,7 @@ import { useId, useState } from 'react'
 import { TmsDialog } from '@/features/tms/kit/TmsDialog'
 import { TmsButton } from '@/features/tms/kit/TmsButton'
 import { CityInput } from '@/features/tms/kit/CityInput'
-import { parseCapacityFields, canonicalEquipment, CAPACITY_EQUIPMENT, CAPACITY_MAX_SPAN_DAYS, type CapacityCard } from '@/lib/capacityBoard'
+import { parseCapacityFields, canonicalEquipment, noGoStateOf, CAPACITY_EQUIPMENT, CAPACITY_MAX_SPAN_DAYS, type CapacityCard } from '@/lib/capacityBoard'
 import type { Driver } from '@/types'
 
 /** The card's fields as the form holds them: everything text, so a half-typed number never fights the person. */
@@ -58,12 +58,14 @@ const labelStyle: React.CSSProperties = {
  * New or edit form for a Capacity card, laid out like DAT's Post Truck form: when, where from, where to (empty = anywhere),
  * what equipment, how long, and the rate the office wants. Origin, equipment and length are required.
  */
-export function CapacityCardDialog({ card, day, drivers, onSave, onClose }: {
+export function CapacityCardDialog({ card, day, drivers, noGoStates = [], onSave, onClose }: {
   /** The card being edited, or null for a new one. */
   card: CapacityCard | null
   /** The day a new card starts on (the column's "+"). */
   day: string
   drivers: Driver[]
+  /** The board's states we do not travel to; an origin or destination in one gets a warning (saving is still allowed). */
+  noGoStates?: readonly string[]
   onSave: (fields: Record<string, unknown>, id?: string) => Promise<CapacityCard | null>
   onClose: () => void
 }) {
@@ -72,8 +74,13 @@ export function CapacityCardDialog({ card, day, drivers, onSave, onClose }: {
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const set = (key: keyof FormValues) => (value: string) => setV((cur) => ({ ...cur, [key]: value }))
+  // "Anywhere" has nothing to measure a radius from, so emptying the destination clears its radius too.
+  const setDestination = (value: string) => setV((cur) => ({ ...cur, destination: value, ...(value.trim() ? {} : { destinationRadiusMi: '' }) }))
   const field = (key: keyof FormValues) => ({ value: v[key], onChange: (e: { target: { value: string } }) => set(key)(e.target.value) })
   const id = (name: string) => `${uid}-${name}`
+  const hasDestination = v.destination.trim() !== ''
+  const originNoGo = noGoStateOf(v.origin, noGoStates)
+  const destNoGo = noGoStateOf(v.destination, noGoStates)
   const activeDrivers = drivers.filter((d) => d.active).sort((a, b) => a.name.localeCompare(b.name))
 
   // An older card may hold a type that is not in the list (free text); it stays selectable so editing never changes it silently.
@@ -129,21 +136,25 @@ export function CapacityCardDialog({ card, day, drivers, onSave, onClose }: {
         <div>
           <label style={labelStyle} htmlFor={id('origin')}>Origin (city, ST or ZIP) *</label>
           <CityInput id={id('origin')} value={v.origin} onChange={set('origin')} onPick={(o) => set('origin')(`${o.city}, ${o.state}`)} placeholder="Chicago, IL" />
+          {originNoGo && <p className="cap-warn" role="status">We do not travel to {originNoGo}</p>}
         </div>
         <div>
           <label style={labelStyle} htmlFor={id('dest')}>Destination (city, ST or zone)</label>
-          <CityInput id={id('dest')} value={v.destination} onChange={set('destination')} onPick={(o) => set('destination')(`${o.city}, ${o.state}`)} placeholder="Leave empty to go anywhere" />
+          <CityInput id={id('dest')} value={v.destination} onChange={setDestination} onPick={(o) => setDestination(`${o.city}, ${o.state}`)} placeholder="Leave empty to go anywhere" />
+          {destNoGo && <p className="cap-warn" role="status">We do not travel to {destNoGo}</p>}
         </div>
         <div>
           <label style={labelStyle} htmlFor={id('oradius')}>Pickup radius (miles)</label>
           <input id={id('oradius')} inputMode="numeric" style={inputStyle} placeholder="50" {...field('originRadiusMi')} />
         </div>
-        {v.destination.trim() && (
-          <div>
-            <label style={labelStyle} htmlFor={id('dradius')}>Destination radius (miles)</label>
-            <input id={id('dradius')} inputMode="numeric" style={inputStyle} placeholder="50" {...field('destinationRadiusMi')} />
-          </div>
-        )}
+        <div>
+          <label style={labelStyle} htmlFor={id('dradius')}>Destination radius (miles, optional)</label>
+          <input
+            id={id('dradius')} inputMode="numeric" disabled={!hasDestination} aria-describedby={hasDestination ? undefined : id('dradius-hint')}
+            style={{ ...inputStyle, ...(hasDestination ? {} : { opacity: 0.55, cursor: 'not-allowed' }) }} placeholder="50" {...field('destinationRadiusMi')}
+          />
+          {!hasDestination && <p id={id('dradius-hint')} style={{ margin: '4px 0 0', fontSize: 11.5, color: 'var(--tms-muted)' }}>Enter a destination to use a radius</p>}
+        </div>
         <div>
           <label style={labelStyle} htmlFor={id('puf')}>Pickup time from</label>
           <input id={id('puf')} type="time" style={inputStyle} {...field('pickupTimeFrom')} />

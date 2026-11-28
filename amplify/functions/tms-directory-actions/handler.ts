@@ -2451,10 +2451,10 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
  * compare-and-swap, so two people editing at once never lose a card: a write that finds the board changed re-reads and applies its
  * operation again, three times, then says so. Returns the whole board, which the page shows. No new table: the board is one field.
  */
-async function capacityBoardAction(input: Record<string, unknown>, caller: Caller): Promise<{ cards: unknown[]; card: unknown }> {
+async function capacityBoardAction(input: Record<string, unknown>, caller: Caller): Promise<{ cards: unknown[]; noGoStates: string[]; card: unknown }> {
   if (!SETTINGS_TABLE_NAME) throw new Error('Settings table name is not configured')
   const opName = assertString(input.op, 'op')
-  if (!['save', 'move', 'cover', 'reopen', 'delete', 'restore'].includes(opName)) throw new Error(`Unknown capacity operation: ${opName}`)
+  if (!['save', 'move', 'cover', 'reopen', 'delete', 'restore', 'setNoGo'].includes(opName)) throw new Error(`Unknown capacity operation: ${opName}`)
   const op = { ...input, op: opName } as unknown as CapacityOp
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const result = await dynamo.send(new GetItemCommand({ TableName: SETTINGS_TABLE_NAME, Key: marshall({ id: 'default' }), ConsistentRead: true }))
@@ -2489,15 +2489,28 @@ async function capacityBoardAction(input: Record<string, unknown>, caller: Calle
       }
       throw err
     }
+    if (!card) {
+      // The list of states we do not travel to belongs to the board, not to a card.
+      await writeAudit('CapacityBoard', 'noGoStates', 'CAPACITY_SETNOGO', caller, {
+        op: opName,
+        actor: caller.email,
+        before: parseCapacityBoard(before).noGoStates ?? [],
+        after: board.noGoStates ?? [],
+      })
+      return { cards: board.cards, noGoStates: board.noGoStates ?? [], card: null }
+    }
+    // The actor is the signed-in caller, so the cross-system audit trail names who covered, reopened, moved or deleted which card.
     await writeAudit('CapacityCard', card.id, `CAPACITY_${opName.toUpperCase()}`, caller, {
       op: opName,
+      cardId: card.id,
+      actor: caller.email,
       origin: card.origin,
       destination: card.destination,
       availableFrom: card.availableFrom,
       availableTo: card.availableTo,
       status: card.status,
     })
-    return { cards: board.cards, card }
+    return { cards: board.cards, noGoStates: board.noGoStates ?? [], card }
   }
   throw new Error('The capacity board changed while you were saving. Try again.')
 }
