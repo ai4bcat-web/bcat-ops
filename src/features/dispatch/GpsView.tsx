@@ -2,7 +2,9 @@
  * Dispatch > GPS (Ryne 2026-11-28; replaces the Empty trucks view): every driver on the map, blue
  * when they are on a load and orange when they are empty. Clicking a pin selects the driver and
  * shows their card; the card can open the driver's conversation in the rail beside the map.
- * Drivers with no fix are listed under "No GPS" with the reason, so nobody just goes missing.
+ * Drivers with no fix are listed under "No GPS" with the reason, so nobody just goes missing. A
+ * truck whose last fix is more than 24 hours old gets no pin: the driver is listed under "Not
+ * reporting" with where they were last seen, and the old spot only shows on request.
  * Locations come from the page (one poll for the rail and the map); the classification is gps.ts.
  */
 import { useEffect, useMemo, useState } from 'react'
@@ -13,7 +15,7 @@ import { useEnsureLoadRange, useLoads } from '@/hooks/useLoads'
 import { useAppStore } from '@/store/useAppStore'
 import type { TruckLocation } from '@/lib/apiClient'
 import { chicagoDateStr } from '@/lib/date'
-import { ageText, computeGps, filterGps, GPS_COLOR, gpsCountsLine, NO_GPS_TEXT, type GpsDriver, type GpsFilter } from './gps'
+import { ageText, computeGps, filterGps, GPS_COLOR, gpsCountsLine, gpsPinColor, lastSeenText, NO_GPS_TEXT, type GpsDriver, type GpsFilter } from './gps'
 import { GpsMap } from './GpsMap'
 
 const DAY = 86_400_000
@@ -21,6 +23,7 @@ const FILTERS: { key: GpsFilter; label: string }[] = [
   { key: 'ALL', label: 'All' },
   { key: 'LOAD', label: 'On a load' },
   { key: 'EMPTY', label: 'Empty' },
+  { key: 'NOT_REPORTING', label: 'Not reporting' },
 ]
 
 export function GpsView({ locations, selectedDriverId, hasConversation, onOpenConversation }: {
@@ -40,10 +43,16 @@ export function GpsView({ locations, selectedDriverId, hasConversation, onOpenCo
 
   const [filter, setFilter] = useState<GpsFilter>('ALL')
   const [noGpsOpen, setNoGpsOpen] = useState(false)
+  const [notReportingOpen, setNotReportingOpen] = useState(true)
+  // The old spot of a truck that stopped reporting: off unless someone asks to see it.
+  const [showLast, setShowLast] = useState(false)
   const [picked, setPicked] = useState<string | null>(selectedDriverId)
 
   const result = useMemo(() => computeGps({ drivers, loads, equipment, locations, now }), [drivers, loads, equipment, locations, now])
-  const shown = useMemo(() => filterGps(result.located, filter), [result.located, filter])
+  const shown = useMemo(() => {
+    const pins = filterGps(result.located, filter)
+    return showLast && (filter === 'ALL' || filter === 'NOT_REPORTING') ? [...pins, ...result.notReporting] : pins
+  }, [result.located, result.notReporting, filter, showLast])
 
   // The latest choice wins: a pin clicked here, or the conversation opened in the rail.
   const [railDriver, setRailDriver] = useState(selectedDriverId)
@@ -52,7 +61,7 @@ export function GpsView({ locations, selectedDriverId, hasConversation, onOpenCo
     if (selectedDriverId) setPicked(selectedDriverId)
   }
   const activeId = picked
-  const active: GpsDriver | null = activeId ? [...result.located, ...result.noGps].find((r) => r.driverId === activeId) ?? null : null
+  const active: GpsDriver | null = activeId ? [...result.located, ...result.notReporting, ...result.noGps].find((r) => r.driverId === activeId) ?? null : null
   const choose = (driverId: string) => setPicked(driverId)
 
   const dot = (color: string, text: string) => (
@@ -77,6 +86,7 @@ export function GpsView({ locations, selectedDriverId, hasConversation, onOpenCo
         <div style={{ display: 'inline-flex', gap: 12, fontSize: 11.5, color: 'var(--tms-muted)', marginLeft: 'auto', flexWrap: 'wrap' }}>
           {dot(GPS_COLOR.LOAD, 'On a load')}
           {dot(GPS_COLOR.EMPTY, 'Empty')}
+          {dot(GPS_COLOR.NOT_REPORTING, 'Not reporting')}
           <span>Drag to pan · Ctrl or Cmd + scroll to zoom</span>
         </div>
       </div>
@@ -85,17 +95,19 @@ export function GpsView({ locations, selectedDriverId, hasConversation, onOpenCo
         <GpsMap drivers={shown} selectedId={activeId} onSelect={choose} />
 
         {active ? (
-          <div data-testid="gps-card" style={{ position: 'absolute', left: 12, bottom: 12, width: 'min(320px, calc(100% - 24px))', background: 'var(--tms-card)', border: `1px solid ${GPS_COLOR[active.status]}`, borderRadius: 10, padding: '10px 12px', boxShadow: 'var(--tms-shadow-pop)', display: 'grid', gap: 6 }}>
+          <div data-testid="gps-card" style={{ position: 'absolute', left: 12, bottom: 12, width: 'min(320px, calc(100% - 24px))', background: 'var(--tms-card)', border: `1px solid ${gpsPinColor(active)}`, borderRadius: 10, padding: '10px 12px', boxShadow: 'var(--tms-shadow-pop)', display: 'grid', gap: 6 }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span aria-hidden="true" style={{ width: 10, height: 10, borderRadius: '50%', background: GPS_COLOR[active.status], flexShrink: 0 }} />
+              <span aria-hidden="true" style={{ width: 10, height: 10, borderRadius: '50%', background: gpsPinColor(active), flexShrink: 0 }} />
               <strong style={{ fontSize: 14, color: 'var(--tms-text)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{active.name}</strong>
-              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: GPS_COLOR[active.status] }}>{active.status === 'LOAD' ? 'On a load' : 'Empty'}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: gpsPinColor(active) }}>{active.notReporting ? 'Not reporting' : active.status === 'LOAD' ? 'On a load' : 'Empty'}</span>
               <button type="button" aria-label="Close" onClick={() => setPicked(null)} style={{ all: 'unset', cursor: 'pointer', color: 'var(--tms-muted)', display: 'inline-flex' }}><X className="size-4" /></button>
             </div>
             <div style={{ fontSize: 12.5, color: 'var(--tms-text-2)', display: 'grid', gap: 2 }}>
               {active.truck ? <span>Truck {active.truck}</span> : null}
-              {active.place ? <span>📍 {active.place}{active.moving === true ? ' · moving' : active.moving === false ? ' · stopped' : ''}</span> : <span>{active.noGpsReason ? NO_GPS_TEXT[active.noGpsReason] : 'No location'}</span>}
-              {active.locatedAt ? <span style={{ color: active.stale ? 'var(--tms-badge-red)' : undefined }}>Last update {ageText(active.fixAgeMin)}{active.stale ? ' (old fix)' : ''}</span> : null}
+              {active.notReporting
+                ? <span style={{ color: 'var(--tms-badge-red)' }}>Not reporting: {lastSeenText(active)}</span>
+                : active.place ? <span>📍 {active.place}{active.moving === true ? ' · moving' : active.moving === false ? ' · stopped' : ''}</span> : <span>{active.noGpsReason ? NO_GPS_TEXT[active.noGpsReason] : 'No location'}</span>}
+              {active.locatedAt && !active.notReporting ? <span style={{ color: active.stale ? 'var(--tms-badge-red)' : undefined }}>Last update {ageText(active.fixAgeMin)}{active.stale ? ' (old fix)' : ''}</span> : null}
               {active.load ? <span>PRO {active.load.pro} · {active.load.lane}{active.load.basis === 'schedule' ? ' (per schedule)' : ''}</span> : null}
             </div>
             {hasConversation(active.driverId) ? (
@@ -106,8 +118,45 @@ export function GpsView({ locations, selectedDriverId, hasConversation, onOpenCo
           </div>
         ) : null}
 
+        <div style={{ position: 'absolute', right: 12, bottom: 12, width: 'min(300px, calc(100% - 24px))', display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 'calc(100% - 24px)', pointerEvents: 'none' }}>
+        {result.notReporting.length ? (
+          <div data-testid="gps-not-reporting" style={{ pointerEvents: 'auto', background: 'var(--tms-surface-hover)', border: '1px solid var(--tms-border)', borderRadius: 10, boxShadow: 'var(--tms-shadow-pop)', overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <button type="button" onClick={() => setNotReportingOpen((v) => !v)} aria-expanded={notReportingOpen}
+              style={{ all: 'unset', cursor: 'pointer', display: 'flex', width: '100%', boxSizing: 'border-box', padding: '8px 12px', fontSize: 12.5, fontWeight: 700, color: 'var(--tms-text)', justifyContent: 'space-between' }}>
+              <span>Not reporting · {result.notReporting.length}</span><span aria-hidden="true">{notReportingOpen ? '▾' : '▸'}</span>
+            </button>
+            {notReportingOpen ? (
+              <div style={{ padding: '0 6px 6px', overflowY: 'auto', minHeight: 0 }}>
+                <p style={{ margin: '0 6px 6px', fontSize: 11.5, color: 'var(--tms-muted)' }}>The truck has sent no location for over 24 hours, so there is no pin.</p>
+                <label style={{ display: 'flex', gap: 6, alignItems: 'center', margin: '0 6px 6px', fontSize: 12, color: 'var(--tms-text-2)', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={showLast} onChange={(e) => setShowLast(e.target.checked)} />
+                  Show last known location
+                </label>
+                <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                  {result.notReporting.map((r) => (
+                    <li key={r.driverId} style={{ padding: '5px 6px', borderRadius: 6, display: 'grid', gap: 2 }}>
+                      <button type="button" onClick={() => choose(r.driverId)}
+                        style={{ all: 'unset', cursor: 'pointer', display: 'block', fontSize: 12.5, color: 'var(--tms-text)' }}>
+                        <span style={{ fontWeight: 600 }}>{r.name}</span>
+                        <span style={{ color: 'var(--tms-muted)' }}>{r.truck ? ` · truck ${r.truck}` : ''}</span>
+                      </button>
+                      <span style={{ fontSize: 12, color: 'var(--tms-text-2)' }}>{lastSeenText(r)}</span>
+                      {r.load ? <span style={{ fontSize: 12, color: 'var(--tms-text-2)' }}>On PRO {r.load.pro} · {r.load.lane}{r.load.basis === 'schedule' ? ' (per schedule)' : ''}</span> : null}
+                      {hasConversation(r.driverId) ? (
+                        <Button size="sm" variant="outline" className="h-7 gap-1.5 justify-self-start text-xs" onClick={() => onOpenConversation(r.driverId)}>
+                          <MessageSquare className="size-3" /> Open conversation
+                        </Button>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         {result.noGps.length ? (
-          <div data-testid="gps-no-gps" style={{ position: 'absolute', right: 12, bottom: 12, width: 'min(280px, calc(100% - 24px))', background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 10, boxShadow: 'var(--tms-shadow-pop)', overflow: 'hidden' }}>
+          <div data-testid="gps-no-gps" style={{ pointerEvents: 'auto', background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 10, boxShadow: 'var(--tms-shadow-pop)', overflow: 'hidden' }}>
             <button type="button" onClick={() => setNoGpsOpen((v) => !v)} aria-expanded={noGpsOpen}
               style={{ all: 'unset', cursor: 'pointer', display: 'flex', width: '100%', boxSizing: 'border-box', padding: '8px 12px', fontSize: 12.5, fontWeight: 700, color: 'var(--tms-text)', justifyContent: 'space-between' }}>
               <span>No GPS · {result.noGps.length}</span><span aria-hidden="true">{noGpsOpen ? '▾' : '▸'}</span>
@@ -127,6 +176,7 @@ export function GpsView({ locations, selectedDriverId, hasConversation, onOpenCo
             ) : null}
           </div>
         ) : null}
+        </div>
       </div>
     </div>
   )

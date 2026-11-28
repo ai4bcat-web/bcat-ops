@@ -10,7 +10,7 @@ import { feature } from 'topojson-client'
 import type { Topology } from 'topojson-specification'
 import type { FeatureCollection } from 'geojson'
 import { Plus, Minus, Maximize2 } from 'lucide-react'
-import { GPS_COLOR, type GpsDriver } from './gps'
+import { gpsPinColor, type GpsDriver } from './gps'
 
 const W = 640
 const H = 390
@@ -184,24 +184,26 @@ export function GpsMap({ drivers, selectedId, onSelect }: {
               const off = fan.get(d.driverId) as XY
               return (
                 <g key={`leader-${d.driverId}`} pointerEvents="none">
-                  <line x1={at[0]} y1={at[1]} x2={at[0] + px(off[0])} y2={at[1] + px(off[1])} stroke={GPS_COLOR[d.status]} strokeWidth={px(1)} opacity={0.6} />
-                  <circle cx={at[0]} cy={at[1]} r={px(2.2)} fill={GPS_COLOR[d.status]} />
+                  <line x1={at[0]} y1={at[1]} x2={at[0] + px(off[0])} y2={at[1] + px(off[1])} stroke={gpsPinColor(d)} strokeWidth={px(1)} opacity={0.6} />
+                  <circle cx={at[0]} cy={at[1]} r={px(2.2)} fill={gpsPinColor(d)} />
                 </g>
               )
             })}
             {ordered.map(({ d, at: trueAt }) => {
               const off = fan.get(d.driverId)
               const at: XY = off ? [trueAt[0] + px(off[0]), trueAt[1] + px(off[1])] : trueAt
-              const color = GPS_COLOR[d.status]
+              const color = gpsPinColor(d)
               const on = d.driverId === selectedId
-              const label = `${d.name}${d.truck ? ` · truck ${d.truck}` : ''} · ${d.status === 'LOAD' ? `on a load${d.load ? ` (PRO ${d.load.pro})` : ''}` : 'empty'}${d.place ? ` · ${d.place}` : ''}`
+              const label = d.notReporting
+                ? `${d.name}${d.truck ? ` · truck ${d.truck}` : ''} · not reporting, last known location${d.place ? ` · ${d.place}` : ''}`
+                : `${d.name}${d.truck ? ` · truck ${d.truck}` : ''} · ${d.status === 'LOAD' ? `on a load${d.load ? ` (PRO ${d.load.pro})` : ''}` : 'empty'}${d.place ? ` · ${d.place}` : ''}`
               return (
                 <g
                   key={d.driverId}
                   className="gps-pin"
                   data-pin
                   data-testid={`gps-pin-${d.driverId}`}
-                  data-status={d.status}
+                  data-status={d.notReporting ? 'NOT_REPORTING' : d.status}
                   transform={`translate(${at[0]} ${at[1]})`}
                   role="button"
                   tabIndex={0}
@@ -213,7 +215,8 @@ export function GpsMap({ drivers, selectedId, onSelect }: {
                   <title>{label}</title>
                   {on ? <circle r={px(16)} fill="none" stroke={color} strokeWidth={px(2.2)} /> : null}
                   <circle className="gps-focus" r={px(18)} fill="none" stroke="var(--tms-text)" strokeWidth={px(2)} strokeDasharray={`${px(3)} ${px(2)}`} />
-                  <circle r={px(10.5)} fill={color} stroke="var(--tms-card)" strokeWidth={px(1.8)} opacity={d.stale ? 0.5 : 1} />
+                  {d.notReporting ? <circle r={px(14)} fill="none" stroke={color} strokeWidth={px(1.2)} strokeDasharray={`${px(3)} ${px(2.5)}`} opacity={0.7} /> : null}
+                  <circle r={px(10.5)} fill={color} stroke="var(--tms-card)" strokeWidth={px(1.8)} opacity={d.notReporting ? 0.4 : d.stale ? 0.5 : 1} />
                   <g transform={`scale(${px(0.54)}) translate(-12 -12)`} fill="none" stroke="var(--tms-card)" strokeWidth={2.3} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none">
                     <path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2" />
                     <path d="M15 18H9" />
@@ -232,7 +235,7 @@ export function GpsMap({ drivers, selectedId, onSelect }: {
               const wpx = text.length * 6 + 16
               return (
                 <g key="sel-label" transform={`translate(${at[0]} ${at[1] + px(-27)})`} pointerEvents="none">
-                  <rect x={-px(wpx) / 2} y={-px(10)} width={px(wpx)} height={px(20)} rx={px(6)} fill="var(--tms-card)" stroke={GPS_COLOR[d.status]} strokeWidth={px(1.2)} />
+                  <rect x={-px(wpx) / 2} y={-px(10)} width={px(wpx)} height={px(20)} rx={px(6)} fill="var(--tms-card)" stroke={gpsPinColor(d)} strokeWidth={px(1.2)} />
                   <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fontSize={px(11)} fontWeight={600} fill="var(--tms-text)">{text}</text>
                 </g>
               )

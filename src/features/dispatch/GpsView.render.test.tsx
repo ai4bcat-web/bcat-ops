@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /** The GPS view: counts, the on-a-load/empty filter, the No GPS list and the open-conversation button. */
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import type { Driver, Load } from '@/types'
 import type { TruckLocation } from '@/lib/apiClient'
 
@@ -10,6 +10,7 @@ const drivers = [
   { id: 'a', name: 'Ann Local', active: true, assignedTruckId: 'eq-a' },
   { id: 'b', name: 'Bob Local', active: true, assignedTruckId: 'eq-b' },
   { id: 'c', name: 'Cy NoTruck', active: true, assignedTruckId: null },
+  { id: 'm', name: 'Mo Quiet', active: true, assignedTruckId: 'eq-m' },
 ] as unknown as Driver[]
 const loads = [{
   id: 'l1', aljexId: '14100', originCity: 'Joliet, IL', destinationCity: 'Dallas, TX',
@@ -24,7 +25,7 @@ vi.setSystemTime(NOW)
 vi.mock('@/hooks/useDrivers', () => ({ useDrivers: () => ({ drivers }) }))
 vi.mock('@/hooks/useLoads', () => ({ useLoads: () => ({ loads }), useEnsureLoadRange: () => true }))
 vi.mock('@/store/useAppStore', () => ({
-  useAppStore: (sel: (s: { equipment: unknown[] }) => unknown) => sel({ equipment: [{ id: 'eq-a', unitNumber: '3101' }, { id: 'eq-b', unitNumber: '3102' }] }),
+  useAppStore: (sel: (s: { equipment: unknown[] }) => unknown) => sel({ equipment: [{ id: 'eq-a', unitNumber: '3101' }, { id: 'eq-b', unitNumber: '3102' }, { id: 'eq-m', unitNumber: '0012' }] }),
 }))
 vi.mock('./GpsMap', () => ({
   GpsMap: ({ drivers: shown, onSelect }: { drivers: { driverId: string; status: string }[]; onSelect: (id: string) => void }) => (
@@ -35,12 +36,51 @@ vi.mock('./GpsMap', () => ({
 import { GpsView } from './GpsView'
 
 const fix = (id: string, unit: string) => ({ truckId: `eq-${id}`, unitNumber: unit, lat: 41.9, lon: -87.9, description: '2 mi N of Chicago, IL', locatedAt: '2026-11-28T17:55:00Z', motion: 'MOVING', speed: 55 }) as unknown as TruckLocation
-const locations = [fix('a', '3101'), fix('b', '3102')]
+const quiet = { ...fix('m', '0012'), description: '5.2 mi SE of Lake Charles, LA', locatedAt: '2026-11-25T09:44:15Z' } as unknown as TruckLocation
+const locations = [fix('a', '3101'), fix('b', '3102'), quiet]
+
+describe('GpsView: not reporting', () => {
+  const view = (open = vi.fn()) => render(<GpsView locations={locations} selectedDriverId={null} hasConversation={(id) => id === 'm'} onOpenConversation={open} />)
+
+  it('lists the driver whose truck went quiet, with no pin, and counts them', () => {
+    view()
+    expect(screen.getAllByTestId(/^pin-/).map((p) => p.textContent)).toEqual(['a', 'b'])
+    const panel = screen.getByTestId('gps-not-reporting')
+    expect(panel.textContent).toContain('Not reporting · 1')
+    expect(panel.textContent).toContain('Mo Quiet')
+    expect(panel.textContent).toContain('truck 0012')
+    expect(panel.textContent).toContain('last seen 3 d ago near Lake Charles, LA')
+  })
+
+  it('opens the conversation from the panel', () => {
+    const open = vi.fn()
+    view(open)
+    fireEvent.click(within(screen.getByTestId('gps-not-reporting')).getByRole('button', { name: /Open conversation/ }))
+    expect(open).toHaveBeenCalledWith('m')
+  })
+
+  it('only shows the old spot when asked, and the Not reporting filter has no pins of its own', () => {
+    view()
+    expect(screen.getAllByTestId(/^pin-/)).toHaveLength(2)
+    fireEvent.click(screen.getByLabelText('Show last known location'))
+    expect(screen.getAllByTestId(/^pin-/).map((p) => p.getAttribute('data-status'))).toEqual(['LOAD', 'EMPTY', 'EMPTY'])
+    fireEvent.click(screen.getByLabelText('Show last known location'))
+    fireEvent.click(screen.getByRole('button', { name: 'Not reporting' }))
+    expect(screen.queryAllByTestId(/^pin-/)).toHaveLength(0)
+    expect(screen.getByTestId('gps-not-reporting')).toBeTruthy()
+  })
+
+  it('selects the not-reporting driver from the list and says so on the card', () => {
+    view()
+    fireEvent.click(within(screen.getByTestId('gps-not-reporting')).getByRole('button', { name: /Mo Quiet/ }))
+    expect(screen.getByTestId('gps-card').textContent).toContain('Not reporting: last seen 3 d ago near Lake Charles, LA')
+  })
+})
 
 describe('GpsView', () => {
   it('counts on a load, empty and no GPS, and filters the pins', () => {
     render(<GpsView locations={locations} selectedDriverId={null} hasConversation={() => true} onOpenConversation={vi.fn()} />)
-    expect(screen.getByTestId('gps-counts').textContent).toBe('1 on a load · 1 empty · 1 no GPS')
+    expect(screen.getByTestId('gps-counts').textContent).toBe('1 on a load · 1 empty · 1 not reporting · 1 no GPS')
     expect(screen.getAllByTestId(/^pin-/)).toHaveLength(2)
     fireEvent.click(screen.getByRole('button', { name: 'On a load' }))
     expect(screen.getAllByTestId(/^pin-/).map((p) => p.getAttribute('data-status'))).toEqual(['LOAD'])
