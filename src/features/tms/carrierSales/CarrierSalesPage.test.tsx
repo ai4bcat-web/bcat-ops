@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   worklist: vi.fn(),
   hasPageAccess: vi.fn(),
   unmatched: vi.fn(),
+  user: { email: 'dispatch@bcatcorp.com', groups: [] as string[] },
 }))
 
 vi.mock('@/lib/apiClient', () => ({
@@ -30,6 +31,7 @@ vi.mock('./OffersHub', () => ({
 vi.mock('./UnmatchedOffers', () => ({
   UnmatchedOffers: ({ rows }: { rows: unknown[] }) => <div data-testid="unmatched-stub" data-rows={rows.length} />,
 }))
+vi.mock('./BookAssetsTab', () => ({ BookAssetsTab: () => <div data-testid="assets-stub" /> }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('@/features/carriers/cover/CoverCarrierDialog', () => ({
   CoverCarrierDialog: ({ shipmentId, shipmentNumber, onClose }: { shipmentId: string; shipmentNumber?: string; onClose: () => void }) => (
@@ -38,7 +40,7 @@ vi.mock('@/features/carriers/cover/CoverCarrierDialog', () => ({
 }))
 vi.mock('@/hooks/useShipments', () => ({ useShipments: mocks.shipments }))
 vi.mock('@/hooks/useQuoteWorklist', () => ({ useQuoteWorklist: mocks.worklist }))
-vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ hasPageAccess: mocks.hasPageAccess }) }))
+vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ hasPageAccess: mocks.hasPageAccess, user: mocks.user }) }))
 
 function shipment(id: string, over: Record<string, unknown> = {}) {
   return {
@@ -56,7 +58,7 @@ const ROWS = [
   shipment('s-4', { assignmentType: 'CARRIER', carrierName: 'Hauler', carrierMc: '123' }),
 ]
 
-async function renderPage(initialEntries = ['/']) {
+async function renderPage(initialEntries = ['/?main=brokerage']) {
   await act(async () => {
     render(<MemoryRouter initialEntries={initialEntries}><CarrierSalesPage /></MemoryRouter>)
   })
@@ -69,6 +71,40 @@ beforeEach(() => {
   mocks.shipments.mockReturnValue({ shipments: ROWS, loading: false, error: null, refresh: vi.fn() })
   mocks.worklist.mockReturnValue({ open: [], loading: false, error: null, refresh: vi.fn() })
   mocks.hasPageAccess.mockImplementation((key: string) => key === 'loads' || key === 'quotes')
+  mocks.user = { email: 'dispatch@bcatcorp.com', groups: [] }
+  window.localStorage.clear()
+})
+
+describe('CarrierSalesPage main tabs', () => {
+  it('opens on Assets, the first tab, and Brokerage still holds everything else', async () => {
+    await renderPage(['/'])
+    const tabs = screen.getAllByRole('tab').slice(0, 2).map((t) => t.textContent)
+    expect(tabs).toEqual(['Assets', 'Brokerage'])
+    expect(screen.getByRole('tab', { name: 'Assets' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByTestId('assets-stub')).toBeTruthy()
+    expect(screen.queryByRole('tab', { name: /Needs cover/ })).toBeNull()
+    await act(async () => { fireEvent.click(screen.getByRole('tab', { name: 'Brokerage' })) })
+    expect(screen.getByRole('tab', { name: /Needs cover/ })).toBeTruthy()
+    expect(screen.queryByTestId('assets-stub')).toBeNull()
+  })
+
+  it('remembers the last main tab, and an older brokerage link still lands on Brokerage', async () => {
+    window.localStorage.setItem('tms:book:main:dispatch@bcatcorp.com', 'brokerage')
+    await renderPage(['/'])
+    expect(screen.getByRole('tab', { name: /Needs cover/ })).toBeTruthy()
+    window.localStorage.setItem('tms:book:main:dispatch@bcatcorp.com', 'assets')
+    document.body.innerHTML = ''
+    await renderPage(['/tms/carrier-sales?tab=covered'])
+    expect(screen.getByRole('tab', { name: /Covered/ }).getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('someone limited to the fleet profiles gets no Assets tab and the Capacity board is never mounted', async () => {
+    mocks.user = { email: 'jason@bcatcorp.com', groups: [] }
+    await renderPage(['/'])
+    expect(screen.queryByRole('tab', { name: 'Assets' })).toBeNull()
+    expect(screen.queryByTestId('assets-stub')).toBeNull()
+    expect(screen.getByRole('tab', { name: /Needs cover/ })).toBeTruthy()
+  })
 })
 
 describe('CarrierSalesPage', () => {

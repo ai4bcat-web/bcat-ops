@@ -18,7 +18,7 @@ import { initialCalendarView, rememberPhoneView, type CalendarView } from './cal
 import { usePhoneWidth, PHONE_MAX_WIDTH } from '@/features/tms/grid/denseCardLayout'
 import { formatDateShort, addDays } from '@/lib/date'
 import { useAuth } from '@/hooks/useAuth'
-import { isFleetProfilesOnly } from '@/lib/profileAccess'
+import { capacityAllowedFor } from './capacityAccess'
 import { addDaysYmd, defaultCapacityRange, daysBetweenYmd, todayChicagoYmd } from '@/lib/capacityBoard'
 import { buildLoadHaystack, loadMatchesQuery } from '@/lib/loadSearch'
 import {
@@ -72,7 +72,7 @@ export function CalendarPage() {
   const [capRange, setCapRange] = useState(() => defaultCapacityRange(todayChicagoYmd()))
   const auth = useAuth()
   // Someone limited to the fleet profiles does not get the Capacity tab: it carries the rates the office is asking for.
-  const capacityAllowed = !isFleetProfilesOnly(auth.user?.email, auth.user?.groups)
+  const capacityAllowed = capacityAllowedFor(auth.user?.email, auth.user?.groups)
 
   const setVisibleDrivers = useCallback((ids: string[]) => {
     setChosenDriverIds(ids)

@@ -18,6 +18,7 @@ import { CarrierAssignmentChip } from '@/features/shipments/components/CarrierAs
 import { LADDER_FILTER_OPTIONS } from '@/features/shipments/carrierLadder'
 import type { CarrierAssignmentStatus } from '@/lib/carrierAssignment'
 import { useAuth } from '@/hooks/useAuth'
+import { capacityAllowedFor } from '@/features/calendar/capacityAccess'
 import { useQuoteWorklist } from '@/hooks/useQuoteWorklist'
 import { useShipments } from '@/hooks/useShipments'
 import type { ShipmentListRow } from '@/hooks/useShipments'
@@ -33,6 +34,8 @@ import { UnmatchedOffers } from './UnmatchedOffers'
 import { CarrierOffersPanel } from './CarrierOffersPanel'
 import { targetFromRow, type OffersTarget } from './offersTarget'
 import { useUnmatchedOffers } from './useUnmatchedOffers'
+import { BookAssetsTab } from './BookAssetsTab'
+import { BOOK_MAIN_TABS, chooseBookMainTab, readBookMainTab, rememberBookMainTab, type BookMainTab } from './bookMainTab'
 
 type TabKey = 'needs-cover' | 'offers' | 'unmatched' | 'covered'
 const TAB_KEYS: readonly TabKey[] = ['needs-cover', 'offers', 'unmatched', 'covered']
@@ -91,9 +94,39 @@ function WithWorklist() {
   return <CarrierSalesView offers={{ open: worklist.open, error: worklist.error, refresh: worklist.refresh }} />
 }
 
-export function CarrierSalesPage() {
+/** The brokerage page as it was before the main tabs: needs-cover, offers, unmatched and covered. */
+function BrokerageBody() {
   const { hasPageAccess } = useAuth()
   return hasPageAccess('quotes') ? <WithWorklist /> : <CarrierSalesView offers={null} />
+}
+
+const MAIN_LABEL: Record<BookMainTab, string> = { assets: 'Assets', brokerage: 'Brokerage' }
+
+/** Book: Assets (the Capacity board, the default) and Brokerage (carrier sales). Someone without the Capacity board sees Brokerage only. */
+export function CarrierSalesPage() {
+  const { user } = useAuth()
+  const capacityAllowed = capacityAllowedFor(user?.email, user?.groups)
+  const [params, setParams] = useSearchParams()
+  const main = chooseBookMainTab({
+    capacityAllowed,
+    mainParam: params.get('main'),
+    hasBrokerageParams: params.has('tab') || params.has('load'),
+    remembered: readBookMainTab(user?.email),
+  })
+  const onMain = (key: string) => {
+    const next = key as BookMainTab
+    rememberBookMainTab(user?.email, next)
+    setParams({ main: next }, { replace: true })
+  }
+  if (!capacityAllowed) return <BrokerageBody />
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 auto', minHeight: 0, minWidth: 0 }}>
+      <div style={{ padding: 'var(--tms-gap) var(--tms-gap) 0' }}>
+        <TmsTabStrip aria-label="Book sections" active={main} onSelect={onMain} tabs={BOOK_MAIN_TABS.map((key) => ({ key, label: MAIN_LABEL[key] }))} />
+      </div>
+      {main === 'assets' ? <BookAssetsTab /> : <BrokerageBody />}
+    </div>
+  )
 }
 
 function CarrierSalesView({ offers }: { offers: OffersState | null }) {
@@ -103,9 +136,9 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
   const [params, setParams] = useSearchParams()
   const tabParam = params.get('tab')
   const tab: TabKey = TAB_KEYS.find((k) => k === tabParam) ?? 'needs-cover'
-  const setTab = (next: TabKey) => setParams(next === 'needs-cover' ? {} : { tab: next }, { replace: true })
+  const setTab = (next: TabKey) => setParams(next === 'needs-cover' ? { main: 'brokerage' } : { main: 'brokerage', tab: next }, { replace: true })
   const loadParam = params.get('load')
-  const setLoad = (value: string | null) => setParams(value ? { tab: 'offers', load: value } : { tab: 'offers' }, { replace: true })
+  const setLoad = (value: string | null) => setParams(value ? { main: 'brokerage', tab: 'offers', load: value } : { main: 'brokerage', tab: 'offers' }, { replace: true })
   const unmatched = useUnmatchedOffers()
   const [search, setSearch] = useState('')
   // Step AM: Cover opens a dialog right here instead of hopping to the shipment, and the Covered tab filters by ladder rung.
