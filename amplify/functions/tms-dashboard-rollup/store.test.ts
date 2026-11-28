@@ -48,38 +48,53 @@ describe('rollupStore.scanAll', () => {
 })
 
 describe('rollupSource.loadsDeliveredIn', () => {
-  const loads = [
-    { id: 'a', deliveryAppt: '2026-11-03T17:00:00Z', rate: 1 },
-    { id: 'b', deliveryAppt: '2026-10-31T23:30:00Z', rate: 2 },
-    { id: 'c', deliveryAppt: '2026-11-20', rate: 3 },
-  ]
+  const T = { shipment: 'S', order: 'O', load: 'L', sample: 'M', invoice: 'I', carrierBill: 'B' }
+  const loadsOf: Record<string, Array<Record<string, unknown>>> = {
+    s1: [{ id: 'a', shipmentId: 's1', deliveryAppt: '2026-11-03T17:00:00Z', rate: 1 }],
+    s2: [{ id: 'b', shipmentId: 's2', deliveryAppt: '2026-10-31T23:30:00Z', rate: 2 }, { id: 'c', shipmentId: 's2', deliveryAppt: '2026-11-20', rate: 3 }],
+    s3: [{ id: 'd', shipmentId: 's3', rate: 4 }], // no delivery date
+  }
+  const shipmentsOf: Record<string, Array<{ id: string }>> = { '2026-09': [{ id: 's1' }], '2026-10': [{ id: 's2' }, { id: 's3' }] }
 
-  it('scans the Load table once (all segments, every page), keeps only non-voided loads with a delivery date server-side, and serves each month from that one pass', async () => {
+  function fakeDb() {
     const inputs: Array<Record<string, unknown>> = []
     const db = {
       send: async (cmd: { input: Record<string, unknown> }) => {
         inputs.push(cmd.input)
-        const segment = cmd.input.Segment as number
-        // Segment 0 answers in two pages; the rest answer nothing.
-        if (segment === 0 && !cmd.input.ExclusiveStartKey) return { Items: [loads[0], loads[1]], LastEvaluatedKey: { id: 'b' } }
-        if (segment === 0) return { Items: [loads[2]] }
-        return { Items: [] }
+        const values = (cmd.input.ExpressionAttributeValues ?? {}) as Record<string, string>
+        if (cmd.input.IndexName === 'shipmentsByPickupMonthAndPickupAppt') return { Items: shipmentsOf[values[':m']!] ?? [] }
+        if (cmd.input.IndexName === 'loadsByShipmentId') return { Items: loadsOf[values[':s']!] ?? [] }
+        throw new Error(`unexpected read ${String(cmd.input.IndexName)}`)
       },
     } as unknown as DynamoDBDocumentClient
-    const src = rollupSource(db, { shipment: 'S', order: 'O', load: 'L', sample: 'M', invoice: 'I', carrierBill: 'B' })
+    return { db, inputs }
+  }
+
+  it('reads every shipment month once and each shipment\'s loads once, only through indexes, and serves every month from that one pass', async () => {
+    const { db, inputs } = fakeDb()
+    const src = rollupSource(db, T, () => new Date('2026-11-28T12:00:00Z'))
     expect((await src.loadsDeliveredIn('2026-11')).map((l) => l.id)).toEqual(['a', 'c'])
     expect((await src.loadsDeliveredIn('2026-10')).map((l) => l.id)).toEqual(['b'])
     expect((await src.loadsDeliveredIn('2026-09')).map((l) => l.id)).toEqual([])
-    // One pass: 8 segments plus the second page of segment 0, however many months were asked for.
-    expect(inputs.length).toBe(9)
-    expect(new Set(inputs.map((i) => i.TotalSegments))).toEqual(new Set([8]))
-    expect(new Set(inputs.map((i) => i.Segment)).size).toBe(8)
+    const shipmentReads = inputs.filter((i) => i.IndexName === 'shipmentsByPickupMonthAndPickupAppt')
+    const loadReads = inputs.filter((i) => i.IndexName === 'loadsByShipmentId')
+    // 2024-01 through January 2027 (two months past the current one), once each; three shipments, once each.
+    expect(shipmentReads.length).toBe(37)
+    expect(new Set(shipmentReads.map((i) => (i.ExpressionAttributeValues as Record<string, string>)[':m'])).size).toBe(37)
+    expect(loadReads.length).toBe(3)
+    // Nothing but Query: the Lambda's role cannot Scan the source tables.
+    expect(inputs.every((i) => i.IndexName)).toBe(true)
+  })
+
+  it('each query defines every #alias it uses and projects the delivery date', async () => {
+    const { db, inputs } = fakeDb()
+    const src = rollupSource(db, T, () => new Date('2026-11-28T12:00:00Z'))
+    await src.loadsDeliveredIn('2026-11')
     for (const input of inputs) {
-      const text = [input.FilterExpression, input.ProjectionExpression].map(String).join(' ')
+      const text = ['KeyConditionExpression', 'FilterExpression', 'ProjectionExpression'].map((k) => String(input[k] ?? '')).join(' ')
       const defined = Object.keys((input.ExpressionAttributeNames ?? {}) as object)
       for (const alias of text.match(/#\w+/g) ?? []) expect(defined, `${alias} in ${text}`).toContain(alias)
-      expect(String(input.FilterExpression)).toContain('attribute_exists(#deliveryAppt)')
-      expect(String(input.FilterExpression)).toContain('#voidedAt')
     }
+    expect(inputs.filter((i) => i.IndexName === 'loadsByShipmentId').every((i) => String(i.ProjectionExpression).includes('#deliveryAppt'))).toBe(true)
   })
 })
