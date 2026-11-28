@@ -34,7 +34,7 @@ export interface AssignDriverDialogProps {
   trailers: Equipment[]
   isAdmin: boolean
   busy: boolean
-  /** Opens with this driver picked (the Dispatch empty-trucks list books one driver on one open load). */
+  /** Opens with this driver picked, for callers that book one known driver on one load. */
   initialDriverId?: string
   onClose: () => void
   /** Rejection text is shown inline and the dialog stays open; success closes it. */

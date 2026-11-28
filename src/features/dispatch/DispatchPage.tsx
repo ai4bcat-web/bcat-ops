@@ -30,7 +30,7 @@ import { FilterDialog } from './FilterDialog'
 import { applyFilters, readFilters, writeFilters, filterCount, type DispatchFilters } from './dispatchFilters'
 import { conversationColor, initialsOf } from './conversationColor'
 import { DriverSchedulePanel } from './DriverSchedulePanel'
-import { EmptyTrucksView } from './EmptyTrucksView'
+import { GpsView } from './GpsView'
 import { unitTypeOf, unitKindLabel, unitTypeEditable, nextUnitType, UNIT_TYPE_LABEL } from '@/lib/unitType'
 import { useLoadPaperwork } from '@/hooks/useLoadPaperwork'
 import { loadHasPod } from '@/lib/podPresence'
@@ -60,14 +60,14 @@ const TABS: { key: Tab; label: string }[] = [
 export function DispatchPage({ compact = false, onHide }: { compact?: boolean; onHide?: () => void } = {}) {
   const { user, isAdmin, isOwner } = useAuth()
   const isMobile = useIsMobile()
-  // One-column behaviour for phones and for the drawer alike.
-  const narrow = isMobile || compact
-  // The page has two views: the text conversations, and where own-fleet trucks go empty. The drawer is always conversations.
+  // The conversations are one column everywhere: the list, then the thread with a Back button. On the full page that
+  // column is the rail beside the GPS map; on a phone the page shows one of the two at a time; the drawer is only the rail.
+  // An old ?view=empty (Empty trucks) link lands on the GPS side.
   const [searchParams, setSearchParams] = useSearchParams()
-  const view: 'MESSAGES' | 'EMPTY' = !compact && searchParams.get('view') === 'empty' ? 'EMPTY' : 'MESSAGES'
-  const chooseView = (next: 'MESSAGES' | 'EMPTY') => setSearchParams((prev) => {
+  const phoneView: 'MESSAGES' | 'GPS' = !compact && ['gps', 'empty'].includes(searchParams.get('view') ?? '') ? 'GPS' : 'MESSAGES'
+  const choosePhoneView = (next: 'MESSAGES' | 'GPS') => setSearchParams((prev) => {
     const p = new URLSearchParams(prev)
-    if (next === 'EMPTY') p.set('view', 'empty'); else p.delete('view')
+    if (next === 'GPS') p.set('view', 'gps'); else p.delete('view')
     return p
   }, { replace: true })
   const { drivers, updateDriver } = useDrivers()
@@ -216,8 +216,8 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
 
   const padX = isMobile ? 12 : 20
   const configured = d.status?.configured ?? true
-  const showList = !narrow || !selected
-  const showThread = !narrow || !!selected
+  const showList = !selected
+  const showThread = !!selected
 
   const header = (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: `12px ${padX}px`, borderBottom: '1px solid var(--tms-border)', background: 'var(--tms-card)', flexShrink: 0 }}>
@@ -229,14 +229,16 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
             : 'One number the whole team texts and calls drivers from.'}
         </p>
       </div>
-      <div role="group" aria-label="Dispatch view" style={{ display: 'inline-flex', gap: 2, padding: 2, border: '1px solid var(--tms-border)', borderRadius: 8, flexShrink: 0 }}>
-        {([['MESSAGES', 'Messages'], ['EMPTY', 'Empty trucks']] as const).map(([key, label]) => (
-          <button key={key} type="button" onClick={() => chooseView(key)} aria-pressed={view === key}
-            style={{ fontSize: 12.5, padding: '4px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', background: view === key ? 'var(--tms-surface-hover)' : 'transparent', color: view === key ? 'var(--tms-text)' : 'var(--tms-muted)', fontWeight: view === key ? 700 : 500 }}>
-            {label}
-          </button>
-        ))}
-      </div>
+      {isMobile ? (
+        <div role="group" aria-label="Dispatch view" style={{ display: 'inline-flex', gap: 2, padding: 2, border: '1px solid var(--tms-border)', borderRadius: 8, flexShrink: 0 }}>
+          {([['MESSAGES', 'Messages'], ['GPS', 'GPS']] as const).map(([key, label]) => (
+            <button key={key} type="button" onClick={() => choosePhoneView(key)} aria-pressed={phoneView === key}
+              style={{ fontSize: 12.5, padding: '4px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', background: phoneView === key ? 'var(--tms-surface-hover)' : 'transparent', color: phoneView === key ? 'var(--tms-text)' : 'var(--tms-muted)', fontWeight: phoneView === key ? 700 : 500 }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
         <Button size="sm" className="h-8 gap-1.5" onClick={() => setNewOpen(true)}><MessageSquarePlus className="size-3.5" />{isMobile ? '' : 'New message'}</Button>
         {(isAdmin || isOwner) ? <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setSettingsOpen(true)} title="Call routing, voicemail, Slack"><Settings className="size-3.5" />{isMobile ? '' : 'Settings'}</Button> : null}
@@ -253,7 +255,7 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
   ) : null
 
   const list = (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, width: narrow ? '100%' : 340, borderRight: narrow ? 'none' : '1px solid var(--tms-border)', background: 'var(--tms-card)', flexShrink: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, width: '100%', background: 'var(--tms-card)' }}>
       <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--tms-border)', display: 'grid', gap: 8 }}>
         <div style={{ position: 'relative' }}>
           <Search className="size-3.5" style={{ position: 'absolute', left: 10, top: 10, color: 'var(--tms-muted)' }} />
@@ -286,8 +288,8 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
 
   const thread = selected ? (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1, background: 'var(--tms-bg)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--tms-border)', borderTop: `3px solid ${selectedColor?.border ?? 'transparent'}`, background: 'var(--tms-card)', flexWrap: narrow ? 'wrap' : 'nowrap' }}>
-        {narrow ? <Button variant="ghost" size="icon" className="size-8" aria-label="Back to conversations" onClick={() => d.select(null)}><ArrowLeft className="size-4" /></Button> : null}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--tms-border)', borderTop: `3px solid ${selectedColor?.border ?? 'transparent'}`, background: 'var(--tms-card)', flexWrap: 'wrap' }}>
+        <Button variant="ghost" size="icon" className="size-8" aria-label="Back to conversations" onClick={() => d.select(null)}><ArrowLeft className="size-4" /></Button>
         <span aria-hidden="true" style={{ width: 36, height: 36, borderRadius: 18, background: selectedColor?.avatarBg, color: 'var(--tms-on-primary)', fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initialsOf(conversationTitle(selected))}</span>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 15, fontWeight: 600, color: selectedColor?.text ?? 'var(--tms-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conversationTitle(selected)}</div>
@@ -319,23 +321,23 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
             })()}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', ...(narrow ? { width: '100%', paddingLeft: 46 } : {}) }}>
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', width: '100%', paddingLeft: 46 }}>
           {configured ? <Button variant="outline" size="sm" className="h-8 gap-1.5" title="Text them who we are, the number to save, and a contact card" onClick={() => void act('send the intro', () => d.sendIntro(selected.id))}>
-            <Send className="size-3.5" />{narrow ? '' : 'Intro'}
+            <Send className="size-3.5" />
           </Button> : null}
           {canManage ? <Button variant="outline" size="sm" className="h-8 gap-1.5" title="Primary and backup dispatcher" onClick={() => setAssigning(selected)}>
-            <UserCheck className="size-3.5" />{narrow ? '' : (selected.assignedTo ? staffName(selected.assignedTo) : 'Assign')}
+            <UserCheck className="size-3.5" />
           </Button> : null}
           {canManage ? <Button variant="outline" size="sm" className="h-8 gap-1.5" title={selected.driverId ? 'Change who this number belongs to' : 'Link this number to a driver'} onClick={() => setLinking(selected)}>
-            <UserPlus className="size-3.5" />{narrow ? '' : (selected.driverId ? 'Relink' : 'Link driver')}
+            <UserPlus className="size-3.5" />
           </Button> : null}
           {d.status?.slackBridge ? (selected.slackChannelId ? (
             <Button variant="outline" size="sm" className="h-8 gap-1.5" asChild title={`#${selected.slackChannelName ?? 'channel'} in Slack`}>
-              <a href={`https://bcatcorp.slack.com/archives/${selected.slackChannelId}`} target="_blank" rel="noreferrer"><Hash className="size-3.5" />{narrow ? '' : (selected.slackChannelName ?? 'Slack')}<ExternalLink className="size-3" /></a>
+              <a href={`https://bcatcorp.slack.com/archives/${selected.slackChannelId}`} target="_blank" rel="noreferrer"><Hash className="size-3.5" /><ExternalLink className="size-3" /></a>
             </Button>
           ) : (
             <Button variant="outline" size="sm" className="h-8 gap-1.5" title="Create this driver's Slack channel" onClick={() => void openSlackWizard(selected)}>
-              <Hash className="size-3.5" />{narrow ? '' : 'Create Slack channel'}
+              <Hash className="size-3.5" />
             </Button>
           )) : null}
           <Button variant="outline" size="sm" className="h-8" title={selected.status === 'ARCHIVED' ? 'Reopen' : 'Archive'} onClick={() => void act('archive', () => d.setArchived(selected.id, selected.status !== 'ARCHIVED'))}>
@@ -386,11 +388,7 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
         onFileAsPod={selectedDriver ? (media) => setFilingPod(media) : undefined}
       />
     </div>
-  ) : (
-    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tms-muted)', fontSize: 13, background: 'var(--tms-bg)' }}>
-      Pick a conversation, or start a new message.
-    </div>
-  )
+  ) : null
 
   const compactBar = (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 12px', borderBottom: '1px solid var(--tms-border)', background: 'var(--tms-card)', flexShrink: 0 }}>
@@ -407,14 +405,33 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
     </div>
   )
 
+  // The map: a pin click shows the driver's card; its button opens their conversation in the rail.
+  const conversationOf = (driverId: string) => d.conversations.find((c) => c.driverId === driverId && c.status !== 'ARCHIVED') ?? d.conversations.find((c) => c.driverId === driverId) ?? null
+  const gpsView = (
+    <GpsView
+      locations={locations}
+      selectedDriverId={selected?.driverId ?? null}
+      hasConversation={(driverId) => conversationOf(driverId) !== null}
+      onOpenConversation={(driverId) => { const c = conversationOf(driverId); if (c) d.select(c.id) }}
+    />
+  )
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       {compact ? compactBar : header}
       {banner}
-      {view === 'EMPTY' ? <EmptyTrucksView /> : (
+      {compact || (isMobile && phoneView === 'MESSAGES') ? (
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           {showList ? list : null}
           {showThread ? thread : null}
+        </div>
+      ) : isMobile ? gpsView : (
+        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+          <div data-testid="dispatch-rail" style={{ display: 'flex', flexDirection: 'column', width: 400, flexShrink: 0, minHeight: 0, borderRight: '1px solid var(--tms-border)', background: 'var(--tms-card)' }}>
+            {showList ? list : null}
+            {showThread ? thread : null}
+          </div>
+          {gpsView}
         </div>
       )}
       {newOpen ? <NewMessageDialog onClose={() => setNewOpen(false)} onStart={async (input) => {

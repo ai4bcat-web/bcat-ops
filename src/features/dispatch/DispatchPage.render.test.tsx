@@ -10,7 +10,8 @@ import { MemoryRouter } from 'react-router-dom'
 vi.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({ user: { email: 'staff@example.test' }, isAdmin: false, isOwner: false }),
 }))
-vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: () => false }))
+const phone = vi.hoisted(() => ({ on: false }))
+vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: () => phone.on }))
 vi.mock('@/hooks/useDrivers', () => ({ useDrivers: () => ({ drivers: [], updateDriver: vi.fn() }) }))
 vi.mock('@/hooks/useLoads', () => ({ useLoads: () => ({ loads: [], updateLoad: vi.fn() }) }))
 vi.mock('@/hooks/useLoadPaperwork', () => ({ useLoadPaperwork: () => ({ index: null, refresh: vi.fn() }) }))
@@ -34,7 +35,7 @@ vi.mock('@/store/useAppStore', () => ({
 }))
 vi.mock('@/lib/apiClient', () => ({ listTruckLocations: vi.fn().mockResolvedValue([]) }))
 vi.mock('@/lib/driverSubmissionsClient', () => ({ staffUploadDriverDoc: vi.fn() }))
-vi.mock('./EmptyTrucksView', () => ({ EmptyTrucksView: () => <div data-testid="empty-trucks-stub" /> }))
+vi.mock('./GpsView', () => ({ GpsView: () => <div data-testid="gps-stub" /> }))
 
 import { DispatchPage } from './DispatchPage'
 
@@ -44,7 +45,6 @@ describe('DispatchPage render', () => {
     expect(screen.getByRole('heading', { name: 'Dispatch' })).toBeTruthy()
     expect(screen.getByRole('button', { name: /New message/ })).toBeTruthy()
     expect(screen.getByText('No conversations here.')).toBeTruthy()
-    expect(screen.getByText('Pick a conversation, or start a new message.')).toBeTruthy()
   })
 
   it('opens the filter dialog from the list toolbar', () => {
@@ -53,23 +53,38 @@ describe('DispatchPage render', () => {
     expect(screen.getByText('Filter conversations')).toBeTruthy()
   })
 
-  it('switches between the conversations and the empty-trucks view, and a ?view=empty link opens it', () => {
-    const { unmount } = render(<MemoryRouter><DispatchPage /></MemoryRouter>)
-    expect(screen.queryByTestId('empty-trucks-stub')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Empty trucks' }))
-    expect(screen.getByTestId('empty-trucks-stub')).toBeTruthy()
-    expect(screen.queryByText('No conversations here.')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Messages' }))
-    expect(screen.queryByTestId('empty-trucks-stub')).toBeNull()
+  it('shows the conversations rail and the GPS map side by side, with no view switch, on a wide screen', () => {
+    render(<MemoryRouter><DispatchPage /></MemoryRouter>)
+    expect(screen.getByTestId('dispatch-rail')).toBeTruthy()
     expect(screen.getByText('No conversations here.')).toBeTruthy()
-    unmount()
-    render(<MemoryRouter initialEntries={['/dispatch?view=empty']}><DispatchPage /></MemoryRouter>)
-    expect(screen.getByTestId('empty-trucks-stub')).toBeTruthy()
+    expect(screen.getByTestId('gps-stub')).toBeTruthy()
+    expect(screen.queryByRole('group', { name: 'Dispatch view' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Empty trucks' })).toBeNull()
   })
 
-  it('keeps the always-on drawer to the conversations: no view switch', () => {
+  it('on a phone shows one at a time: Messages or GPS, and an old ?view=empty link opens GPS', () => {
+    phone.on = true
+    try {
+      const { unmount } = render(<MemoryRouter><DispatchPage /></MemoryRouter>)
+      expect(screen.queryByTestId('gps-stub')).toBeNull()
+      expect(screen.getByText('No conversations here.')).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: 'GPS' }))
+      expect(screen.getByTestId('gps-stub')).toBeTruthy()
+      expect(screen.queryByText('No conversations here.')).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: 'Messages' }))
+      expect(screen.queryByTestId('gps-stub')).toBeNull()
+      unmount()
+      render(<MemoryRouter initialEntries={['/dispatch?view=empty']}><DispatchPage /></MemoryRouter>)
+      expect(screen.getByTestId('gps-stub')).toBeTruthy()
+    } finally {
+      phone.on = false
+    }
+  })
+
+  it('keeps the always-on drawer to the conversations: no GPS, no view switch', () => {
     render(<MemoryRouter initialEntries={['/dispatch?view=empty']}><DispatchPage compact /></MemoryRouter>)
-    expect(screen.queryByRole('button', { name: 'Empty trucks' })).toBeNull()
-    expect(screen.queryByTestId('empty-trucks-stub')).toBeNull()
+    expect(screen.queryByTestId('gps-stub')).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Dispatch view' })).toBeNull()
+    expect(screen.getByText('No conversations here.')).toBeTruthy()
   })
 })
