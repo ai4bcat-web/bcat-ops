@@ -1,3 +1,6 @@
+// Relative: reached from a Lambda bundle, where the '@/' alias does not resolve.
+import { isFuelTx, fuelDedupKey } from './driverFuel'
+
 /**
  * Expense allocation / aggregation engine.
  *
@@ -60,7 +63,11 @@ export interface FuelTxInput {
   truckId:         string | null | undefined
   transactionDate: string
   amount:          number
-  itemCategory:    string  // only 'FUEL' rows are included in fuel totals
+  itemCategory?:   string | null  // an explicit category must be 'FUEL'; none → classified by fuelType
+  fuelType?:       string | null
+  /** With fuelType and quantity, lets the same fill stored twice count once (see fuelDedupKey). */
+  cardNumber?:     string | null
+  quantity?:       number | null
 }
 
 export interface RecurringInput {
@@ -184,10 +191,19 @@ export function getExpensesByTruck(
   }
 
   // ── Fuel: from FuelTransaction ──────────────────────────────────────────────
+  // Same rules as the driver settlements (driverFuel): a row with no category is classified
+  // by its fuelType rather than dropped, and a fill stored twice counts once, so a truck's
+  // cost and its driver's fuel charge agree.
+  const seenFuel = new Set<string>()
   for (const tx of fuelTxs) {
     if (!tx.truckId) continue
-    if (tx.itemCategory !== 'FUEL') continue
+    if (!isFuelTx({ itemCategory: tx.itemCategory, fuelType: tx.fuelType ?? '' })) continue
     if (tx.transactionDate < startDate || tx.transactionDate > endDate) continue
+    if (tx.cardNumber != null && tx.fuelType != null && tx.quantity != null) {
+      const key = fuelDedupKey({ transactionDate: tx.transactionDate, cardNumber: tx.cardNumber, fuelType: tx.fuelType, amount: tx.amount, quantity: tx.quantity })
+      if (seenFuel.has(key)) continue
+      seenFuel.add(key)
+    }
     add(tx.truckId, 'FUEL', tx.amount)
   }
 

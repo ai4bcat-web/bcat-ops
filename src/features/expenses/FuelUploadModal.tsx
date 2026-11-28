@@ -6,7 +6,8 @@ import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { parseEfsTransactionReport, fuelTxDedupKey } from '@/lib/parsers/efsTransactionReport'
 import type { ItemCategory } from '@/lib/parsers/efsTransactionReport'
-import { createFuelTransaction, checkFuelTxExists, cleanupDuplicateFuelTransactions } from '@/lib/apiClient'
+import { createFuelTransaction, loadStoredFuelKeys, cleanupDuplicateFuelTransactions } from '@/lib/apiClient'
+import { fuelDedupKey } from '@/lib/driverFuel'
 import type { FuelTransaction } from '@/lib/apiClient'
 import type { Equipment } from '@/types/equipment'
 
@@ -110,13 +111,13 @@ export function FuelUploadModal({ trucks, onImported, onChanged, onClose }: Prop
       })
 
       // Check for duplicates against the DB (batch check)
+      // Read what is stored ONCE, then compare locally.
+      const stored = await loadStoredFuelKeys()
       let dupes = 0
       const checked: PreviewRow[] = []
       for (const row of rows) {
-        const exists = await checkFuelTxExists(
-          row.transactionDate, row.cardNumber, row.fuelType, row.amount, row.quantity,
-        )
-        if (exists) { dupes++; continue }
+        const key = fuelDedupKey(row)
+        if (stored.has(key)) { dupes++; continue }
         checked.push(row)
       }
 
