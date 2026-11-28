@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { Driver, Load } from '@/types'
 import type { TruckLocation } from '@/lib/apiClient'
-import { ageText, computeGps, filterGps, gpsCountsLine, currentOpenLoad } from './gps'
+import { ageText, computeGps, filterGps, gpsCountsLine, currentOpenLoad, fixState, lastSeenText, NOT_REPORTING_MINUTES } from './gps'
 
 const NOW = Date.parse('2026-11-28T18:00:00Z')
 const driver = (id: string, extra: Partial<Driver> = {}) => ({ id, name: id.toUpperCase(), phone: '+1', active: true, assignedTruckId: `eq-${id}`, createdAt: '', updatedAt: '', ...extra }) as unknown as Driver
@@ -69,7 +69,7 @@ describe('GPS locations and the No GPS list', () => {
     const r = run([noTruck, noFix, gone, driver('a')], [], [fix('a')])
     expect(r.located.map((x) => x.driverId)).toEqual(['a'])
     expect(r.noGps.map((x) => [x.driverId, x.noGpsReason])).toEqual([['f', 'NO_FIX'], ['n', 'NO_TRUCK']])
-    expect(r.counts).toEqual({ onLoad: 0, empty: 1, noGps: 2, total: 3 })
+    expect(r.counts).toEqual({ onLoad: 0, empty: 1, notReporting: 0, noGps: 2, total: 3 })
     expect(gpsCountsLine(r.counts)).toBe('0 on a load · 1 empty · 2 no GPS')
   })
 
@@ -88,5 +88,71 @@ describe('GPS locations and the No GPS list', () => {
     expect(filterGps(r.located, 'EMPTY').map((x) => x.driverId)).toEqual(['b'])
     expect(filterGps(r.located, 'ALL')).toHaveLength(2)
     expect([ageText(0), ageText(10), ageText(300), ageText(3000), ageText(null)]).toEqual(['just now', '10 min ago', '5 h ago', '2 d ago', 'unknown'])
+  })
+})
+
+const ago = (ms: number) => new Date(NOW - ms).toISOString()
+const MIN = 60_000
+const HOUR = 3_600_000
+
+describe('GPS: a fix more than 24 hours old gets no pin', () => {
+  it('keeps the threshold at 24 hours', () => {
+    expect(NOT_REPORTING_MINUTES).toBe(24 * 60)
+  })
+
+  it('is fresh at 2 h, faded at 3 h 1 min and 23 h 59 min, and still pinned at exactly 24 h', () => {
+    expect(fixState(2 * 60)).toBe('FRESH')
+    expect(fixState(3 * 60)).toBe('FRESH')
+    expect(fixState(3 * 60 + 1)).toBe('STALE')
+    expect(fixState(23 * 60 + 59)).toBe('STALE')
+    expect(fixState(24 * 60)).toBe('STALE')
+  })
+
+  it('is not reporting one minute past 24 h and at 3 days', () => {
+    expect(fixState(24 * 60 + 1)).toBe('NOT_REPORTING')
+    expect(fixState(3 * 24 * 60)).toBe('NOT_REPORTING')
+  })
+
+  it('pins the drivers at each age and lists the 3 day old one as not reporting, without a pin row', () => {
+    const ds = ['a', 'b', 'c', 'd', 'e', 'f'].map((id) => driver(id))
+    const fixes = [
+      fix('a', { locatedAt: ago(2 * HOUR) }),
+      fix('b', { locatedAt: ago(3 * HOUR) }),
+      fix('c', { locatedAt: ago(23 * HOUR + 59 * MIN) }),
+      fix('d', { locatedAt: ago(24 * HOUR) }),
+      fix('e', { locatedAt: ago(24 * HOUR + MIN) }),
+      fix('f', { locatedAt: ago(3 * 24 * HOUR + 8 * HOUR), description: '5.2 mi SE of Lake Charles, LA' }),
+    ]
+    const r = run(ds, [], fixes)
+    expect(r.located.map((x) => [x.driverId, x.stale])).toEqual([['a', false], ['b', false], ['c', true], ['d', true]])
+    expect(r.notReporting.map((x) => x.driverId)).toEqual(['e', 'f'])
+    expect(r.notReporting.every((x) => x.notReporting && x.stale)).toBe(true)
+    expect(r.counts).toEqual({ onLoad: 0, empty: 4, notReporting: 2, noGps: 0, total: 6 })
+    expect(gpsCountsLine(r.counts)).toBe('0 on a load · 4 empty · 2 not reporting')
+  })
+
+  it('keeps the last known place on a not-reporting driver and words the age', () => {
+    const r = run([driver('m')], [], [fix('m', { locatedAt: ago(3 * 24 * HOUR + 8 * HOUR), description: '5.2 mi SE of Lake Charles, LA' })])
+    expect(r.notReporting[0]).toMatchObject({ place: 'Lake Charles, LA', fixAgeMin: 3 * 24 * 60 + 8 * 60, lat: 41.9, lng: -87.9 })
+    expect(lastSeenText(r.notReporting[0])).toBe('last seen 3 d ago near Lake Charles, LA')
+    expect(lastSeenText({ fixAgeMin: 26 * 60, place: null })).toBe('last seen 26 h ago')
+    expect(ageText(26 * 60)).toBe('26 h ago')
+    expect(ageText(3 * 24 * 60)).toBe('3 d ago')
+  })
+
+  it('counts a not-reporting driver who is on a load as not reporting, never on a load or empty', () => {
+    const open = load('14200', 'm', [pu({ arrivedAt: '2026-11-28T13:00:00Z' }), de()])
+    const r = run([driver('m'), driver('x')], [open], [fix('m', { locatedAt: ago(4 * 24 * HOUR) }), fix('x')])
+    expect(r.located.map((d) => d.driverId)).toEqual(['x'])
+    expect(r.notReporting[0]).toMatchObject({ driverId: 'm', status: 'LOAD', load: { pro: '14200' } })
+    expect(r.counts).toMatchObject({ onLoad: 0, empty: 1, notReporting: 1 })
+    expect(filterGps(r.located, 'LOAD')).toEqual([])
+    expect(filterGps(r.located, 'NOT_REPORTING')).toEqual([])
+  })
+
+  it('leaves the match alone: a driver with no truck or no fix is still under No GPS', () => {
+    const r = run([driver('n', { assignedTruckId: null } as unknown as Partial<Driver>), driver('f')], [], [])
+    expect(r.noGps.map((d) => d.noGpsReason)).toEqual(['NO_FIX', 'NO_TRUCK'])
+    expect(r.notReporting).toEqual([])
   })
 })
