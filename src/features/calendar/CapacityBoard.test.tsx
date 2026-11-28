@@ -52,6 +52,38 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers() })
 
 describe('CapacityBoard', () => {
+  it('draws a truck for each card and gives cards on one day their own colors', async () => {
+    seed({ id: 'a', equipment: 'Van' }, { id: 'b', equipment: 'Box truck', lengthFt: 18 }, { id: 'c', equipment: 'Reefer' })
+    render(board())
+    await loaded()
+    const cards = Array.from(column('2026-11-27').querySelectorAll('[data-testid="capacity-card"]')) as HTMLElement[]
+    expect(cards).toHaveLength(3)
+    expect(new Set(cards.map((c) => c.dataset.accent)).size).toBe(3)
+    expect(cards.map((c) => c.querySelector('svg')?.getAttribute('data-truck')).sort()).toEqual(['box', 'reefer', 'van'])
+    expect(cards.every((c) => c.style.getPropertyValue('--cap-accent') === c.dataset.accent)).toBe(true)
+  })
+
+  it('keeps a multi-day card the same color on every day it shows', async () => {
+    seed({ id: 'span', availableFrom: '2026-11-27', availableTo: '2026-11-29' }, { id: 'one', availableFrom: '2026-11-28', availableTo: '2026-11-28' })
+    render(board())
+    await loaded()
+    const colors = ['2026-11-27', '2026-11-28', '2026-11-29'].map((d) => (column(d).querySelector('[data-card-id="span"]') as HTMLElement).dataset.accent)
+    expect(new Set(colors).size).toBe(1)
+    const one = (column('2026-11-28').querySelector('[data-card-id="one"]') as HTMLElement).dataset.accent
+    expect(one).not.toBe(colors[0])
+  })
+
+  it('shows the status pill, and greys a covered card', async () => {
+    seed({ id: 'open1' }, { id: 'done1', status: 'COVERED' })
+    render(board())
+    await loaded()
+    const open = column('2026-11-27').querySelector('[data-card-id="open1"]') as HTMLElement
+    const done = column('2026-11-27').querySelector('[data-card-id="done1"]') as HTMLElement
+    expect(within(open).getByText('Open')).toBeTruthy()
+    expect(done.dataset.status).toBe('COVERED')
+    expect(within(done).getByText('Covered', { selector: '.cap-pill' })).toBeTruthy()
+  })
+
   it('shows one column per day of the range', async () => {
     render(board())
     await screen.findByText('Fri Nov 27')
@@ -172,7 +204,7 @@ describe('CapacityBoard', () => {
     seed({}, { origin: 'Atlanta, GA' })
     render(board())
     await loaded()
-    await within(column('2026-11-27')).findAllByTestId('capacity-card')
+    await loaded()
     fireEvent.click(within(column('2026-11-27')).getAllByRole('button', { name: 'Mark covered' })[0])
     await waitFor(() => expect(within(column('2026-11-27')).getAllByTestId('capacity-card').map((c) => c.getAttribute('data-status'))).toEqual(['OPEN', 'COVERED']))
     expect(screen.getByTestId('count-2026-11-27').textContent).toBe('1 open · 1 covered')
