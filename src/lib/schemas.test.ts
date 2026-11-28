@@ -5,7 +5,7 @@
  * work on a load booked before they existed.
  */
 import { describe, it, expect } from 'vitest'
-import { loadSchemaFor } from './schemas'
+import { driverSchema, driverWarnings, loadSchemaFor } from './schemas'
 
 
 describe('the MC and ZIP rules on an existing load', () => {
@@ -68,5 +68,45 @@ describe('the MC and ZIP rules on an existing load', () => {
     const r = loadSchemaFor(factored)
       .safeParse({ ...base, stops: [stop('pickup'), stop('delivery')] })
     expect(r.success).toBe(false)
+  })
+})
+
+
+describe('the driver profile: problems warn, only unstorable values block', () => {
+  const base = { name: 'Daniel Palmer', phone: '', active: true, type: 'driver' as const }
+
+  it('saves a driver with no phone number (Daniel Palmer), and warns about it', () => {
+    expect(driverSchema.safeParse(base).success).toBe(true)
+    expect(driverWarnings(base)).toEqual([{ field: 'phone', label: 'Phone', message: 'No phone number on file.' }])
+  })
+
+  it('saves a short phone and warns it has fewer than 10 digits', () => {
+    const v = { ...base, phone: '555-0100' }
+    expect(driverSchema.safeParse(v).success).toBe(true)
+    expect(driverWarnings(v)[0]).toMatchObject({ field: 'phone', message: 'Phone has fewer than 10 digits.' })
+  })
+
+  it('no warning for a complete ten-digit phone however it is punctuated', () => {
+    expect(driverWarnings({ ...base, phone: '(847) 293-6704' })).toEqual([])
+    expect(driverWarnings({ ...base, phone: '+1 847 293 6704' })).toEqual([])
+  })
+
+  it('a mistyped dispatcher or driver e-mail saves, and names the field in the warning', () => {
+    const v = { ...base, phone: '(847) 293-6704', email: 'zak@', dispatcherPrimary: 'jenny', dispatcherBackup: 'dennis@bcatcorp.com' }
+    expect(driverSchema.safeParse(v).success).toBe(true)
+    expect(driverWarnings(v).map((w) => w.label)).toEqual(['E-mail', 'Dispatcher'])
+  })
+
+  it('blank optional e-mails are not warned about', () => {
+    expect(driverWarnings({ ...base, phone: '(847) 293-6704', email: '', dispatcherPrimary: '', dispatcherBackup: null })).toEqual([])
+  })
+
+  it('still refuses what cannot be stored: no name, a bad type, fleet, unit or Motive id', () => {
+    expect(driverSchema.safeParse({ ...base, name: '' }).success).toBe(false)
+    expect(driverSchema.safeParse({ ...base, type: 'nope' }).success).toBe(false)
+    expect(driverSchema.safeParse({ ...base, fleetGroup: 'MOON' }).success).toBe(false)
+    expect(driverSchema.safeParse({ ...base, unitType: 'SUBMARINE' }).success).toBe(false)
+    expect(driverSchema.safeParse({ ...base, motiveDriverId: -4 }).success).toBe(false)
+    expect(driverSchema.safeParse({ ...base, motiveDriverId: 1.5 }).success).toBe(false)
   })
 })
