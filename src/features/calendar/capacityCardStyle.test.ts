@@ -44,14 +44,18 @@ describe('assignAccents', () => {
 
 describe('truckKindFor', () => {
   it.each([
-    ['Van', 'van'], ['Box truck', 'box'], ['Reefer', 'reefer'], ['Flatbed', 'flatbed'], ['Step Deck', 'stepdeck'],
+    ['Dry Van', 'van'], ['Straight Truck', 'straight'], ['Reefer', 'reefer'], ['Flatbed', 'flatbed'], ['Step Deck', 'stepdeck'],
     ['Power Only', 'power'], ['Container', 'container'], ['Hotshot', 'hotshot'], ['Conestoga', 'conestoga'],
   ])('%s is drawn as %s', (equipment, kind) => {
     expect(truckKindFor(equipment)).toBe(kind)
   })
 
+  it('draws older stored names the way their new names are drawn', () => {
+    expect(truckKindFor('Van')).toBe('van')
+    expect(truckKindFor('Box truck')).toBe('straight')
+  })
+
   it('draws older free-text equipment as a van', () => {
-    expect(truckKindFor('Dry Van')).toBe('van')
     expect(truckKindFor('')).toBe('van')
     expect(truckKindFor('Something new')).toBe('van')
   })
@@ -59,6 +63,6 @@ describe('truckKindFor', () => {
   it('reads a few common spellings', () => {
     expect(truckKindFor('53 ft reefer')).toBe('reefer')
     expect(truckKindFor('FLATBED w/ tarps')).toBe('flatbed')
-    expect(truckKindFor('Straight truck')).toBe('box')
+    expect(truckKindFor('Straight truck')).toBe('straight')
   })
 })

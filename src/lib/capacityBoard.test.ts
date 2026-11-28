@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   addDaysYmd, applyCapacityOp, capacityColumns, clampCapacityRange, daysBetweenYmd, defaultCapacityRange, parseCapacityBoard,
-  parseCapacityFields, formatCapacityTimes, formatMaxWeight, CAPACITY_EQUIPMENT, capacityHeadline, pruneBoard, rangeDays, shiftCardRange, CAPACITY_MAX_CARDS, EMPTY_CAPACITY_BOARD,
+  parseCapacityFields, canonicalEquipment, formatCapacityTimes, formatMaxWeight, CAPACITY_EQUIPMENT, capacityHeadline, pruneBoard, rangeDays, shiftCardRange, CAPACITY_MAX_CARDS, EMPTY_CAPACITY_BOARD,
   type CapacityBoard, type CapacityOp,
 } from './capacityBoard'
 
@@ -84,7 +84,9 @@ describe('card fields', () => {
     expect(saved.referenceId).toBeUndefined()
     expect(saved.contactPhone).toBeUndefined()
     expect(() => parseCapacityFields({ ...fields, weightLbs: '999999' })).toThrow('Maximum weight must be between')
-    expect(CAPACITY_EQUIPMENT.slice(0, 2)).toEqual([{ value: 'Van', defaultLengthFt: 53 }, { value: 'Box truck', defaultLengthFt: 18 }])
+    expect(CAPACITY_EQUIPMENT.map((o) => o.value)).toEqual(['Dry Van', 'Straight Truck', 'Power Only', 'Step Deck', 'Flatbed', 'Reefer', 'Container', 'Hotshot', 'Conestoga'])
+    expect(CAPACITY_EQUIPMENT.slice(0, 2)).toEqual([{ value: 'Dry Van', defaultLengthFt: 53 }, { value: 'Straight Truck', defaultLengthFt: 18 }])
+    expect(Object.fromEntries(CAPACITY_EQUIPMENT.map((o) => [o.value, o.defaultLengthFt]))).toMatchObject({ 'Power Only': undefined, 'Step Deck': 48, Flatbed: 48, Reefer: 53, Container: 40, Hotshot: 40, Conestoga: 48 })
   })
 
   it('refuses a backwards or too-long range and a bad load type', () => {
@@ -183,5 +185,28 @@ describe('day columns', () => {
     expect(capacityColumns(b.board, days, true, 'reefer')[0].cards).toHaveLength(1)
     expect(capacityColumns(b.board, days, true, 'load-locks')[0].cards).toHaveLength(1)
     expect(capacityColumns(b.board, days, true, 'zzz')[0].cards).toHaveLength(0)
+  })
+})
+
+describe('canonicalEquipment', () => {
+  it.each([
+    ['Van', 'Dry Van'], ['van', 'Dry Van'], ['Dry Van', 'Dry Van'], ['dry-van', 'Dry Van'], ["53' van", 'Dry Van'],
+    ['Box truck', 'Straight Truck'], ['box truck', 'Straight Truck'], ['Straight truck', 'Straight Truck'], ['Straight', 'Straight Truck'],
+    ['power only', 'Power Only'], ['STEP DECK', 'Step Deck'], ['reefer', 'Reefer'],
+  ])('%s reads as %s', (stored, name) => {
+    expect(canonicalEquipment(stored)).toBe(name)
+  })
+
+  it('leaves other older text as written, and an empty value empty', () => {
+    expect(canonicalEquipment('Reefer van w/ tarps')).toBe('Reefer van w/ tarps')
+    expect(canonicalEquipment('Sprinter')).toBe('Sprinter')
+    expect(canonicalEquipment('  ')).toBe('')
+    expect(canonicalEquipment(undefined)).toBe('')
+  })
+
+  it('finds an older card by the new name in search', () => {
+    const a = run({ cards: [] }, { op: 'save', fields: { ...fields, equipment: 'Box truck', lengthFt: '18' } })
+    expect(capacityColumns(a.board, ['2026-11-27'], true, 'straight truck')[0].cards).toHaveLength(1)
+    expect(capacityColumns(a.board, ['2026-11-27'], true, 'dry van')[0].cards).toHaveLength(0)
   })
 })

@@ -7,7 +7,7 @@ import { assignAccents, CAPACITY_ACCENTS, truckKindFor } from './capacityCardSty
 import './capacityBoard.css'
 import { useCapacityBoard } from './useCapacityBoard'
 import {
-  capacityColumns, capacityHeadline, clampCapacityRange, formatCapacityTimes, formatMaxWeight, formatRatePerMile, rangeDays, todayChicagoYmd,
+  canonicalEquipment, capacityColumns, capacityHeadline, clampCapacityRange, formatCapacityTimes, formatMaxWeight, formatRatePerMile, rangeDays, todayChicagoYmd,
   type CapacityCard,
 } from '@/lib/capacityBoard'
 import type { Driver } from '@/types'
@@ -195,7 +195,8 @@ function CapacityCardView({ card, day, accent, driverName, onEdit, onCover, onRe
   const rate = formatRatePerMile(card.minRatePerMileCents)
   const times = formatCapacityTimes(card)
   const kind = truckKindFor(card.equipment)
-  const chips = [card.equipment, `${card.lengthFt} ft`, card.loadType === 'PARTIAL' ? 'Partial' : 'Full', formatMaxWeight(card.weightLbs)].filter(Boolean)
+  const equipment = canonicalEquipment(card.equipment)
+  const chips = [equipment, `${card.lengthFt} ft`, card.loadType === 'PARTIAL' ? 'Partial' : 'Full', formatMaxWeight(card.weightLbs)].filter(Boolean)
   return (
     <article
       className="cap-card"
@@ -213,7 +214,7 @@ function CapacityCardView({ card, day, accent, driverName, onEdit, onCover, onRe
       }}
     >
       <div className="cap-art">
-        <CapacityTruckArt kind={kind} accent={accent} label={`${card.equipment || 'Van'} truck`} />
+        <CapacityTruckArt kind={kind} accent={accent} label={`${equipment || 'Dry Van'} truck`} />
         {span && <span className="cap-span"><CalendarRange size={11} aria-hidden="true" />{span}</span>}
         <span className="cap-pill">{covered && <Check size={11} aria-hidden="true" />}{covered ? 'Covered' : 'Open'}</span>
       </div>
@@ -226,9 +227,9 @@ function CapacityCardView({ card, day, accent, driverName, onEdit, onCover, onRe
         {card.comments && <div className="cap-note">{card.comments}</div>}
         <div className="cap-actions">
           {covered ? (
-            <button type="button" className="cap-btn" onClick={onReopen} aria-label="Reopen card" title="Reopen"><RotateCcw size={13} /></button>
+            <button type="button" className="cap-btn cap-btn--reopen" onClick={onReopen} aria-label="Reopen" title="Move back to open"><RotateCcw size={13} aria-hidden="true" /> Reopen</button>
           ) : (
-            <button type="button" className="cap-btn cap-btn--cover" onClick={onCover} aria-label="Mark covered" title="Mark covered"><Check size={13} /> Covered</button>
+            <button type="button" className="cap-btn cap-btn--cover" onClick={onCover} aria-label="Mark as covered" title="Mark this truck as covered"><Check size={13} aria-hidden="true" /> Mark as covered</button>
           )}
           <button type="button" className="cap-btn" onClick={onEdit} aria-label="Edit card" title="Edit"><Pencil size={13} /></button>
           <button type="button" className="cap-btn cap-btn--danger" onClick={onDelete} aria-label="Delete card" title="Delete"><Trash2 size={13} /></button>
